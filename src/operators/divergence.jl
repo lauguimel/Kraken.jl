@@ -26,6 +26,19 @@ array type via `KernelAbstractions.get_backend`.
 - `u`: x-component of velocity (N × N)
 - `v`: y-component of velocity (N × N)
 - `dx`: uniform grid spacing
+
+# Returns
+- `div`: the modified output array.
+
+# Example
+```julia
+N = 64; dx = 1.0 / (N - 1)
+u, v = zeros(N, N), zeros(N, N)
+div = zeros(N, N)
+divergence!(div, u, v, dx)
+```
+
+See also: [`gradient!`](@ref), [`laplacian!`](@ref)
 """
 function divergence!(div, u, v, dx; ndrange=nothing)
     backend = KernelAbstractions.get_backend(u)

@@ -89,8 +89,27 @@ constant; we pin φ[1,1] = 0 to remove the null space.
 
 Works on CPU arrays and GPU arrays (CUDA, Metal) automatically.
 
+# Arguments
+- `phi`: output array (N × N), will be overwritten with the solution.
+- `rhs`: right-hand side array (N × N).
+- `dx`: uniform grid spacing.
+
+# Keyword Arguments
+- `maxiter::Int`: maximum CG iterations (default: 2000).
+- `rtol`: relative tolerance (default: 1e-8).
+
 # Returns
-- `(phi, niter)`: solution and iteration count
+- `(phi, niter)`: solution array and iteration count.
+
+# Example
+```julia
+N = 32; dx = 1.0 / (N - 1)
+phi = zeros(N, N)
+rhs = zeros(N, N)
+phi, niter = solve_poisson_neumann!(phi, rhs, dx)
+```
+
+See also: [`solve_poisson_fft!`](@ref), [`solve_poisson_cg!`](@ref)
 """
 function solve_poisson_neumann!(phi, rhs, dx; maxiter=2000, rtol=1e-8)
     N = size(rhs, 1)
@@ -124,6 +143,16 @@ Apply boundary conditions for the lid-driven cavity:
 - Right wall (i=N): u=0, v=0
 
 Works on CPU and GPU arrays via slice broadcasting.
+
+# Arguments
+- `u`: x-velocity array (N × N), modified in-place.
+- `v`: y-velocity array (N × N), modified in-place.
+- `N::Int`: grid size.
+
+# Returns
+- `(u, v)`: the modified velocity arrays.
+
+See also: [`apply_pressure_neumann_bc!`](@ref), [`projection_step!`](@ref)
 """
 function apply_velocity_bc!(u, v, N)
     T_u = eltype(u)
@@ -152,6 +181,15 @@ Apply homogeneous Neumann BCs for pressure: ∂p/∂n = 0 at all walls.
 Implemented by copying the nearest interior value to the boundary.
 
 Works on CPU and GPU arrays via slice broadcasting.
+
+# Arguments
+- `p`: pressure array (N × N), modified in-place.
+- `N::Int`: grid size.
+
+# Returns
+- `p`: the modified pressure array.
+
+See also: [`apply_velocity_bc!`](@ref), [`projection_step!`](@ref)
 """
 function apply_pressure_neumann_bc!(p, N)
     p[:, 1] .= @view p[:, 2]       # bottom
@@ -208,6 +246,11 @@ Works on CPU and GPU arrays automatically.
 
 # Keyword Arguments
 - Work arrays: `adv_u, adv_v, lap_u, lap_v, div_field, gx, gy`
+
+# Returns
+- `(u, v, p)`: the updated velocity and pressure fields.
+
+See also: [`run_cavity`](@ref), [`solve_poisson_neumann!`](@ref), [`apply_velocity_bc!`](@ref)
 """
 function projection_step!(u, v, p, ν, dx, dt, N;
                           adv_u=similar(u), adv_v=similar(v),
@@ -273,6 +316,11 @@ CUDABackend if CUDA.jl is functional.
 
 # Returns
 - `Vector{KernelAbstractions.Backend}`: list of available backends
+
+# Example
+```julia
+backends = available_backends()  # [CPU(), ...Metal/CUDA if available]
+```
 """
 function available_backends()
     backends = Any[KernelAbstractions.CPU()]
@@ -313,6 +361,13 @@ runs until steady state (velocity change < `tol`) or `max_steps` is reached.
 
 # Returns
 - `(u, v, p, converged)`: velocity components, pressure, and convergence flag
+
+# Example
+```julia
+u, v, p, converged = run_cavity(N=32, Re=100.0, max_steps=500)
+```
+
+See also: [`projection_step!`](@ref), [`available_backends`](@ref)
 """
 function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
                      verbose=false, backend=KernelAbstractions.CPU(), float_type=Float64)

@@ -49,6 +49,19 @@ array type via `KernelAbstractions.get_backend`.
 - `v`: y-component of velocity (N × N)
 - `f`: scalar field to advect (N × N)
 - `dx`: uniform grid spacing
+
+# Returns
+- `out`: the modified output array.
+
+# Example
+```julia
+N = 64; dx = 1.0 / (N - 1)
+u, v, f = zeros(N, N), zeros(N, N), zeros(N, N)
+out = zeros(N, N)
+advect!(out, u, v, f, dx)
+```
+
+See also: [`laplacian!`](@ref), [`projection_step!`](@ref)
 """
 function advect!(out, u, v, f, dx; ndrange=nothing)
     backend = KernelAbstractions.get_backend(f)

@@ -116,6 +116,11 @@ Missing fields are filled with sensible defaults:
 cfg = load_config("examples/cavity.yaml")
 cfg.geometry.resolution  # (64, 64)
 ```
+
+# Returns
+- `SimulationConfig`: a fully populated configuration object.
+
+See also: [`SimulationConfig`](@ref), [`GeometryConfig`](@ref), [`PhysicsConfig`](@ref)
 """
 function load_config(filename::String)::SimulationConfig
     raw = YAML.load_file(filename)

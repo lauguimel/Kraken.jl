@@ -24,6 +24,19 @@ array type via `KernelAbstractions.get_backend`.
 - `gy`: output array for ∂p/∂y, same size as `p`
 - `p`: input scalar field (N × N)
 - `dx`: uniform grid spacing
+
+# Returns
+- `(gx, gy)`: tuple of the two gradient component arrays.
+
+# Example
+```julia
+N = 64; dx = 1.0 / (N - 1)
+p = zeros(N, N)
+gx, gy = zeros(N, N), zeros(N, N)
+gradient!(gx, gy, p, dx)
+```
+
+See also: [`laplacian!`](@ref), [`divergence!`](@ref)
 """
 function gradient!(gx, gy, p, dx; ndrange=nothing)
     backend = KernelAbstractions.get_backend(p)

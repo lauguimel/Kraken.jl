@@ -14,6 +14,8 @@ Write field data on a 2D rectilinear grid to a VTK `.vtr` file.
 # Returns
 A vector of output file paths (typically one `.vtr` file).
 
+See also: [`create_pvd`](@ref), [`write_vtk_to_pvd`](@ref)
+
 # Example
 ```julia
 write_vtk("output", 8, 8, 0.125, Dict("P" => rand(8,8)))
@@ -47,6 +49,8 @@ Write a VTK snapshot and register it in a PVD time-series collection.
 # Returns
 A vector of output file paths.
 
+See also: [`create_pvd`](@ref), [`write_vtk`](@ref)
+
 # Example
 ```julia
 pvd = create_pvd("series")
@@ -78,6 +82,8 @@ Create a ParaView Data (`.pvd`) collection file for time series output.
 # Returns
 A `CollectionFile` handle. Add timesteps with [`write_vtk_to_pvd`](@ref),
 then close with `vtk_save(pvd)`.
+
+See also: [`write_vtk_to_pvd`](@ref), [`write_vtk`](@ref)
 
 # Example
 ```julia

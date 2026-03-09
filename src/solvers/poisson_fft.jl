@@ -45,6 +45,11 @@ phi = zeros(N, N)
 f = zeros(N, N)
 solve_poisson_fft!(phi, f, dx)
 ```
+
+# Returns
+- `phi`: the modified solution array.
+
+See also: [`solve_poisson_cg!`](@ref), [`solve_poisson_neumann!`](@ref)
 """
 function solve_poisson_fft!(phi, f, dx)
     N = size(f, 1)

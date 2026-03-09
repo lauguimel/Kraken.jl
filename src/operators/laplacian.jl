@@ -25,6 +25,9 @@ array type via `KernelAbstractions.get_backend`.
 - `f`: input scalar field
 - `dx`: uniform grid spacing
 
+# Returns
+- `out`: the modified output array.
+
 # Example
 ```julia
 N = 64; dx = 1.0 / (N - 1)
@@ -32,6 +35,8 @@ f = zeros(N, N)
 out = zeros(N, N)
 laplacian!(out, f, dx)
 ```
+
+See also: [`gradient!`](@ref), [`divergence!`](@ref)
 """
 function laplacian!(out, f, dx; ndrange=nothing)
     backend = KernelAbstractions.get_backend(f)

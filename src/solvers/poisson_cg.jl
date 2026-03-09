@@ -104,6 +104,8 @@ phi = zeros(N, N)
 f = zeros(N, N)
 phi, niter = solve_poisson_cg!(phi, f, dx)
 ```
+
+See also: [`solve_poisson_fft!`](@ref), [`solve_poisson_neumann!`](@ref)
 """
 function solve_poisson_cg!(phi, f, dx; maxiter=1000, rtol=1e-10)
     N = size(f, 1)
