@@ -19,7 +19,9 @@ Return the package name string.
 greet() = "Kraken.jl"
 
 include("operators/laplacian.jl")
+include("solvers/poisson_fft.jl")
+include("solvers/poisson_cg.jl")
 
-export greet, laplacian!
+export greet, laplacian!, solve_poisson_fft!, solve_poisson_cg!
 
 end # module Kraken

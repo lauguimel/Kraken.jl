@@ -6,3 +6,4 @@ using Kraken
 end
 
 include("test_laplacian.jl")
+include("test_poisson.jl")
