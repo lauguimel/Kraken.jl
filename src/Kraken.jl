@@ -18,6 +18,8 @@ Return the package name string.
 """
 greet() = "Kraken.jl"
 
-export greet
+include("operators/laplacian.jl")
+
+export greet, laplacian!
 
 end # module Kraken
