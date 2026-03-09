@@ -2,5 +2,8 @@
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Kraken = "b9c8ae56-6711-4442-a2ee-93cdf3c40864"
 
+[sources]
+Kraken = {path = ".."}
+
 [compat]
 Documenter = "1"
