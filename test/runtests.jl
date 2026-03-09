@@ -7,3 +7,4 @@ end
 
 include("test_laplacian.jl")
 include("test_poisson.jl")
+include("test_cavity.jl")
