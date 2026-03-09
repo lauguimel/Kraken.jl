@@ -23,6 +23,13 @@ makedocs(;
         ],
         "Benchmarks" => [
             "benchmarks/overview.md",
+            "benchmarks/heat-diffusion.md",
+            "benchmarks/lid-cavity.md",
+            "benchmarks/taylor-green.md",
+            "benchmarks/poiseuille.md",
+            "benchmarks/couette.md",
+            "benchmarks/rotation-advection.md",
+            "benchmarks/advection-diffusion.md",
         ],
         "Tutorials" => [
             "tutorials/getting-started.md",
