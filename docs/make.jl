@@ -33,6 +33,8 @@ makedocs(;
         ],
         "Tutorials" => [
             "tutorials/getting-started.md",
+            "tutorials/custom-case.md",
+            "tutorials/operators.md",
         ],
         "API Reference" => "api.md",
     ],
