@@ -1,0 +1,31 @@
+geometry:
+  domain: [1.0, 1.0]
+  resolution: [64, 64]
+
+physics:
+  equation: navier-stokes
+  Re: 100.0
+
+boundary_conditions:
+  top:
+    type: wall
+    velocity: [1.0, 0.0]
+  bottom:
+    type: wall
+    velocity: [0.0, 0.0]
+  left:
+    type: wall
+    velocity: [0.0, 0.0]
+  right:
+    type: wall
+    velocity: [0.0, 0.0]
+
+study:
+  type: transient
+  dt: auto
+  max_steps: 10000
+  convergence_tol: 1.0e-6
+
+output:
+  format: vtk
+  frequency: 100

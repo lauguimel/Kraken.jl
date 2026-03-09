@@ -25,9 +25,14 @@ include("operators/advection.jl")
 include("solvers/poisson_fft.jl")
 include("solvers/poisson_cg.jl")
 include("solvers/projection.jl")
+include("io/vtk_writer.jl")
+include("io/config_parser.jl")
 
 export greet, laplacian!, gradient!, divergence!, advect!
 export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!
 export projection_step!, run_cavity, apply_velocity_bc!
+export write_vtk, create_pvd, write_vtk_to_pvd
+export load_config, SimulationConfig, GeometryConfig, PhysicsConfig
+export BCConfig, OutputConfig, StudyConfig
 
 end # module Kraken
