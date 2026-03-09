@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Guillaume"]
 
 [deps]
+AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Configurations = "5218b696-f38b-4ac9-8b61-a12ec717816d"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
@@ -15,6 +16,7 @@ WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [compat]
+AbstractFFTs = "1.5.0"
 CUDA = "5"
 Configurations = "0.17"
 FFTW = "1"

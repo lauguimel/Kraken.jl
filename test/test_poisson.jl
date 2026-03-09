@@ -104,3 +104,35 @@ end
 
     @info "CG 128×128: niter=$niter, error=$err"
 end
+
+@testset "Poisson CG — Metal GPU" begin
+    gpu_available = false
+    try
+        @eval using Metal
+        if Metal.functional()
+            gpu_available = true
+        end
+    catch
+    end
+
+    if !gpu_available
+        @info "Metal not available, skipping GPU Poisson CG tests"
+        @test_skip false
+    else
+        N = 34
+        dx = Float32(1.0 / (N - 1))
+        xs = range(Float32(0.0), Float32(1.0), length=N)
+        ys = range(Float32(0.0), Float32(1.0), length=N)
+
+        f_cpu = Float32[-2π^2 * sin(π * x) * sin(π * y) for x in xs, y in ys]
+        phi_cpu = zeros(Float32, N, N)
+        phi_cpu, niter_cpu = Kraken.solve_poisson_cg!(phi_cpu, f_cpu, dx; maxiter=1000, rtol=Float32(1e-6))
+
+        f_gpu = MtlArray(f_cpu)
+        phi_gpu = Metal.zeros(Float32, N, N)
+        phi_gpu, niter_gpu = Kraken.solve_poisson_cg!(phi_gpu, f_gpu, dx; maxiter=1000, rtol=Float32(1e-6))
+
+        @test maximum(abs.(Array(phi_gpu) .- phi_cpu)) < 1e-3
+        @info "CG Metal GPU: niter_cpu=$niter_cpu, niter_gpu=$niter_gpu"
+    end
+end

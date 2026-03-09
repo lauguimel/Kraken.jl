@@ -1,5 +1,6 @@
 using Krylov
 using LinearAlgebra
+using KernelAbstractions
 
 """
     NeumannLaplacianOperator{T}
@@ -25,24 +26,37 @@ Base.size(op::NeumannLaplacianOperator) = (op.N^2, op.N^2)
 Base.size(op::NeumannLaplacianOperator, d::Int) = op.N^2
 Base.eltype(::NeumannLaplacianOperator{T}) where {T} = T
 
+@kernel function neumann_laplacian_kernel!(Y, @Const(X), inv_dx2, N)
+    idx = @index(Global)
+    @inbounds begin
+        i = mod1(idx, N)
+        j = div(idx - 1, N) + 1
+
+        # Neumann BC: ghost values = interior neighbor (zero gradient)
+        xim = i > 1 ? X[idx - 1] : X[idx + 1]
+        xip = i < N ? X[idx + 1] : X[idx - 1]
+        xjm = j > 1 ? X[idx - N] : X[idx + N]
+        xjp = j < N ? X[idx + N] : X[idx - N]
+
+        val = (4 * X[idx] - xim - xip - xjm - xjp) * inv_dx2
+
+        # Pin first element to remove null space
+        if i == 1 && j == 1
+            val += X[1] * inv_dx2
+        end
+
+        Y[idx] = val
+    end
+end
+
 function LinearAlgebra.mul!(y::AbstractVector, op::NeumannLaplacianOperator, x::AbstractVector)
     N = op.N
     inv_dx2 = one(op.dx) / (op.dx * op.dx)
-    X = reshape(x, N, N)
-    Y = reshape(y, N, N)
+    backend = KernelAbstractions.get_backend(x)
 
-    @inbounds for j in 1:N, i in 1:N
-        # Neumann BC: ghost values = interior neighbor (zero gradient)
-        xim = i > 1 ? X[i-1, j] : X[i+1, j]
-        xip = i < N ? X[i+1, j] : X[i-1, j]
-        xjm = j > 1 ? X[i, j-1] : X[i, j+1]
-        xjp = j < N ? X[i, j+1] : X[i, j-1]
-
-        Y[i, j] = (4 * X[i, j] - xim - xip - xjm - xjp) * inv_dx2
-    end
-
-    # Pin first element to remove null space
-    Y[1, 1] += X[1, 1] * inv_dx2
+    kernel! = neumann_laplacian_kernel!(backend)
+    kernel!(y, x, inv_dx2, N; ndrange=N * N)
+    KernelAbstractions.synchronize(backend)
 
     return y
 end
@@ -73,6 +87,8 @@ end
 Solve ∇²φ = rhs with Neumann BCs using CG. The solution is unique up to a
 constant; we pin φ[1,1] = 0 to remove the null space.
 
+Works on CPU arrays and GPU arrays (CUDA, Metal) automatically.
+
 # Returns
 - `(phi, niter)`: solution and iteration count
 """
@@ -80,17 +96,20 @@ function solve_poisson_neumann!(phi, rhs, dx; maxiter=2000, rtol=1e-8)
     N = size(rhs, 1)
     T = eltype(rhs)
 
-    # Negate for SPD: -∇²φ = -rhs
-    b = vec(-copy(rhs))
+    # Negate for SPD: -∇²φ = -rhs (GPU-compatible)
+    b = similar(rhs, N * N)
+    b .= vec(-rhs)
 
     A = NeumannLaplacianOperator{T}(N, dx)
     M = NeumannJacobiPreconditioner{T}(T(dx * dx / 4))
 
-    (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=rtol, atol=zero(T))
+    (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
 
     phi .= reshape(x, N, N)
     # Ensure pin: shift so phi[1,1] = 0
-    phi .-= phi[1, 1]
+    # Use Array() scalar extraction for GPU compatibility
+    p11 = Array(phi[1:1, 1:1])[1]
+    phi .-= p11
 
     return phi, stats.niter
 end
@@ -103,28 +122,26 @@ Apply boundary conditions for the lid-driven cavity:
 - Bottom wall (j=1): u=0, v=0
 - Left wall (i=1): u=0, v=0
 - Right wall (i=N): u=0, v=0
+
+Works on CPU and GPU arrays via slice broadcasting.
 """
 function apply_velocity_bc!(u, v, N)
+    T_u = eltype(u)
+    T_v = eltype(v)
+
     # Bottom wall (j=1)
-    @inbounds for i in 1:N
-        u[i, 1] = zero(eltype(u))
-        v[i, 1] = zero(eltype(v))
-    end
+    u[:, 1] .= zero(T_u)
+    v[:, 1] .= zero(T_v)
     # Top wall (j=N): lid moves with u=1
-    @inbounds for i in 1:N
-        u[i, N] = one(eltype(u))
-        v[i, N] = zero(eltype(v))
-    end
+    u[:, N] .= one(T_u)
+    v[:, N] .= zero(T_v)
     # Left wall (i=1)
-    @inbounds for j in 1:N
-        u[1, j] = zero(eltype(u))
-        v[1, j] = zero(eltype(v))
-    end
+    u[1, :] .= zero(T_u)
+    v[1, :] .= zero(T_v)
     # Right wall (i=N)
-    @inbounds for j in 1:N
-        u[N, j] = zero(eltype(u))
-        v[N, j] = zero(eltype(v))
-    end
+    u[N, :] .= zero(T_u)
+    v[N, :] .= zero(T_v)
+
     return u, v
 end
 
@@ -133,17 +150,36 @@ end
 
 Apply homogeneous Neumann BCs for pressure: ∂p/∂n = 0 at all walls.
 Implemented by copying the nearest interior value to the boundary.
+
+Works on CPU and GPU arrays via slice broadcasting.
 """
 function apply_pressure_neumann_bc!(p, N)
-    @inbounds for i in 1:N
-        p[i, 1] = p[i, 2]       # bottom
-        p[i, N] = p[i, N-1]     # top
-    end
-    @inbounds for j in 1:N
-        p[1, j] = p[2, j]       # left
-        p[N, j] = p[N-1, j]     # right
-    end
+    p[:, 1] .= @view p[:, 2]       # bottom
+    p[:, N] .= @view p[:, N-1]     # top
+    p[1, :] .= @view p[2, :]       # left
+    p[N, :] .= @view p[N-1, :]     # right
     return p
+end
+
+@kernel function velocity_update_kernel!(u, v, @Const(adv_u), @Const(adv_v),
+                                          @Const(lap_u), @Const(lap_v), ν, dt)
+    i, j = @index(Global, NTuple)
+    ii = i + 1
+    jj = j + 1
+    @inbounds begin
+        u[ii, jj] = u[ii, jj] + dt * (-adv_u[ii, jj] + ν * lap_u[ii, jj])
+        v[ii, jj] = v[ii, jj] + dt * (-adv_v[ii, jj] + ν * lap_v[ii, jj])
+    end
+end
+
+@kernel function pressure_correction_kernel!(u, v, @Const(gx), @Const(gy), dt)
+    i, j = @index(Global, NTuple)
+    ii = i + 1
+    jj = j + 1
+    @inbounds begin
+        u[ii, jj] = u[ii, jj] - dt * gx[ii, jj]
+        v[ii, jj] = v[ii, jj] - dt * gy[ii, jj]
+    end
 end
 
 """
@@ -160,6 +196,7 @@ Navier-Stokes equations on a collocated grid.
 3. Correct velocity: u^{n+1} = u* − dt*∇p
 
 Boundary conditions are applied after each sub-step.
+Works on CPU and GPU arrays automatically.
 
 # Arguments
 - `u, v`: velocity components (N × N), modified in-place
@@ -177,6 +214,8 @@ function projection_step!(u, v, p, ν, dx, dt, N;
                           lap_u=similar(u), lap_v=similar(v),
                           div_field=similar(u), gx=similar(u), gy=similar(v))
     T = eltype(u)
+    backend = KernelAbstractions.get_backend(u)
+    n = N - 2  # interior points
 
     # --- Step 1: intermediate velocity ---
     # Advection: u·∇u, u·∇v
@@ -191,11 +230,10 @@ function projection_step!(u, v, p, ν, dx, dt, N;
     laplacian!(lap_u, u, dx)
     laplacian!(lap_v, v, dx)
 
-    # u* = u + dt * (-advection + ν * laplacian)
-    @inbounds for j in 2:N-1, i in 2:N-1
-        u[i, j] = u[i, j] + dt * (-adv_u[i, j] + ν * lap_u[i, j])
-        v[i, j] = v[i, j] + dt * (-adv_v[i, j] + ν * lap_v[i, j])
-    end
+    # u* = u + dt * (-advection + ν * laplacian) — via kernel
+    kernel_vel! = velocity_update_kernel!(backend)
+    kernel_vel!(u, v, adv_u, adv_v, lap_u, lap_v, T(ν), T(dt); ndrange=(n, n))
+    KernelAbstractions.synchronize(backend)
 
     # Apply velocity BCs to intermediate velocity
     apply_velocity_bc!(u, v, N)
@@ -208,7 +246,7 @@ function projection_step!(u, v, p, ν, dx, dt, N;
     # RHS = (1/dt) * div(u*)
     rhs = div_field ./ dt
 
-    solve_poisson_neumann!(p, rhs, dx; maxiter=2000, rtol=T(1e-6))
+    solve_poisson_neumann!(p, rhs, dx; maxiter=2000, rtol=eltype(u)(1e-6))
     apply_pressure_neumann_bc!(p, N)
 
     # --- Step 3: velocity correction ---
@@ -216,10 +254,9 @@ function projection_step!(u, v, p, ν, dx, dt, N;
     fill!(gy, zero(T))
     gradient!(gx, gy, p, dx)
 
-    @inbounds for j in 2:N-1, i in 2:N-1
-        u[i, j] = u[i, j] - dt * gx[i, j]
-        v[i, j] = v[i, j] - dt * gy[i, j]
-    end
+    kernel_corr! = pressure_correction_kernel!(backend)
+    kernel_corr!(u, v, gx, gy, T(dt); ndrange=(n, n))
+    KernelAbstractions.synchronize(backend)
 
     # Apply velocity BCs after correction
     apply_velocity_bc!(u, v, N)
@@ -228,7 +265,36 @@ function projection_step!(u, v, p, ν, dx, dt, N;
 end
 
 """
-    run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6, verbose=false)
+    available_backends()
+
+Return a list of available KernelAbstractions backends.
+Always includes CPU. Adds MetalBackend if Metal.jl is functional,
+CUDABackend if CUDA.jl is functional.
+
+# Returns
+- `Vector{KernelAbstractions.Backend}`: list of available backends
+"""
+function available_backends()
+    backends = Any[KernelAbstractions.CPU()]
+    try
+        @eval using Metal
+        if Metal.functional()
+            push!(backends, Metal.MetalBackend())
+        end
+    catch
+    end
+    try
+        @eval using CUDA
+        if CUDA.functional()
+            push!(backends, CUDA.CUDABackend())
+        end
+    catch
+    end
+    return backends
+end
+
+"""
+    run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6, verbose=false, backend=KernelAbstractions.CPU(), float_type=Float64)
 
 Run the lid-driven cavity benchmark at given Reynolds number on an N×N grid.
 
@@ -242,40 +308,46 @@ runs until steady state (velocity change < `tol`) or `max_steps` is reached.
 - `max_steps::Int`: maximum number of timesteps (default: 10000)
 - `tol::Float64`: convergence tolerance on max velocity change (default: 1e-6)
 - `verbose::Bool`: print progress every 1000 steps (default: false)
+- `backend`: KernelAbstractions backend (default: CPU())
+- `float_type`: floating-point type (default: Float64, use Float32 for Metal)
 
 # Returns
 - `(u, v, p, converged)`: velocity components, pressure, and convergence flag
 """
-function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6, verbose=false)
-    T = Float64
+function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
+                     verbose=false, backend=KernelAbstractions.CPU(), float_type=Float64)
+    T = float_type
     dx = T(1.0) / T(N - 1)
     ν = T(1.0) / T(Re)
 
-    # Initialize fields
-    u = zeros(T, N, N)
-    v = zeros(T, N, N)
-    p = zeros(T, N, N)
+    # Initialize fields using KernelAbstractions.zeros for backend support
+    u = KernelAbstractions.zeros(backend, T, N, N)
+    v = KernelAbstractions.zeros(backend, T, N, N)
+    p = KernelAbstractions.zeros(backend, T, N, N)
 
     # Apply initial BCs
     apply_velocity_bc!(u, v, N)
 
     # Preallocate work arrays
-    adv_u = zeros(T, N, N)
-    adv_v = zeros(T, N, N)
-    lap_u = zeros(T, N, N)
-    lap_v = zeros(T, N, N)
-    div_field = zeros(T, N, N)
-    gx = zeros(T, N, N)
-    gy = zeros(T, N, N)
+    adv_u = KernelAbstractions.zeros(backend, T, N, N)
+    adv_v = KernelAbstractions.zeros(backend, T, N, N)
+    lap_u = KernelAbstractions.zeros(backend, T, N, N)
+    lap_v = KernelAbstractions.zeros(backend, T, N, N)
+    div_field = KernelAbstractions.zeros(backend, T, N, N)
+    gx = KernelAbstractions.zeros(backend, T, N, N)
+    gy = KernelAbstractions.zeros(backend, T, N, N)
 
     # Timestep from CFL and viscous stability
-    dt_adv = cfl * dx  # CFL with max velocity ≈ 1
-    dt_vis = cfl * dx^2 / ν  # Viscous stability
+    dt_adv = T(cfl) * dx  # CFL with max velocity ≈ 1
+    dt_vis = T(cfl) * dx^2 / ν  # Viscous stability
     dt = min(dt_adv, dt_vis)
+
+    # Work array for convergence check
+    u_old = similar(u)
 
     converged = false
     for step in 1:max_steps
-        u_old = copy(u)
+        copyto!(u_old, u)
 
         projection_step!(u, v, p, ν, dx, dt, N;
                          adv_u=adv_u, adv_v=adv_v,

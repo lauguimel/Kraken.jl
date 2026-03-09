@@ -53,3 +53,41 @@ using LinearAlgebra
 
     @test l2_error < 0.05  # < 5% L2 error
 end
+
+@testset "Lid-driven cavity — Metal GPU" begin
+    gpu_available = false
+    try
+        @eval using Metal
+        if Metal.functional()
+            gpu_available = true
+        end
+    catch
+    end
+
+    if !gpu_available
+        @info "Metal not available, skipping GPU cavity tests"
+        @test_skip false
+    else
+        using KernelAbstractions
+
+        # Smoke test: run a few steps on both CPU and Metal GPU,
+        # compare results (full convergence is too slow on Metal)
+        N = 16
+        n_steps = 10
+
+        u_cpu, v_cpu, p_cpu, _ = Kraken.run_cavity(
+            N=N, Re=100.0, cfl=0.2, max_steps=n_steps, tol=1e-20, verbose=false,
+            backend=KernelAbstractions.CPU(), float_type=Float32)
+
+        u_gpu, v_gpu, p_gpu, _ = Kraken.run_cavity(
+            N=N, Re=100.0, cfl=0.2, max_steps=n_steps, tol=1e-20, verbose=false,
+            backend=Metal.MetalBackend(), float_type=Float32)
+
+        # Compare results after same number of steps
+        diff_u = maximum(abs.(Array(u_gpu) .- u_cpu))
+        diff_v = maximum(abs.(Array(v_gpu) .- v_cpu))
+        @test diff_u < 1e-3
+        @test diff_v < 1e-3
+        @info "Metal cavity smoke test: max u diff = $diff_u, max v diff = $diff_v"
+    end
+end

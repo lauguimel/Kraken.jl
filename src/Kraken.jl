@@ -30,7 +30,7 @@ include("io/config_parser.jl")
 
 export greet, laplacian!, gradient!, divergence!, advect!
 export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!
-export projection_step!, run_cavity, apply_velocity_bc!
+export projection_step!, run_cavity, apply_velocity_bc!, available_backends
 export write_vtk, create_pvd, write_vtk_to_pvd
 export load_config, SimulationConfig, GeometryConfig, PhysicsConfig
 export BCConfig, OutputConfig, StudyConfig

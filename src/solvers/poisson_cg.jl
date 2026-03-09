@@ -1,5 +1,6 @@
 using Krylov
 using LinearAlgebra
+using KernelAbstractions
 
 """
     NegLaplacianOperator{T}
@@ -25,24 +26,29 @@ Base.size(op::NegLaplacianOperator) = (op.n_interior^2, op.n_interior^2)
 Base.size(op::NegLaplacianOperator, d::Int) = op.n_interior^2
 Base.eltype(::NegLaplacianOperator{T}) where {T} = T
 
+@kernel function neg_laplacian_dirichlet_kernel!(Y, @Const(X), inv_dx2, n)
+    idx = @index(Global)
+    @inbounds begin
+        i = mod1(idx, n)
+        j = div(idx - 1, n) + 1
+
+        xim = i > 1 ? X[idx - 1] : zero(eltype(X))
+        xip = i < n ? X[idx + 1] : zero(eltype(X))
+        xjm = j > 1 ? X[idx - n] : zero(eltype(X))
+        xjp = j < n ? X[idx + n] : zero(eltype(X))
+
+        Y[idx] = (4 * X[idx] - xim - xip - xjm - xjp) * inv_dx2
+    end
+end
+
 function LinearAlgebra.mul!(y::AbstractVector, op::NegLaplacianOperator, x::AbstractVector)
     n = op.n_interior
     inv_dx2 = one(op.dx) / (op.dx * op.dx)
+    backend = KernelAbstractions.get_backend(x)
 
-    # Reshape to 2D for stencil application
-    X = reshape(x, n, n)
-    Y = reshape(y, n, n)
-
-    # Apply -∇² (negated Laplacian) so eigenvalues are positive
-    @inbounds for j in 1:n, i in 1:n
-        # Neighbors with Dirichlet BC (phi=0 outside interior)
-        xim = i > 1 ? X[i-1, j] : zero(eltype(x))
-        xip = i < n ? X[i+1, j] : zero(eltype(x))
-        xjm = j > 1 ? X[i, j-1] : zero(eltype(x))
-        xjp = j < n ? X[i, j+1] : zero(eltype(x))
-
-        Y[i, j] = (4 * X[i, j] - xim - xip - xjm - xjp) * inv_dx2
-    end
+    kernel! = neg_laplacian_dirichlet_kernel!(backend)
+    kernel!(y, x, inv_dx2, n; ndrange=n * n)
+    KernelAbstractions.synchronize(backend)
 
     return y
 end
@@ -77,6 +83,8 @@ Solve the 2D Poisson equation nabla^2 phi = f with Dirichlet boundary conditions
 The solver uses a matrix-free Laplacian operator and a Jacobi preconditioner.
 Only interior points are solved; boundary values in `phi` are set to zero.
 
+Works on CPU arrays and GPU arrays (CUDA, Metal) automatically.
+
 # Arguments
 - `phi`: output array (N x N), will be overwritten with the solution
 - `f`: right-hand side array (N x N)
@@ -103,14 +111,17 @@ function solve_poisson_cg!(phi, f, dx; maxiter=1000, rtol=1e-10)
     n = N - 2  # interior points per dimension
 
     # Extract interior RHS as a vector, negated for SPD system: -∇²φ = -f
-    b = vec(-f[2:N-1, 2:N-1])
+    # GPU-compatible: use view + broadcasting
+    interior = f[2:N-1, 2:N-1]
+    b = similar(f, n * n)
+    b .= vec(-interior)
 
     # Create matrix-free operator (-∇², SPD) and Jacobi preconditioner
     A = NegLaplacianOperator{T}(n, dx)
     M = JacobiPreconditioner{T}(T(dx * dx / 4))
 
     # Solve with CG
-    (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=rtol, atol=zero(T))
+    (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
 
     # Write solution back to phi (boundary stays zero)
     phi .= zero(T)
