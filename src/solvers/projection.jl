@@ -116,37 +116,47 @@ function solve_poisson_neumann_dct!(phi, rhs, dx; eigenvalues=nothing)
     N = size(rhs, 1)
     T = eltype(rhs)
 
+    # Copy GPU→CPU if needed (FFTW is CPU-only)
+    rhs_cpu = rhs isa Array ? rhs : Array(rhs)
+
     # Forward DCT-I (REDFT00) — matches Neumann BCs with values at grid points
-    f_hat = FFTW.r2r(rhs, FFTW.REDFT00)
+    f_hat = FFTW.r2r(Float64.(rhs_cpu), FFTW.REDFT00)
 
     # Build or use cached eigenvalues of Neumann Laplacian under DCT-I
     if eigenvalues !== nothing
         eig = eigenvalues
     else
-        eig = zeros(T, N, N)
-        inv_dx2 = one(T) / (dx * dx)
+        eig = zeros(Float64, N, N)
+        inv_dx2 = 1.0 / (Float64(dx) * Float64(dx))
         for l in 1:N, k in 1:N
-            eig[k, l] = T(2) * inv_dx2 * (cos(T(π) * T(k - 1) / T(N - 1)) - one(T)) +
-                         T(2) * inv_dx2 * (cos(T(π) * T(l - 1) / T(N - 1)) - one(T))
+            eig[k, l] = 2.0 * inv_dx2 * (cos(π * Float64(k - 1) / Float64(N - 1)) - 1.0) +
+                         2.0 * inv_dx2 * (cos(π * Float64(l - 1) / Float64(N - 1)) - 1.0)
         end
     end
 
     # Divide in spectral space (skip zero mode)
     @inbounds for l in 1:N, k in 1:N
         if k == 1 && l == 1
-            f_hat[k, l] = zero(T)
+            f_hat[k, l] = 0.0
         else
             f_hat[k, l] /= eig[k, l]
         end
     end
 
     # Inverse DCT-I (REDFT00 is self-inverse, normalization = 2*(N-1) per dim)
-    norm_factor = T(4) * T(N - 1) * T(N - 1)
-    phi .= FFTW.r2r(f_hat, FFTW.REDFT00) ./ norm_factor
+    norm_factor = 4.0 * Float64(N - 1) * Float64(N - 1)
+    result_cpu = FFTW.r2r(f_hat, FFTW.REDFT00) ./ norm_factor
 
     # Pin phi[1,1] = 0
-    p11 = phi[1, 1]
-    phi .-= p11
+    p11 = result_cpu[1, 1]
+    result_cpu .-= p11
+
+    # Copy back CPU→GPU if needed
+    if phi isa Array
+        phi .= T.(result_cpu)
+    else
+        copyto!(phi, T.(result_cpu))
+    end
 
     return phi, 0
 end
@@ -580,17 +590,14 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
     gx = KernelAbstractions.zeros(backend, T, N, N)
     gy = KernelAbstractions.zeros(backend, T, N, N)
 
-    # Pre-compute DCT-I eigenvalues for direct solvers (CPU only — FFTW needs CPU arrays)
-    is_cpu = backend isa KernelAbstractions.CPU
-    if is_cpu
-        inv_dx2 = one(T) / (dx * dx)
-        poisson_eigenvalues = zeros(T, N, N)
-        for l in 1:N, k in 1:N
-            poisson_eigenvalues[k, l] = T(2) * inv_dx2 * (cos(T(π) * T(k - 1) / T(N - 1)) - one(T)) +
-                                         T(2) * inv_dx2 * (cos(T(π) * T(l - 1) / T(N - 1)) - one(T))
-        end
-    else
-        poisson_eigenvalues = nothing
+    # Pre-compute DCT-I eigenvalues for direct solvers (always use DCT, even on GPU)
+    # On GPU: DCT is computed on CPU with data copies (negligible for N≤512)
+    inv_dx2 = one(T) / (dx * dx)
+    # Eigenvalues are always Float64 on CPU for accuracy
+    poisson_eigenvalues = zeros(Float64, N, N)
+    for l in 1:N, k in 1:N
+        poisson_eigenvalues[k, l] = 2.0 * Float64(inv_dx2) * (cos(π * Float64(k - 1) / Float64(N - 1)) - 1.0) +
+                                     2.0 * Float64(inv_dx2) * (cos(π * Float64(l - 1) / Float64(N - 1)) - 1.0)
     end
 
     # Scheme-specific work arrays

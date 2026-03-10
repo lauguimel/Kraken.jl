@@ -173,31 +173,42 @@ function solve_helmholtz_dct!(phi, rhs, dx, sigma; poisson_eigenvalues=nothing)
     N = size(rhs, 1)
     T = eltype(rhs)
 
+    # Copy GPU→CPU if needed (FFTW is CPU-only)
+    rhs_cpu = rhs isa Array ? rhs : Array(rhs)
+
     # Forward DCT-I (REDFT00) — matches Neumann BCs with values at grid points
-    f_hat = FFTW.r2r(rhs, FFTW.REDFT00)
+    f_hat = FFTW.r2r(Float64.(rhs_cpu), FFTW.REDFT00)
 
     # Build or use cached Poisson eigenvalues
     if poisson_eigenvalues !== nothing
         eig = poisson_eigenvalues
     else
-        eig = zeros(T, N, N)
-        inv_dx2 = one(T) / (dx * dx)
+        eig = zeros(Float64, N, N)
+        inv_dx2 = 1.0 / (Float64(dx) * Float64(dx))
         for l in 1:N, k in 1:N
-            eig[k, l] = T(2) * inv_dx2 * (cos(T(π) * T(k - 1) / T(N - 1)) - one(T)) +
-                         T(2) * inv_dx2 * (cos(T(π) * T(l - 1) / T(N - 1)) - one(T))
+            eig[k, l] = 2.0 * inv_dx2 * (cos(π * Float64(k - 1) / Float64(N - 1)) - 1.0) +
+                         2.0 * inv_dx2 * (cos(π * Float64(l - 1) / Float64(N - 1)) - 1.0)
         end
     end
 
     # Divide by Helmholtz eigenvalues: 1 - sigma * laplacian_eigenvalue
     # Since eig[k,l] ≤ 0, helmholtz_eig = 1 - sigma*eig ≥ 1 (always positive, no singularity)
+    sig = Float64(sigma)
     @inbounds for l in 1:N, k in 1:N
-        helmholtz_eig = one(T) - T(sigma) * eig[k, l]
+        helmholtz_eig = 1.0 - sig * eig[k, l]
         f_hat[k, l] /= helmholtz_eig
     end
 
     # Inverse DCT-I (REDFT00 is self-inverse, normalization = 2*(N-1) per dim)
-    norm_factor = T(4) * T(N - 1) * T(N - 1)
-    phi .= FFTW.r2r(f_hat, FFTW.REDFT00) ./ norm_factor
+    norm_factor = 4.0 * Float64(N - 1) * Float64(N - 1)
+    result_cpu = FFTW.r2r(f_hat, FFTW.REDFT00) ./ norm_factor
+
+    # Copy back CPU→GPU if needed
+    if phi isa Array
+        phi .= T.(result_cpu)
+    else
+        copyto!(phi, T.(result_cpu))
+    end
 
     return phi, 0
 end
