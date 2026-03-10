@@ -30,6 +30,7 @@ include("solvers/projection.jl")
 include("io/vtk_writer.jl")
 include("io/config_parser.jl")
 include("physics/boussinesq.jl")
+include("amr/quadtree.jl")
 
 export greet, laplacian!, gradient!, divergence!, advect!
 export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!, solve_poisson_neumann_dct!, solve_poisson_mg!
@@ -39,5 +40,8 @@ export advance_temperature!, buoyancy_force!, run_rayleigh_benard
 export write_vtk, create_pvd, write_vtk_to_pvd
 export load_config, SimulationConfig, GeometryConfig, PhysicsConfig
 export BCConfig, OutputConfig, StudyConfig
+export QuadTree, add_field!, get_field, set_field!, cell_size, cell_center
+export refine!, coarsen!, adapt!, enforce_balance!
+export find_neighbor, foreach_leaf, nleaves, initialize_field!, rebuild_leaf_list!
 
 end # module Kraken
