@@ -33,6 +33,7 @@ include("physics/boussinesq.jl")
 include("amr/quadtree.jl")
 include("amr/operators.jl")
 include("amr/poisson_amr.jl")
+include("amr/projection_amr.jl")
 
 export greet, laplacian!, gradient!, divergence!, advect!
 export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!, solve_poisson_neumann_dct!, solve_poisson_mg!
@@ -50,5 +51,6 @@ export neighbor_value, neighbor_distance
 export refine_uniformly!, solve_poisson_amr!, vcycle_amr!
 export compute_residual_all!, compute_residual_level!, residual_norm
 export smooth_level!, restrict_level!, prolongate_level!
+export run_cavity_amr, projection_step_amr!, apply_velocity_bc_amr!
 
 end # module Kraken
