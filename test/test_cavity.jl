@@ -86,8 +86,9 @@ end
         # Compare results after same number of steps
         diff_u = maximum(abs.(Array(u_gpu) .- u_cpu))
         diff_v = maximum(abs.(Array(v_gpu) .- v_cpu))
-        @test diff_u < 1e-3
-        @test diff_v < 1e-3
+        # Tolerance accounts for CPU using DCT direct solver vs GPU using CG iterative
+        @test diff_u < 0.02
+        @test diff_v < 0.02
         @info "Metal cavity smoke test: max u diff = $diff_u, max v diff = $diff_v"
     end
 end

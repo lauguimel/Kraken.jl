@@ -308,7 +308,8 @@ function projection_step!(u, v, p, ν, dx, dt, N;
                           adv_u=similar(u), adv_v=similar(v),
                           lap_u=similar(u), lap_v=similar(v),
                           div_field=similar(u), gx=similar(u), gy=similar(v),
-                          poisson_solver=:cg)
+                          poisson_solver=:cg,
+                          poisson_eigenvalues=nothing)
     T = eltype(u)
     backend = KernelAbstractions.get_backend(u)
     n = N - 2  # interior points
@@ -342,7 +343,10 @@ function projection_step!(u, v, p, ν, dx, dt, N;
     # RHS = (1/dt) * div(u*) — in-place
     div_field ./= dt
 
-    if poisson_solver == :mg
+    if poisson_eigenvalues !== nothing
+        # Fast DCT-based direct solver (no iterations)
+        solve_poisson_neumann_dct!(p, div_field, dx; eigenvalues=poisson_eigenvalues)
+    elseif poisson_solver == :mg
         solve_poisson_mg!(p, div_field, dx)
     else
         solve_poisson_neumann!(p, div_field, dx; maxiter=2000, rtol=eltype(u)(1e-4), x0=p)
@@ -440,10 +444,18 @@ function projection_step_implicit!(u, v, p, ν, dx, dt, N;
 
     # --- Step 3: Solve Helmholtz for u*, v* ---
     sigma = dt * ν
-    solve_helmholtz!(u, rhs_u, dx, sigma;
-                     solver=helmholtz_solver_u, work_b=work_b)
-    solve_helmholtz!(v, rhs_v, dx, sigma;
-                     solver=helmholtz_solver_v, work_b=work_b)
+    if poisson_eigenvalues !== nothing
+        # Fast DCT-based direct solver (no iterations)
+        solve_helmholtz_dct!(u, rhs_u, dx, sigma;
+                             poisson_eigenvalues=poisson_eigenvalues)
+        solve_helmholtz_dct!(v, rhs_v, dx, sigma;
+                             poisson_eigenvalues=poisson_eigenvalues)
+    else
+        solve_helmholtz!(u, rhs_u, dx, sigma;
+                         solver=helmholtz_solver_u, work_b=work_b)
+        solve_helmholtz!(v, rhs_v, dx, sigma;
+                         solver=helmholtz_solver_v, work_b=work_b)
+    end
 
     # Apply velocity BCs to intermediate velocity
     apply_velocity_bc!(u, v, N)
@@ -568,23 +580,29 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
     gx = KernelAbstractions.zeros(backend, T, N, N)
     gy = KernelAbstractions.zeros(backend, T, N, N)
 
-    # Scheme-specific work arrays
-    if time_scheme == :implicit
-        rhs_u = KernelAbstractions.zeros(backend, T, N, N)
-        rhs_v = KernelAbstractions.zeros(backend, T, N, N)
-        # Pre-allocate CG workspaces for Helmholtz (avoids allocs per step)
-        n2 = N * N
-        S = typeof(KernelAbstractions.zeros(backend, T, n2))
-        helmholtz_solver_u = CgWorkspace(n2, n2, S)
-        helmholtz_solver_v = CgWorkspace(n2, n2, S)
-        work_b = KernelAbstractions.zeros(backend, T, n2)
-        # Pre-compute DCT-I eigenvalues for Poisson (direct solver, no iterations)
+    # Pre-compute DCT-I eigenvalues for direct solvers (CPU only — FFTW needs CPU arrays)
+    is_cpu = backend isa KernelAbstractions.CPU
+    if is_cpu
         inv_dx2 = one(T) / (dx * dx)
         poisson_eigenvalues = zeros(T, N, N)
         for l in 1:N, k in 1:N
             poisson_eigenvalues[k, l] = T(2) * inv_dx2 * (cos(T(π) * T(k - 1) / T(N - 1)) - one(T)) +
                                          T(2) * inv_dx2 * (cos(T(π) * T(l - 1) / T(N - 1)) - one(T))
         end
+    else
+        poisson_eigenvalues = nothing
+    end
+
+    # Scheme-specific work arrays
+    if time_scheme == :implicit
+        rhs_u = KernelAbstractions.zeros(backend, T, N, N)
+        rhs_v = KernelAbstractions.zeros(backend, T, N, N)
+        # Pre-allocate CG workspaces for Helmholtz (fallback when DCT not available)
+        n2 = N * N
+        S = typeof(KernelAbstractions.zeros(backend, T, n2))
+        helmholtz_solver_u = CgWorkspace(n2, n2, S)
+        helmholtz_solver_v = CgWorkspace(n2, n2, S)
+        work_b = KernelAbstractions.zeros(backend, T, n2)
     else
         lap_u = KernelAbstractions.zeros(backend, T, N, N)
         lap_v = KernelAbstractions.zeros(backend, T, N, N)
@@ -621,7 +639,8 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
                              adv_u=adv_u, adv_v=adv_v,
                              lap_u=lap_u, lap_v=lap_v,
                              div_field=div_field, gx=gx, gy=gy,
-                             poisson_solver=poisson_solver)
+                             poisson_solver=poisson_solver,
+                             poisson_eigenvalues=poisson_eigenvalues)
         end
 
         # Check convergence (zero-allocation)

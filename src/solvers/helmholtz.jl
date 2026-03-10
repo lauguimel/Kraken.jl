@@ -1,6 +1,7 @@
 using Krylov
 using LinearAlgebra
 using KernelAbstractions
+using FFTW
 
 """
     HelmholtzOperator{T}
@@ -138,4 +139,65 @@ function solve_helmholtz!(phi, rhs, dx, sigma; maxiter=2000, rtol=1e-3,
         phi .= reshape(x, N, N)
         return phi, stats.niter
     end
+end
+
+"""
+    solve_helmholtz_dct!(phi, rhs, dx, sigma; poisson_eigenvalues=nothing)
+
+Solve the 2D Helmholtz equation (I - σ·∇²)φ = rhs with Neumann BCs using DCT-I.
+
+This is a direct solver (no iterations) that exploits the fact that the DCT-I
+diagonalizes the discrete Neumann Laplacian. The Helmholtz eigenvalues are
+`1 - σ·λ_{k,l}` where `λ_{k,l}` are the Poisson (Laplacian) eigenvalues.
+
+Since Poisson eigenvalues are ≤ 0 and σ > 0, all Helmholtz eigenvalues are ≥ 1,
+so no division by zero or near-zero occurs. This makes DCT Helmholtz even more
+robust than DCT Poisson (which needs special handling of the zero mode).
+
+# Arguments
+- `phi`: output array (N × N), will be overwritten with the solution.
+- `rhs`: right-hand side array (N × N).
+- `dx`: uniform grid spacing.
+- `sigma::Real`: diffusion parameter σ = dt·ν (must be > 0).
+
+# Keyword Arguments
+- `poisson_eigenvalues`: pre-computed Poisson eigenvalues matrix (N × N).
+  If not provided, eigenvalues are computed on the fly.
+
+# Returns
+- `(phi, 0)`: solution array and iteration count (always 0 for direct solver).
+
+See also: [`solve_helmholtz!`](@ref), [`solve_poisson_neumann_dct!`](@ref)
+"""
+function solve_helmholtz_dct!(phi, rhs, dx, sigma; poisson_eigenvalues=nothing)
+    N = size(rhs, 1)
+    T = eltype(rhs)
+
+    # Forward DCT-I (REDFT00) — matches Neumann BCs with values at grid points
+    f_hat = FFTW.r2r(rhs, FFTW.REDFT00)
+
+    # Build or use cached Poisson eigenvalues
+    if poisson_eigenvalues !== nothing
+        eig = poisson_eigenvalues
+    else
+        eig = zeros(T, N, N)
+        inv_dx2 = one(T) / (dx * dx)
+        for l in 1:N, k in 1:N
+            eig[k, l] = T(2) * inv_dx2 * (cos(T(π) * T(k - 1) / T(N - 1)) - one(T)) +
+                         T(2) * inv_dx2 * (cos(T(π) * T(l - 1) / T(N - 1)) - one(T))
+        end
+    end
+
+    # Divide by Helmholtz eigenvalues: 1 - sigma * laplacian_eigenvalue
+    # Since eig[k,l] ≤ 0, helmholtz_eig = 1 - sigma*eig ≥ 1 (always positive, no singularity)
+    @inbounds for l in 1:N, k in 1:N
+        helmholtz_eig = one(T) - T(sigma) * eig[k, l]
+        f_hat[k, l] /= helmholtz_eig
+    end
+
+    # Inverse DCT-I (REDFT00 is self-inverse, normalization = 2*(N-1) per dim)
+    norm_factor = T(4) * T(N - 1) * T(N - 1)
+    phi .= FFTW.r2r(f_hat, FFTW.REDFT00) ./ norm_factor
+
+    return phi, 0
 end

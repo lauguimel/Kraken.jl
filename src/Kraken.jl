@@ -32,8 +32,8 @@ include("io/config_parser.jl")
 include("physics/boussinesq.jl")
 
 export greet, laplacian!, gradient!, divergence!, advect!
-export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!, solve_poisson_mg!
-export solve_helmholtz!
+export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!, solve_poisson_neumann_dct!, solve_poisson_mg!
+export solve_helmholtz!, solve_helmholtz_dct!
 export projection_step!, projection_step_implicit!, run_cavity, apply_velocity_bc!, apply_pressure_neumann_bc!, available_backends
 export advance_temperature!, buoyancy_force!, run_rayleigh_benard
 export write_vtk, create_pvd, write_vtk_to_pvd

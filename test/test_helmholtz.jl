@@ -29,6 +29,61 @@ using Kraken
     end
 end
 
+@testset "DCT Helmholtz Solver" begin
+    @testset "Known analytic solution (DCT)" begin
+        N = 33
+        dx = 1.0 / (N - 1)
+        sigma = 0.01
+        x = [(i - 1) * dx for i in 1:N]
+        y = [(j - 1) * dx for j in 1:N]
+        # phi_exact = cos(pi*x) * cos(pi*y) — satisfies Neumann BCs
+        # (I - sigma*nabla^2) phi = (1 + 2*sigma*pi^2) * phi
+        phi_exact = [cos(π * x[i]) * cos(π * y[j]) for i in 1:N, j in 1:N]
+        rhs = (1 + 2 * sigma * π^2) .* phi_exact
+        phi = zeros(N, N)
+        phi, niter = Kraken.solve_helmholtz_dct!(phi, rhs, dx, sigma)
+        @test niter == 0  # Direct solver
+        max_err = maximum(abs.(phi - phi_exact))
+        @test max_err < 0.01
+        @info "DCT Helmholtz analytic test: max error = $max_err"
+    end
+
+    @testset "DCT Helmholtz with pre-computed eigenvalues" begin
+        N = 33
+        dx = 1.0 / (N - 1)
+        sigma = 0.005
+        inv_dx2 = 1.0 / (dx * dx)
+        eig = zeros(N, N)
+        for l in 1:N, k in 1:N
+            eig[k, l] = 2.0 * inv_dx2 * (cos(π * (k - 1) / (N - 1)) - 1.0) +
+                         2.0 * inv_dx2 * (cos(π * (l - 1) / (N - 1)) - 1.0)
+        end
+        x = [(i - 1) * dx for i in 1:N]
+        y = [(j - 1) * dx for j in 1:N]
+        phi_exact = [cos(π * x[i]) * cos(π * y[j]) for i in 1:N, j in 1:N]
+        rhs = (1 + 2 * sigma * π^2) .* phi_exact
+        phi = zeros(N, N)
+        phi, niter = Kraken.solve_helmholtz_dct!(phi, rhs, dx, sigma;
+                                                   poisson_eigenvalues=eig)
+        @test niter == 0
+        @test maximum(abs.(phi - phi_exact)) < 0.01
+    end
+
+    @testset "DCT vs CG Helmholtz agreement" begin
+        N = 17
+        dx = 1.0 / (N - 1)
+        sigma = 0.01
+        rhs = rand(N, N)
+        phi_cg = zeros(N, N)
+        phi_dct = zeros(N, N)
+        phi_cg, _ = Kraken.solve_helmholtz!(phi_cg, rhs, dx, sigma; rtol=1e-10)
+        phi_dct, _ = Kraken.solve_helmholtz_dct!(phi_dct, rhs, dx, sigma)
+        max_diff = maximum(abs.(phi_cg - phi_dct))
+        @test max_diff < 0.01
+        @info "DCT vs CG Helmholtz max diff = $max_diff"
+    end
+end
+
 @testset "Implicit Projection" begin
     @testset "Cavity convergence with implicit scheme" begin
         u, v, p, conv = Kraken.run_cavity(N=17, Re=100.0, max_steps=3000,
