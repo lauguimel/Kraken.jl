@@ -13,6 +13,7 @@ function run_taylor_green(; save_figures=true, figdir="docs/src/assets/figures")
     t_final = 1.0
     grids = [32, 64, 128]
     errors = Float64[]
+    errors_tvd = Float64[]
 
     """Apply periodic BCs by copying opposite interior edges."""
     function apply_periodic_bc!(f, N)
@@ -127,7 +128,7 @@ function run_taylor_green(; save_figures=true, figdir="docs/src/assets/figures")
         err = sqrt(norm(u_int .- ue_int)^2 + norm(v_int .- ve_int)^2) /
               sqrt(norm(ue_int)^2 + norm(ve_int)^2)
         push!(errors, err)
-        @printf("  N=%3d: L2 relative error = %.2e\n", N, err)
+        @printf("  N=%3d (upwind): L2 relative error = %.2e\n", N, err)
 
         if N == grids[end]
             u_last = u
@@ -135,6 +136,46 @@ function run_taylor_green(; save_figures=true, figdir="docs/src/assets/figures")
             N_last = Nt
             x_last = x
         end
+
+        # --- TVD (Van Leer) run for same grid ---
+        u_tvd = [cos(x[i]) * sin(y[j]) for i in 1:Nt, j in 1:Nt]
+        v_tvd = [-sin(x[i]) * cos(y[j]) for i in 1:Nt, j in 1:Nt]
+        p_tvd = zeros(Nt, Nt)
+        adv_u_tvd = zeros(Nt, Nt); adv_v_tvd = zeros(Nt, Nt)
+        lap_u_tvd = zeros(Nt, Nt); lap_v_tvd = zeros(Nt, Nt)
+        div_tvd = zeros(Nt, Nt); gx_tvd = zeros(Nt, Nt); gy_tvd = zeros(Nt, Nt)
+        phi_tvd = zeros(N, N)
+
+        apply_periodic_bc!(u_tvd, Nt)
+        apply_periodic_bc!(v_tvd, Nt)
+
+        for _ in 1:nsteps
+            fill!(adv_u_tvd, 0.0); fill!(adv_v_tvd, 0.0)
+            advect!(adv_u_tvd, u_tvd, v_tvd, u_tvd, dx; scheme=:tvd)
+            advect!(adv_v_tvd, u_tvd, v_tvd, v_tvd, dx; scheme=:tvd)
+            fill!(lap_u_tvd, 0.0); fill!(lap_v_tvd, 0.0)
+            laplacian!(lap_u_tvd, u_tvd, dx); laplacian!(lap_v_tvd, v_tvd, dx)
+            for j in 2:Nt-1, i in 2:Nt-1
+                u_tvd[i, j] += dt * (-adv_u_tvd[i, j] + ν * lap_u_tvd[i, j])
+                v_tvd[i, j] += dt * (-adv_v_tvd[i, j] + ν * lap_v_tvd[i, j])
+            end
+            apply_periodic_bc!(u_tvd, Nt); apply_periodic_bc!(v_tvd, Nt)
+            fill!(div_tvd, 0.0); divergence!(div_tvd, u_tvd, v_tvd, dx)
+            rhs_tvd = div_tvd[2:Nt-1, 2:Nt-1] ./ dt
+            fill!(phi_tvd, 0.0); solve_poisson_fft!(phi_tvd, rhs_tvd, dx)
+            p_tvd[2:Nt-1, 2:Nt-1] .= phi_tvd; apply_periodic_bc!(p_tvd, Nt)
+            fill!(gx_tvd, 0.0); fill!(gy_tvd, 0.0); gradient!(gx_tvd, gy_tvd, p_tvd, dx)
+            for j in 2:Nt-1, i in 2:Nt-1
+                u_tvd[i, j] -= dt * gx_tvd[i, j]; v_tvd[i, j] -= dt * gy_tvd[i, j]
+            end
+            apply_periodic_bc!(u_tvd, Nt); apply_periodic_bc!(v_tvd, Nt)
+        end
+
+        u_tvd_int = u_tvd[2:Nt-1, 2:Nt-1]; v_tvd_int = v_tvd[2:Nt-1, 2:Nt-1]
+        err_tvd = sqrt(norm(u_tvd_int .- ue_int)^2 + norm(v_tvd_int .- ve_int)^2) /
+                  sqrt(norm(ue_int)^2 + norm(ve_int)^2)
+        push!(errors_tvd, err_tvd)
+        @printf("  N=%3d (TVD):    L2 relative error = %.2e\n", N, err_tvd)
     end
 
     # --- Timing on 128 ---
@@ -227,9 +268,14 @@ function run_taylor_green(; save_figures=true, figdir="docs/src/assets/figures")
         ax2 = Axis(fig2[1, 1], xlabel="N", ylabel="L2 relative error",
                     title="Taylor-Green — Convergence",
                     xscale=log10, yscale=log10)
-        scatterlines!(ax2, Float64.(grids), errors, linewidth=2, markersize=10, label="Kraken")
-        ref = errors[1] .* (grids[1] ./ grids) .^ 1  # first-order upwind
-        lines!(ax2, Float64.(grids), ref, linestyle=:dash, color=:gray, label="O(dx)")
+        scatterlines!(ax2, Float64.(grids), errors, linewidth=2, markersize=10,
+                       label="Kraken (upwind)", color=:royalblue)
+        scatterlines!(ax2, Float64.(grids), errors_tvd, linewidth=2, markersize=10,
+                       label="Kraken (TVD Van Leer)", color=:darkorange, marker=:diamond)
+        ref1 = errors[1] .* (grids[1] ./ grids) .^ 1  # first-order slope
+        ref2 = errors_tvd[1] .* (grids[1] ./ grids) .^ 2  # second-order slope
+        lines!(ax2, Float64.(grids), ref1, linestyle=:dash, color=:gray, label="O(dx)")
+        lines!(ax2, Float64.(grids), ref2, linestyle=:dot, color=:gray, label="O(dx²)")
         axislegend(ax2)
         save(joinpath(figdir, "taylor_green_convergence.png"), fig2)
 
@@ -299,6 +345,7 @@ function run_taylor_green(; save_figures=true, figdir="docs/src/assets/figures")
     return Dict(
         "name" => "taylor_green",
         "errors" => errors,
+        "errors_tvd" => errors_tvd,
         "grids" => grids,
         "t_cpu" => t_cpu,
         "t_metal" => t_metal,

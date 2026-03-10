@@ -22,6 +22,7 @@ using JSON3  # for parsing external results
 include("heat_diffusion.jl")
 include("lid_cavity.jl")
 include("taylor_green.jl")
+include("rayleigh_benard.jl")
 
 const RESULTS_DIR = joinpath(@__DIR__, "external", "results")
 const FIGDIR = joinpath(@__DIR__, "..", "docs", "src", "assets", "figures")
@@ -74,13 +75,25 @@ function compare_cavity(; save_figures=true)
     # --- Run Kraken (warmup + timed) ---
     println("  Warming up Kraken (small run to compile)...")
     run_cavity(N=8, Re=100.0, cfl=0.2, max_steps=10, tol=1e-1, verbose=false)
+    run_cavity(N=8, Re=100.0, cfl=0.5, max_steps=10, tol=1e-1, verbose=false, time_scheme=:implicit)
 
-    println("  Running Kraken cavity (N=$N, Re=100)...")
-    t_kraken = @elapsed begin
-        u, v, p, converged = run_cavity(N=N, Re=100.0, cfl=0.2,
-                                         max_steps=20000, tol=1e-7, verbose=false)
+    println("  Running Kraken cavity — explicit (N=$N, Re=100)...")
+    t_kraken_explicit = @elapsed begin
+        u_exp, v_exp, p_exp, conv_exp = run_cavity(N=N, Re=100.0, cfl=0.2,
+                                                     max_steps=20000, tol=1e-7, verbose=false)
     end
-    println("  Kraken converged: $converged ($(round(t_kraken, digits=2))s, excl. JIT)")
+    println("  Kraken explicit converged: $conv_exp ($(round(t_kraken_explicit, digits=2))s)")
+
+    println("  Running Kraken cavity — implicit (N=$N, Re=100)...")
+    t_kraken_implicit = @elapsed begin
+        u, v, p, converged = run_cavity(N=N, Re=100.0, cfl=0.5,
+                                         max_steps=20000, tol=1e-7, verbose=false,
+                                         time_scheme=:implicit)
+    end
+    println("  Kraken implicit converged: $converged ($(round(t_kraken_implicit, digits=2))s)")
+
+    # Use implicit as primary timing
+    t_kraken = t_kraken_implicit
 
     # Extract Kraken u(y) at x=0.5
     dx = 1.0 / (N - 1)
@@ -99,6 +112,7 @@ function compare_cavity(; save_figures=true)
 
     profiles["kraken"] = (y=y_grid, u=u_kraken)
     timings["kraken"] = t_kraken
+    timings["kraken_explicit"] = t_kraken_explicit
 
     for (solver, data) in [("gerris", gerris_data), ("basilisk", basilisk_data), ("openfoam", openfoam_data)]
         if data === nothing || !haskey(data, :cases) || !haskey(data.cases, :cavity)
@@ -172,19 +186,25 @@ function compare_cavity(; save_figures=true)
         save(joinpath(FIGDIR, "comparison_cavity_profile.png"), fig1)
         println("  Saved: comparison_cavity_profile.png")
 
-        # (b) Timing bar chart
-        solver_order = ["kraken", "gerris", "basilisk", "openfoam"]
-        available = [s for s in solver_order if haskey(timings, s)]
-        if length(available) >= 2
-            fig2 = Figure(size=(800, 500))
+        # (b) Timing bar chart (with both Kraken explicit and implicit)
+        bar_entries = Tuple{String, String, Any, Float64}[]  # (key, label, color, time)
+        push!(bar_entries, ("kraken", "Kraken (implicit)", :royalblue, t_kraken_implicit))
+        push!(bar_entries, ("kraken_explicit", "Kraken (explicit)", :steelblue, t_kraken_explicit))
+        for s in ["gerris", "basilisk", "openfoam"]
+            if haskey(timings, s)
+                push!(bar_entries, (s, SOLVER_STYLE[s].label, SOLVER_STYLE[s].color, timings[s]))
+            end
+        end
+        if length(bar_entries) >= 2
+            fig2 = Figure(size=(900, 500))
             ax2 = Axis(fig2[1, 1],
                         xlabel="Solver", ylabel="Wall time (s)",
                         title="Lid-Driven Cavity Re=100, N=64 — Execution Time",
-                        xticks=(1:length(available),
-                                [SOLVER_STYLE[s].label for s in available]))
-            colors = [SOLVER_STYLE[s].color for s in available]
-            times = [timings[s] for s in available]
-            barplot!(ax2, 1:length(available), times, color=colors,
+                        xticks=(1:length(bar_entries),
+                                [e[2] for e in bar_entries]))
+            colors = [e[3] for e in bar_entries]
+            times = [e[4] for e in bar_entries]
+            barplot!(ax2, 1:length(bar_entries), times, color=colors,
                      bar_labels=:y, label_formatter=x -> @sprintf("%.1fs", x))
             save(joinpath(FIGDIR, "comparison_cavity_timing.png"), fig2)
             println("  Saved: comparison_cavity_timing.png")
@@ -391,6 +411,10 @@ function main()
     # --- Taylor-Green comparison ---
     tg_results = compare_taylor_green()
 
+    # --- Rayleigh-Bénard benchmark ---
+    println()
+    rb_results = run_rayleigh_benard_benchmark(figdir=FIGDIR)
+
     # --- Summary ---
     println()
     println("╔" * "═"^58 * "╗")
@@ -399,9 +423,16 @@ function main()
 
     if cavity_results !== nothing
         println("║ Cavity Re=100 — Wall times:                             ║")
+        timing_labels = Dict(
+            "kraken" => "Kraken(impl)",
+            "kraken_explicit" => "Kraken(expl)",
+            "gerris" => "Gerris",
+            "basilisk" => "Basilisk",
+            "openfoam" => "OpenFOAM v10",
+        )
         for (solver, t) in sort(collect(cavity_results["timings"]), by=x->x[2])
-            style = SOLVER_STYLE[solver]
-            @printf("║   %-12s: %8.2fs                                  ║\n", style.label, t)
+            label = get(timing_labels, solver, solver)
+            @printf("║   %-12s: %8.2fs                                  ║\n", label, t)
         end
     end
 
@@ -411,6 +442,13 @@ function main()
         println("║ Taylor-Green — L2 errors:                                ║")
         @printf("║   Kraken.jl:   %.3e                                 ║\n", tg_results["kraken_error"])
         @printf("║   Basilisk:    %.3e                                 ║\n", tg_results["basilisk_error"])
+    end
+
+    if rb_results !== nothing
+        println("╠" * "═"^58 * "╣")
+        println("║ Rayleigh-Bénard Ra=1e4:                                 ║")
+        @printf("║   Nusselt (avg): %.3f  (ref: ~2.24)                     ║\n", rb_results["Nu_avg"])
+        @printf("║   CPU time:      %.2fs                                   ║\n", rb_results["t_cpu"])
     end
 
     println("╚" * "═"^58 * "╝")

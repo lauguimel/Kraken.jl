@@ -18,12 +18,20 @@ function run_lid_cavity(; save_figures=true, figdir="docs/src/assets/figures")
               -0.13641, -0.20581, -0.21090, -0.15662, -0.10150, -0.06434,
               -0.04775, -0.04192, -0.03717, 0.0]
 
-    # --- CPU run ---
+    # --- CPU run (explicit) ---
     t_cpu = @elapsed begin
         u, v, p, converged = run_cavity(N=N, Re=100.0, cfl=0.2,
                                          max_steps=20000, tol=1e-7, verbose=false)
     end
-    println("  Converged: $converged")
+    println("  Explicit — Converged: $converged")
+
+    # --- CPU run (implicit) ---
+    t_cpu_implicit = @elapsed begin
+        u_impl, v_impl, p_impl, conv_impl = run_cavity(N=N, Re=100.0, cfl=0.5,
+                                                         max_steps=20000, tol=1e-7,
+                                                         verbose=false, time_scheme=:implicit)
+    end
+    println("  Implicit — Converged: $conv_impl")
 
     # Extract u(y) at x=0.5
     dx = 1.0 / (N - 1)
@@ -69,8 +77,8 @@ function run_lid_cavity(; save_figures=true, figdir="docs/src/assets/figures")
     end
 
     speedup = has_metal ? round(t_cpu / t_metal, digits=1) : NaN
-    @printf("  Timing (N=%d): CPU=%.3fs, Metal=%s, Speedup=%s\n",
-            N, t_cpu,
+    @printf("  Timing (N=%d): CPU-explicit=%.3fs, CPU-implicit=%.3fs, Metal=%s, Speedup=%s\n",
+            N, t_cpu, t_cpu_implicit,
             has_metal ? @sprintf("%.3fs", t_metal) : "N/A",
             has_metal ? @sprintf("%.1fx", speedup) : "N/A")
 
@@ -125,6 +133,7 @@ function run_lid_cavity(; save_figures=true, figdir="docs/src/assets/figures")
         "l2_error" => l2_error,
         "converged" => converged,
         "t_cpu" => t_cpu,
+        "t_cpu_implicit" => t_cpu_implicit,
         "t_metal" => t_metal,
         "has_metal" => has_metal
     )

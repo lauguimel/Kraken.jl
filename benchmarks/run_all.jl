@@ -20,6 +20,7 @@ include("poiseuille.jl")
 include("couette.jl")
 include("rotation_advection.jl")
 include("advection_diffusion.jl")
+include("rayleigh_benard.jl")
 
 function main()
     println("╔" * "═"^58 * "╗")
@@ -40,6 +41,7 @@ function main()
         ("Couette Flow",         () -> run_couette(figdir=figdir)),
         ("Rotation Advection",   () -> run_rotation_advection(figdir=figdir)),
         ("Advection-Diffusion",  () -> run_advection_diffusion(figdir=figdir)),
+        ("Rayleigh-Bénard",     () -> run_rayleigh_benard_benchmark(figdir=figdir)),
     ]
 
     total_time = @elapsed begin
