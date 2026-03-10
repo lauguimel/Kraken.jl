@@ -31,6 +31,8 @@ include("io/vtk_writer.jl")
 include("io/config_parser.jl")
 include("physics/boussinesq.jl")
 include("amr/quadtree.jl")
+include("amr/operators.jl")
+include("amr/poisson_amr.jl")
 
 export greet, laplacian!, gradient!, divergence!, advect!
 export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!, solve_poisson_neumann_dct!, solve_poisson_mg!
@@ -43,5 +45,10 @@ export BCConfig, OutputConfig, StudyConfig
 export QuadTree, add_field!, get_field, set_field!, cell_size, cell_center
 export refine!, coarsen!, adapt!, enforce_balance!
 export find_neighbor, foreach_leaf, nleaves, initialize_field!, rebuild_leaf_list!
+export laplacian_amr!, divergence_amr!, gradient_amr!, advect_amr!
+export neighbor_value, neighbor_distance
+export refine_uniformly!, solve_poisson_amr!, vcycle_amr!
+export compute_residual_all!, compute_residual_level!, residual_norm
+export smooth_level!, restrict_level!, prolongate_level!
 
 end # module Kraken
