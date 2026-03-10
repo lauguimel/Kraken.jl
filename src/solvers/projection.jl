@@ -111,7 +111,7 @@ phi, niter = solve_poisson_neumann!(phi, rhs, dx)
 
 See also: [`solve_poisson_fft!`](@ref), [`solve_poisson_cg!`](@ref)
 """
-function solve_poisson_neumann!(phi, rhs, dx; maxiter=2000, rtol=1e-8)
+function solve_poisson_neumann!(phi, rhs, dx; maxiter=2000, rtol=1e-8, x0=nothing)
     N = size(rhs, 1)
     T = eltype(rhs)
 
@@ -255,7 +255,8 @@ See also: [`run_cavity`](@ref), [`solve_poisson_neumann!`](@ref), [`apply_veloci
 function projection_step!(u, v, p, ν, dx, dt, N;
                           adv_u=similar(u), adv_v=similar(v),
                           lap_u=similar(u), lap_v=similar(v),
-                          div_field=similar(u), gx=similar(u), gy=similar(v))
+                          div_field=similar(u), gx=similar(u), gy=similar(v),
+                          poisson_solver=:cg)
     T = eltype(u)
     backend = KernelAbstractions.get_backend(u)
     n = N - 2  # interior points
@@ -286,13 +287,119 @@ function projection_step!(u, v, p, ν, dx, dt, N;
     fill!(div_field, zero(T))
     divergence!(div_field, u, v, dx)
 
-    # RHS = (1/dt) * div(u*)
-    rhs = div_field ./ dt
+    # RHS = (1/dt) * div(u*) — in-place
+    div_field ./= dt
 
-    solve_poisson_neumann!(p, rhs, dx; maxiter=2000, rtol=eltype(u)(1e-6))
+    if poisson_solver == :mg
+        solve_poisson_mg!(p, div_field, dx)
+    else
+        solve_poisson_neumann!(p, div_field, dx; maxiter=2000, rtol=eltype(u)(1e-4), x0=p)
+    end
     apply_pressure_neumann_bc!(p, N)
 
     # --- Step 3: velocity correction ---
+    fill!(gx, zero(T))
+    fill!(gy, zero(T))
+    gradient!(gx, gy, p, dx)
+
+    kernel_corr! = pressure_correction_kernel!(backend)
+    kernel_corr!(u, v, gx, gy, T(dt); ndrange=(n, n))
+    KernelAbstractions.synchronize(backend)
+
+    # Apply velocity BCs after correction
+    apply_velocity_bc!(u, v, N)
+
+    return u, v, p
+end
+
+@kernel function implicit_rhs_kernel!(rhs_u, rhs_v, @Const(u), @Const(v),
+                                      @Const(adv_u), @Const(adv_v), dt)
+    i, j = @index(Global, NTuple)
+    ii = i + 1
+    jj = j + 1
+    @inbounds begin
+        rhs_u[ii, jj] = u[ii, jj] - dt * adv_u[ii, jj]
+        rhs_v[ii, jj] = v[ii, jj] - dt * adv_v[ii, jj]
+    end
+end
+
+"""
+    projection_step_implicit!(u, v, p, ν, dx, dt, N;
+                              adv_u=similar(u), adv_v=similar(v),
+                              rhs_u=similar(u), rhs_v=similar(v),
+                              div_field=similar(u), gx=similar(u), gy=similar(v))
+
+Perform one timestep of the semi-implicit projection method for the 2D
+incompressible Navier-Stokes equations on a collocated grid.
+
+Diffusion is treated implicitly via the Helmholtz equation, removing the
+viscous stability constraint on the timestep. Only the advective CFL remains.
+
+1. Compute advection explicitly
+2. Build RHS: rhs = u - dt·advection
+3. Solve Helmholtz: (I - dt·ν·∇²) u* = rhs
+4. Solve pressure Poisson: ∇²p = (1/dt)∇·u*
+5. Correct velocity: u^{n+1} = u* − dt·∇p
+
+Works on CPU and GPU arrays automatically.
+
+# Arguments
+- `u, v`: velocity components (N × N), modified in-place
+- `p`: pressure field (N × N), modified in-place
+- `ν`: kinematic viscosity (= 1/Re)
+- `dx`: grid spacing
+- `dt`: timestep
+- `N`: grid size
+
+# Keyword Arguments
+- Work arrays: `adv_u, adv_v, rhs_u, rhs_v, div_field, gx, gy`
+
+# Returns
+- `(u, v, p)`: the updated velocity and pressure fields.
+
+See also: [`projection_step!`](@ref), [`solve_helmholtz!`](@ref), [`run_cavity`](@ref)
+"""
+function projection_step_implicit!(u, v, p, ν, dx, dt, N;
+                                    adv_u=similar(u), adv_v=similar(v),
+                                    rhs_u=similar(u), rhs_v=similar(v),
+                                    div_field=similar(u), gx=similar(u), gy=similar(v))
+    T = eltype(u)
+    backend = KernelAbstractions.get_backend(u)
+    n = N - 2  # interior points
+
+    # --- Step 1: Compute advection (explicit) ---
+    fill!(adv_u, zero(T))
+    fill!(adv_v, zero(T))
+    advect!(adv_u, u, v, u, dx)
+    advect!(adv_v, u, v, v, dx)
+
+    # --- Step 2: Build RHS for Helmholtz ---
+    # rhs = u - dt * advection (interior points only, boundary from BCs)
+    copyto!(rhs_u, u)
+    copyto!(rhs_v, v)
+    kernel_rhs! = implicit_rhs_kernel!(backend)
+    kernel_rhs!(rhs_u, rhs_v, u, v, adv_u, adv_v, T(dt); ndrange=(n, n))
+    KernelAbstractions.synchronize(backend)
+
+    # --- Step 3: Solve Helmholtz for u*, v* ---
+    sigma = dt * ν
+    solve_helmholtz!(u, rhs_u, dx, sigma)
+    solve_helmholtz!(v, rhs_v, dx, sigma)
+
+    # Apply velocity BCs to intermediate velocity
+    apply_velocity_bc!(u, v, N)
+
+    # --- Step 4: Pressure Poisson equation ---
+    fill!(div_field, zero(T))
+    divergence!(div_field, u, v, dx)
+
+    # RHS = (1/dt) * div(u*) — in-place
+    div_field ./= dt
+
+    solve_poisson_neumann!(p, div_field, dx; maxiter=2000, rtol=eltype(u)(1e-4), x0=p)
+    apply_pressure_neumann_bc!(p, N)
+
+    # --- Step 5: Velocity correction ---
     fill!(gx, zero(T))
     fill!(gy, zero(T))
     gradient!(gx, gy, p, dx)
@@ -342,12 +449,14 @@ function available_backends()
 end
 
 """
-    run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6, verbose=false, backend=KernelAbstractions.CPU(), float_type=Float64)
+    run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6, verbose=false,
+                 backend=KernelAbstractions.CPU(), float_type=Float64,
+                 poisson_solver=:cg, time_scheme=:explicit)
 
 Run the lid-driven cavity benchmark at given Reynolds number on an N×N grid.
 
-Uses Chorin's projection method with explicit Euler time stepping. The simulation
-runs until steady state (velocity change < `tol`) or `max_steps` is reached.
+Uses Chorin's projection method. Time stepping can be explicit (default) or
+semi-implicit (diffusion treated implicitly via Helmholtz solver).
 
 # Keyword Arguments
 - `N::Int`: grid points per dimension (default: 64)
@@ -358,6 +467,8 @@ runs until steady state (velocity change < `tol`) or `max_steps` is reached.
 - `verbose::Bool`: print progress every 1000 steps (default: false)
 - `backend`: KernelAbstractions backend (default: CPU())
 - `float_type`: floating-point type (default: Float64, use Float32 for Metal)
+- `poisson_solver::Symbol`: `:cg` (default) or `:mg` (geometric multigrid)
+- `time_scheme::Symbol`: `:explicit` (default) or `:implicit` (semi-implicit diffusion)
 
 # Returns
 - `(u, v, p, converged)`: velocity components, pressure, and convergence flag
@@ -365,12 +476,14 @@ runs until steady state (velocity change < `tol`) or `max_steps` is reached.
 # Example
 ```julia
 u, v, p, converged = run_cavity(N=32, Re=100.0, max_steps=500)
+u, v, p, converged = run_cavity(N=32, Re=100.0, time_scheme=:implicit)
 ```
 
-See also: [`projection_step!`](@ref), [`available_backends`](@ref)
+See also: [`projection_step!`](@ref), [`projection_step_implicit!`](@ref), [`available_backends`](@ref)
 """
 function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
-                     verbose=false, backend=KernelAbstractions.CPU(), float_type=Float64)
+                     verbose=false, backend=KernelAbstractions.CPU(), float_type=Float64,
+                     poisson_solver=:cg, time_scheme=:explicit)
     T = float_type
     dx = T(1.0) / T(N - 1)
     ν = T(1.0) / T(Re)
@@ -383,19 +496,31 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
     # Apply initial BCs
     apply_velocity_bc!(u, v, N)
 
-    # Preallocate work arrays
+    # Preallocate work arrays (shared between explicit/implicit)
     adv_u = KernelAbstractions.zeros(backend, T, N, N)
     adv_v = KernelAbstractions.zeros(backend, T, N, N)
-    lap_u = KernelAbstractions.zeros(backend, T, N, N)
-    lap_v = KernelAbstractions.zeros(backend, T, N, N)
     div_field = KernelAbstractions.zeros(backend, T, N, N)
     gx = KernelAbstractions.zeros(backend, T, N, N)
     gy = KernelAbstractions.zeros(backend, T, N, N)
 
-    # Timestep from CFL and viscous stability
-    dt_adv = T(cfl) * dx  # CFL with max velocity ≈ 1
-    dt_vis = T(cfl) * dx^2 / ν  # Viscous stability
-    dt = min(dt_adv, dt_vis)
+    # Scheme-specific work arrays
+    if time_scheme == :implicit
+        rhs_u = KernelAbstractions.zeros(backend, T, N, N)
+        rhs_v = KernelAbstractions.zeros(backend, T, N, N)
+    else
+        lap_u = KernelAbstractions.zeros(backend, T, N, N)
+        lap_v = KernelAbstractions.zeros(backend, T, N, N)
+    end
+
+    # Timestep selection
+    if time_scheme == :implicit
+        # No viscous stability restriction, only advective CFL
+        dt = T(cfl) * dx
+    else
+        dt_adv = T(cfl) * dx  # CFL with max velocity ≈ 1
+        dt_vis = T(cfl) * dx^2 / ν  # Viscous stability
+        dt = min(dt_adv, dt_vis)
+    end
 
     # Work array for convergence check
     u_old = similar(u)
@@ -404,10 +529,18 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
     for step in 1:max_steps
         copyto!(u_old, u)
 
-        projection_step!(u, v, p, ν, dx, dt, N;
-                         adv_u=adv_u, adv_v=adv_v,
-                         lap_u=lap_u, lap_v=lap_v,
-                         div_field=div_field, gx=gx, gy=gy)
+        if time_scheme == :implicit
+            projection_step_implicit!(u, v, p, ν, dx, dt, N;
+                                       adv_u=adv_u, adv_v=adv_v,
+                                       rhs_u=rhs_u, rhs_v=rhs_v,
+                                       div_field=div_field, gx=gx, gy=gy)
+        else
+            projection_step!(u, v, p, ν, dx, dt, N;
+                             adv_u=adv_u, adv_v=adv_v,
+                             lap_u=lap_u, lap_v=lap_v,
+                             div_field=div_field, gx=gx, gy=gy,
+                             poisson_solver=poisson_solver)
+        end
 
         # Check convergence
         max_change = maximum(abs.(u .- u_old))
