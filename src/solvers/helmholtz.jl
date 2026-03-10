@@ -82,7 +82,7 @@ function LinearAlgebra.mul!(y::AbstractVector, M::HelmholtzJacobiPreconditioner,
 end
 
 """
-    solve_helmholtz!(phi, rhs, dx, sigma; maxiter=2000, rtol=1e-6)
+    solve_helmholtz!(phi, rhs, dx, sigma; maxiter=2000, rtol=1e-3, solver=nothing, work_b=nothing)
 
 Solve the 2D Helmholtz equation (I - σ·∇²)φ = rhs with Neumann BCs using CG.
 
@@ -99,14 +99,17 @@ Works on CPU arrays and GPU arrays (CUDA, Metal) automatically.
 
 # Keyword Arguments
 - `maxiter::Int`: maximum CG iterations (default: 2000).
-- `rtol`: relative tolerance (default: 1e-6).
+- `rtol`: relative tolerance (default: 1e-3).
+- `solver`: pre-allocated `CgWorkspace` to avoid per-call allocation (default: nothing).
+- `work_b`: pre-allocated work vector of length N² (default: nothing).
 
 # Returns
 - `(phi, niter)`: solution array and iteration count.
 
 See also: [`solve_poisson_neumann!`](@ref), [`projection_step_implicit!`](@ref)
 """
-function solve_helmholtz!(phi, rhs, dx, sigma; maxiter=2000, rtol=1e-6)
+function solve_helmholtz!(phi, rhs, dx, sigma; maxiter=2000, rtol=1e-3,
+                          solver=nothing, work_b=nothing)
     N = size(rhs, 1)
     T = eltype(rhs)
 
@@ -116,16 +119,23 @@ function solve_helmholtz!(phi, rhs, dx, sigma; maxiter=2000, rtol=1e-6)
         return phi, 0
     end
 
-    b = similar(rhs, N * N)
+    # Use pre-allocated work_b or allocate
+    b = work_b === nothing ? similar(rhs, N * N) : work_b
     b .= vec(rhs)
 
     A = HelmholtzOperator{T}(N, dx, T(sigma))
     inv_diag_val = T(1) / (T(1) + T(4) * T(sigma) / (dx * dx))
     M = HelmholtzJacobiPreconditioner{T}(inv_diag_val)
 
-    (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
-
-    phi .= reshape(x, N, N)
-
-    return phi, stats.niter
+    if solver !== nothing
+        # In-place solve with pre-allocated workspace (avoids per-call allocation)
+        solver.warm_start = false
+        cg!(solver, A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
+        phi .= reshape(solver.x, N, N)
+        return phi, solver.stats.niter
+    else
+        (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
+        phi .= reshape(x, N, N)
+        return phi, stats.niter
+    end
 end

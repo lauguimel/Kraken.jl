@@ -1,6 +1,7 @@
 using Krylov
 using LinearAlgebra
 using KernelAbstractions
+using FFTW
 
 """
     NeumannLaplacianOperator{T}
@@ -111,26 +112,77 @@ phi, niter = solve_poisson_neumann!(phi, rhs, dx)
 
 See also: [`solve_poisson_fft!`](@ref), [`solve_poisson_cg!`](@ref)
 """
-function solve_poisson_neumann!(phi, rhs, dx; maxiter=2000, rtol=1e-8, x0=nothing)
+function solve_poisson_neumann_dct!(phi, rhs, dx; eigenvalues=nothing)
     N = size(rhs, 1)
     T = eltype(rhs)
 
+    # Forward DCT-I (REDFT00) — matches Neumann BCs with values at grid points
+    f_hat = FFTW.r2r(rhs, FFTW.REDFT00)
+
+    # Build or use cached eigenvalues of Neumann Laplacian under DCT-I
+    if eigenvalues !== nothing
+        eig = eigenvalues
+    else
+        eig = zeros(T, N, N)
+        inv_dx2 = one(T) / (dx * dx)
+        for l in 1:N, k in 1:N
+            eig[k, l] = T(2) * inv_dx2 * (cos(T(π) * T(k - 1) / T(N - 1)) - one(T)) +
+                         T(2) * inv_dx2 * (cos(T(π) * T(l - 1) / T(N - 1)) - one(T))
+        end
+    end
+
+    # Divide in spectral space (skip zero mode)
+    @inbounds for l in 1:N, k in 1:N
+        if k == 1 && l == 1
+            f_hat[k, l] = zero(T)
+        else
+            f_hat[k, l] /= eig[k, l]
+        end
+    end
+
+    # Inverse DCT-I (REDFT00 is self-inverse, normalization = 2*(N-1) per dim)
+    norm_factor = T(4) * T(N - 1) * T(N - 1)
+    phi .= FFTW.r2r(f_hat, FFTW.REDFT00) ./ norm_factor
+
+    # Pin phi[1,1] = 0
+    p11 = phi[1, 1]
+    phi .-= p11
+
+    return phi, 0
+end
+
+function solve_poisson_neumann!(phi, rhs, dx; maxiter=2000, rtol=1e-8, x0=nothing,
+                                solver=nothing, work_b=nothing)
+    N = size(rhs, 1)
+    T = eltype(rhs)
+
+    # Use pre-allocated work_b or allocate
+    b = work_b === nothing ? similar(rhs, N * N) : work_b
     # Negate for SPD: -∇²φ = -rhs (GPU-compatible)
-    b = similar(rhs, N * N)
     b .= vec(-rhs)
 
     A = NeumannLaplacianOperator{T}(N, dx)
     M = NeumannJacobiPreconditioner{T}(T(dx * dx / 4))
 
-    (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
+    niter = 0
+    if solver !== nothing
+        # In-place solve with pre-allocated workspace (avoids per-call allocation)
+        solver.warm_start = false
+        cg!(solver, A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
+        phi .= reshape(solver.x, N, N)
+        niter = solver.stats.niter
+    else
+        (x, stats) = cg(A, b; M=M, ldiv=false, itmax=maxiter, rtol=T(rtol), atol=zero(T))
+        phi .= reshape(x, N, N)
+        niter = stats.niter
+    end
 
-    phi .= reshape(x, N, N)
     # Ensure pin: shift so phi[1,1] = 0
     # Use Array() scalar extraction for GPU compatibility
     p11 = Array(phi[1:1, 1:1])[1]
     phi .-= p11
 
-    return phi, stats.niter
+    return phi, niter
 end
 
 """
@@ -362,7 +414,12 @@ See also: [`projection_step!`](@ref), [`solve_helmholtz!`](@ref), [`run_cavity`]
 function projection_step_implicit!(u, v, p, ν, dx, dt, N;
                                     adv_u=similar(u), adv_v=similar(v),
                                     rhs_u=similar(u), rhs_v=similar(v),
-                                    div_field=similar(u), gx=similar(u), gy=similar(v))
+                                    div_field=similar(u), gx=similar(u), gy=similar(v),
+                                    poisson_solver_obj=nothing,
+                                    helmholtz_solver_u=nothing,
+                                    helmholtz_solver_v=nothing,
+                                    work_b=nothing,
+                                    poisson_eigenvalues=nothing)
     T = eltype(u)
     backend = KernelAbstractions.get_backend(u)
     n = N - 2  # interior points
@@ -383,8 +440,10 @@ function projection_step_implicit!(u, v, p, ν, dx, dt, N;
 
     # --- Step 3: Solve Helmholtz for u*, v* ---
     sigma = dt * ν
-    solve_helmholtz!(u, rhs_u, dx, sigma)
-    solve_helmholtz!(v, rhs_v, dx, sigma)
+    solve_helmholtz!(u, rhs_u, dx, sigma;
+                     solver=helmholtz_solver_u, work_b=work_b)
+    solve_helmholtz!(v, rhs_v, dx, sigma;
+                     solver=helmholtz_solver_v, work_b=work_b)
 
     # Apply velocity BCs to intermediate velocity
     apply_velocity_bc!(u, v, N)
@@ -396,7 +455,13 @@ function projection_step_implicit!(u, v, p, ν, dx, dt, N;
     # RHS = (1/dt) * div(u*) — in-place
     div_field ./= dt
 
-    solve_poisson_neumann!(p, div_field, dx; maxiter=2000, rtol=eltype(u)(1e-4), x0=p)
+    if poisson_eigenvalues !== nothing
+        # Fast DCT-based direct solver (no iterations)
+        solve_poisson_neumann_dct!(p, div_field, dx; eigenvalues=poisson_eigenvalues)
+    else
+        solve_poisson_neumann!(p, div_field, dx; maxiter=2000, rtol=eltype(u)(1e-4), x0=p,
+                               solver=poisson_solver_obj, work_b=work_b)
+    end
     apply_pressure_neumann_bc!(p, N)
 
     # --- Step 5: Velocity correction ---
@@ -507,6 +572,19 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
     if time_scheme == :implicit
         rhs_u = KernelAbstractions.zeros(backend, T, N, N)
         rhs_v = KernelAbstractions.zeros(backend, T, N, N)
+        # Pre-allocate CG workspaces for Helmholtz (avoids allocs per step)
+        n2 = N * N
+        S = typeof(KernelAbstractions.zeros(backend, T, n2))
+        helmholtz_solver_u = CgWorkspace(n2, n2, S)
+        helmholtz_solver_v = CgWorkspace(n2, n2, S)
+        work_b = KernelAbstractions.zeros(backend, T, n2)
+        # Pre-compute DCT-I eigenvalues for Poisson (direct solver, no iterations)
+        inv_dx2 = one(T) / (dx * dx)
+        poisson_eigenvalues = zeros(T, N, N)
+        for l in 1:N, k in 1:N
+            poisson_eigenvalues[k, l] = T(2) * inv_dx2 * (cos(T(π) * T(k - 1) / T(N - 1)) - one(T)) +
+                                         T(2) * inv_dx2 * (cos(T(π) * T(l - 1) / T(N - 1)) - one(T))
+        end
     else
         lap_u = KernelAbstractions.zeros(backend, T, N, N)
         lap_v = KernelAbstractions.zeros(backend, T, N, N)
@@ -533,7 +611,11 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
             projection_step_implicit!(u, v, p, ν, dx, dt, N;
                                        adv_u=adv_u, adv_v=adv_v,
                                        rhs_u=rhs_u, rhs_v=rhs_v,
-                                       div_field=div_field, gx=gx, gy=gy)
+                                       div_field=div_field, gx=gx, gy=gy,
+                                       helmholtz_solver_u=helmholtz_solver_u,
+                                       helmholtz_solver_v=helmholtz_solver_v,
+                                       work_b=work_b,
+                                       poisson_eigenvalues=poisson_eigenvalues)
         else
             projection_step!(u, v, p, ν, dx, dt, N;
                              adv_u=adv_u, adv_v=adv_v,
@@ -542,8 +624,9 @@ function run_cavity(; N=64, Re=100.0, cfl=0.2, max_steps=10000, tol=1e-6,
                              poisson_solver=poisson_solver)
         end
 
-        # Check convergence
-        max_change = maximum(abs.(u .- u_old))
+        # Check convergence (zero-allocation)
+        u_old .-= u
+        max_change = maximum(abs, u_old)
         if max_change < tol
             if verbose
                 println("Converged at step $step (max_change = $max_change)")
