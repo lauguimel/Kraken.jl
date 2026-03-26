@@ -143,21 +143,30 @@ function apply_zou_he_west_2d!(f, u_in, Nx, Ny)
     KernelAbstractions.synchronize(backend)
 end
 
-# --- Zero-gradient outlet on east wall (i=Nx) ---
+# --- Zou-He pressure outlet on east wall (i=Nx) ---
 
-@kernel function extrapolation_east_2d_kernel!(f, Nx)
+@kernel function zou_he_pressure_east_2d_kernel!(f, Nx, ρ_out)
     j = @index(Global)
 
     @inbounds begin
-        f[Nx,j,4] = f[Nx-1,j,4]
-        f[Nx,j,7] = f[Nx-1,j,7]
-        f[Nx,j,8] = f[Nx-1,j,8]
+        T = eltype(f)
+        # Known: f1, f3(+y), f5(-y) parallel; f2(+x), f6(+x,+y), f9(+x,-y) from interior
+        f1 = f[Nx,j,1]; f2 = f[Nx,j,2]; f3 = f[Nx,j,3]
+        f5 = f[Nx,j,5]; f6 = f[Nx,j,6]; f9 = f[Nx,j,9]
+
+        # Compute ux from fixed ρ_out
+        ux = -one(T) + (f1 + f3 + f5 + T(2) * (f2 + f6 + f9)) / ρ_out
+
+        # Unknown: f4(-x), f7(-x,+y), f8(-x,-y)
+        f[Nx,j,4] = f2 - T(2.0/3.0) * ρ_out * ux
+        f[Nx,j,7] = f9 - T(0.5) * (f3 - f5) - T(1.0/6.0) * ρ_out * ux
+        f[Nx,j,8] = f6 + T(0.5) * (f3 - f5) - T(1.0/6.0) * ρ_out * ux
     end
 end
 
-function apply_extrapolation_east_2d!(f, Nx, Ny)
+function apply_zou_he_pressure_east_2d!(f, Nx, Ny; ρ_out=1.0)
     backend = KernelAbstractions.get_backend(f)
-    kernel! = extrapolation_east_2d_kernel!(backend)
-    kernel!(f, Nx; ndrange=(Ny,))
+    kernel! = zou_he_pressure_east_2d_kernel!(backend)
+    kernel!(f, Nx, eltype(f)(ρ_out); ndrange=(Ny,))
     KernelAbstractions.synchronize(backend)
 end

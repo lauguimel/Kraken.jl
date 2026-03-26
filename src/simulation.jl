@@ -333,34 +333,37 @@ function initialize_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=
 end
 
 """
-    compute_drag_2d(f, is_solid, Nx, Ny)
+    compute_drag_mea_2d(f_pre, f_post, is_solid, Nx, Ny)
 
-Compute drag and lift on solid obstacles using momentum exchange method.
-Returns (Fx_drag, Fy_lift).
+Compute drag and lift via two-time-level momentum exchange:
+- `f_pre`: populations BEFORE streaming (= post-collision from previous step)
+- `f_post`: populations AFTER streaming + BCs (= pre-collision current step)
+
+The force on the solid for each boundary link q from fluid to solid is:
+  F = c_q · f_q(pre-stream) + c_q · f_q̄(post-stream)
 """
-function compute_drag_2d(f, is_solid, Nx, Ny)
-    f_cpu = Array(f)
-    solid_cpu = Array(is_solid)
-    cx = [0, 1, 0, -1,  0, 1, -1, -1,  1]
-    cy = [0, 0, 1,  0, -1, 1,  1, -1, -1]
+function compute_drag_mea_2d(f_pre, f_post, is_solid, Nx, Ny)
+    fpre = Array(f_pre)
+    fpost = Array(f_post)
+    solid = Array(is_solid)
+    cxv = [0, 1, 0, -1,  0, 1, -1, -1,  1]
+    cyv = [0, 0, 1,  0, -1, 1,  1, -1, -1]
     opp = [1, 4, 5, 2, 3, 8, 9, 6, 7]
 
     Fx_total = 0.0
     Fy_total = 0.0
 
-    for j in 2:Ny-1, i in 2:Nx-1
-        if !solid_cpu[i, j]
-            for q in 2:9  # skip rest
-                ni = i + cx[q]
-                nj = j + cy[q]
-                if 1 <= ni <= Nx && 1 <= nj <= Ny && solid_cpu[ni, nj]
+    for j in 1:Ny, i in 1:Nx
+        if !solid[i, j]
+            for q in 2:9
+                ni = i + cxv[q]
+                nj = j + cyv[q]
+                if 1 <= ni <= Nx && 1 <= nj <= Ny && solid[ni, nj]
                     oq = opp[q]
-                    # Momentum exchange: force on solid = momentum_in - momentum_out
-                    # Pre-bounce: population f_q carries momentum c_q*f_q toward solid
-                    # Post-bounce: population f_oq carries momentum c_oq*f_oq = -c_q*f_oq away
-                    # Net force = c_q*f_q + c_q*f_oq (positive = same direction as c_q)
-                    Fx_total += Float64(cx[q]) * (f_cpu[i, j, q] + f_cpu[i, j, oq])
-                    Fy_total += Float64(cy[q]) * (f_cpu[i, j, q] + f_cpu[i, j, oq])
+                    # f_q(pre-stream): population about to leave fluid toward solid
+                    # f_opp(post-stream): population that just bounced back from solid
+                    Fx_total += Float64(cxv[q]) * (fpre[i, j, q] + fpost[i, j, oq])
+                    Fy_total += Float64(cyv[q]) * (fpre[i, j, q] + fpost[i, j, oq])
                 end
             end
         end
@@ -374,10 +377,11 @@ end
                      max_steps=20000, backend, T)
 
 Flow around a cylinder at Re = u_in * 2*radius / ν.
-Returns final fields and drag coefficient.
+Drag computed via momentum exchange on post-stream populations, averaged
+over last `avg_window` steps.
 """
 function run_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
-                          u_in=0.05, ν=0.05, max_steps=20000,
+                          u_in=0.05, ν=0.05, max_steps=20000, avg_window=1000,
                           backend=KernelAbstractions.CPU(), T=Float64)
     state, config = initialize_cylinder_2d(; Nx=Nx, Ny=Ny, cx=cx, cy=cy,
                                             radius=radius, u_in=u_in, ν=ν,
@@ -387,20 +391,39 @@ function run_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
     is_solid = state.is_solid
     ω = T(omega(config))
 
+    Fx_sum = 0.0
+    Fy_sum = 0.0
+    n_avg = 0
+
     for step in 1:max_steps
+        # 1. Stream (f_in = pre-stream, f_out = post-stream)
         stream_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. BCs
         apply_zou_he_west_2d!(f_out, u_in, Nx, Ny)
-        apply_extrapolation_east_2d!(f_out, Nx, Ny)
+        apply_zou_he_pressure_east_2d!(f_out, Nx, Ny)
+
+        # 3. MEA drag: f_pre=f_in (pre-stream), f_post=f_out (post-stream+BCs)
+        if step > max_steps - avg_window
+            drag = compute_drag_mea_2d(f_in, f_out, is_solid, Nx, Ny)
+            Fx_sum += drag.Fx
+            Fy_sum += drag.Fy
+            n_avg += 1
+        end
+
+        # 4. Collide
         collide_2d!(f_out, is_solid, ω)
+
+        # 5. Macroscopic + swap
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
         f_in, f_out = f_out, f_in
     end
 
-    # Compute drag
-    drag = compute_drag_2d(f_in, is_solid, Nx, Ny)
+    Fx_avg = Fx_sum / n_avg
+    Fy_avg = Fy_sum / n_avg
     D = 2 * radius
-    Cd = 2.0 * drag.Fx / (1.0 * u_in^2 * D)
+    Cd = 2.0 * Fx_avg / (1.0 * u_in^2 * D)
 
     return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), config=config,
-            Cd=Cd, Fx=drag.Fx, Fy=drag.Fy)
+            Cd=Cd, Fx=Fx_avg, Fy=Fy_avg)
 end
