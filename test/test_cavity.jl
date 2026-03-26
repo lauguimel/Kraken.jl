@@ -1,94 +1,68 @@
 using Test
 using Kraken
-using LinearAlgebra
 
-@testset "Lid-driven cavity Re=100" begin
-    # Run cavity simulation
-    N = 64
-    u, v, p, converged = Kraken.run_cavity(N=N, Re=100.0, cfl=0.2,
-                                            max_steps=20000, tol=1e-7,
-                                            verbose=true)
+@testset "Lid-Driven Cavity" begin
 
-    @test converged
+    @testset "Cavity 2D Re=100" begin
+        # Ghia et al. 1982 reference data for Re=100
+        # u-velocity along vertical centerline (x = 0.5)
+        ghia_y = [0.0000, 0.0547, 0.0625, 0.0703, 0.1016, 0.1719,
+                  0.2813, 0.4531, 0.5000, 0.6172, 0.7344, 0.8516,
+                  0.9531, 0.9609, 0.9688, 0.9766, 1.0000]
+        ghia_u = [0.0000, -0.03717, -0.04192, -0.04775, -0.06434, -0.10150,
+                  -0.15662, -0.21090, -0.20581, -0.13641, 0.00332, 0.23151,
+                  0.68717, 0.73722, 0.78871, 0.84123, 1.00000]
 
-    # --- Compare u(y) at x=0.5 with Ghia et al. 1982 ---
-    # Ghia reference data for Re=100
-    y_ghia = [1.0, 0.9766, 0.9688, 0.9609, 0.9531, 0.8516, 0.7344,
-              0.6172, 0.5, 0.4531, 0.2813, 0.1719, 0.1016, 0.0703,
-              0.0625, 0.0547, 0.0]
-    u_ghia = [1.0, 0.84123, 0.78871, 0.73722, 0.68717, 0.23151, 0.00332,
-              -0.13641, -0.20581, -0.21090, -0.15662, -0.10150, -0.06434,
-              -0.04775, -0.04192, -0.03717, 0.0]
+        N = 128
+        Re = 100.0
+        u_lid = 0.1
+        ν = u_lid * N / Re
+        max_steps = 30000  # enough for Re=100 on 128² to converge
 
-    dx = 1.0 / (N - 1)
+        config = LBMConfig(D2Q9(); Nx=N, Ny=N, ν=ν, u_lid=u_lid, max_steps=max_steps)
+        result = run_cavity_2d(config)
 
-    # Extract u profile at x=0.5 (nearest grid column)
-    i_mid = round(Int, 0.5 / dx) + 1  # 1-indexed
-    y_grid = range(0.0, 1.0, length=N)
-    u_profile = u[i_mid, :]
+        # Extract u along vertical centerline (i = N/2)
+        i_center = N ÷ 2
+        u_centerline = result.ux[i_center, :] ./ u_lid  # normalized
 
-    # Interpolate simulation results to Ghia y-locations
-    u_interp = zeros(length(y_ghia))
-    for (k, yg) in enumerate(y_ghia)
-        # Linear interpolation
-        if yg <= 0.0
-            u_interp[k] = u_profile[1]
-        elseif yg >= 1.0
-            u_interp[k] = u_profile[N]
-        else
-            j_float = yg / dx + 1.0
-            j_lo = floor(Int, j_float)
-            j_hi = j_lo + 1
-            j_lo = clamp(j_lo, 1, N)
-            j_hi = clamp(j_hi, 1, N)
-            w = j_float - floor(j_float)
-            u_interp[k] = (1 - w) * u_profile[j_lo] + w * u_profile[j_hi]
+        # Compare at Ghia y-locations (interpolate from our data)
+        max_error = 0.0
+        for (yg, ug) in zip(ghia_y, ghia_u)
+            # Find nearest grid point
+            j = clamp(round(Int, yg * (N - 1)) + 1, 1, N)
+            error = abs(u_centerline[j] - ug)
+            max_error = max(max_error, error)
         end
+
+        @test max_error < 0.1  # within 10% of Ghia (reasonable for 128² with BGK)
+        @info "Cavity 2D Re=100: max error vs Ghia = $(round(max_error, digits=4))"
     end
 
-    # Compute L2 relative error
-    l2_error = norm(u_interp .- u_ghia) / norm(u_ghia)
-    println("L2 relative error vs Ghia: $(round(l2_error * 100, digits=2))%")
-    println("Max pointwise error: $(round(maximum(abs.(u_interp .- u_ghia)), digits=4))")
-
-    @test l2_error < 0.05  # < 5% L2 error
-end
-
-@testset "Lid-driven cavity — Metal GPU" begin
-    gpu_available = false
-    try
-        @eval using Metal
-        if Metal.functional()
-            gpu_available = true
-        end
-    catch
-    end
-
-    if !gpu_available
-        @info "Metal not available, skipping GPU cavity tests"
-        @test_skip false
-    else
-        using KernelAbstractions
-
-        # Smoke test: run a few steps on both CPU and Metal GPU,
-        # compare results (full convergence is too slow on Metal)
+    @testset "Cavity 3D basic convergence" begin
+        # Small 3D cavity — use moderate Re for stability on coarse grid
+        # ν=0.01 gives ω≈1.89 (stable). Re = u_lid * N / ν = 0.02*16/0.01 = 32
         N = 16
-        n_steps = 10
+        u_lid = 0.02
+        ν = 0.01
 
-        u_cpu, v_cpu, p_cpu, _ = Kraken.run_cavity(
-            N=N, Re=100.0, cfl=0.2, max_steps=n_steps, tol=1e-20, verbose=false,
-            backend=KernelAbstractions.CPU(), float_type=Float32)
+        config = LBMConfig(D3Q19(); Nx=N, Ny=N, Nz=N, ν=ν, u_lid=u_lid, max_steps=2000)
+        result = run_cavity_3d(config)
 
-        u_gpu, v_gpu, p_gpu, _ = Kraken.run_cavity(
-            N=N, Re=100.0, cfl=0.2, max_steps=n_steps, tol=1e-20, verbose=false,
-            backend=Metal.MetalBackend(), float_type=Float32)
+        # Check no NaN
+        @test !any(isnan, result.ρ)
 
-        # Compare results after same number of steps
-        diff_u = maximum(abs.(Array(u_gpu) .- u_cpu))
-        diff_v = maximum(abs.(Array(v_gpu) .- v_cpu))
-        # Tolerance accounts for CPU using DCT direct solver vs GPU using CG iterative
-        @test diff_u < 0.02
-        @test diff_v < 0.02
-        @info "Metal cavity smoke test: max u diff = $diff_u, max v diff = $diff_v"
+        # Check lid velocity is approximately imposed
+        ux_top = result.ux[:, :, N]
+        mean_ux_top = sum(ux_top[2:N-1, 2:N-1]) / ((N-2)^2)
+        @test abs(mean_ux_top - u_lid) / u_lid < 0.6  # coarse grid, not fully converged
+
+        # Check mass conservation
+        total_mass = sum(result.ρ)
+        expected = N^3 * 1.0
+        @test abs(total_mass - expected) / expected < 0.01
+
+        @info "Cavity 3D: mean ux at lid = $(round(mean_ux_top, digits=5)), target = $u_lid"
     end
+
 end

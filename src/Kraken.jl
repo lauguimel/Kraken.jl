@@ -1,56 +1,48 @@
 """
     Kraken
 
-GPU-native multi-physics CFD framework in Julia.
+GPU-native Lattice Boltzmann Method (LBM) framework in Julia.
 
-Kraken.jl provides composable operators for computational fluid dynamics
-simulations with automatic GPU acceleration via KernelAbstractions.jl.
+Supports 2D (D2Q9) and 3D (D3Q19) simulations with automatic GPU
+acceleration via KernelAbstractions.jl.
 """
 module Kraken
 
-"""
-    greet() -> String
+# --- Lattice definitions ---
+include("lattice/lattice.jl")
+include("lattice/d2q9.jl")
+include("lattice/d3q19.jl")
 
-Return the package name string.
+# --- GPU kernels ---
+include("kernels/collide_stream_2d.jl")
+include("kernels/collide_stream_3d.jl")
+include("kernels/macroscopic.jl")
+include("kernels/boundary_2d.jl")
+include("kernels/boundary_3d.jl")
 
-# Returns
-- `String`: the string `"Kraken.jl"`.
-"""
-greet() = "Kraken.jl"
+# --- Simulation ---
+include("simulation.jl")
 
-include("operators/laplacian.jl")
-include("operators/gradient.jl")
-include("operators/divergence.jl")
-include("operators/advection.jl")
-include("solvers/poisson_fft.jl")
-include("solvers/poisson_cg.jl")
-include("solvers/helmholtz.jl")
-include("solvers/multigrid.jl")
-include("solvers/projection.jl")
+# --- I/O ---
 include("io/vtk_writer.jl")
-include("io/config_parser.jl")
-include("physics/boussinesq.jl")
-include("amr/quadtree.jl")
-include("amr/operators.jl")
-include("amr/poisson_amr.jl")
-include("amr/projection_amr.jl")
 
-export greet, laplacian!, gradient!, divergence!, advect!
-export solve_poisson_fft!, solve_poisson_cg!, solve_poisson_neumann!, solve_poisson_neumann_dct!, solve_poisson_mg!
-export solve_helmholtz!, solve_helmholtz_dct!
-export projection_step!, projection_step_implicit!, run_cavity, apply_velocity_bc!, apply_pressure_neumann_bc!, available_backends
-export advance_temperature!, buoyancy_force!, run_rayleigh_benard
+# Lattice types and functions
+export AbstractLattice, D2Q9, D3Q19
+export lattice_dim, lattice_q, weights, velocities_x, velocities_y, velocities_z
+export opposite, cs2, equilibrium
+
+# Kernels
+export stream_2d!, collide_2d!, stream_3d!, collide_3d!
+export compute_macroscopic_2d!, compute_macroscopic_3d!
+export apply_zou_he_north_2d!
+export apply_zou_he_top_3d!
+
+# Simulation
+export LBMConfig, omega, reynolds
+export initialize_2d, initialize_3d
+export run_cavity_2d, run_cavity_3d
+
+# I/O
 export write_vtk, create_pvd, write_vtk_to_pvd
-export load_config, SimulationConfig, GeometryConfig, PhysicsConfig
-export BCConfig, OutputConfig, StudyConfig
-export QuadTree, add_field!, get_field, set_field!, cell_size, cell_center
-export refine!, coarsen!, adapt!, enforce_balance!
-export find_neighbor, foreach_leaf, nleaves, initialize_field!, rebuild_leaf_list!
-export laplacian_amr!, divergence_amr!, gradient_amr!, advect_amr!
-export neighbor_value, neighbor_distance
-export refine_uniformly!, solve_poisson_amr!, vcycle_amr!
-export compute_residual_all!, compute_residual_level!, residual_norm
-export smooth_level!, restrict_level!, prolongate_level!
-export run_cavity_amr, projection_step_amr!, apply_velocity_bc_amr!
 
 end # module Kraken
