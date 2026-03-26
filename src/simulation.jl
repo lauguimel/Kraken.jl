@@ -427,3 +427,254 @@ function run_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
     return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), config=config,
             Cd=Cd, Fx=Fx_avg, Fy=Fy_avg)
 end
+
+# --- Rayleigh-Bénard 2D (thermal convection) ---
+
+"""
+    run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000, Pr=1.0, T_hot=1.0, T_cold=0.0,
+                            max_steps=20000, backend, T)
+
+Rayleigh-Bénard convection: hot bottom wall, cold top wall, periodic x.
+Ra = β·g·ΔT·H³/(ν·α), Pr = ν/α.
+"""
+function run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000.0, Pr=1.0,
+                                 T_hot=1.0, T_cold=0.0, max_steps=20000,
+                                 backend=KernelAbstractions.CPU(), FT=Float64)
+    ΔT = T_hot - T_cold
+    H = Ny  # channel height in lattice units (half-way BB)
+
+    # Choose ν for stability (ω not too close to 2)
+    ν = 0.05
+    α = ν / Pr               # thermal diffusivity
+    β_g = Ra * ν * α / (ΔT * H^3)  # β·g combined
+
+    ω_f = FT(1.0 / (3.0 * ν + 0.5))     # flow relaxation
+    ω_T = FT(1.0 / (3.0 * α + 0.5))     # thermal relaxation
+
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    # Thermal populations: initialize to linear temperature profile
+    g_in  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    g_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    Temp  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    w = weights(D2Q9())
+    g_cpu = zeros(FT, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        # Linear profile from T_hot (j=1) to T_cold (j=Ny) + small perturbation
+        T_init = FT(T_hot - ΔT * (j - 1) / (Ny - 1))
+        T_init += FT(0.01 * ΔT) * sin(FT(2π * i / Nx)) * sin(FT(π * j / Ny))
+        for q in 1:9
+            g_cpu[i, j, q] = FT(w[q]) * T_init
+        end
+    end
+    copyto!(g_in, g_cpu)
+    copyto!(g_out, g_cpu)
+
+    T_ref = FT((T_hot + T_cold) / 2)
+
+    for step in 1:max_steps
+        # 1. Stream flow (periodic x, wall y)
+        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Stream thermal (same kernel)
+        stream_periodic_x_wall_y_2d!(g_out, g_in, Nx, Ny)
+
+        # 3. Thermal BCs: fixed temperature at walls
+        apply_fixed_temp_south_2d!(g_out, T_hot, Nx)
+        apply_fixed_temp_north_2d!(g_out, T_cold, Nx, Ny)
+
+        # 4. Compute temperature for Boussinesq coupling
+        compute_temperature_2d!(Temp, g_out)
+
+        # 5. Collide thermal (uses flow velocity)
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+        collide_thermal_2d!(g_out, ux, uy, ω_T)
+
+        # 6. Collide flow with per-node Boussinesq force: Fy(i,j) = β·g·(T(i,j) - T_ref)
+        collide_boussinesq_2d!(f_out, Temp, is_solid, ω_f, β_g, T_ref)
+
+        # 7. Swap
+        f_in, f_out = f_out, f_in
+        g_in, g_out = g_out, g_in
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+    compute_temperature_2d!(Temp, g_in)
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=Array(Temp),
+            config=config, Ra=Ra, Pr=Pr, ν=ν, α=α)
+end
+
+# --- Axisymmetric D2Q9 (z-r coordinates) ---
+
+"""
+    collide_axisymmetric_2d!(f, is_solid, ω, Nx, Ny)
+
+BGK collision with axisymmetric source terms for D2Q9 in (z,r) coordinates.
+x-direction = z (axial), y-direction = r (radial).
+
+Source term from Peng et al. (2003) / Zhou (2011):
+Accounts for 1/r geometric terms in cylindrical Navier-Stokes.
+r = j - 0.5 (half-way BB, r=0 axis at j=0.5).
+"""
+@kernel function collide_axisymmetric_2d_kernel!(f, @Const(is_solid), ω, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        if is_solid[i, j]
+            tmp2 = f[i,j,2]; f[i,j,2] = f[i,j,4]; f[i,j,4] = tmp2
+            tmp3 = f[i,j,3]; f[i,j,3] = f[i,j,5]; f[i,j,5] = tmp3
+            tmp6 = f[i,j,6]; f[i,j,6] = f[i,j,8]; f[i,j,8] = tmp6
+            tmp7 = f[i,j,7]; f[i,j,7] = f[i,j,9]; f[i,j,9] = tmp7
+        else
+            T = eltype(f)
+            f1=f[i,j,1]; f2=f[i,j,2]; f3=f[i,j,3]; f4=f[i,j,4]
+            f5=f[i,j,5]; f6=f[i,j,6]; f7=f[i,j,7]; f8=f[i,j,8]; f9=f[i,j,9]
+
+            ρ = f1+f2+f3+f4+f5+f6+f7+f8+f9
+            inv_ρ = one(T) / ρ
+            uz = (f2 - f4 + f6 - f7 - f8 + f9) * inv_ρ  # axial (x=z)
+            ur = (f3 - f5 + f6 + f7 - f8 - f9) * inv_ρ  # radial (y=r)
+            usq = uz * uz + ur * ur
+
+            # Radial position: r = j - 0.5 (half-way BB, axis at r=0)
+            r = T(j) - T(0.5)
+            inv_r = one(T) / r
+
+            # Standard BGK collision
+            cu = zero(T)
+            feq = T(4.0/9.0) * ρ * (one(T) - T(1.5)*usq)
+            f[i,j,1] = f1 - ω*(f1-feq)
+
+            cu = uz
+            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,2] = f2 - ω*(f2-feq)
+
+            cu = ur
+            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,3] = f3 - ω*(f3-feq)
+
+            cu = -uz
+            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,4] = f4 - ω*(f4-feq)
+
+            cu = -ur
+            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,5] = f5 - ω*(f5-feq)
+
+            cu = uz + ur
+            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,6] = f6 - ω*(f6-feq)
+
+            cu = -uz + ur
+            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,7] = f7 - ω*(f7-feq)
+
+            cu = -uz - ur
+            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,8] = f8 - ω*(f8-feq)
+
+            cu = uz - ur
+            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
+            f[i,j,9] = f9 - ω*(f9-feq)
+
+            # Axisymmetric source: S_q = -w_q * ur/r * (1 + (c_qr*ur)*3 ... )
+            # Simplified form (Zhou 2011): S_q = -f_eq_q * ur / r
+            # This accounts for the ∂(r·ur)/r∂r - ur/r mass/momentum correction
+            pref = -ur * inv_r
+
+            f[i,j,1] = f[i,j,1] + pref * T(4.0/9.0) * ρ * (one(T) - T(1.5)*usq)
+            f[i,j,2] = f[i,j,2] + pref * T(1.0/9.0) * ρ * (one(T) + T(3)*uz + T(4.5)*uz*uz - T(1.5)*usq)
+            f[i,j,3] = f[i,j,3] + pref * T(1.0/9.0) * ρ * (one(T) + T(3)*ur + T(4.5)*ur*ur - T(1.5)*usq)
+            f[i,j,4] = f[i,j,4] + pref * T(1.0/9.0) * ρ * (one(T) - T(3)*uz + T(4.5)*uz*uz - T(1.5)*usq)
+            f[i,j,5] = f[i,j,5] + pref * T(1.0/9.0) * ρ * (one(T) - T(3)*ur + T(4.5)*ur*ur - T(1.5)*usq)
+            f[i,j,6] = f[i,j,6] + pref * T(1.0/36.0) * ρ * (one(T) + T(3)*(uz+ur) + T(4.5)*(uz+ur)*(uz+ur) - T(1.5)*usq)
+            f[i,j,7] = f[i,j,7] + pref * T(1.0/36.0) * ρ * (one(T) + T(3)*(-uz+ur) + T(4.5)*(-uz+ur)*(-uz+ur) - T(1.5)*usq)
+            f[i,j,8] = f[i,j,8] + pref * T(1.0/36.0) * ρ * (one(T) + T(3)*(-uz-ur) + T(4.5)*(-uz-ur)*(-uz-ur) - T(1.5)*usq)
+            f[i,j,9] = f[i,j,9] + pref * T(1.0/36.0) * ρ * (one(T) + T(3)*(uz-ur) + T(4.5)*(uz-ur)*(uz-ur) - T(1.5)*usq)
+        end
+    end
+end
+
+function collide_axisymmetric_2d!(f, is_solid, ω, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = collide_axisymmetric_2d_kernel!(backend)
+    kernel!(f, is_solid, ω, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+# --- Axisymmetric source only (post-collision correction) ---
+
+@kernel function apply_axisym_source_2d_kernel!(f, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(f)
+        f1=f[i,j,1]; f2=f[i,j,2]; f3=f[i,j,3]; f4=f[i,j,4]
+        f5=f[i,j,5]; f6=f[i,j,6]; f7=f[i,j,7]; f8=f[i,j,8]; f9=f[i,j,9]
+
+        ρ = f1+f2+f3+f4+f5+f6+f7+f8+f9
+        inv_ρ = one(T) / ρ
+        uz = (f2-f4+f6-f7-f8+f9) * inv_ρ
+        ur = (f3-f5+f6+f7-f8-f9) * inv_ρ
+        usq = uz*uz + ur*ur
+
+        r = T(j) - T(0.5)
+        pref = -ur / r
+
+        f[i,j,1] = f1 + pref * T(4.0/9.0)*ρ*(one(T) - T(1.5)*usq)
+        f[i,j,2] = f2 + pref * T(1.0/9.0)*ρ*(one(T) + T(3)*uz + T(4.5)*uz*uz - T(1.5)*usq)
+        f[i,j,3] = f3 + pref * T(1.0/9.0)*ρ*(one(T) + T(3)*ur + T(4.5)*ur*ur - T(1.5)*usq)
+        f[i,j,4] = f4 + pref * T(1.0/9.0)*ρ*(one(T) - T(3)*uz + T(4.5)*uz*uz - T(1.5)*usq)
+        f[i,j,5] = f5 + pref * T(1.0/9.0)*ρ*(one(T) - T(3)*ur + T(4.5)*ur*ur - T(1.5)*usq)
+        f[i,j,6] = f6 + pref * T(1.0/36.0)*ρ*(one(T) + T(3)*(uz+ur) + T(4.5)*(uz+ur)^2 - T(1.5)*usq)
+        f[i,j,7] = f7 + pref * T(1.0/36.0)*ρ*(one(T) + T(3)*(-uz+ur) + T(4.5)*(-uz+ur)^2 - T(1.5)*usq)
+        f[i,j,8] = f8 + pref * T(1.0/36.0)*ρ*(one(T) + T(3)*(-uz-ur) + T(4.5)*(-uz-ur)^2 - T(1.5)*usq)
+        f[i,j,9] = f9 + pref * T(1.0/36.0)*ρ*(one(T) + T(3)*(uz-ur) + T(4.5)*(uz-ur)^2 - T(1.5)*usq)
+    end
+end
+
+function apply_axisym_source_2d!(f, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = apply_axisym_source_2d_kernel!(backend)
+    kernel!(f, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+"""
+    run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000, backend, T)
+
+Hagen-Poiseuille pipe flow (axisymmetric). Validates axisymmetric LBM.
+Analytical: u_z(r) = Fz/(4ν) * (R² - r²) where R = Nr - 0.5.
+"""
+function run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000,
+                                  backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny = Nz, Nr
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    ω = FT(omega(config))
+
+    # Axis at j=0.5 (y=r direction), wall at j=Nr+0.5
+    # Streaming: periodic in z (x), wall bounce-back at r=Nr (j=Ny)
+    # At j=1 (near axis): use symmetry (bounce-back mimics axis condition)
+
+    for step in 1:max_steps
+        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+        # Combined: Guo body force + axisymmetric correction
+        collide_guo_2d!(f_out, is_solid, ω, FT(Fz), FT(0))
+        # Apply axisymmetric source on top of Guo collision
+        apply_axisym_source_2d!(f_out, Nx, Ny)
+        compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, FT(Fz), FT(0))
+        f_in, f_out = f_out, f_in
+    end
+
+    return (ρ=Array(ρ), uz=Array(ux), ur=Array(uy), config=config)
+end

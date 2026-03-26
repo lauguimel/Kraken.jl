@@ -21,6 +21,7 @@ include("kernels/collide_guo_2d.jl")
 include("kernels/macroscopic.jl")
 include("kernels/boundary_2d.jl")
 include("kernels/boundary_3d.jl")
+include("kernels/thermal_2d.jl")
 
 # --- Simulation ---
 include("simulation.jl")
@@ -49,6 +50,11 @@ export run_cavity_2d, run_cavity_3d
 export run_poiseuille_2d, run_couette_2d
 export initialize_taylor_green_2d, run_taylor_green_2d
 export initialize_cylinder_2d, run_cylinder_2d, compute_drag_mea_2d
+export collide_thermal_2d!, compute_temperature_2d!
+export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
+export run_rayleigh_benard_2d
+export collide_boussinesq_2d!
+export collide_axisymmetric_2d!, apply_axisym_source_2d!, run_hagen_poiseuille_2d
 
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd
