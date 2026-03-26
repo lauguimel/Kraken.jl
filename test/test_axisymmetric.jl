@@ -25,13 +25,15 @@ using Kraken
 
         @test !any(isnan, result.uz)
 
-        # Note: simplified axisymmetric source (S = -f_eq * ur/r) does not fully
-        # reproduce the 1/(4ν) Hagen-Poiseuille factor (gives 1/(2ν) like Cartesian).
-        # Full axisymmetric formulation (Peng 2003) needed for quantitative accuracy.
-        # For now, verify the profile is parabolic and no NaN.
-        @test max_rel_err < 1.0  # qualitative check only
+        # Current axisymmetric source (FD gradient + Guo force) is approximate.
+        # Full Halliday (2001) modified equilibrium needed for quantitative HP accuracy.
+        # For now: verify parabolic shape and no blow-up.
+        @test max_rel_err < 1.0  # qualitative: profile exists, right shape
 
-        @info "Hagen-Poiseuille: L∞ relative error = $(round(max_rel_err, digits=4))"
-        @info "  u_max numerical = $(round(maximum(u_numerical), sigdigits=4)), analytical = $(round(u_max, sigdigits=4))"
+        # Verify the profile is parabolic (not flat or blown up)
+        @test maximum(u_numerical) > 0  # flow develops
+        @test u_numerical[1] < u_numerical[Nr÷2]  # center faster than edge
+
+        @info "Hagen-Poiseuille: L∞ error = $(round(max_rel_err, digits=3)), u_max = $(round(maximum(u_numerical), sigdigits=4)) (analytical $(round(u_max, sigdigits=4)))"
     end
 end

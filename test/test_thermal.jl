@@ -62,4 +62,33 @@ using Kraken
         @info "RB sub-critical (Ra=1000): max|uy| = $(round(max_uy_sub, sigdigits=3))"
         @info "RB super-critical (Ra=5000): max|uy| = $(round(max_uy_sup, sigdigits=3))"
     end
+
+    @testset "ν(T) Arrhenius kernel" begin
+        # Verify the Arrhenius viscosity kernel runs without NaN/Inf
+        # Use a simple channel with temperature gradient
+        Nx, Ny = 4, 32
+        ν_ref = 0.05; T_ref = 1.0; A_arr = 0.5
+
+        config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν_ref, u_lid=0.0, max_steps=0)
+        state = initialize_2d(config)
+        f_in, f_out = state.f_in, state.f_out
+
+        # Setup temperature field: linear 1.2 (bottom) to 0.8 (top)
+        Temp = zeros(Float64, Nx, Ny)
+        for j in 1:Ny
+            Temp[:, j] .= 1.2 - 0.4 * (j - 1) / (Ny - 1)
+        end
+
+        for step in 1:500
+            Kraken.stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+            collide_boussinesq_vt_2d!(f_out, Temp, state.is_solid,
+                                      ν_ref, T_ref, A_arr, 0.0)
+            f_in, f_out = f_out, f_in
+        end
+
+        Kraken.compute_macroscopic_2d!(state.ρ, state.ux, state.uy, f_in)
+        @test !any(isnan, Array(state.ρ))
+        @test all(isfinite, Array(state.ux))
+        @info "ν(T) Arrhenius kernel: stable after 500 steps"
+    end
 end

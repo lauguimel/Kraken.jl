@@ -206,6 +206,94 @@ end
     end
 end
 
+"""
+    collide_boussinesq_vt_2d!(f, Temp, is_solid, ν_ref, T_ref, A_arr, β_g)
+
+BGK collision with per-node Boussinesq force AND temperature-dependent viscosity.
+ν(T) = ν_ref · exp(A_arr · (1/T - 1/T_ref))  (Arrhenius law)
+ω(T) = 1 / (3·ν(T) + 0.5)
+"""
+@kernel function collide_boussinesq_vt_2d_kernel!(f, @Const(Temp), @Const(is_solid),
+                                                    ν_ref, T_ref, A_arr, β_g)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        if is_solid[i, j]
+            tmp2 = f[i,j,2]; f[i,j,2] = f[i,j,4]; f[i,j,4] = tmp2
+            tmp3 = f[i,j,3]; f[i,j,3] = f[i,j,5]; f[i,j,5] = tmp3
+            tmp6 = f[i,j,6]; f[i,j,6] = f[i,j,8]; f[i,j,8] = tmp6
+            tmp7 = f[i,j,7]; f[i,j,7] = f[i,j,9]; f[i,j,9] = tmp7
+        else
+            T = eltype(f)
+            f1=f[i,j,1]; f2=f[i,j,2]; f3=f[i,j,3]; f4=f[i,j,4]
+            f5=f[i,j,5]; f6=f[i,j,6]; f7=f[i,j,7]; f8=f[i,j,8]; f9=f[i,j,9]
+
+            # Temperature-dependent viscosity (Arrhenius)
+            T_local = Temp[i,j]
+            ν_local = ν_ref * exp(A_arr * (one(T)/T_local - one(T)/T_ref))
+            ω_local = one(T) / (T(3) * ν_local + T(0.5))
+
+            # Per-node buoyancy
+            fy = β_g * (T_local - T_ref)
+            fx = zero(T)
+
+            ρ = f1+f2+f3+f4+f5+f6+f7+f8+f9
+            inv_ρ = one(T) / ρ
+            ux = ((f2-f4+f6-f7-f8+f9) + fx/T(2)) * inv_ρ
+            uy = ((f3-f5+f6+f7-f8-f9) + fy/T(2)) * inv_ρ
+            usq = ux*ux + uy*uy
+
+            guo_pref = one(T) - ω_local / T(2)
+            t3 = T(3); t45 = T(4.5); t15 = T(1.5)
+
+            feq=T(4.0/9.0)*ρ*(one(T)-t15*usq)
+            Sq=T(4.0/9.0)*((-ux)*fx+(-uy)*fy)*t3
+            f[i,j,1]=f1-ω_local*(f1-feq)+guo_pref*Sq
+
+            cu=ux; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/9.0)*((one(T)-ux)*fx+(-uy)*fy)*t3+T(1.0/9.0)*ux*fx*T(9)
+            f[i,j,2]=f2-ω_local*(f2-feq)+guo_pref*Sq
+
+            cu=uy; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/9.0)*((-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/9.0)*uy*fy*T(9)
+            f[i,j,3]=f3-ω_local*(f3-feq)+guo_pref*Sq
+
+            cu=-ux; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/9.0)*((-one(T)-ux)*fx+(-uy)*fy)*t3+T(1.0/9.0)*ux*fx*T(9)
+            f[i,j,4]=f4-ω_local*(f4-feq)+guo_pref*Sq
+
+            cu=-uy; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/9.0)*((-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/9.0)*uy*fy*T(9)
+            f[i,j,5]=f5-ω_local*(f5-feq)+guo_pref*Sq
+
+            cu=ux+uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/36.0)*((one(T)-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(fx+fy)*T(9)
+            f[i,j,6]=f6-ω_local*(f6-feq)+guo_pref*Sq
+
+            cu=-ux+uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/36.0)*((-one(T)-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(-fx+fy)*T(9)
+            f[i,j,7]=f7-ω_local*(f7-feq)+guo_pref*Sq
+
+            cu=-ux-uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/36.0)*((-one(T)-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(-fx-fy)*T(9)
+            f[i,j,8]=f8-ω_local*(f8-feq)+guo_pref*Sq
+
+            cu=ux-uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
+            Sq=T(1.0/36.0)*((one(T)-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(fx-fy)*T(9)
+            f[i,j,9]=f9-ω_local*(f9-feq)+guo_pref*Sq
+        end
+    end
+end
+
+function collide_boussinesq_vt_2d!(f, Temp, is_solid, ν_ref, T_ref, A_arr, β_g)
+    backend = KernelAbstractions.get_backend(f)
+    Nx, Ny = size(f, 1), size(f, 2)
+    ET = eltype(f)
+    kernel! = collide_boussinesq_vt_2d_kernel!(backend)
+    kernel!(f, Temp, is_solid, ET(ν_ref), ET(T_ref), ET(A_arr), ET(β_g); ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
 function collide_boussinesq_2d!(f, Temp, is_solid, ω, β_g, T_ref)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)

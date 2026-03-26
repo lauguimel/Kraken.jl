@@ -53,7 +53,7 @@ export initialize_cylinder_2d, run_cylinder_2d, compute_drag_mea_2d
 export collide_thermal_2d!, compute_temperature_2d!
 export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export run_rayleigh_benard_2d
-export collide_boussinesq_2d!
+export collide_boussinesq_2d!, collide_boussinesq_vt_2d!
 export collide_axisymmetric_2d!, apply_axisym_source_2d!, run_hagen_poiseuille_2d
 
 # I/O
