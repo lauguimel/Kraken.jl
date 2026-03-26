@@ -608,121 +608,156 @@ function collide_axisymmetric_2d!(f, is_solid, ω, Nx, Ny)
     KernelAbstractions.synchronize(backend)
 end
 
-# --- Full axisymmetric source (Peng 2003 / Guo-Halliday formulation) ---
+# --- Li et al. (2010) axisymmetric LBM scheme ---
 #
-# In cylindrical (z,r) coords, the Navier-Stokes has extra terms vs Cartesian:
-# - Continuity: +(ρ·ur)/r
-# - z-momentum: +(ν/r)·∂uz/∂r  (extra viscous diffusion)
-# - r-momentum: +(ν/r)·∂ur/∂r - ν·ur/r²  (extra viscous + geometric)
+# From: "Improved axisymmetric lattice Boltzmann scheme", PRE 81, 056707
 #
-# These are implemented as effective body forces in the Guo scheme:
-#   Fz_axi = (ν/r) · ∂uz/∂r  (estimated by finite difference)
-#   Fr_axi = (ν/r) · ∂ur/∂r - ν·ur/r² - ur²/r  (viscous + convective)
-# Plus a mass source: S_mass = -ρ·ur/r (applied to all f_q via equilibrium)
+# Key formulas (Eqs. 12-13, 16-17):
+# Source:    S_α = [(e_αi - u_i)·F_i / (ρ·cs²) - u_r/r] · f_α^eq
+#            where F_r = -2μ·u_r/r²  (only radial component)
+# Collision: f̂(x+e, t+1) = f̂(x,t) - ω_f·[f̂ - f^eq] + (1-0.5·ω_f)·S
+#            where ω_f = [1 + τ·e_αr/r] / (τ + 0.5)  — direction-dependent!
+# Velocity:  u_i = Σ e_αi·f̂_α / [Σ f̂_α + μ/r²·δ_ir]
+# Density:   ρ = Σ f̂_α / [1 + 0.5·u_r/r]
 
-@kernel function apply_axisym_source_full_2d_kernel!(f, @Const(f_pre), ω, Ny)
+# The driver uses a combined stream → collision approach.
+# Since ω_f depends on direction, we implement the full collision inline.
+
+@kernel function collide_li_axisym_2d_kernel!(f, @Const(is_solid), τ, Ny, Fz_body)
     i, j = @index(Global, NTuple)
 
     @inbounds begin
-        T = eltype(f)
-        f1=f[i,j,1]; f2=f[i,j,2]; f3=f[i,j,3]; f4=f[i,j,4]
-        f5=f[i,j,5]; f6=f[i,j,6]; f7=f[i,j,7]; f8=f[i,j,8]; f9=f[i,j,9]
-
-        ρ = f1+f2+f3+f4+f5+f6+f7+f8+f9
-        inv_ρ = one(T) / ρ
-        uz = (f2-f4+f6-f7-f8+f9) * inv_ρ
-        ur = (f3-f5+f6+f7-f8-f9) * inv_ρ
-        usq = uz*uz + ur*ur
-
-        r = T(j) - T(0.5)
-        inv_r = one(T) / r
-        nu_eff = (one(T)/ω - T(0.5)) / T(3)  # ν = (1/ω - 0.5) * cs²
-
-        # Estimate ∂uz/∂r and ∂ur/∂r from pre-collision populations (central difference)
-        if j > 1 && j < Ny
-            # Macroscopic at j+1 and j-1 from pre-stream populations
-            ρ_p = zero(T); uz_p = zero(T); ur_p = zero(T)
-            ρ_m = zero(T); uz_m = zero(T); ur_m = zero(T)
-            for q in 1:9
-                ρ_p += f_pre[i, j+1, q]
-                ρ_m += f_pre[i, j-1, q]
-            end
-            uz_p = (f_pre[i,j+1,2]-f_pre[i,j+1,4]+f_pre[i,j+1,6]-f_pre[i,j+1,7]-f_pre[i,j+1,8]+f_pre[i,j+1,9]) / ρ_p
-            uz_m = (f_pre[i,j-1,2]-f_pre[i,j-1,4]+f_pre[i,j-1,6]-f_pre[i,j-1,7]-f_pre[i,j-1,8]+f_pre[i,j-1,9]) / ρ_m
-            ur_p = (f_pre[i,j+1,3]-f_pre[i,j+1,5]+f_pre[i,j+1,6]+f_pre[i,j+1,7]-f_pre[i,j+1,8]-f_pre[i,j+1,9]) / ρ_p
-            ur_m = (f_pre[i,j-1,3]-f_pre[i,j-1,5]+f_pre[i,j-1,6]+f_pre[i,j-1,7]-f_pre[i,j-1,8]-f_pre[i,j-1,9]) / ρ_m
-
-            duz_dr = (uz_p - uz_m) / T(2)
-            dur_dr = (ur_p - ur_m) / T(2)
+        if is_solid[i, j]
+            tmp = f[i,j,2]; f[i,j,2] = f[i,j,4]; f[i,j,4] = tmp
+            tmp = f[i,j,3]; f[i,j,3] = f[i,j,5]; f[i,j,5] = tmp
+            tmp = f[i,j,6]; f[i,j,6] = f[i,j,8]; f[i,j,8] = tmp
+            tmp = f[i,j,7]; f[i,j,7] = f[i,j,9]; f[i,j,9] = tmp
         else
-            duz_dr = zero(T)
-            dur_dr = zero(T)
+            T = eltype(f)
+            f1=f[i,j,1]; f2=f[i,j,2]; f3=f[i,j,3]; f4=f[i,j,4]
+            f5=f[i,j,5]; f6=f[i,j,6]; f7=f[i,j,7]; f8=f[i,j,8]; f9=f[i,j,9]
+
+            r = T(j) - T(0.5)
+            inv_r = one(T) / r
+            μ = τ * T(1.0/3.0)  # dynamic viscosity = τ·cs²
+
+            # Macroscopic: Eq. (16) — u_i = Σ e_αi·f̂ / [Σ f̂ + μ/r²·δ_ir]
+            sum_f = f1+f2+f3+f4+f5+f6+f7+f8+f9
+            mom_z = f2-f4+f6-f7-f8+f9
+            mom_r = f3-f5+f6+f7-f8-f9
+
+            denom_z = sum_f  # no correction for z
+            denom_r = sum_f + μ * inv_r * inv_r  # Eq. (16) with δ_ir
+
+            uz = mom_z / denom_z
+            ur = mom_r / denom_r
+
+            # Density: Eq. (17) — ρ = Σ f̂ / [1 + 0.5·u_r/r]
+            ρ = sum_f / (one(T) + T(0.5) * ur * inv_r)
+
+            usq = uz*uz + ur*ur
+
+            # Force: F_r = -2μ·u_r/r², F_z = Fz_body (external body force)
+            Fr = -T(2) * μ * ur * inv_r * inv_r
+            Fz = Fz_body
+
+            # D2Q9 velocity components: e_αr for each direction
+            # q: 1  2  3  4  5  6  7  8  9
+            # cr: 0  0  1  0 -1  1  1 -1 -1
+            # cz: 0  1  0 -1  0  1 -1 -1  1
+
+            # For each direction α:
+            # ω_f = [1 + τ·e_αr/r] / (τ + 0.5)          — Eq. (13)
+            # S_α = [(e_αi - u_i)·F_geom/(ρcs²) - ur/r] · f_eq  — Eq. (12)
+            # Guo_α = (1-0.5ω_f)·w_α·[(c-u)·F_ext/cs² + (c·u)(c·F_ext)/cs⁴]
+            # f = f - ω_f·(f-feq) + (1-0.5ω_f)·S_α + Guo_α
+
+            inv_cs2 = T(3)
+            ur_over_r = ur * inv_r
+            ω_std = one(T) / (τ + T(0.5))  # standard ω for Guo external force
+            guo_ext_pref = one(T) - T(0.5) * ω_std  # (1-ω/2) for external force
+
+            # Helper: compute collision for one direction
+            # cz_q, cr_q = lattice velocity components
+            # w_q = weight
+            # For HP with ur=0: S_α=0, only ω_f asymmetry + Guo external force matter
+
+            # Macro for each direction: BGK(ω_f) + axisym source + Guo external force
+            # Inlined for all 9 directions:
+
+            # q=1: rest (cz=0, cr=0), w=4/9
+            feq = T(4.0/9.0)*ρ*(one(T) - T(1.5)*usq)
+            ω_f = one(T) / (τ + T(0.5))
+            # Geometric source: S = [(0-uz)*0 + (0-ur)*Fr]/(ρ·cs²) - ur/r] * feq
+            Sq = ((-ur)*Fr * inv_cs2 / ρ - ur_over_r) * feq
+            # Guo external: w*(c-u)·Fext*3 + w*(c·u)(c·Fext)*9
+            Gq = T(4.0/9.0)*((-uz)*Fz*T(3))
+            f[i,j,1] = f1 - ω_f*(f1-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=2: E (cz=1, cr=0), w=1/9
+            cu=uz; feq=T(1.0/9.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = one(T) / (τ + T(0.5))
+            Sq = (((-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/9.0)*((one(T)-uz)*Fz*T(3) + uz*Fz*T(9))
+            f[i,j,2] = f2 - ω_f*(f2-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=3: N (cz=0, cr=+1), w=1/9
+            cu=ur; feq=T(1.0/9.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = (one(T) + τ*inv_r) / (τ + T(0.5))
+            Sq = (((one(T)-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/9.0)*((-uz)*Fz*T(3))
+            f[i,j,3] = f3 - ω_f*(f3-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=4: W (cz=-1, cr=0), w=1/9
+            cu=-uz; feq=T(1.0/9.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = one(T) / (τ + T(0.5))
+            Sq = (((-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/9.0)*((-one(T)-uz)*Fz*T(3) + uz*Fz*T(9))
+            f[i,j,4] = f4 - ω_f*(f4-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=5: S (cz=0, cr=-1), w=1/9
+            cu=-ur; feq=T(1.0/9.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = (one(T) - τ*inv_r) / (τ + T(0.5))
+            Sq = (((-one(T)-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/9.0)*((-uz)*Fz*T(3))
+            f[i,j,5] = f5 - ω_f*(f5-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=6: NE (cz=1, cr=+1), w=1/36
+            cu=uz+ur; feq=T(1.0/36.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = (one(T) + τ*inv_r) / (τ + T(0.5))
+            Sq = (((one(T)-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/36.0)*((one(T)-uz)*Fz*T(3) + cu*Fz*T(9))
+            f[i,j,6] = f6 - ω_f*(f6-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=7: NW (cz=-1, cr=+1), w=1/36
+            cu=-uz+ur; feq=T(1.0/36.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = (one(T) + τ*inv_r) / (τ + T(0.5))
+            Sq = (((one(T)-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/36.0)*((-one(T)-uz)*Fz*T(3) + cu*(-Fz)*T(9))
+            f[i,j,7] = f7 - ω_f*(f7-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=8: SW (cz=-1, cr=-1), w=1/36
+            cu=-uz-ur; feq=T(1.0/36.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = (one(T) - τ*inv_r) / (τ + T(0.5))
+            Sq = (((-one(T)-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/36.0)*((-one(T)-uz)*Fz*T(3) + cu*(-Fz)*T(9))
+            f[i,j,8] = f8 - ω_f*(f8-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
+
+            # q=9: SE (cz=1, cr=-1), w=1/36
+            cu=uz-ur; feq=T(1.0/36.0)*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
+            ω_f = (one(T) - τ*inv_r) / (τ + T(0.5))
+            Sq = (((-one(T)-ur)*Fr * inv_cs2 / ρ) - ur_over_r) * feq
+            Gq = T(1.0/36.0)*((one(T)-uz)*Fz*T(3) + cu*Fz*T(9))
+            f[i,j,9] = f9 - ω_f*(f9-feq) + (one(T)-T(0.5)*ω_f)*Sq + guo_ext_pref*Gq
         end
-
-        # Axisymmetric forces
-        Fz_axi = nu_eff * inv_r * duz_dr
-        Fr_axi = nu_eff * inv_r * dur_dr - nu_eff * ur * inv_r * inv_r - ur * ur * inv_r
-
-        # Mass source: -ρ·ur/r (applied as -f_eq·ur/r)
-        mass_src = -ur * inv_r
-
-        # Apply Guo-style force + mass source
-        guo_pref = one(T) - ω / T(2)
-
-        # Combined: mass source via equilibrium + momentum via Guo
-        for_q_w = T(4.0/9.0)
-        feq_rest = for_q_w * ρ * (one(T) - T(1.5)*usq)
-        Sq = for_q_w * ((-uz)*Fz_axi + (-ur)*Fr_axi)*T(3)
-        f[i,j,1] = f1 + mass_src * feq_rest + guo_pref * Sq
-
-        for_q_w = T(1.0/9.0)
-        # q=2: E (cz=1, cr=0)
-        feq = for_q_w*ρ*(one(T)+T(3)*uz+T(4.5)*uz*uz-T(1.5)*usq)
-        Sq = for_q_w*((one(T)-uz)*Fz_axi+(-ur)*Fr_axi)*T(3) + for_q_w*uz*Fz_axi*T(9)
-        f[i,j,2] = f2 + mass_src*feq + guo_pref*Sq
-
-        # q=3: N (cz=0, cr=1)
-        feq = for_q_w*ρ*(one(T)+T(3)*ur+T(4.5)*ur*ur-T(1.5)*usq)
-        Sq = for_q_w*((-uz)*Fz_axi+(one(T)-ur)*Fr_axi)*T(3) + for_q_w*ur*Fr_axi*T(9)
-        f[i,j,3] = f3 + mass_src*feq + guo_pref*Sq
-
-        # q=4: W (cz=-1, cr=0)
-        feq = for_q_w*ρ*(one(T)-T(3)*uz+T(4.5)*uz*uz-T(1.5)*usq)
-        Sq = for_q_w*((-one(T)-uz)*Fz_axi+(-ur)*Fr_axi)*T(3) + for_q_w*uz*Fz_axi*T(9)
-        f[i,j,4] = f4 + mass_src*feq + guo_pref*Sq
-
-        # q=5: S (cz=0, cr=-1)
-        feq = for_q_w*ρ*(one(T)-T(3)*ur+T(4.5)*ur*ur-T(1.5)*usq)
-        Sq = for_q_w*((-uz)*Fz_axi+(-one(T)-ur)*Fr_axi)*T(3) + for_q_w*ur*Fr_axi*T(9)
-        f[i,j,5] = f5 + mass_src*feq + guo_pref*Sq
-
-        for_q_w = T(1.0/36.0)
-        # q=6: NE (cz=1, cr=1)
-        cu=uz+ur; feq=for_q_w*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
-        Sq = for_q_w*((one(T)-uz)*Fz_axi+(one(T)-ur)*Fr_axi)*T(3) + for_q_w*cu*(Fz_axi+Fr_axi)*T(9)
-        f[i,j,6] = f6 + mass_src*feq + guo_pref*Sq
-
-        # q=7: NW (cz=-1, cr=1)
-        cu=-uz+ur; feq=for_q_w*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
-        Sq = for_q_w*((-one(T)-uz)*Fz_axi+(one(T)-ur)*Fr_axi)*T(3) + for_q_w*cu*(-Fz_axi+Fr_axi)*T(9)
-        f[i,j,7] = f7 + mass_src*feq + guo_pref*Sq
-
-        # q=8: SW (cz=-1, cr=-1)
-        cu=-uz-ur; feq=for_q_w*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
-        Sq = for_q_w*((-one(T)-uz)*Fz_axi+(-one(T)-ur)*Fr_axi)*T(3) + for_q_w*cu*(-Fz_axi-Fr_axi)*T(9)
-        f[i,j,8] = f8 + mass_src*feq + guo_pref*Sq
-
-        # q=9: SE (cz=1, cr=-1)
-        cu=uz-ur; feq=for_q_w*ρ*(one(T)+T(3)*cu+T(4.5)*cu*cu-T(1.5)*usq)
-        Sq = for_q_w*((one(T)-uz)*Fz_axi+(-one(T)-ur)*Fr_axi)*T(3) + for_q_w*cu*(Fz_axi-Fr_axi)*T(9)
-        f[i,j,9] = f9 + mass_src*feq + guo_pref*Sq
     end
 end
 
-function apply_axisym_source_2d!(f, f_pre, ω, Nx, Ny)
+function collide_li_axisym_2d!(f, is_solid, τ, Nx, Ny; Fz_body=0.0)
     backend = KernelAbstractions.get_backend(f)
-    kernel! = apply_axisym_source_full_2d_kernel!(backend)
-    kernel!(f, f_pre, ω, Ny; ndrange=(Nx, Ny))
+    T = eltype(f)
+    kernel! = collide_li_axisym_2d_kernel!(backend)
+    kernel!(f, is_solid, T(τ), Ny, T(Fz_body); ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end
 
@@ -746,12 +781,12 @@ function run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000
     # Streaming: periodic in z (x), wall bounce-back at r=Nr (j=Ny)
     # At j=1 (near axis): use symmetry (bounce-back mimics axis condition)
 
+    τ = FT(1.0 / omega(config))  # τ = 1/ω = 3ν + 0.5
+
     for step in 1:max_steps
         stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
-        collide_guo_2d!(f_out, is_solid, ω, FT(Fz), FT(0))
-        # Full axisymmetric source (uses f_in as pre-collision for gradient estimation)
-        apply_axisym_source_2d!(f_out, f_in, ω, Nx, Ny)
-        compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, FT(Fz), FT(0))
+        collide_li_axisym_2d!(f_out, is_solid, τ, Nx, Ny; Fz_body=FT(Fz))
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
         f_in, f_out = f_out, f_in
     end
 
