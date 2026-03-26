@@ -22,6 +22,9 @@ include("kernels/macroscopic.jl")
 include("kernels/boundary_2d.jl")
 include("kernels/boundary_3d.jl")
 include("kernels/thermal_2d.jl")
+include("kernels/collide_mrt_2d.jl")
+include("kernels/species_2d.jl")
+include("kernels/multiphase_2d.jl")
 
 # --- Simulation ---
 include("simulation.jl")
@@ -55,6 +58,17 @@ export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export run_rayleigh_benard_2d
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
+
+# MRT
+export collide_mrt_2d!
+
+# Species transport
+export collide_species_2d!, compute_concentration_2d!
+export apply_fixed_conc_south_2d!, apply_fixed_conc_north_2d!
+
+# Multiphase (Shan-Chen)
+export compute_psi_2d!, compute_sc_force_2d!, collide_sc_2d!
+export run_spinodal_2d, benchmark_mlups
 
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd

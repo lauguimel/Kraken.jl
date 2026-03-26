@@ -8,6 +8,10 @@ using Kraken
     include("test_taylor_green.jl")
     include("test_thermal.jl")
     include("test_axisymmetric.jl")
+    include("test_mrt.jl")
+    include("test_species.jl")
+    include("test_multiphase.jl")
+    include("test_benchmark.jl")
     include("test_cavity.jl")
     include("test_cylinder.jl")
 end

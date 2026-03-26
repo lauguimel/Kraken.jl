@@ -1,9 +1,15 @@
 [deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+DocumenterCitations = "daee34ce-89f3-4625-b898-19571571c4a0"
 Kraken = "b9c8ae56-6711-4442-a2ee-93cdf3c40864"
+Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 
 [sources]
-Kraken = {path = "/Users/guillaume/Documents/Recherche/Kraken.jl"}
+Kraken = {path = ".."}
 
 [compat]
+CairoMakie = "0.12, 0.13"
 Documenter = "1"
+DocumenterCitations = "1"
+Literate = "2"

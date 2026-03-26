@@ -792,3 +792,105 @@ function run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000
 
     return (ρ=Array(ρ), uz=Array(ux), ur=Array(uy), config=config)
 end
+
+# --- Spinodal decomposition (Shan-Chen multiphase) ---
+
+"""
+    run_spinodal_2d(; N=128, ν=0.1, G=-5.5, ρ0=1.0, max_steps=5000, backend, T)
+
+Spinodal decomposition: a random density field phase-separates into two phases.
+G controls attraction strength (G < -4 for phase separation in D2Q9).
+Fully periodic domain.
+"""
+function run_spinodal_2d(; N=128, ν=0.1, G=-5.5, ρ0=1.0, max_steps=5000,
+                          backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny = N, N
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    ω = FT(omega(config))
+
+    # Initialize with random density perturbation
+    f_in  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    f_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    ρ     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ux    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    uy    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ψ     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_sc = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_sc = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+
+    w = weights(D2Q9())
+    f_cpu = zeros(FT, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        ρ_init = FT(ρ0 + 0.01 * (rand() - 0.5))
+        for q in 1:9
+            f_cpu[i, j, q] = FT(w[q]) * ρ_init
+        end
+    end
+    copyto!(f_in, f_cpu)
+    copyto!(f_out, f_cpu)
+
+    for step in 1:max_steps
+        # 1. Stream (fully periodic)
+        stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Macroscopic (standard — SC force correction in collision)
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+
+        # 3. Shan-Chen force
+        compute_psi_2d!(ψ, ρ, FT(ρ0))
+        compute_sc_force_2d!(Fx_sc, Fy_sc, ψ, FT(G), Nx, Ny)
+
+        # 4. Collide with SC force
+        collide_sc_2d!(f_out, Fx_sc, Fy_sc, is_solid, ω)
+
+        # 5. Swap
+        f_in, f_out = f_out, f_in
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), config=config, G=G)
+end
+
+# --- GPU benchmark utility ---
+
+"""
+    benchmark_mlups(; Ns=[64, 128, 256], steps=100, backend=CPU())
+
+Measure Million Lattice Updates Per Second for 2D LBM.
+Returns a vector of (N, mlups) tuples.
+"""
+function benchmark_mlups(; Ns=[64, 128, 256], steps=100,
+                          backend=KernelAbstractions.CPU(), FT=Float64)
+    results = Tuple{Int, Float64}[]
+
+    for N in Ns
+        config = LBMConfig(D2Q9(); Nx=N, Ny=N, ν=0.1, u_lid=0.05, max_steps=steps)
+        state = initialize_2d(config, FT; backend=backend)
+        f_in, f_out = state.f_in, state.f_out
+        is_solid = state.is_solid
+        ω = FT(omega(config))
+
+        # Warmup
+        for _ in 1:5
+            stream_2d!(f_out, f_in, N, N)
+            collide_2d!(f_out, is_solid, ω)
+            f_in, f_out = f_out, f_in
+        end
+
+        # Timed run
+        t_start = time_ns()
+        for _ in 1:steps
+            stream_2d!(f_out, f_in, N, N)
+            collide_2d!(f_out, is_solid, ω)
+            f_in, f_out = f_out, f_in
+        end
+        t_elapsed = (time_ns() - t_start) / 1e9  # seconds
+
+        total_updates = N * N * steps
+        mlups = total_updates / t_elapsed / 1e6
+        push!(results, (N, mlups))
+    end
+
+    return results
+end
