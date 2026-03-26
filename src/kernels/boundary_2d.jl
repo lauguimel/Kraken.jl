@@ -93,3 +93,71 @@ function apply_bounce_back_walls_2d!(f, Nx, Ny)
 
     KernelAbstractions.synchronize(backend)
 end
+
+# --- Zou-He velocity BC on south wall (j=1) — for Couette ---
+
+@kernel function zou_he_velocity_south_2d_kernel!(f, u_wall_x)
+    i = @index(Global)
+    j = 1
+
+    @inbounds begin
+        T = eltype(f)
+        f1 = f[i,j,1]; f2 = f[i,j,2]; f4 = f[i,j,4]
+        f5 = f[i,j,5]; f8 = f[i,j,8]; f9 = f[i,j,9]
+
+        ρ_wall = f1 + f2 + f4 + T(2) * (f5 + f8 + f9)
+        f[i,j,3] = f5
+        f[i,j,6] = f8 - T(0.5) * (f2 - f4) + T(0.5) * ρ_wall * u_wall_x
+        f[i,j,7] = f9 + T(0.5) * (f2 - f4) - T(0.5) * ρ_wall * u_wall_x
+    end
+end
+
+function apply_zou_he_south_2d!(f, u_wall_x, Nx)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = zou_he_velocity_south_2d_kernel!(backend)
+    kernel!(f, eltype(f)(u_wall_x); ndrange=(Nx,))
+    KernelAbstractions.synchronize(backend)
+end
+
+# --- Zou-He velocity inlet on west wall (i=1) — for cylinder ---
+
+@kernel function zou_he_velocity_west_2d_kernel!(f, u_in, Ny)
+    j = @index(Global)
+
+    @inbounds begin
+        T = eltype(f)
+        f1 = f[1,j,1]; f3 = f[1,j,3]; f4 = f[1,j,4]
+        f5 = f[1,j,5]; f7 = f[1,j,7]; f8 = f[1,j,8]
+
+        ρ_wall = (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / (one(T) - u_in)
+        f[1,j,2] = f4 + T(2.0/3.0) * ρ_wall * u_in
+        f[1,j,6] = f8 - T(0.5) * (f3 - f5) + T(1.0/6.0) * ρ_wall * u_in
+        f[1,j,9] = f7 + T(0.5) * (f3 - f5) + T(1.0/6.0) * ρ_wall * u_in
+    end
+end
+
+function apply_zou_he_west_2d!(f, u_in, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = zou_he_velocity_west_2d_kernel!(backend)
+    kernel!(f, eltype(f)(u_in), Ny; ndrange=(Ny,))
+    KernelAbstractions.synchronize(backend)
+end
+
+# --- Zero-gradient outlet on east wall (i=Nx) ---
+
+@kernel function extrapolation_east_2d_kernel!(f, Nx)
+    j = @index(Global)
+
+    @inbounds begin
+        f[Nx,j,4] = f[Nx-1,j,4]
+        f[Nx,j,7] = f[Nx-1,j,7]
+        f[Nx,j,8] = f[Nx-1,j,8]
+    end
+end
+
+function apply_extrapolation_east_2d!(f, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = extrapolation_east_2d_kernel!(backend)
+    kernel!(f, Nx; ndrange=(Ny,))
+    KernelAbstractions.synchronize(backend)
+end

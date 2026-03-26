@@ -55,3 +55,29 @@ function compute_macroscopic_3d!(ρ, ux, uy, uz, f)
     kernel!(ρ, ux, uy, uz, f; ndrange=(Nx, Ny, Nz))
     KernelAbstractions.synchronize(backend)
 end
+
+# --- 2D force-corrected macroscopic computation ---
+
+@kernel function compute_macroscopic_forced_2d_kernel!(ρ, ux, uy, @Const(f), Fx, Fy)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f)
+        f1 = f[i,j,1]; f2 = f[i,j,2]; f3 = f[i,j,3]
+        f4 = f[i,j,4]; f5 = f[i,j,5]; f6 = f[i,j,6]
+        f7 = f[i,j,7]; f8 = f[i,j,8]; f9 = f[i,j,9]
+
+        ρ_local = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+        inv_ρ = one(ρ_local) / ρ_local
+        ρ[i,j] = ρ_local
+        ux[i,j] = ((f2 - f4 + f6 - f7 - f8 + f9) + T(Fx) / T(2)) * inv_ρ
+        uy[i,j] = ((f3 - f5 + f6 + f7 - f8 - f9) + T(Fy) / T(2)) * inv_ρ
+    end
+end
+
+function compute_macroscopic_forced_2d!(ρ, ux, uy, f, Fx, Fy)
+    backend = KernelAbstractions.get_backend(f)
+    Nx, Ny = size(ρ)
+    kernel! = compute_macroscopic_forced_2d_kernel!(backend)
+    kernel!(ρ, ux, uy, f, Fx, Fy; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end

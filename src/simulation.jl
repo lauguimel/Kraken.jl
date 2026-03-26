@@ -174,3 +174,233 @@ function run_cavity_3d(config::LBMConfig{D3Q19};
 
     return (ρ=ρ_cpu, ux=ux_cpu, uy=uy_cpu, uz=uz_cpu, config=config)
 end
+
+# --- Poiseuille 2D with body force ---
+
+"""
+    run_poiseuille_2d(; Nx=4, Ny=32, ν=0.1, Fx=1e-5, max_steps=10000, backend, T)
+
+Channel flow driven by body force Fx. Periodic in x, walls at j=1 and j=Ny.
+"""
+function run_poiseuille_2d(; Nx=4, Ny=32, ν=0.1, Fx=1e-5, max_steps=10000,
+                            backend=KernelAbstractions.CPU(), T=Float64)
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, T; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    ω = T(omega(config))
+
+    for step in 1:max_steps
+        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+        collide_guo_2d!(f_out, is_solid, ω, T(Fx), T(0))
+        compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, T(Fx), T(0))
+        f_in, f_out = f_out, f_in
+    end
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), config=config)
+end
+
+# --- Couette 2D ---
+
+"""
+    run_couette_2d(; Nx=4, Ny=32, ν=0.1, u_wall=0.05, max_steps=10000, backend, T)
+
+Couette flow: bottom wall (j=1) moves at u_wall, top wall (j=Ny) stationary.
+Periodic in x.
+"""
+function run_couette_2d(; Nx=4, Ny=32, ν=0.1, u_wall=0.05, max_steps=10000,
+                         backend=KernelAbstractions.CPU(), T=Float64)
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, T; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    ω = T(omega(config))
+
+    for step in 1:max_steps
+        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+        apply_zou_he_south_2d!(f_out, u_wall, Nx)
+        collide_2d!(f_out, is_solid, ω)
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+        f_in, f_out = f_out, f_in
+    end
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), config=config)
+end
+
+# --- Taylor-Green vortex 2D ---
+
+"""
+    initialize_taylor_green_2d(; N=64, ν=0.01, u0=0.01, backend, T)
+
+Initialize populations to equilibrium with Taylor-Green velocity field.
+"""
+function initialize_taylor_green_2d(; N=64, ν=0.01, u0=0.01,
+                                     backend=KernelAbstractions.CPU(), T=Float64)
+    config = LBMConfig(D2Q9(); Nx=N, Ny=N, ν=ν, u_lid=0.0, max_steps=0)
+    Nx, Ny = N, N
+    k = T(2π / N)
+
+    f_in  = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+    f_out = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+    ρ_arr = KernelAbstractions.ones(backend, T, Nx, Ny)
+    ux    = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    uy    = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+
+    w = weights(D2Q9())
+    f_cpu = zeros(T, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        x = T(i - 1)
+        y = T(j - 1)
+        ux_tg = -T(u0) * cos(k * x) * sin(k * y)
+        uy_tg =  T(u0) * sin(k * x) * cos(k * y)
+        ρ_tg = one(T) - T(3) * T(u0)^2 / T(4) * (cos(T(2) * k * x) + cos(T(2) * k * y))
+        for q in 1:9
+            f_cpu[i, j, q] = equilibrium(D2Q9(), ρ_tg, ux_tg, uy_tg, q)
+        end
+    end
+    copyto!(f_in, f_cpu)
+    copyto!(f_out, f_cpu)
+
+    return (f_in=f_in, f_out=f_out, ρ=ρ_arr, ux=ux, uy=uy, is_solid=is_solid,
+            config=config, u0=u0, k=k)
+end
+
+"""
+    run_taylor_green_2d(; N=64, ν=0.01, u0=0.01, max_steps=1000, backend, T)
+
+Taylor-Green vortex decay in a fully periodic domain.
+Returns final macroscopic fields.
+"""
+function run_taylor_green_2d(; N=64, ν=0.01, u0=0.01, max_steps=1000,
+                              backend=KernelAbstractions.CPU(), T=Float64)
+    state = initialize_taylor_green_2d(; N=N, ν=ν, u0=u0, backend=backend, T=T)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    ω = T(1.0 / (3.0 * ν + 0.5))
+
+    for step in 1:max_steps
+        stream_fully_periodic_2d!(f_out, f_in, N, N)
+        collide_2d!(f_out, is_solid, ω)
+        f_in, f_out = f_out, f_in
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy),
+            config=state.config, u0=u0, k=state.k, max_steps=max_steps)
+end
+
+# --- Cylinder 2D ---
+
+"""
+    initialize_cylinder_2d(; Nx=200, Ny=50, cx=Nx÷4, cy=Ny÷2, radius=10,
+                            u_in=0.05, ν=0.05, backend, T)
+
+Initialize a channel with a circular cylinder obstacle.
+"""
+function initialize_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
+                                 u_in=0.05, ν=0.05,
+                                 backend=KernelAbstractions.CPU(), T=Float64)
+    cx = isnothing(cx) ? Nx ÷ 4 : cx
+    cy = isnothing(cy) ? Ny ÷ 2 : cy
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=0)
+    state = initialize_2d(config, T; backend=backend)
+
+    # Set cylinder as solid
+    solid_cpu = zeros(Bool, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        if (i - cx)^2 + (j - cy)^2 <= radius^2
+            solid_cpu[i, j] = true
+        end
+    end
+    copyto!(state.is_solid, solid_cpu)
+
+    # Initialize to equilibrium with uniform inflow velocity
+    w = weights(D2Q9())
+    f_cpu = zeros(T, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        for q in 1:9
+            f_cpu[i, j, q] = equilibrium(D2Q9(), one(T), T(u_in), zero(T), q)
+        end
+    end
+    copyto!(state.f_in, f_cpu)
+    copyto!(state.f_out, f_cpu)
+
+    return state, config
+end
+
+"""
+    compute_drag_2d(f, is_solid, Nx, Ny)
+
+Compute drag and lift on solid obstacles using momentum exchange method.
+Returns (Fx_drag, Fy_lift).
+"""
+function compute_drag_2d(f, is_solid, Nx, Ny)
+    f_cpu = Array(f)
+    solid_cpu = Array(is_solid)
+    cx = [0, 1, 0, -1,  0, 1, -1, -1,  1]
+    cy = [0, 0, 1,  0, -1, 1,  1, -1, -1]
+    opp = [1, 4, 5, 2, 3, 8, 9, 6, 7]
+
+    Fx_total = 0.0
+    Fy_total = 0.0
+
+    for j in 2:Ny-1, i in 2:Nx-1
+        if !solid_cpu[i, j]
+            for q in 2:9  # skip rest
+                ni = i + cx[q]
+                nj = j + cy[q]
+                if 1 <= ni <= Nx && 1 <= nj <= Ny && solid_cpu[ni, nj]
+                    oq = opp[q]
+                    # Momentum exchange: force on solid = momentum_in - momentum_out
+                    # Pre-bounce: population f_q carries momentum c_q*f_q toward solid
+                    # Post-bounce: population f_oq carries momentum c_oq*f_oq = -c_q*f_oq away
+                    # Net force = c_q*f_q + c_q*f_oq (positive = same direction as c_q)
+                    Fx_total += Float64(cx[q]) * (f_cpu[i, j, q] + f_cpu[i, j, oq])
+                    Fy_total += Float64(cy[q]) * (f_cpu[i, j, q] + f_cpu[i, j, oq])
+                end
+            end
+        end
+    end
+
+    return (Fx=Fx_total, Fy=Fy_total)
+end
+
+"""
+    run_cylinder_2d(; Nx=200, Ny=50, radius=10, u_in=0.05, ν=0.05,
+                     max_steps=20000, backend, T)
+
+Flow around a cylinder at Re = u_in * 2*radius / ν.
+Returns final fields and drag coefficient.
+"""
+function run_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
+                          u_in=0.05, ν=0.05, max_steps=20000,
+                          backend=KernelAbstractions.CPU(), T=Float64)
+    state, config = initialize_cylinder_2d(; Nx=Nx, Ny=Ny, cx=cx, cy=cy,
+                                            radius=radius, u_in=u_in, ν=ν,
+                                            backend=backend, T=T)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    ω = T(omega(config))
+
+    for step in 1:max_steps
+        stream_2d!(f_out, f_in, Nx, Ny)
+        apply_zou_he_west_2d!(f_out, u_in, Nx, Ny)
+        apply_extrapolation_east_2d!(f_out, Nx, Ny)
+        collide_2d!(f_out, is_solid, ω)
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+        f_in, f_out = f_out, f_in
+    end
+
+    # Compute drag
+    drag = compute_drag_2d(f_in, is_solid, Nx, Ny)
+    D = 2 * radius
+    Cd = 2.0 * drag.Fx / (1.0 * u_in^2 * D)
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), config=config,
+            Cd=Cd, Fx=drag.Fx, Fy=drag.Fy)
+end
