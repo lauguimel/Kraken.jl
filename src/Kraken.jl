@@ -26,12 +26,16 @@ include("kernels/collide_mrt_2d.jl")
 include("kernels/species_2d.jl")
 include("kernels/multiphase_2d.jl")
 include("kernels/vof_2d.jl")
+include("kernels/dualgrid_2d.jl")
+include("kernels/levelset_2d.jl")
+include("kernels/clsvof_2d.jl")
 
 # --- Simulation ---
 include("simulation.jl")
 
 # --- I/O ---
 include("io/vtk_writer.jl")
+include("io/diagnostics.jl")
 
 # Lattice types and functions
 export AbstractLattice, D2Q9, D3Q19
@@ -77,7 +81,21 @@ export compute_hf_curvature_2d!, compute_surface_tension_2d!
 export collide_twophase_2d!, run_static_droplet_2d, run_plateau_pinch_2d
 export add_azimuthal_curvature_2d!, run_rp_axisym_2d
 
+# Dual-grid VOF
+export prolongate_bilinear_2d!, restrict_average_2d!
+export compute_hf_curvature_dx_2d!, compute_surface_tension_dx_2d!
+export run_static_droplet_dualgrid_2d
+
+# Level-set
+export advect_ls_2d!, reinit_ls_2d!, curvature_ls_2d!, add_azimuthal_curvature_ls_2d!
+
+# CLSVOF
+export ls_from_vof_2d!, surface_tension_clsvof_2d!
+export run_static_droplet_clsvof_2d, run_rp_clsvof_2d
+
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd
+export setup_output_dir, write_snapshot_2d!
+export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
 
 end # module Kraken

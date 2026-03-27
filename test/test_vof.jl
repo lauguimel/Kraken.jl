@@ -101,4 +101,21 @@ using Kraken
         @test !any(isnan, result.C)
         @info "Static droplet: max|u|=$(round(result.max_u_spurious, sigdigits=3)), ρ range=$(round.(extrema(result.ρ), digits=3))"
     end
+
+    @testset "Dual-grid static droplet" begin
+        # Same physical setup as single-grid but with 2× VOF refinement
+        result = run_static_droplet_dualgrid_2d(; N=64, R=15, σ=0.001, ν=0.1,
+                                                  ρ_l=1.0, ρ_g=0.5, max_steps=500,
+                                                  refine=2)
+
+        @test !any(isnan, result.ρ)
+        @test !any(isnan, result.C_fine)
+        @test !any(isnan, result.C_coarse)
+
+        # C_coarse should be block average of C_fine → consistent
+        @test all(result.C_coarse .>= 0)
+        @test all(result.C_coarse .<= 1)
+
+        @info "Dual-grid droplet (r=$(result.refine)): max|u|=$(round(result.max_u_spurious, sigdigits=3)), Δp=$(round(result.Δp, sigdigits=3)), Δp_th=$(round(result.Δp_analytical, sigdigits=3))"
+    end
 end

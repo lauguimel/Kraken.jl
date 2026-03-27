@@ -80,3 +80,33 @@ Create a ParaView Data (`.pvd`) collection file for time series output.
 function create_pvd(filename::String)
     return paraview_collection(filename)
 end
+
+"""
+    setup_output_dir(path::String) -> String
+
+Create the output directory (and parents) if it does not exist.
+Returns the absolute path.
+"""
+function setup_output_dir(path::String)
+    mkpath(path)
+    return abspath(path)
+end
+
+"""
+    write_snapshot_2d!(output_dir, step, Nx, Ny, dx, fields; pvd=nothing, time=0.0)
+
+Write a 2D VTK snapshot with a zero-padded filename `snapshot_NNNNNNN`.
+If `pvd` is provided, the snapshot is also registered in the PVD collection.
+"""
+function write_snapshot_2d!(output_dir::String, step::Int, Nx::Int, Ny::Int, dx,
+                            fields::Dict{String, <:AbstractMatrix};
+                            pvd=nothing, time::Float64=0.0)
+    tag = lpad(step, 7, '0')
+    filename = joinpath(output_dir, "snapshot_$tag")
+    dx_f = Float64(dx)
+    if pvd !== nothing
+        write_vtk_to_pvd(pvd, filename, Nx, Ny, dx_f, fields, Float64(time))
+    else
+        write_vtk(filename, Nx, Ny, dx_f, fields)
+    end
+end

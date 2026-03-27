@@ -1,0 +1,4 @@
+[deps]
+WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+ReadVTK = "dc215faf-f008-4f12-95ff-4c00b24b6a27"
