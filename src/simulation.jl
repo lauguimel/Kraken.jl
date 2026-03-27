@@ -894,3 +894,105 @@ function benchmark_mlups(; Ns=[64, 128, 256], steps=100,
 
     return results
 end
+
+# --- Static droplet (VOF-LBM validation) ---
+
+"""
+    run_static_droplet_2d(; N=128, R=20, σ=0.01, ν=0.1, ρ_l=1.0, ρ_g=0.001,
+                           max_steps=5000, backend, T)
+
+Static circular droplet in a periodic box. Validates Laplace pressure:
+Δp = σ/R. Measures spurious currents.
+"""
+function run_static_droplet_2d(; N=128, R=20, σ=0.01, ν=0.1,
+                                ρ_l=1.0, ρ_g=0.001, max_steps=5000,
+                                backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny = N, N
+    cx, cy = N ÷ 2, N ÷ 2
+
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    # VOF arrays
+    C     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_new = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    nx_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ny_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    κ     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    # Initialize circular droplet (smooth tanh interface, width ~2 cells)
+    C_cpu = zeros(FT, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        r = sqrt(FT((i - cx)^2 + (j - cy)^2))
+        C_cpu[i, j] = FT(0.5) * (one(FT) - tanh((r - FT(R)) / FT(2)))
+    end
+    copyto!(C, C_cpu)
+
+    # Initialize f to equilibrium with density from C
+    w = weights(D2Q9())
+    f_cpu = zeros(FT, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        ρ_init = C_cpu[i,j] * FT(ρ_l) + (1 - C_cpu[i,j]) * FT(ρ_g)
+        for q in 1:9
+            f_cpu[i, j, q] = FT(w[q]) * ρ_init
+        end
+    end
+    copyto!(f_in, f_cpu)
+    copyto!(f_out, f_cpu)
+
+    for step in 1:max_steps
+        # 1. Stream (fully periodic)
+        stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Macroscopic
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+
+        # 3. VOF advection
+        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        copyto!(C, C_new)
+
+        # 4. Clamp C to [0,1]
+        C_cpu = Array(C)
+        clamp!(C_cpu, FT(0), FT(1))
+        copyto!(C, C_cpu)
+
+        # 5. Interface normal + curvature + surface tension
+        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+        compute_surface_tension_2d!(Fx_st, Fy_st, κ, C, σ, Nx, Ny)
+
+        # 6. Two-phase collision
+        collide_twophase_2d!(f_out, C, Fx_st, Fy_st, is_solid;
+                             ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν, ν_g=ν)
+
+        f_in, f_out = f_out, f_in
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+
+    ρ_cpu = Array(ρ)
+    ux_cpu = Array(ux)
+    uy_cpu = Array(uy)
+    C_cpu = Array(C)
+
+    # Measure spurious currents
+    max_u = sqrt(maximum(ux_cpu .^ 2 .+ uy_cpu .^ 2))
+
+    # Laplace pressure: Δp = p_inside - p_outside = σ/R
+    # p = ρ·cs² = ρ/3
+    inside_mask = [(i-cx)^2 + (j-cy)^2 < (R-3)^2 for i in 1:Nx, j in 1:Ny]
+    outside_mask = [(i-cx)^2 + (j-cy)^2 > (R+3)^2 for i in 1:Nx, j in 1:Ny]
+    p_in = sum(ρ_cpu[inside_mask]) / sum(inside_mask) / 3
+    p_out = sum(ρ_cpu[outside_mask]) / sum(outside_mask) / 3
+    Δp = p_in - p_out
+    Δp_analytical = σ / R
+
+    return (ρ=ρ_cpu, ux=ux_cpu, uy=uy_cpu, C=C_cpu,
+            max_u_spurious=max_u, Δp=Δp, Δp_analytical=Δp_analytical,
+            config=config, σ=σ, R=R)
+end

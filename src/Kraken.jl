@@ -25,6 +25,7 @@ include("kernels/thermal_2d.jl")
 include("kernels/collide_mrt_2d.jl")
 include("kernels/species_2d.jl")
 include("kernels/multiphase_2d.jl")
+include("kernels/vof_2d.jl")
 
 # --- Simulation ---
 include("simulation.jl")
@@ -69,6 +70,11 @@ export apply_fixed_conc_south_2d!, apply_fixed_conc_north_2d!
 # Multiphase (Shan-Chen)
 export compute_psi_2d!, compute_sc_force_2d!, collide_sc_2d!
 export run_spinodal_2d, benchmark_mlups
+
+# VOF PLIC
+export compute_vof_normal_2d!, advect_vof_2d!
+export compute_hf_curvature_2d!, compute_surface_tension_2d!
+export collide_twophase_2d!, run_static_droplet_2d
 
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd
