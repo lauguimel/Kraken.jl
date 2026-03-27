@@ -830,6 +830,143 @@ function run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000
     return (ρ=Array(ρ), uz=Array(ux), ur=Array(uy), config=config)
 end
 
+# --- Rayleigh-Plateau pinch-off (axisymmetric VOF-LBM) ---
+
+"""
+    run_rp_axisym_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
+                      σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.01,
+                      max_steps=10000, output_interval=500, backend, T)
+
+Rayleigh-Plateau capillary instability in axisymmetric geometry.
+
+Coordinates: x=z (axial, periodic), y=r (radial, axis at j=1, wall at j=Nr).
+A liquid jet of radius R0 with sinusoidal perturbation R(z) = R0(1-ε·cos(2πz/λ)).
+λ > 2πR0 → unstable → pinch-off.
+
+The azimuthal curvature κ₂ = n_r/r drives the instability (absent in 2D planar).
+"""
+function run_rp_axisym_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
+                           σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.01,
+                           max_steps=10000, output_interval=500,
+                           backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny = Nz, Nr
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    ω = FT(omega(config))
+
+    # VOF arrays
+    C     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_new = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    nx_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ny_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    κ     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    # Axisymmetric force arrays
+    Fz_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fr_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    λ = FT(λ_ratio * R0)
+
+    # Initialize: axisymmetric jet with perturbation
+    C_cpu = zeros(FT, Nx, Ny)
+    w = weights(D2Q9())
+    f_cpu = zeros(FT, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        r = FT(j) - FT(0.5)  # radial position
+        R_local = FT(R0) * (one(FT) - FT(ε) * cos(FT(2π) * FT(i - 1) / λ))
+        C_cpu[i, j] = FT(0.5) * (one(FT) - tanh((r - R_local) / FT(1.5)))
+        ρ_init = C_cpu[i,j] * FT(ρ_l) + (one(FT) - C_cpu[i,j]) * FT(ρ_g)
+        for q in 1:9
+            f_cpu[i, j, q] = FT(w[q]) * ρ_init
+        end
+    end
+    copyto!(C, C_cpu)
+    copyto!(f_in, f_cpu)
+    copyto!(f_out, f_cpu)
+
+    r_min_history = FT[]
+    times = Int[]
+
+    for step in 1:max_steps
+        # 1. Stream (axisym: periodic z, specular axis, wall at Nr)
+        stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Macroscopic
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+
+        # 3. VOF advection (same as Cartesian for incompressible)
+        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        copyto!(C, C_new)
+        C_cpu = Array(C); clamp!(C_cpu, FT(0), FT(1)); copyto!(C, C_cpu)
+
+        # 4. Curvature: meridional (κ₁) + azimuthal (κ₂ = n_r/r)
+        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+        add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
+
+        # 5. Surface tension force
+        compute_surface_tension_2d!(Fx_st, Fy_st, κ, C, σ, Nx, Ny)
+
+        # 6. Axisymmetric viscous correction + surface tension
+        uz_cpu = Array(ux)
+        Fz_cpu = zeros(FT, Nx, Ny)
+        Fr_cpu = Array(Fy_st)
+        Fx_st_cpu = Array(Fx_st)
+        for j in 1:Ny, i in 1:Nx
+            r = FT(j) - FT(0.5)
+            if j > 1 && j < Ny
+                duz_dr = (uz_cpu[i,j+1] - uz_cpu[i,j-1]) / FT(2)
+            elseif j == 1
+                duz_dr = FT(2) * (uz_cpu[i,2] - uz_cpu[i,1])
+                duz_dr = duz_dr  # L'Hôpital: ν/r·∂u/∂r → ν·∂²u/∂r²
+            else
+                duz_dr = zero(FT)
+            end
+            axisym_corr = j == 1 ? FT(ν) * duz_dr : FT(ν) / r * duz_dr
+            Fz_cpu[i,j] = Fx_st_cpu[i,j] + axisym_corr
+            Fr_cpu[i,j] = Fr_cpu[i,j]  # surface tension in r already there
+        end
+        copyto!(Fz_field, Fz_cpu)
+        copyto!(Fr_field, Fr_cpu)
+
+        # 7. Two-phase collision with per-node force
+        collide_twophase_2d!(f_out, C, Fz_field, Fr_field, is_solid;
+                             ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν, ν_g=ν)
+
+        f_in, f_out = f_out, f_in
+
+        # Track minimum jet radius
+        if step % output_interval == 0 || step == 1
+            C_cpu = Array(C)
+            r_min_val = FT(Inf)
+            for i in 1:Nx
+                # Find interface position (where C ≈ 0.5)
+                for j in 1:Ny-1
+                    if C_cpu[i,j] > 0.5 && C_cpu[i,j+1] <= 0.5
+                        # Linear interpolation
+                        r_interf = (j - 0.5) + (C_cpu[i,j] - 0.5) / (C_cpu[i,j] - C_cpu[i,j+1])
+                        r_min_val = min(r_min_val, r_interf)
+                        break
+                    end
+                end
+            end
+            push!(r_min_history, r_min_val)
+            push!(times, step)
+        end
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+
+    return (ρ=Array(ρ), uz=Array(ux), ur=Array(uy), C=Array(C),
+            r_min=r_min_history, times=times, config=config,
+            σ=σ, R0=R0, λ=λ, ε=ε)
+end
+
 # --- Spinodal decomposition (Shan-Chen multiphase) ---
 
 """

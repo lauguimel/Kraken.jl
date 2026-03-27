@@ -266,6 +266,35 @@ end
     end
 end
 
+# --- Axisymmetric curvature: add azimuthal component κ₂ = n_r / r ---
+
+@kernel function add_azimuthal_curvature_2d_kernel!(κ, @Const(C), @Const(ny_n), Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(κ)
+        c = C[i,j]
+        if c > T(0.01) && c < T(0.99)
+            r = max(T(j) - T(0.5), one(T))  # clamp r ≥ 1 to avoid singularity
+            # Azimuthal curvature: κ₂ = n_r / r where n_r = ny_n
+            # For a jet: normal points inward (ny < 0 above axis), κ₂ should be positive
+            # Negate to match sign convention: outward-pointing normal → κ > 0 for convex
+            κ_axi = -ny_n[i,j] / r
+            # Clamp total curvature to avoid instability
+            κ_total = κ[i,j] + κ_axi
+            κ[i,j] = clamp(κ_total, -T(0.5), T(0.5))
+        end
+    end
+end
+
+function add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
+    backend = KernelAbstractions.get_backend(κ)
+    Nx = size(κ, 1)
+    kernel! = add_azimuthal_curvature_2d_kernel!(backend)
+    kernel!(κ, C, ny_n, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
 function compute_surface_tension_2d!(Fx, Fy, κ, C, σ, Nx, Ny)
     backend = KernelAbstractions.get_backend(C)
     T = eltype(C)

@@ -76,6 +76,22 @@ using Kraken
         end
     end
 
+    @testset "RP axisym pinch-off" begin
+        # Axisymmetric jet: λ/R0 = 7 > 2π → Rayleigh-unstable
+        # Azimuthal curvature κ₂ = -n_r/r drives the instability
+        result = run_rp_axisym_2d(; Nz=128, Nr=30, R0=12, λ_ratio=7.0, ε=0.3,
+                                   σ=0.01, ν=1/6, ρ_l=1.0, ρ_g=0.5,
+                                   max_steps=8000, output_interval=500)
+
+        @test !any(isnan, result.C)
+        @test !any(isnan, result.ρ)
+
+        # r_min should DECREASE (jet thins toward pinch-off)
+        @test result.r_min[end] < result.r_min[1]
+
+        @info "RP axisym: r_min $(round(result.r_min[1], digits=1)) → $(round(result.r_min[end], digits=1)) ($(round((1-result.r_min[end]/result.r_min[1])*100, digits=0))% thinning)"
+    end
+
     @testset "Static droplet stability" begin
         # Low density ratio for stability; just verify no NaN
         result = run_static_droplet_2d(; N=64, R=15, σ=0.001, ν=0.1,
