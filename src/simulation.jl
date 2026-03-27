@@ -777,15 +777,52 @@ function run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000
     is_solid = state.is_solid
     ω = FT(omega(config))
 
-    # Axis at j=0.5 (y=r direction), wall at j=Nr+0.5
-    # Streaming: periodic in z (x), wall bounce-back at r=Nr (j=Ny)
-    # At j=1 (near axis): use symmetry (bounce-back mimics axis condition)
+    # Axisymmetric approach: standard BGK + Guo forcing with TWO forces:
+    # 1. Body force Fz (drives the flow)
+    # 2. Axisym viscous correction Fz_axi = ν/r · ∂uz/∂r (from macroscopic field)
+    # Plus mass source -ρ·ur/r (negligible for HP since ur≈0)
+    #
+    # The correction is computed from the macroscopic velocity field at each step
+    # using central FD on the (converging) uz field.
 
-    τ = FT(1.0 / omega(config))  # τ = 1/ω = 3ν + 0.5
+    # Pre-allocate force arrays
+    Fz_total = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fr_total = KernelAbstractions.zeros(backend, FT, Nx, Ny)
 
     for step in 1:max_steps
-        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
-        collide_li_axisym_2d!(f_out, is_solid, τ, Nx, Ny; Fz_body=FT(Fz))
+        stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
+
+        # Compute axisymmetric correction from current macroscopic field
+        # (uses ux from PREVIOUS step — lagged but stable)
+        if step > 1
+            uz_cpu = Array(ux)  # ux = uz in axisym convention
+            Fz_cpu = zeros(FT, Nx, Ny)
+            for j in 2:Ny-1, i in 1:Nx
+                r = FT(j) - FT(0.5)
+                duz_dr = (uz_cpu[i, j+1] - uz_cpu[i, j-1]) / FT(2)
+                Fz_cpu[i, j] = FT(Fz) + FT(ν) / r * duz_dr
+            end
+            # j=1 (near axis, r=0.5): L'Hôpital — lim(r→0) ν/r·∂u/∂r = ν·∂²u/∂r²
+            # By symmetry: u(r=-Δr) = u(r=+Δr) → u(j=0) = u(j=2)
+            # ∂²u/∂r² ≈ (u[j+1] - 2u[j] + u[j-1]) = 2*(u[2] - u[1])
+            for i in 1:Nx
+                d2uz_dr2 = FT(2) * (uz_cpu[i, 2] - uz_cpu[i, 1])
+                Fz_cpu[i, 1] = FT(Fz) + FT(ν) * d2uz_dr2
+            end
+            # j=Ny (wall): just body force
+            for i in 1:Nx
+                Fz_cpu[i, Ny] = FT(Fz)
+            end
+            copyto!(Fz_total, Fz_cpu)
+        else
+            # First step: just body force
+            fill!(Array(Fz_total), FT(Fz))
+            Fz_cpu = fill(FT(Fz), Nx, Ny)
+            copyto!(Fz_total, Fz_cpu)
+        end
+
+        # Collision with per-node Guo force field
+        collide_guo_field_2d!(f_out, is_solid, Fz_total, Fr_total, ω)
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
         f_in, f_out = f_out, f_in
     end

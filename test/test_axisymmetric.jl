@@ -25,15 +25,9 @@ using Kraken
 
         @test !any(isnan, result.uz)
 
-        # Current axisymmetric source (FD gradient + Guo force) is approximate.
-        # Full Halliday (2001) modified equilibrium needed for quantitative HP accuracy.
-        # For now: verify parabolic shape and no blow-up.
-        @test max_rel_err < 1.0  # qualitative: profile exists, right shape
+        # Specular axis BC + per-node Guo force correction → quantitative accuracy
+        @test max_rel_err < 0.10  # 10% tolerance (3% typical at Nr=32)
 
-        # Verify the profile is parabolic (not flat or blown up)
-        @test maximum(u_numerical) > 0  # flow develops
-        @test u_numerical[1] < u_numerical[Nr÷2]  # center faster than edge
-
-        @info "Hagen-Poiseuille: L∞ error = $(round(max_rel_err, digits=3)), u_max = $(round(maximum(u_numerical), sigdigits=4)) (analytical $(round(u_max, sigdigits=4)))"
+        @info "Hagen-Poiseuille: L∞ error = $(round(max_rel_err*100, digits=1))%, u_max = $(round(maximum(u_numerical), sigdigits=4)) (analytical $(round(u_max, sigdigits=4)))"
     end
 end
