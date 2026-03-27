@@ -74,7 +74,7 @@ export run_spinodal_2d, benchmark_mlups
 # VOF PLIC
 export compute_vof_normal_2d!, advect_vof_2d!
 export compute_hf_curvature_2d!, compute_surface_tension_2d!
-export collide_twophase_2d!, run_static_droplet_2d
+export collide_twophase_2d!, run_static_droplet_2d, run_plateau_pinch_2d
 
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd

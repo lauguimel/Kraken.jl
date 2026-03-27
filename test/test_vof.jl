@@ -57,6 +57,25 @@ using Kraken
         end
     end
 
+    @testset "Capillary bridge relaxation (2D)" begin
+        # In 2D (planar), Rayleigh-Plateau instability does NOT occur:
+        # perturbations are STABLE (surface tension smooths them out).
+        # This validates that the VOF-LBM surface tension acts correctly.
+        # r_min should INCREASE toward R0 as the perturbation decays.
+        result = run_plateau_pinch_2d(; Nx=128, Ny=32, R0=10, λ_ratio=4.5, ε=0.1,
+                                       σ=0.005, ν=0.05, ρ_l=1.0, ρ_g=0.1,
+                                       max_steps=3000, output_interval=200)
+
+        @test !any(isnan, result.C)
+        @test !any(isnan, result.ρ)
+
+        # In 2D: perturbation should decay → r_min increases toward R0
+        if length(result.r_min) >= 3
+            @test result.r_min[end] >= result.r_min[1]  # relaxation (correct 2D physics)
+            @info "Capillary relaxation: r_min $(round(result.r_min[1], digits=2)) → $(round(result.r_min[end], digits=2)) (R0=$(result.R0))"
+        end
+    end
+
     @testset "Static droplet stability" begin
         # Low density ratio for stability; just verify no NaN
         result = run_static_droplet_2d(; N=64, R=15, σ=0.001, ν=0.1,

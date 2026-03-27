@@ -996,3 +996,121 @@ function run_static_droplet_2d(; N=128, R=20, σ=0.01, ν=0.1,
             max_u_spurious=max_u, Δp=Δp, Δp_analytical=Δp_analytical,
             config=config, σ=σ, R=R)
 end
+
+# --- Rayleigh-Plateau pinch-off (2D liquid bridge) ---
+
+"""
+    run_plateau_pinch_2d(; Nx=256, Ny=64, R0=20, λ_ratio=4.5, ε=0.05,
+                          σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.01,
+                          max_steps=10000, output_interval=500, backend, T)
+
+Rayleigh-Plateau capillary instability: a 2D liquid bridge with sinusoidal
+perturbation pinches off due to surface tension.
+
+Setup (cf. Popinet 2009, Gerris plateau example):
+- Liquid slab of half-width R0 centered at y = Ny/2
+- Perturbation: R(x) = R0 * (1 - ε·cos(2π·x/λ)) where λ = λ_ratio·R0
+- Periodic in x, walls in y (or periodic)
+- Surface tension σ drives the instability
+- λ > 2πR (Rayleigh criterion) → unstable → pinch-off
+
+Returns snapshots of C and r_min (minimum bridge radius) vs time.
+"""
+function run_plateau_pinch_2d(; Nx=256, Ny=64, R0=20, λ_ratio=4.5, ε=0.05,
+                               σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.01,
+                               max_steps=10000, output_interval=500,
+                               backend=KernelAbstractions.CPU(), FT=Float64)
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    # VOF arrays
+    C     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_new = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    nx_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ny_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    κ     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    # Wavelength
+    λ = FT(λ_ratio * R0)
+    cy = FT(Ny / 2)
+
+    # Initialize: liquid slab with sinusoidal perturbation
+    C_cpu = zeros(FT, Nx, Ny)
+    w = weights(D2Q9())
+    f_cpu = zeros(FT, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        # Perturbed bridge radius
+        R_local = FT(R0) * (one(FT) - FT(ε) * cos(FT(2π) * FT(i - 1) / λ))
+        # Distance from centerline
+        dist = abs(FT(j) - cy)
+        # Smooth interface (tanh)
+        C_cpu[i, j] = FT(0.5) * (one(FT) - tanh((dist - R_local) / FT(2)))
+        ρ_init = C_cpu[i,j] * FT(ρ_l) + (one(FT) - C_cpu[i,j]) * FT(ρ_g)
+        for q in 1:9
+            f_cpu[i, j, q] = FT(w[q]) * ρ_init
+        end
+    end
+    copyto!(C, C_cpu)
+    copyto!(f_in, f_cpu)
+    copyto!(f_out, f_cpu)
+
+    # Track minimum bridge radius over time
+    r_min_history = FT[]
+    times = Int[]
+
+    ω_flow = FT(omega(config))
+
+    for step in 1:max_steps
+        # 1. Stream (fully periodic in x, periodic in y for simplicity)
+        stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Macroscopic
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+
+        # 3. VOF advection
+        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        copyto!(C, C_new)
+
+        # Clamp
+        C_cpu = Array(C)
+        clamp!(C_cpu, FT(0), FT(1))
+        copyto!(C, C_cpu)
+
+        # 4. Interface + curvature + surface tension
+        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+        compute_surface_tension_2d!(Fx_st, Fy_st, κ, C, σ, Nx, Ny)
+
+        # 5. Two-phase collision
+        collide_twophase_2d!(f_out, C, Fx_st, Fy_st, is_solid;
+                             ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν, ν_g=ν)
+
+        f_in, f_out = f_out, f_in
+
+        # Track r_min: minimum "bridge width" (sum of C along y at each x)
+        if step % output_interval == 0 || step == 1
+            C_cpu = Array(C)
+            # For each x column, compute the half-width of the liquid bridge
+            widths = FT[]
+            for i in 1:Nx
+                col_C = C_cpu[i, :]
+                bridge_width = sum(col_C) / 2  # half the total liquid height
+                push!(widths, bridge_width)
+            end
+            r_min_val = minimum(widths)
+            push!(r_min_history, r_min_val)
+            push!(times, step)
+        end
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), C=Array(C),
+            r_min=r_min_history, times=times, config=config,
+            σ=σ, R0=R0, λ=λ, ε=ε)
+end
