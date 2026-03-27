@@ -1,6 +1,5 @@
 # # Lid-Driven Cavity (2D) — Re = 100
 #
-# ![](cavity_2d_centerlines.svg)
 #
 # ## Problem statement
 #

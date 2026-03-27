@@ -85,15 +85,13 @@
 # The `collide_guo_2d!` kernel performs BGK collision with Guo forcing:
 #
 # ```julia
-# collide_guo_2d!(f_out, f_in, ρ, ux, uy, Fx, Fy, ω, lattice;
-#                 ndrange=(Nx, Ny))
+# collide_guo_2d!(f, is_solid, ω, Fx, Fy)
 # ```
 #
 # And `compute_macroscopic_forced_2d!` recovers the corrected velocity:
 #
 # ```julia
-# compute_macroscopic_forced_2d!(ρ, ux, uy, f, Fx, Fy, lattice;
-#                                ndrange=(Nx, Ny))
+# compute_macroscopic_forced_2d!(ρ, ux, uy, f, Fx, Fy)
 # ```
 
 using Kraken

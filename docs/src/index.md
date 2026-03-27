@@ -32,9 +32,9 @@ result = run_cavity_2d(config)
 ## Documentation
 
 - **[Installation](@ref)** — set up Kraken.jl and GPU backends
-- **[Theory](@ref "LBM Fundamentals")** — from kinetic theory to lattice Boltzmann (10 progressive chapters)
-- **[Examples](@ref "Poiseuille Flow (2D)")** — validated simulations with plots and convergence studies
-- **[Benchmarks](@ref "Performance: MLUPs")** — performance and accuracy measurements
+- **Theory** — from kinetic theory to lattice Boltzmann (10 progressive chapters)
+- **Examples** — validated simulations with plots and convergence studies
+- **Benchmarks** — performance and accuracy measurements
 - **[API Reference](@ref)** — complete function reference
 
 ## Physics Capabilities
@@ -48,3 +48,8 @@ result = run_cavity_2d(config)
 | Cylinder drag | D2Q9 | `run_cylinder_2d` |
 | Thermal convection | D2Q9 | `run_rayleigh_benard_2d` |
 | Axisymmetric pipe flow | D2Q9 | `run_hagen_poiseuille_2d` |
+
+## References
+
+```@bibliography
+```

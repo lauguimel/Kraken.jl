@@ -66,7 +66,7 @@
 # ```
 #
 # and the kinematic viscosity is set by the collision parameter (see
-# [BGK collision](@ref)).
+# the BGK collision chapter).
 #
 # ## Why LBM for GPU computing?
 #

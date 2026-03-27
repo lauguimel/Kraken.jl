@@ -130,14 +130,15 @@ Pr = 0.71
 #
 # ```julia
 # for step in 1:max_steps
-#     collide_boussinesq_2d!(f_out, f_in, ρ, ux, uy, T, ...)
-#     stream_2d!(f_stream, f_out, lattice; ...)
-#     apply_zou_he_...(f_stream, ...)       # velocity BCs
-#     collide_thermal_2d!(g_out, g_in, T, ux, uy, ω_T, lattice; ...)
-#     stream_2d!(g_stream, g_out, lattice; ...)
-#     apply_fixed_temp_south_2d!(g_stream, T_hot, ...)
-#     apply_fixed_temp_north_2d!(g_stream, T_cold, ...)
-#     compute_macroscopic_2d!(ρ, ux, uy, f_stream, lattice; ...)
-#     compute_temperature_2d!(T, g_stream, lattice; ...)
+#     stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+#     stream_periodic_x_wall_y_2d!(g_out, g_in, Nx, Ny)
+#     apply_fixed_temp_south_2d!(g_out, T_hot, Nx)
+#     apply_fixed_temp_north_2d!(g_out, T_cold, Nx, Ny)
+#     compute_temperature_2d!(Temp, g_out)
+#     compute_macroscopic_2d!(ρ, ux, uy, f_out)
+#     collide_thermal_2d!(g_out, ux, uy, ω_T)
+#     collide_boussinesq_2d!(f_out, Temp, is_solid, ω_f, β_g, T_ref)
+#     f_in, f_out = f_out, f_in
+#     g_in, g_out = g_out, g_in
 # end
 # ```

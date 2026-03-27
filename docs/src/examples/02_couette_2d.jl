@@ -1,6 +1,5 @@
 # # Couette Flow (2D)
 #
-# ![](couette_profile.svg)
 #
 # ## Problem statement
 #

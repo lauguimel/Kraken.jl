@@ -83,7 +83,7 @@ config = LBMConfig(D2Q9(); Nx=64, Ny=64, ν=0.01, u_lid=0.1, max_steps=1000)
 # in a single GPU kernel launch. Its signature is:
 #
 # ```julia
-# collide_2d!(f_out, f_in, ρ, ux, uy, ω, lattice; ndrange=(Nx, Ny))
+# collide_2d!(f, is_solid, ω)
 # ```
 #
 # Internally, for each node `(i, j)` and each direction `q`:

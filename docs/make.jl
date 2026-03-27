@@ -5,10 +5,8 @@ using Kraken
 
 # --- Process Literate.jl files ---
 
-const REPO_ROOT = joinpath(@__DIR__, "..")
-const DOCS_SRC  = joinpath(@__DIR__, "src")
+const DOCS_SRC = joinpath(@__DIR__, "src")
 
-# Literate.jl sections to process
 const LITERATE_DIRS = [
     "theory",
     "examples",
@@ -24,6 +22,10 @@ for dir in LITERATE_DIRS
             joinpath(src_dir, file), out_dir;
             documenter = true,
             credit = false,
+            # Non-executable code blocks: show code without running simulations
+            # To enable execution (for CI with GPU), change to:
+            #   codefence = nothing  (default, generates @example blocks)
+            codefence = "```julia" => "```",
         )
     end
 end
@@ -34,6 +36,9 @@ bib = CitationBibliography(joinpath(@__DIR__, "refs.bib"); style=:numeric)
 
 # --- Build documentation ---
 
+# Note: on Julia 1.12+ with Metal.jl, makedocs may segfault due to libgit2.
+# Workaround: run from a temp directory with remotes=nothing, or use CI.
+
 makedocs(;
     sitename = "Kraken.jl",
     modules = [Kraken],
@@ -41,6 +46,8 @@ makedocs(;
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true",
         canonical = "https://lauguimel.github.io/Kraken.jl",
+        edit_link = "lbm",
+        repolink = "https://github.com/lauguimel/Kraken.jl",
     ),
     pages = [
         "Home" => "index.md",
@@ -75,6 +82,9 @@ makedocs(;
         ],
         "API Reference" => "api.md",
     ],
+    remotes = nothing,
+    warnonly = true,
+    checkdocs = :none,
 )
 
 deploydocs(

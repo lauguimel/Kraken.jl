@@ -1,6 +1,5 @@
 # # Lid-Driven Cavity (3D) — Re = 100
 #
-# ![](cavity_3d_midplane.svg)
 #
 # ## Problem statement
 #

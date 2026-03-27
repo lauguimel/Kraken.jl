@@ -55,7 +55,7 @@
 #
 # - **Periodic boundaries**: wrap around to the opposite side of the domain.
 # - **Wall boundaries**: unknown incoming populations are set by bounce-back
-#   or Zou--He conditions (see [Boundary Conditions](@ref)).
+#   or Zou--He conditions (see the Boundary Conditions chapter).
 #
 # In Kraken.jl, different streaming kernels handle different boundary
 # configurations:
@@ -73,7 +73,7 @@
 # boundary condition kernels. The call signature is:
 #
 # ```julia
-# stream_2d!(f_out, f_in, lattice; ndrange=(Nx, Ny))
+# stream_2d!(f_out, f_in, Nx, Ny)
 # ```
 #
 # where `f_in` holds the post-collision state and `f_out` receives the

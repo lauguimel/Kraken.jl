@@ -105,8 +105,9 @@ using Kraken
 lattice = D2Q9()
 
 ## The opposite direction mapping used by bounce-back
+opp = opposite(lattice)
 for q in 1:9
-    println("q=$q  →  opposite = $(opposite(lattice, q))")
+    println("q=$q  →  opposite = $(opp[q])")
 end
 
 # Available Zou--He kernels:
@@ -122,5 +123,5 @@ end
 # in-place. Example call for a lid-driven cavity:
 #
 # ```julia
-# apply_zou_he_north_2d!(f, ρ, ux, uy, u_lid, lattice; ndrange=Nx)
+# apply_zou_he_north_2d!(f, u_lid, Nx, Ny)
 # ```

@@ -1,6 +1,5 @@
 # # 1D Heat Conduction
 #
-# ![](heat_conduction_profile.svg)
 #
 # ## Problem statement
 #

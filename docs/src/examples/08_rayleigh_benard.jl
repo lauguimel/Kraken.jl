@@ -1,6 +1,5 @@
 # # Rayleigh--Benard Convection (2D)
 #
-# ![](rayleigh_benard_temperature.svg)
 #
 # ## Problem statement
 #

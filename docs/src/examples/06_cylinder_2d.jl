@@ -1,6 +1,5 @@
 # # Flow Around a Cylinder (2D) — Re = 20
 #
-# ![](cylinder_umag.svg)
 #
 # ## Problem statement
 #
@@ -49,9 +48,13 @@ u_in   = 0.04
 D      = 2 * radius
 ν      = u_in * D / Re
 
-ρ, ux, uy, config, Cd, Fx_hist, Fy_hist = run_cylinder_2d(;
+result = run_cylinder_2d(;
     Nx=400, Ny=100, radius=radius, u_in=u_in, ν=ν,
     max_steps=40000, avg_window=2000)
+ρ  = result.ρ
+ux = result.ux
+uy = result.uy
+Cd = result.Cd
 
 # ## Results — velocity magnitude
 
@@ -79,13 +82,12 @@ Cd_ref = 5.58
 # Schafer--Turek reference:  Cd = 5.58  (Re = 20)
 # ```
 
-fig2 = Figure(size=(600, 350))
-ax2  = Axis(fig2[1, 1]; xlabel="Time step", ylabel="C_d",
-            title="Drag coefficient history")
-lines!(ax2, 1:length(Fx_hist), Fx_hist ./ (0.5 * u_in^2 * D);
-       linewidth=1.5, label="Cd(t)")
-hlines!(ax2, [Cd_ref]; color=:red, linestyle=:dash, label="Schafer--Turek")
-axislegend(ax2; position=:rt)
+fig2 = Figure(size=(400, 300))
+ax2  = Axis(fig2[1, 1]; title="Drag comparison at Re = $Re")
+barplot!(ax2, [1, 2], [Cd, Cd_ref]; color=[:steelblue, :tomato],
+         bar_labels=[string(round(Cd; digits=3)), string(Cd_ref)])
+ax2.xticks = ([1, 2], ["Kraken", "Schäfer-Turek"])
+ax2.ylabel = "Cd"
 fig2
 save("cylinder_cd.svg", fig2) #hide
 

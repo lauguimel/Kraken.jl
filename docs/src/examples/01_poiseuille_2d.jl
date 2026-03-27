@@ -1,6 +1,5 @@
 # # Poiseuille Flow (2D)
 #
-# ![](poiseuille_profile.svg)
 #
 # ## Problem statement
 #

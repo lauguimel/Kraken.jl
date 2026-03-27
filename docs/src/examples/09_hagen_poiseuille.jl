@@ -1,6 +1,5 @@
 # # Hagen--Poiseuille Flow (Axisymmetric)
 #
-# ![](hagen_poiseuille_profile.svg)
 #
 # ## Problem statement
 #

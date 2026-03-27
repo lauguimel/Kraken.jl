@@ -1,6 +1,5 @@
 # # Taylor--Green Vortex (2D)
 #
-# ![](taylor_green_energy.svg)
 #
 # ## Problem statement
 #
