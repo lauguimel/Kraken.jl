@@ -215,8 +215,8 @@ function _fill_bc_arrays!(ux_arr, uy_arr, ux_fn, uy_fn, face::Symbol,
             x_val = (i - 0.5) * dx
             kw = (; x=x_val, y=y_val, Lx=Lx, Ly=Ly,
                     Nx=Float64(Nx), Ny=Float64(Ny), dx=dx, dy=dy, t=t)
-            ux_fn !== nothing && (cpu_ux[i] = T(ux_fn(; kw...)))
-            uy_fn !== nothing && (cpu_uy[i] = T(uy_fn(; kw...)))
+            ux_fn !== nothing && (cpu_ux[i] = T(Base.invokelatest(ux_fn; kw...)))
+            uy_fn !== nothing && (cpu_uy[i] = T(Base.invokelatest(uy_fn; kw...)))
         end
         ux_arr !== nothing && copyto!(ux_arr, cpu_ux)
         uy_arr !== nothing && copyto!(uy_arr, cpu_uy)
@@ -228,8 +228,8 @@ function _fill_bc_arrays!(ux_arr, uy_arr, ux_fn, uy_fn, face::Symbol,
             y_val = (j - 0.5) * dy
             kw = (; x=x_val, y=y_val, Lx=Lx, Ly=Ly,
                     Nx=Float64(Nx), Ny=Float64(Ny), dx=dx, dy=dy, t=t)
-            ux_fn !== nothing && (cpu_ux[j] = T(ux_fn(; kw...)))
-            uy_fn !== nothing && (cpu_uy[j] = T(uy_fn(; kw...)))
+            ux_fn !== nothing && (cpu_ux[j] = T(Base.invokelatest(ux_fn; kw...)))
+            uy_fn !== nothing && (cpu_uy[j] = T(Base.invokelatest(uy_fn; kw...)))
         end
         ux_arr !== nothing && copyto!(ux_arr, cpu_ux)
         uy_arr !== nothing && copyto!(uy_arr, cpu_uy)
@@ -258,12 +258,12 @@ function _apply_boundary_conditions!(f, handlers::Vector{BoundaryHandler},
             if h.ux_arr !== nothing  # spatial BC
                 _apply_velocity_spatial!(f, h, Nx, Ny)
             else  # scalar BC
-                ux_val = h.ux_fn !== nothing ? h.ux_fn(; t=Float64(step)) : 0.0
-                uy_val = h.uy_fn !== nothing ? h.uy_fn(; t=Float64(step)) : 0.0
+                ux_val = h.ux_fn !== nothing ? Base.invokelatest(h.ux_fn; t=Float64(step)) : 0.0
+                uy_val = h.uy_fn !== nothing ? Base.invokelatest(h.uy_fn; t=Float64(step)) : 0.0
                 _apply_velocity_scalar!(f, h.face, ux_val, uy_val, Nx, Ny)
             end
         elseif h.type == :pressure
-            rho_val = h.rho_fn !== nothing ? h.rho_fn(; t=Float64(step)) : 1.0
+            rho_val = h.rho_fn !== nothing ? Base.invokelatest(h.rho_fn; t=Float64(step)) : 1.0
             _apply_pressure_bc!(f, h.face, rho_val, Nx, Ny)
         end
     end

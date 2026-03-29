@@ -297,4 +297,4 @@ expr = parse_kraken_expr("sin(x) + y")
 evaluate(expr; x=1.0, y=2.0)  # ≈ 2.8414709848
 ```
 """
-evaluate(ke::KrakenExpr; kwargs...) = ke.func(; kwargs...)
+evaluate(ke::KrakenExpr; kwargs...) = Base.invokelatest(ke.func; kwargs...)
