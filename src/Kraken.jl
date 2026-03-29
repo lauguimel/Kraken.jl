@@ -36,6 +36,14 @@ include("simulation.jl")
 # --- I/O ---
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
+include("io/expression.jl")
+include("io/kraken_parser.jl")
+
+# --- Spatial boundary kernels ---
+include("kernels/boundary_spatial_2d.jl")
+
+# --- Generic simulation runner ---
+include("simulation_runner.jl")
 
 # Lattice types and functions
 export AbstractLattice, D2Q9, D3Q19
@@ -97,5 +105,16 @@ export run_static_droplet_clsvof_2d, run_rp_clsvof_2d
 export write_vtk, create_pvd, write_vtk_to_pvd
 export setup_output_dir, write_snapshot_2d!
 export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
+
+# .krk config system
+export KrakenExpr, parse_kraken_expr, evaluate, has_variable, is_time_dependent, is_spatial
+export SimulationSetup, DomainSetup, PhysicsSetup, GeometryRegion, BoundarySetup
+export InitialSetup, OutputSetup, DiagnosticsSetup
+export load_kraken, parse_kraken
+export run_simulation
+
+# Spatial boundary kernels
+export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
+export apply_zou_he_west_spatial_2d!, apply_zou_he_pressure_east_spatial_2d!
 
 end # module Kraken

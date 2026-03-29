@@ -16,4 +16,7 @@ using Kraken
     include("test_benchmark.jl")
     include("test_cavity.jl")
     include("test_cylinder.jl")
+    include("test_expression.jl")
+    include("test_kraken_parser.jl")
+    include("test_simulation_runner.jl")
 end

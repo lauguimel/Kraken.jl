@@ -1,6 +1,7 @@
 using Documenter
 using DocumenterCitations
 using Literate
+using PlutoStaticHTML
 using Kraken
 
 # --- Process Literate.jl files ---
@@ -30,6 +31,20 @@ for dir in LITERATE_DIRS
     end
 end
 
+# --- Process Pluto notebooks (interactive tutorials with WGLMakie) ---
+
+const TUTORIAL_DIR = joinpath(DOCS_SRC, "tutorials")
+
+if isdir(TUTORIAL_DIR) && !isempty(filter(f -> endswith(f, ".jl"), readdir(TUTORIAL_DIR)))
+    @info "Building Pluto notebooks → tutorials/"
+    bopts = BuildOptions(TUTORIAL_DIR;
+        output_format = documenter_output,
+        use_distributed = false,
+    )
+    notebooks = sort(filter(f -> endswith(f, ".jl"), readdir(TUTORIAL_DIR)))
+    build_notebooks(bopts, notebooks)
+end
+
 # --- Bibliography ---
 
 bib = CitationBibliography(joinpath(@__DIR__, "refs.bib"); style=:numeric)
@@ -48,6 +63,8 @@ makedocs(;
         canonical = "https://lauguimel.github.io/Kraken.jl",
         edit_link = "lbm",
         repolink = "https://github.com/lauguimel/Kraken.jl",
+        mathengine = Documenter.MathJax3(),
+        size_threshold = nothing,
     ),
     pages = [
         "Home" => "index.md",
@@ -74,6 +91,10 @@ makedocs(;
             "examples/07_heat_conduction.md",
             "examples/08_rayleigh_benard.md",
             "examples/09_hagen_poiseuille.md",
+            "examples/10_krk_config.md",
+        ],
+        "Tutorials (Interactive)" => [
+            "tutorials/02_couette_2d.md",
         ],
         "Benchmarks" => [
             "benchmarks/mlups_cpu_gpu.md",
