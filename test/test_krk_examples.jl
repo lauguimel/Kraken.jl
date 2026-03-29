@@ -126,4 +126,29 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         @info "taylor_green.krk: L2 error = $(round(l2_err, digits=4)), " *
               "max|ux| = $(round(max_ux, digits=5)), decay = $(round(decay_factor, digits=4))"
     end
+
+    @testset "Parametric kwargs override" begin
+        # Override domain size and physics
+        s = load_kraken(joinpath(EXAMPLES_DIR, "cavity.krk"); Nx=32, Ny=32, nu=0.2)
+        @test s.domain.Nx == 32
+        @test s.domain.Ny == 32
+        @test s.physics.params[:nu] ≈ 0.2
+
+        # Override max_steps
+        s = load_kraken(joinpath(EXAMPLES_DIR, "poiseuille.krk"); max_steps=500)
+        @test s.max_steps == 500
+
+        # Override Define variable
+        s = load_kraken(joinpath(EXAMPLES_DIR, "cylinder.krk"); U=0.1, R=1.0)
+        @test s.user_vars[:U] ≈ 0.1
+        @test s.user_vars[:R] ≈ 1.0
+
+        # Run with overrides — smaller/faster cavity
+        result = run_simulation(joinpath(EXAMPLES_DIR, "cavity.krk");
+                                Nx=16, Ny=16, nu=0.2, max_steps=2000)
+        @test !any(isnan, result.ρ)
+        @test size(result.ux) == (16, 16)
+
+        @info "Parametric kwargs: all overrides work"
+    end
 end

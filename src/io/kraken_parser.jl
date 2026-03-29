@@ -170,37 +170,55 @@ end
 # --- Main parser ---
 
 """
-    load_kraken(filename::String) -> SimulationSetup
+    load_kraken(filename::String; kwargs...) -> SimulationSetup
 
 Parse a `.krk` file and return a `SimulationSetup` struct.
+Keyword arguments override `Define` defaults for parametric studies.
 
 # Example
 ```julia
 setup = load_kraken("examples/cavity.krk")
-setup.name        # "cavity"
-setup.domain.Nx   # 128
+setup = load_kraken("examples/cavity.krk"; Re=400, N=256)
 ```
 """
-function load_kraken(filename::String)
+function load_kraken(filename::String; kwargs...)
     text = read(filename, String)
-    return parse_kraken(text)
+    return parse_kraken(text; kwargs...)
 end
 
 """
-    parse_kraken(text::String) -> SimulationSetup
+    parse_kraken(text::String; kwargs...) -> SimulationSetup
 
 Parse .krk format text into a SimulationSetup struct.
+Keyword arguments override `Define` defaults for parametric studies.
+
+# Example
+```julia
+setup = parse_kraken(text; Re=400, N=256)
+```
 """
-function parse_kraken(text::String)
+function parse_kraken(text::String; kwargs...)
     lines = _preprocess_lines(text)
 
-    # State accumulation
+    # --- First pass: collect Define defaults ---
+    user_vars = Dict{Symbol, Float64}()
+    for line in lines
+        _first_word(line) == "Define" || continue
+        k, v = _parse_define(line)
+        user_vars[k] = v
+    end
+
+    # Override with kwargs (highest priority)
+    for (k, v) in kwargs
+        user_vars[k] = Float64(v)
+    end
+
+    # --- Second pass: parse everything ---
     name = ""
     lattice = :D2Q9
     domain = nothing
     physics_params = Dict{Symbol, Float64}()
     body_force = Dict{Symbol, KrakenExpr}()
-    user_vars = Dict{Symbol, Float64}()
     regions = GeometryRegion[]
     boundaries = BoundarySetup[]
     initial = nothing
@@ -215,12 +233,11 @@ function parse_kraken(text::String)
         if keyword == "Simulation"
             name, lattice = _parse_simulation(line)
         elseif keyword == "Domain"
-            domain = _parse_domain(line)
+            domain = _parse_domain(line, user_vars)
         elseif keyword == "Physics"
-            merge!(physics_params, _parse_physics(line))
+            merge!(physics_params, _parse_physics(line, user_vars))
         elseif keyword == "Define"
-            k, v = _parse_define(line)
-            user_vars[k] = v
+            # Already processed in first pass
         elseif keyword == "Obstacle"
             push!(regions, _parse_obstacle(line, user_vars))
         elseif keyword == "Fluid"
@@ -245,6 +262,32 @@ function parse_kraken(text::String)
     domain === nothing && throw(ArgumentError("Missing 'Domain' in .krk file"))
     isempty(name) && throw(ArgumentError("Missing 'Simulation' in .krk file"))
     max_steps == 0 && throw(ArgumentError("Missing 'Run' in .krk file"))
+
+    # --- Apply kwargs overrides to Physics and Domain ---
+    param_kwargs = Dict{Symbol,Float64}(k => Float64(v) for (k, v) in kwargs)
+
+    # Override Physics params with matching kwargs
+    for (k, v) in param_kwargs
+        if haskey(physics_params, k)
+            physics_params[k] = v
+        end
+    end
+
+    # Override Domain with matching kwargs (Nx, Ny, Nz, Lx, Ly, Lz)
+    if domain !== nothing
+        Nx = haskey(param_kwargs, :Nx) ? round(Int, param_kwargs[:Nx]) : domain.Nx
+        Ny = haskey(param_kwargs, :Ny) ? round(Int, param_kwargs[:Ny]) : domain.Ny
+        Nz = haskey(param_kwargs, :Nz) ? round(Int, param_kwargs[:Nz]) : domain.Nz
+        Lx = get(param_kwargs, :Lx, domain.Lx)
+        Ly = get(param_kwargs, :Ly, domain.Ly)
+        Lz = get(param_kwargs, :Lz, domain.Lz)
+        domain = DomainSetup(Lx, Ly, Lz, Nx, Ny, Nz)
+    end
+
+    # Override max_steps with kwarg
+    if haskey(param_kwargs, :max_steps)
+        max_steps = round(Int, param_kwargs[:max_steps])
+    end
 
     # Parse body force if present in physics_params
     for sym in (:Fx, :Fy, :Fz)
@@ -279,33 +322,48 @@ function _parse_simulation(line::String)
     return name, lattice
 end
 
-"""Parse: Domain L = <Lx> x <Ly> N = <Nx> x <Ny>"""
-function _parse_domain(line::String)
-    # Extract L = ... x ...  and N = ... x ...
-    lm = match(r"L\s*=\s*([\d.eE+-]+)\s*x\s*([\d.eE+-]+)(?:\s*x\s*([\d.eE+-]+))?", line)
-    nm = match(r"N\s*=\s*(\d+)\s*x\s*(\d+)(?:\s*x\s*(\d+))?", line)
+"""Parse: Domain L = <Lx> x <Ly> N = <Nx> x <Ny>  (values can be expressions/variables)"""
+function _parse_domain(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}())
+    # Extract L = ... x ... and N = ... x ...  (accept variable names and numbers)
+    lm = match(r"L\s*=\s*([\w.eE+-]+)\s*x\s*([\w.eE+-]+)(?:\s*x\s*([\w.eE+-]+))?", line)
+    nm = match(r"N\s*=\s*([\w.eE+-]+)\s*x\s*([\w.eE+-]+)(?:\s*x\s*([\w.eE+-]+))?", line)
 
     lm === nothing && throw(ArgumentError("Cannot parse Domain L = ... : $line"))
     nm === nothing && throw(ArgumentError("Cannot parse Domain N = ... : $line"))
 
-    Lx = parse(Float64, lm.captures[1])
-    Ly = parse(Float64, lm.captures[2])
-    Lz = lm.captures[3] !== nothing ? parse(Float64, lm.captures[3]) : 1.0
+    Lx = _eval_domain_value(lm.captures[1], user_vars)
+    Ly = _eval_domain_value(lm.captures[2], user_vars)
+    Lz = lm.captures[3] !== nothing ? _eval_domain_value(lm.captures[3], user_vars) : 1.0
 
-    Nx = parse(Int, nm.captures[1])
-    Ny = parse(Int, nm.captures[2])
-    Nz = nm.captures[3] !== nothing ? parse(Int, nm.captures[3]) : 1
+    Nx = round(Int, _eval_domain_value(nm.captures[1], user_vars))
+    Ny = round(Int, _eval_domain_value(nm.captures[2], user_vars))
+    Nz = nm.captures[3] !== nothing ? round(Int, _eval_domain_value(nm.captures[3], user_vars)) : 1
 
     return DomainSetup(Lx, Ly, Lz, Nx, Ny, Nz)
 end
 
-"""Parse: Physics <key> = <value> ..."""
-function _parse_physics(line::String)
+"""Evaluate a domain value: either a number literal or a user variable."""
+function _eval_domain_value(s::AbstractString, user_vars::Dict{Symbol,Float64})
+    val = tryparse(Float64, s)
+    val !== nothing && return val
+    sym = Symbol(s)
+    haskey(user_vars, sym) && return user_vars[sym]
+    throw(ArgumentError("Unknown variable '$s' in Domain. Define it with 'Define $s = ...' or pass as kwarg."))
+end
+
+"""Parse: Physics <key> = <value> ...  (values can be expressions with user vars)"""
+function _parse_physics(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}())
     params = Dict{Symbol, Float64}()
-    # Match all key = value pairs
-    for m in eachmatch(r"(\w+)\s*=\s*([\d.eE+-]+)", line)
+    # Match all key = value pairs (value can be a number or an expression)
+    for m in eachmatch(r"(\w+)\s*=\s*([\w.eE+\-*/()]+)", line)
         key = Symbol(m.captures[1])
-        val = parse(Float64, m.captures[2])
+        val_str = strip(String(m.captures[2]))
+        # Try literal first, then evaluate as expression with user vars
+        val = tryparse(Float64, val_str)
+        if val === nothing
+            expr = parse_kraken_expr(val_str, user_vars)
+            val = Float64(evaluate(expr))
+        end
         params[key] = val
     end
     return params

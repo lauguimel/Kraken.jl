@@ -25,21 +25,22 @@ struct BoundaryHandler
 end
 
 """
-    run_simulation(filename::String; backend=CPU(), T=Float64) -> NamedTuple
+    run_simulation(filename::String; backend=CPU(), T=Float64, kwargs...) -> NamedTuple
 
 Run an LBM simulation defined by a `.krk` configuration file.
+Keyword arguments override `Define` defaults for parametric studies.
 
 Returns a NamedTuple with final fields on CPU: `(ρ, ux, uy, setup)`.
 
 # Example
 ```julia
 result = run_simulation("examples/cavity.krk")
-result.ux  # velocity field
+result = run_simulation("examples/cavity.krk"; Re=400, N=256)
 ```
 """
 function run_simulation(filename::String;
-                        backend=KernelAbstractions.CPU(), T=Float64)
-    setup = load_kraken(filename)
+                        backend=KernelAbstractions.CPU(), T=Float64, kwargs...)
+    setup = load_kraken(filename; kwargs...)
     return run_simulation(setup; backend=backend, T=T)
 end
 
