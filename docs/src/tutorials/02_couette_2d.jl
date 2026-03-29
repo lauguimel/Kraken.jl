@@ -50,7 +50,8 @@
 using Kraken
 using CairoMakie
 
-result = run_simulation(joinpath(@__DIR__, "..", "..", "..", "examples", "couette.krk"))
+krk = joinpath(@__DIR__, "..", "..", "..", "examples", "couette.krk")
+result = run_simulation(krk)
 nothing #hide
 
 # One line: `run_simulation("couette.krk")`.  The result is a `NamedTuple`
@@ -65,10 +66,9 @@ Ny = 32
 u_wall = 0.05
 H = Ny - 1
 
-j_range = 1:Ny
-y_phys  = [(j - 1) for j in j_range]
-u_ana   = [u_wall * (j - 1) / H for j in j_range]
-u_num   = result.ux[2, :]
+y_phys = [j - 1 for j in 1:Ny]
+u_ana  = [u_wall * (j - 1) / H for j in 1:Ny]
+u_num  = result.ux[2, :]
 
 fig = Figure(size=(600, 420))
 ax = Axis(fig[1, 1];
@@ -85,12 +85,19 @@ save("couette_profile.svg", fig) #hide
 #
 # ---
 #
-# ## Convergence study
+# ## Convergence study — parametric kwargs
 #
-# Since the linear profile is an exact steady-state of the D2Q9 lattice
-# Boltzmann equation, the error should be at machine precision regardless
-# of resolution.  We verify this by running at multiple ``N_y`` using
-# `parse_kraken` to build the setup programmatically:
+# The same `.krk` file can be re-used at different resolutions by passing
+# **keyword arguments** to `run_simulation`.  These override `Domain`,
+# `Physics`, `Define`, and `Run` values without modifying the file:
+#
+# ```julia
+# run_simulation("couette.krk"; Ny=64, max_steps=20000)
+# ```
+#
+# We use this to sweep ``N_y`` and measure the ``L_2`` error at each
+# resolution.  The number of steps is scaled as ``\sim H^2/\nu`` to
+# reach steady state.
 
 Ny_list = [16, 32, 64, 128]
 errors  = Float64[]
@@ -99,33 +106,19 @@ for Ny_i in Ny_list
     H_i    = Ny_i - 1
     nsteps = max(10_000, ceil(Int, 3 * H_i^2 / 0.1))
 
-    setup = parse_kraken("""
-        Simulation couette D2Q9
-        Domain L = 0.125 x 1.0  N = 4 x $Ny_i
+    res = run_simulation(krk; Ny=Ny_i, max_steps=nsteps)
 
-        Define u_wall = 0.05
-
-        Physics nu = 0.1
-
-        Boundary x periodic
-        Boundary south wall
-        Boundary north velocity(ux = u_wall, uy = 0)
-
-        Run $nsteps steps
-    """)
-    res = run_simulation(setup)
-
-    jf   = 2:Ny_i-1
-    u_a  = [0.05 * (j - 1) / H_i for j in jf]
-    u_n  = [res.ux[2, j] for j in jf]
-    L2   = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
+    jf  = 2:Ny_i-1
+    u_a = [0.05 * (j - 1) / H_i for j in jf]
+    u_n = [res.ux[2, j] for j in jf]
+    L2  = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
     push!(errors, L2)
 end
 
 fig2 = Figure(size=(500, 400))
 ax2  = Axis(fig2[1, 1];
     xlabel = "Ny", ylabel = "Relative L₂ error",
-    title  = "Convergence — Couette flow (.krk)",
+    title  = "Convergence — Couette flow",
     xscale = log10, yscale = log10)
 scatterlines!(ax2, Float64.(Ny_list), errors;
     linewidth=2, markersize=10, label="LBM")
@@ -134,11 +127,10 @@ axislegend(ax2; position=:rt)
 fig2
 save("couette_convergence.svg", fig2) #hide
 
-# The error is at ``\sim 10^{-2}`` because the `.krk` runner uses the
-# `stream_periodic_x_wall_y_2d!` kernel with half-way bounce-back on
-# the south wall (first-order wall position), combined with Zou–He
-# on the north wall (on-node).  With both walls using Zou–He (as in the
-# Julia API `run_couette_2d`), the error drops to machine precision.
+# The error is at ``\sim 10^{-2}`` because the `.krk` runner uses
+# half-way bounce-back on the south wall (first-order wall position).
+# With both walls using Zou–He (Julia API `run_couette_2d`), the error
+# drops to machine precision.
 #
 # ---
 #
