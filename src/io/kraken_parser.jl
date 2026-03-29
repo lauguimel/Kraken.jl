@@ -25,15 +25,29 @@ struct PhysicsSetup
 end
 
 """
+    STLSource
+
+Reference to an STL file with optional transform parameters.
+"""
+struct STLSource
+    file::String
+    scale::Float64
+    translate::NTuple{3, Float64}
+    z_slice::Float64   # z-plane for 2D cross-section (default 0.0)
+end
+
+"""
     GeometryRegion
 
-A geometry region defining solid obstacles or fluid zones via a condition expression.
+A geometry region defining solid obstacles or fluid zones.
+Either via a condition expression OR an STL file (mutually exclusive).
 """
 struct GeometryRegion
     name::String
-    kind::Symbol          # :obstacle or :fluid
-    condition::KrakenExpr # (x, y [,z]) -> Bool
-    bc_type::Symbol       # :wall (default)
+    kind::Symbol                        # :obstacle or :fluid
+    condition::Union{KrakenExpr, Nothing}  # (x, y [,z]) -> Bool (nothing if STL)
+    stl::Union{STLSource, Nothing}         # STL file source (nothing if condition)
+    bc_type::Symbol                     # :wall (default)
     bc_values::Dict{Symbol, KrakenExpr}
 end
 
@@ -317,15 +331,8 @@ function _parse_fluid(line::String, user_vars::Dict{Symbol,Float64})
 end
 
 function _parse_geometry_region(line::String, kind::Symbol, user_vars::Dict{Symbol,Float64})
-    # Extract brace content
-    brace_m = match(r"\{(.+)\}", line)
-    brace_m === nothing && throw(ArgumentError("Missing { condition } in: $line"))
-    condition_str = strip(String(brace_m.captures[1]))
-
-    # Extract name (second word)
-    keyword = kind == :obstacle ? "Obstacle" : "Fluid"
+    # Extract name (second word after keyword)
     after_kw = strip(replace(line, r"^\w+" => ""))
-    # Name is the first word after keyword, before any wall(...) or {
     name_m = match(r"^(\w+)", after_kw)
     name_m === nothing && throw(ArgumentError("Missing name in: $line"))
     name = String(name_m.captures[1])
@@ -342,8 +349,19 @@ function _parse_geometry_region(line::String, kind::Symbol, user_vars::Dict{Symb
         end
     end
 
+    # Check for STL source: stl(file = "...", scale = ..., ...)
+    stl_m = match(r"stl\(([^)]+)\)", line)
+    if stl_m !== nothing
+        stl_source = _parse_stl_params(stl_m.captures[1])
+        return GeometryRegion(name, kind, nothing, stl_source, bc_type, bc_values)
+    end
+
+    # Otherwise: condition expression in { ... }
+    brace_m = match(r"\{(.+)\}", line)
+    brace_m === nothing && throw(ArgumentError("Missing { condition } or stl(...) in: $line"))
+    condition_str = strip(String(brace_m.captures[1]))
     condition = parse_kraken_expr(condition_str, user_vars)
-    return GeometryRegion(name, kind, condition, bc_type, bc_values)
+    return GeometryRegion(name, kind, condition, nothing, bc_type, bc_values)
 end
 
 """Parse: Boundary <face> <type>(<params>) or Boundary <axis> periodic"""
@@ -537,4 +555,34 @@ function _parse_diagnostics(line::String)
     end
 
     return DiagnosticsSetup(interval, columns)
+end
+
+"""Parse STL parameters from stl(file = "...", scale = ..., translate = [...], z_slice = ...)"""
+function _parse_stl_params(params_str::AbstractString)
+    # Extract file path (quoted string)
+    file_m = match(r"""file\s*=\s*"([^"]+)""", params_str)
+    file_m === nothing && throw(ArgumentError(
+        "STL source requires file parameter: stl(file = \"path.stl\")"))
+    file = String(file_m.captures[1])
+
+    # Optional: scale
+    scale = 1.0
+    scale_m = match(r"scale\s*=\s*([\d.eE+-]+)", params_str)
+    scale_m !== nothing && (scale = parse(Float64, scale_m.captures[1]))
+
+    # Optional: translate = [x, y, z]
+    translate = (0.0, 0.0, 0.0)
+    tr_m = match(r"translate\s*=\s*\[\s*([\d.eE+-]+)\s*,\s*([\d.eE+-]+)\s*,\s*([\d.eE+-]+)\s*\]", params_str)
+    if tr_m !== nothing
+        translate = (parse(Float64, tr_m.captures[1]),
+                     parse(Float64, tr_m.captures[2]),
+                     parse(Float64, tr_m.captures[3]))
+    end
+
+    # Optional: z_slice (for 2D cross-section)
+    z_slice = 0.0
+    zs_m = match(r"z_slice\s*=\s*([\d.eE+-]+)", params_str)
+    zs_m !== nothing && (z_slice = parse(Float64, zs_m.captures[1]))
+
+    return STLSource(file, scale, translate, z_slice)
 end

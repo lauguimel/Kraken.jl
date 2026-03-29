@@ -306,7 +306,7 @@ function _apply_pressure_bc!(f, face::Symbol, rho_val, Nx, Ny)
     end
 end
 
-"""Build is_solid mask from geometry regions."""
+"""Build is_solid mask from geometry regions (condition expressions or STL files)."""
 function _apply_geometry!(is_solid, setup::SimulationSetup, dx, dy)
     Nx, Ny = setup.domain.Nx, setup.domain.Ny
     Lx, Ly = setup.domain.Lx, setup.domain.Ly
@@ -315,20 +315,42 @@ function _apply_geometry!(is_solid, setup::SimulationSetup, dx, dy)
     solid_cpu = has_fluid_region ? ones(Bool, Nx, Ny) : zeros(Bool, Nx, Ny)
 
     for region in setup.regions
-        for j in 1:Ny, i in 1:Nx
-            x = (i - 0.5) * dx
-            y = (j - 0.5) * dy
-            result = evaluate(region.condition; x=x, y=y, z=0.0,
-                             Lx=Lx, Ly=Ly, dx=dx, dy=dy)
-            if region.kind == :fluid && result
-                solid_cpu[i, j] = false
-            elseif region.kind == :obstacle && result
-                solid_cpu[i, j] = true
+        if region.stl !== nothing
+            # STL-based geometry
+            stl_mask = _voxelize_stl_region(region.stl, Nx, Ny, dx, dy)
+            for j in 1:Ny, i in 1:Nx
+                if region.kind == :fluid && stl_mask[i, j]
+                    solid_cpu[i, j] = false
+                elseif region.kind == :obstacle && stl_mask[i, j]
+                    solid_cpu[i, j] = true
+                end
+            end
+        else
+            # Expression-based geometry
+            for j in 1:Ny, i in 1:Nx
+                x = (i - 0.5) * dx
+                y = (j - 0.5) * dy
+                result = evaluate(region.condition; x=x, y=y, z=0.0,
+                                 Lx=Lx, Ly=Ly, dx=dx, dy=dy)
+                if region.kind == :fluid && result
+                    solid_cpu[i, j] = false
+                elseif region.kind == :obstacle && result
+                    solid_cpu[i, j] = true
+                end
             end
         end
     end
 
     copyto!(is_solid, solid_cpu)
+end
+
+"""Load and voxelize an STL file for a 2D simulation (z-plane cross-section)."""
+function _voxelize_stl_region(stl_src::STLSource, Nx, Ny, dx, dy)
+    mesh = read_stl(stl_src.file)
+    if stl_src.scale != 1.0 || stl_src.translate != (0.0, 0.0, 0.0)
+        mesh = transform_mesh(mesh; scale=stl_src.scale, translate=stl_src.translate)
+    end
+    return voxelize_2d(mesh, Nx, Ny, dx, dy; z_slice=stl_src.z_slice)
 end
 
 """Apply initial conditions from expressions."""

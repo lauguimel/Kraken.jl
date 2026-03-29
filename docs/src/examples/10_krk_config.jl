@@ -183,6 +183,56 @@ nothing #hide
 
 # ---
 #
+# ## STL geometry import
+#
+# Complex geometries can be imported from STL files (binary or ASCII).
+# The mesh is voxelized onto the LBM grid using ray casting.
+#
+# ### Syntax
+#
+# ```
+# Obstacle body stl(file = "geometry.stl")
+# Obstacle body stl(file = "geometry.stl", scale = 0.001, translate = [1.0, 0.5, 0.0])
+# ```
+#
+# ### Parameters
+#
+# | Parameter | Default | Description |
+# |-----------|---------|-------------|
+# | `file`    | (required) | Path to STL file (relative to `.krk` file) |
+# | `scale`   | `1.0`   | Uniform scaling factor (applied first) |
+# | `translate` | `[0,0,0]` | Translation vector ``(t_x, t_y, t_z)`` (applied after scale) |
+# | `z_slice` | `0.0`   | z-plane for 2D cross-section (only for D2Q9) |
+#
+# For **2D simulations** (D2Q9), the STL is sliced at `z = z_slice` to extract
+# a 2D contour, then voxelized via 2D ray casting.
+# For **3D simulations** (D3Q19), full volumetric ray casting along the z-axis
+# is used.
+#
+# ### Example: airfoil from STL
+#
+# ```
+# Simulation airfoil D2Q9
+# Domain  L = 4 x 2  N = 400 x 200
+# Physics nu = 0.01
+#
+# Obstacle wing stl(file = "naca0012.stl", scale = 0.5, translate = [1.0, 1.0, 0.0])
+#
+# Boundary west  velocity(ux = 0.05, uy = 0)
+# Boundary east  pressure(rho = 1.0)
+# Boundary south wall
+# Boundary north wall
+#
+# Run 50000 steps
+# Output vtk every 1000 [rho, ux, uy]
+# ```
+#
+# !!! note "Watertight meshes"
+#     The STL surface must be closed (watertight) for the ray-casting voxelization
+#     to produce correct inside/outside classification.
+#
+# ---
+#
 # ## Programmatic usage
 #
 # The `.krk` file is parsed into a `SimulationSetup` struct that can also be

@@ -37,6 +37,8 @@ include("simulation.jl")
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
 include("io/expression.jl")
+include("io/stl_reader.jl")
+include("io/voxelizer.jl")
 include("io/kraken_parser.jl")
 
 # --- Spatial boundary kernels ---
@@ -109,9 +111,13 @@ export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
 # .krk config system
 export KrakenExpr, parse_kraken_expr, evaluate, has_variable, is_time_dependent, is_spatial
 export SimulationSetup, DomainSetup, PhysicsSetup, GeometryRegion, BoundarySetup
-export InitialSetup, OutputSetup, DiagnosticsSetup
+export InitialSetup, OutputSetup, DiagnosticsSetup, STLSource
 export load_kraken, parse_kraken
 export run_simulation
+
+# STL geometry
+export STLTriangle, STLMesh, read_stl, transform_mesh
+export voxelize_2d, voxelize_3d
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
