@@ -12,6 +12,7 @@ const LITERATE_DIRS = [
     "theory",
     "examples",
     "benchmarks",
+    "tutorials",
 ]
 
 for dir in LITERATE_DIRS
@@ -35,14 +36,21 @@ end
 
 const TUTORIAL_DIR = joinpath(DOCS_SRC, "tutorials")
 
-if isdir(TUTORIAL_DIR) && !isempty(filter(f -> endswith(f, ".jl"), readdir(TUTORIAL_DIR)))
-    @info "Building Pluto notebooks → tutorials/"
-    bopts = BuildOptions(TUTORIAL_DIR;
-        output_format = documenter_output,
-        use_distributed = false,
-    )
-    notebooks = sort(filter(f -> endswith(f, ".jl"), readdir(TUTORIAL_DIR)))
-    build_notebooks(bopts, notebooks)
+# Pluto notebooks (if any): only process files that start with Pluto header
+if isdir(TUTORIAL_DIR)
+    pluto_files = filter(readdir(TUTORIAL_DIR)) do f
+        endswith(f, ".jl") || return false
+        first_line = readline(joinpath(TUTORIAL_DIR, f))
+        return startswith(first_line, "### A Pluto.jl notebook ###")
+    end
+    if !isempty(pluto_files)
+        @info "Building Pluto notebooks → tutorials/" pluto_files
+        bopts = BuildOptions(TUTORIAL_DIR;
+            output_format = documenter_output,
+            use_distributed = false,
+        )
+        build_notebooks(bopts, sort(pluto_files))
+    end
 end
 
 # --- Bibliography ---
@@ -93,7 +101,7 @@ makedocs(;
             "examples/09_hagen_poiseuille.md",
             "examples/10_krk_config.md",
         ],
-        "Tutorials (Interactive)" => [
+        "Tutorials" => [
             "tutorials/02_couette_2d.md",
         ],
         "Benchmarks" => [
