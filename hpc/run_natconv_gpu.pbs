@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#PBS -N kraken_natconv_gpu
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -V
+
+# --- Natural convection benchmark: GPU (H100) vs CPU ---
+# Kraken.jl LBM — refinement study N={128,256,512}, Ra={1e3,1e4,1e5}
+
+WORKDIR=$HOME/Kraken.jl
+cd $WORKDIR
+
+echo "========================================"
+echo "Job: $PBS_JOBID"
+echo "Node: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "PWD:  $(pwd)"
+echo "Start: $(date)"
+echo "========================================"
+
+# --- Environment setup ---
+# Julia: via juliaup (install first time with: curl -fsSL https://install.julialang.org | sh)
+export PATH=$HOME/.juliaup/bin:$PATH
+
+# CUDA: Julia CUDA.jl uses its own artifacts, but needs the driver visible.
+# On aqua GPU nodes the driver is pre-installed. If module needed, uncomment:
+# module load CUDA/12.1.1
+# module load GCC/13.2.0
+
+# Verify GPU is visible
+nvidia-smi
+
+# Install deps (first run only — CUDA.jl downloads its own toolkit)
+julia --project -e '
+    using Pkg
+    Pkg.instantiate()
+    Pkg.add("CUDA")
+    using CUDA
+    CUDA.versioninfo()
+' 2>&1
+
+# Run the benchmark
+julia --project hpc/natconv_gpu.jl 2>&1
+
+EXIT_CODE=$?
+
+echo "========================================"
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "✓ Completed successfully"
+else
+    echo "✗ Failed (exit code: $EXIT_CODE)"
+fi
+echo "End: $(date)"
+echo "========================================"
+
+exit $EXIT_CODE

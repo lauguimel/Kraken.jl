@@ -73,8 +73,9 @@ export initialize_taylor_green_2d, run_taylor_green_2d
 export initialize_cylinder_2d, run_cylinder_2d, compute_drag_mea_2d
 export collide_thermal_2d!, compute_temperature_2d!
 export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
-export run_rayleigh_benard_2d
-export collide_boussinesq_2d!, collide_boussinesq_vt_2d!
+export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
+export run_rayleigh_benard_2d, run_natural_convection_2d
+export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT

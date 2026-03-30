@@ -1,0 +1,58 @@
+#!/bin/bash -l
+#PBS -N kraken_natconv_cpu
+#PBS -l select=1:ncpus=12:mem=16GB
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -V
+
+# --- Natural convection CPU benchmark (12 cores, same as OpenFOAM) ---
+# For timing comparison with OpenFOAM/RheoTool runs
+
+WORKDIR=$HOME/Kraken.jl
+cd $WORKDIR
+
+echo "========================================"
+echo "Job: $PBS_JOBID"
+echo "Node: $(hostname)"
+echo "CPUs: 12"
+echo "Start: $(date)"
+echo "========================================"
+
+# Julia via juliaup
+export PATH=$HOME/.juliaup/bin:$PATH
+
+julia --project -e 'using Pkg; Pkg.instantiate()' 2>&1
+
+# LBM is single-threaded (GPU-native), but Julia GC uses threads
+export JULIA_NUM_THREADS=1
+
+julia --project -e '
+using Kraken, KernelAbstractions, Printf
+
+DE_VAHL_DAVIS = Dict(1e3 => 1.118, 1e4 => 2.243, 1e5 => 4.519)
+
+function nsteps(N, Ra)
+    base_128 = Ra <= 1e3 ? 40_000 : (Ra <= 1e4 ? 80_000 : 160_000)
+    return round(Int, base_128 * (N / 128)^2)
+end
+
+println("\n  CPU Benchmark — Natural Convection (Pr=0.71, Rc=1)\n")
+@printf("  %-6s  %-8s  %-10s  %-10s  %-8s  %-10s  %-8s\n",
+        "N", "Ra", "Nu", "Nu_ref", "Err%", "Time(s)", "Steps")
+println("  " * "-" ^ 66)
+
+for Ra in [1e3, 1e4, 1e5], N in [128, 256, 512]
+    steps = nsteps(N, Ra)
+    t = @elapsed r = run_natural_convection_2d(; N=N, Ra=Ra, Pr=0.71, Rc=1.0,
+                                                  max_steps=steps)
+    Nu_ref = DE_VAHL_DAVIS[Ra]
+    err = 100 * abs(r.Nu - Nu_ref) / Nu_ref
+    @printf("  %-6d  %-8.0e  %-10.4f  %-10.3f  %-8.2f  %-10.1f  %-8d\n",
+            N, Ra, r.Nu, Nu_ref, err, t, steps)
+end
+println()
+' 2>&1
+
+echo "========================================"
+echo "End: $(date)"
+echo "========================================"

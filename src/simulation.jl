@@ -221,6 +221,7 @@ function run_couette_2d(; Nx=4, Ny=32, ν=0.1, u_wall=0.05, max_steps=10000,
     for step in 1:max_steps
         stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
         apply_zou_he_south_2d!(f_out, u_wall, Nx)
+        apply_zou_he_north_2d!(f_out, T(0), Nx, Ny)
         collide_2d!(f_out, is_solid, ω)
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
         f_in, f_out = f_out, f_in
@@ -508,6 +509,106 @@ function run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000.0, Pr=1.0,
 
     return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=Array(Temp),
             config=config, Ra=Ra, Pr=Pr, ν=ν, α=α)
+end
+
+# --- Natural convection in a differentially heated cavity ---
+
+"""
+    run_natural_convection_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
+                                T_hot=1.0, T_cold=0.0, max_steps=50000,
+                                backend, FT)
+
+Natural convection in a square cavity: hot left wall, cold right wall,
+adiabatic top/bottom. Boussinesq approximation with optional
+temperature-dependent viscosity via modified Arrhenius law.
+
+Ra = β·g·ΔT·H³/(ν·α), Pr = ν/α, Rc = η_max/η_min (rheological contrast).
+For Rc=1: constant viscosity. For Rc>1: ν(T) = ν_ref·exp(α_visc·(T - T_ref)).
+"""
+function run_natural_convection_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
+                                     T_hot=1.0, T_cold=0.0, max_steps=50000,
+                                     backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny = N, N
+    ΔT = T_hot - T_cold
+    H = FT(N)
+
+    # LBM parameters
+    ν = FT(0.05)
+    α_thermal = ν / FT(Pr)
+    β_g = FT(Ra) * ν * α_thermal / (FT(ΔT) * H^3)
+
+    ω_f = FT(1.0 / (3.0 * ν + 0.5))
+    ω_T = FT(1.0 / (3.0 * α_thermal + 0.5))
+
+    # Variable viscosity: modified Arrhenius
+    α_visc = FT(log(Rc))
+    T_ref = FT((T_hot + T_cold) / 2)
+
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(ν), u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    # Thermal populations: horizontal linear profile T(x)
+    g_in  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    g_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    Temp  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    w = weights(D2Q9())
+    g_cpu = zeros(FT, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        T_init = FT(T_hot - ΔT * (i - 1) / (Nx - 1))
+        T_init += FT(0.01 * ΔT) * sin(FT(2π * i / Nx)) * sin(FT(π * j / Ny))
+        for q in 1:9
+            g_cpu[i, j, q] = FT(w[q]) * T_init
+        end
+    end
+    copyto!(g_in, g_cpu)
+    copyto!(g_out, g_cpu)
+
+    for step in 1:max_steps
+        # 1. Stream (bounce-back on all 4 walls)
+        stream_2d!(f_out, f_in, Nx, Ny)
+        stream_2d!(g_out, g_in, Nx, Ny)
+
+        # 2. Thermal BCs: fixed T on left/right, adiabatic top/bottom (bounce-back)
+        apply_fixed_temp_west_2d!(g_out, T_hot, Ny)
+        apply_fixed_temp_east_2d!(g_out, T_cold, Nx, Ny)
+
+        # 3. Recover macroscopic fields
+        compute_temperature_2d!(Temp, g_out)
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+
+        # 4. Collide thermal
+        collide_thermal_2d!(g_out, ux, uy, ω_T)
+
+        # 5. Collide flow with Boussinesq
+        if Rc ≈ 1.0
+            collide_boussinesq_2d!(f_out, Temp, is_solid, ω_f, β_g, T_ref)
+        else
+            collide_boussinesq_vt_modified_2d!(f_out, Temp, is_solid, ν, T_ref, α_visc, β_g)
+        end
+
+        # 6. Swap
+        f_in, f_out = f_out, f_in
+        g_in, g_out = g_out, g_in
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+    compute_temperature_2d!(Temp, g_in)
+
+    # Compute Nusselt number at hot wall (second-order forward FD)
+    T_cpu = Array(Temp)
+    dx = FT(1.0)  # lattice spacing
+    Nu_local = zeros(FT, Ny)
+    for j in 2:Ny-1
+        Nu_local[j] = -H * (-3*T_cpu[1,j] + 4*T_cpu[2,j] - T_cpu[3,j]) / (2*dx) / FT(ΔT)
+    end
+    Nu = sum(Nu_local[2:end-1]) / (Ny - 2)
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=T_cpu,
+            Nu=Nu, config=config, Ra=Ra, Pr=Pr, Rc=Rc, ν=Float64(ν), α=Float64(α_thermal))
 end
 
 # --- Axisymmetric D2Q9 (z-r coordinates) ---

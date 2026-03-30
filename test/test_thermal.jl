@@ -91,4 +91,31 @@ using Kraken
         @test all(isfinite, Array(state.ux))
         @info "ν(T) Arrhenius kernel: stable after 500 steps"
     end
+
+    @testset "Natural convection cavity (Rc=1)" begin
+        # De Vahl Davis benchmark: Ra=1e3, Pr=0.71, Nu ≈ 1.118
+        result = run_natural_convection_2d(; N=64, Ra=1e3, Pr=0.71, Rc=1.0,
+                                             max_steps=30000)
+
+        @test !any(isnan, result.Temp)
+        @test !any(isnan, result.ux)
+        @test !any(isnan, result.uy)
+
+        Nu_ref = 1.118  # De Vahl Davis (1983)
+        rel_err = abs(result.Nu - Nu_ref) / Nu_ref
+        @test rel_err < 0.10  # 10% tolerance at N=64
+        @info "Natural convection Ra=1e3: Nu = $(round(result.Nu, digits=4)) " *
+              "(ref = $Nu_ref, error = $(round(100*rel_err, digits=2))%)"
+    end
+
+    @testset "Modified Arrhenius kernel (Rc>1)" begin
+        # Verify stability of modified Arrhenius kernel with Rc=10
+        result = run_natural_convection_2d(; N=32, Ra=1e3, Pr=0.71, Rc=10.0,
+                                             max_steps=10000)
+
+        @test !any(isnan, result.Temp)
+        @test !any(isnan, result.ux)
+        @test result.Nu > 1.0  # should be > conduction limit
+        @info "Natural convection Ra=1e3, Rc=10: Nu = $(round(result.Nu, digits=4))"
+    end
 end
