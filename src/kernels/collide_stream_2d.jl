@@ -7,15 +7,20 @@ using KernelAbstractions
 
     @inbounds begin
         # Pull from neighbors; if source is out of bounds → bounce-back
+        # Clamped indices ensure valid memory access on both CPU and GPU
+        # (ifelse evaluates both branches, so the "dead" read must be in-bounds)
+        im = max(i - 1, 1); ip = min(i + 1, Nx)
+        jm = max(j - 1, 1); jp = min(j + 1, Ny)
+
         fp1 = f_in[i, j, 1]
-        fp2 = ifelse(i > 1,             f_in[i-1, j, 2], f_in[i, j, 4])
-        fp3 = ifelse(j > 1,             f_in[i, j-1, 3], f_in[i, j, 5])
-        fp4 = ifelse(i < Nx,            f_in[i+1, j, 4], f_in[i, j, 2])
-        fp5 = ifelse(j < Ny,            f_in[i, j+1, 5], f_in[i, j, 3])
-        fp6 = ifelse(i > 1  && j > 1,   f_in[i-1, j-1, 6], f_in[i, j, 8])
-        fp7 = ifelse(i < Nx && j > 1,   f_in[i+1, j-1, 7], f_in[i, j, 9])
-        fp8 = ifelse(i < Nx && j < Ny,  f_in[i+1, j+1, 8], f_in[i, j, 6])
-        fp9 = ifelse(i > 1  && j < Ny,  f_in[i-1, j+1, 9], f_in[i, j, 7])
+        fp2 = ifelse(i > 1,             f_in[im, j,  2], f_in[i, j, 4])
+        fp3 = ifelse(j > 1,             f_in[i,  jm, 3], f_in[i, j, 5])
+        fp4 = ifelse(i < Nx,            f_in[ip, j,  4], f_in[i, j, 2])
+        fp5 = ifelse(j < Ny,            f_in[i,  jp, 5], f_in[i, j, 3])
+        fp6 = ifelse(i > 1  && j > 1,   f_in[im, jm, 6], f_in[i, j, 8])
+        fp7 = ifelse(i < Nx && j > 1,   f_in[ip, jm, 7], f_in[i, j, 9])
+        fp8 = ifelse(i < Nx && j < Ny,  f_in[ip, jp, 8], f_in[i, j, 6])
+        fp9 = ifelse(i > 1  && j < Ny,  f_in[im, jp, 9], f_in[i, j, 7])
 
         f_out[i,j,1] = fp1
         f_out[i,j,2] = fp2; f_out[i,j,3] = fp3
