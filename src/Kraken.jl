@@ -47,6 +47,9 @@ include("kernels/boundary_spatial_2d.jl")
 # --- Generic simulation runner ---
 include("simulation_runner.jl")
 
+# --- Post-processing helpers ---
+include("postprocess.jl")
+
 # Lattice types and functions
 export AbstractLattice, D2Q9, D3Q19
 export lattice_dim, lattice_q, weights, velocities_x, velocities_y, velocities_z
@@ -118,6 +121,9 @@ export run_simulation
 # STL geometry
 export STLTriangle, STLMesh, read_stl, transform_mesh
 export voxelize_2d, voxelize_3d
+
+# Post-processing
+export extract_line, field_error, probe, domain_stats
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!

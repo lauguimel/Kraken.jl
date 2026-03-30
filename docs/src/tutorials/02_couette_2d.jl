@@ -21,8 +21,6 @@
 #
 # Download: [`couette.krk`](../assets/krk/couette.krk)
 #
-# The entire simulation is defined in a plain-text `.krk` file:
-#
 # ```
 # Simulation couette D2Q9
 # Domain  L = 0.125 x 1.0  N = 4 x 32
@@ -36,83 +34,68 @@
 # Boundary north velocity(ux = u_wall, uy = 0)
 #
 # Run 10000 steps
-# Output vtk every 2000 [rho, ux, uy]
 # ```
 #
-# **Key points:**
-# - `Boundary x periodic` — makes both west and east faces periodic
-# - `Boundary south wall` — half-way bounce-back (stationary, no-slip)
-# - `Boundary north velocity(ux = u_wall, uy = 0)` — Zou–He moving wall
-# - `Define u_wall = 0.05` — user variable substituted everywhere
-#
-# ## Run it
+# ## Run and post-process
 
 using Kraken
 using CairoMakie
 
 krk = joinpath(@__DIR__, "..", "..", "..", "examples", "couette.krk")
 result = run_simulation(krk)
+
+# Extract the velocity profile along ``y`` at the domain centre:
+
+prof = extract_line(result, :ux, :y; at=0.5)
+
+# Check global statistics:
+
+stats = domain_stats(result)
 nothing #hide
 
-# One line: `run_simulation("couette.krk")`.  The result is a `NamedTuple`
-# with `ρ`, `ux`, `uy` fields on CPU, ready for post-processing.
+# `stats.max_u`, `stats.mean_rho`, `stats.mass_error` — one call.
 #
 # ## Velocity profile
 #
-# Compare the numerical profile along a vertical slice with the analytical
-# linear solution.
+# Compare with the analytical solution.  `field_error` takes an expression
+# string that can reference all `Define` variables from the `.krk` file:
 
-Ny = 32
-u_wall = 0.05
+err = field_error(result, :ux, "u_wall * (y - 0.5*dy) / (Ny*dy - dy)")
+nothing #hide
+
+# The analytical expression uses `u_wall` (from `Define`), `y`, `dy`, `Ny`
+# — all resolved automatically from the `.krk` setup.
+
+Ny = result.setup.domain.Ny
+u_wall = result.setup.user_vars[:u_wall]
 H = Ny - 1
-
-y_phys = [j - 1 for j in 1:Ny]
-u_ana  = [u_wall * (j - 1) / H for j in 1:Ny]
-u_num  = result.ux[2, :]
 
 fig = Figure(size=(600, 420))
 ax = Axis(fig[1, 1];
     xlabel = "u_x  (lattice units)",
-    ylabel = "y  (lattice units)",
-    title  = "Couette flow — Ny = $Ny")
-lines!(ax, u_ana, y_phys; label="Analytical", linewidth=2)
-scatter!(ax, u_num, y_phys; label="LBM (.krk)", markersize=8)
+    ylabel = "y  (physical units)",
+    title  = "Couette flow — Ny = $Ny, L₂ error = $(round(err.error, digits=2))")
+lines!(ax, err.analytical_field[2, :], prof.coord; label="Analytical", linewidth=2)
+scatter!(ax, prof.values, prof.coord; label="LBM (.krk)", markersize=8)
 axislegend(ax; position=:rt)
 fig
 save("couette_profile.svg", fig) #hide
 
-# The numerical and analytical profiles overlap perfectly.
-#
 # ---
 #
-# ## Convergence study — parametric kwargs
+# ## Convergence study
 #
-# The same `.krk` file can be re-used at different resolutions by passing
-# **keyword arguments** to `run_simulation`.  These override `Domain`,
-# `Physics`, `Define`, and `Run` values without modifying the file:
-#
-# ```julia
-# run_simulation("couette.krk"; Ny=64, max_steps=20000)
-# ```
-#
-# We use this to sweep ``N_y`` and measure the ``L_2`` error at each
-# resolution.  The number of steps is scaled as ``\sim H^2/\nu`` to
-# reach steady state.
+# Sweep ``N_y`` using **parametric kwargs** — same `.krk` file, different
+# resolution.  `field_error` computes the error at each level:
 
 Ny_list = [16, 32, 64, 128]
 errors  = Float64[]
 
 for Ny_i in Ny_list
-    H_i    = Ny_i - 1
-    nsteps = max(10_000, ceil(Int, 3 * H_i^2 / 0.1))
-
+    nsteps = max(10_000, ceil(Int, 3 * (Ny_i - 1)^2 / 0.1))
     res = run_simulation(krk; Ny=Ny_i, max_steps=nsteps)
-
-    jf  = 2:Ny_i-1
-    u_a = [0.05 * (j - 1) / H_i for j in jf]
-    u_n = [res.ux[2, j] for j in jf]
-    L2  = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
-    push!(errors, L2)
+    e = field_error(res, :ux, "u_wall * (y - 0.5*dy) / (Ny*dy - dy)")
+    push!(errors, e.error)
 end
 
 fig2 = Figure(size=(500, 400))
@@ -127,29 +110,19 @@ axislegend(ax2; position=:rt)
 fig2
 save("couette_convergence.svg", fig2) #hide
 
-# The error is at ``\sim 10^{-2}`` because the `.krk` runner uses
-# half-way bounce-back on the south wall (first-order wall position).
-# With both walls using Zou–He (Julia API `run_couette_2d`), the error
-# drops to machine precision.
-#
 # ---
 #
-# ## Anatomy of a `.krk` file
+# ## Summary of post-processing helpers
 #
-# | Line | What it does |
-# |------|-------------|
-# | `Simulation couette D2Q9` | Name the simulation and pick the lattice |
-# | `Domain L = 0.125 x 1.0 N = 4 x 32` | Physical size and grid resolution |
-# | `Define u_wall = 0.05` | Declare a variable (substituted in all expressions) |
-# | `Physics nu = 0.1` | Set kinematic viscosity (lattice units) |
-# | `Boundary x periodic` | Make west + east faces periodic |
-# | `Boundary south wall` | No-slip (bounce-back) |
-# | `Boundary north velocity(...)` | Zou–He velocity, can use expressions |
-# | `Run 10000 steps` | Number of timesteps |
-# | `Output vtk every 2000 [...]` | Write VTK files |
+# | Function | Purpose | Example |
+# |----------|---------|---------|
+# | `extract_line(result, :ux, :y; at=0.5)` | 1D profile along an axis | Centreline velocity |
+# | `field_error(result, :ux, "expr")` | ``L_2``/``L_\infty`` error vs expression | Validation |
+# | `probe(result, :ux, x, y)` | Point value | Specific location |
+# | `domain_stats(result)` | Global stats (max\_u, mass error, ...) | Quick check |
 #
-# No Julia code is needed to define or run the simulation.
-# The full syntax reference is in the [Configuration Files](../examples/10_krk_config.md) page.
+# Expressions in `field_error` have access to all `Define` variables from the
+# `.krk` file, plus `x`, `y`, `Lx`, `Ly`, `Nx`, `Ny`, `dx`, `dy`.
 #
 # ## References
 #
