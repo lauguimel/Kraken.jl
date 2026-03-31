@@ -2,9 +2,9 @@
 # Thermal extension for patch-based grid refinement
 #
 # Adds thermal DDF (g populations) support to the existing refinement system.
-# The thermal populations g use the same D2Q9 lattice and the same
-# prolongation/restriction kernels as f (Filippova-Hanel rescaling applies
-# identically to the thermal non-equilibrium part).
+# The thermal populations g use the same D2Q9 lattice but simpler
+# prolongation (bilinear interpolation without Filippova-Hanel rescaling,
+# since g_eq is linear in T) and restriction (block averaging).
 #
 # The thermal relaxation ω_T is rescaled the same way as ω_f:
 #   tau_T_fine = ratio * (tau_T_coarse - 0.5) + 0.5
@@ -92,57 +92,159 @@ function save_thermal_coarse_state!(patch::RefinementPatch{T},
 end
 
 """
-    fill_thermal_ghost!(patch, thermal, g_coarse, Nx_c, Ny_c)
+    fill_thermal_ghost!(patch, thermal, g_coarse, Nx_c, Ny_c; t_frac=0)
 
-Fill fine-grid thermal ghost cells using simple injection from coarse g.
-Unlike flow populations, thermal g uses simple bilinear interpolation
-(no Filippova-Hanel rescaling — g_eq is linear in T, not quadratic in u).
+Fill fine-grid thermal ghost cells using bilinear interpolation of coarse g.
+Unlike flow populations, no Filippova-Hanel rescaling (g_eq is linear in T).
+When `t_frac > 0`, temporally interpolates between saved g_prev (time n)
+and current g_coarse (time n+1) for sub-cycling consistency.
 """
 function fill_thermal_ghost!(patch::RefinementPatch{T},
                               thermal::ThermalPatchArrays{T},
                               g_coarse,
-                              Nx_c::Int, Ny_c::Int) where T
-    _fill_thermal_ghost_simple!(
-        thermal.g_in, g_coarse,
-        patch.ratio, patch.Nx_inner, patch.Ny_inner,
-        patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
-        Nx_c, Ny_c
-    )
+                              Nx_c::Int, Ny_c::Int;
+                              t_frac::Real=zero(T)) where T
+    if t_frac > zero(T)
+        # Temporal + spatial interpolation
+        _fill_thermal_ghost_temporal!(
+            thermal.g_in, g_coarse, thermal.g_prev,
+            patch.ratio, patch.Nx_inner, patch.Ny_inner,
+            patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
+            Nx_c, Ny_c, T(t_frac))
+    else
+        _fill_thermal_ghost_simple!(
+            thermal.g_in, g_coarse,
+            patch.ratio, patch.Nx_inner, patch.Ny_inner,
+            patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
+            Nx_c, Ny_c)
+    end
 end
 
-"""Simple injection of coarse g into fine ghost cells (nearest-neighbor)."""
+"""Bilinear interpolation of coarse g into fine ghost cells."""
 function _fill_thermal_ghost_simple!(g_fine, g_coarse,
                                       ratio, Nx_inner, Ny_inner, n_ghost,
                                       i_offset, j_offset, Nx_c, Ny_c)
     backend = KernelAbstractions.get_backend(g_fine)
     Nx_f = Nx_inner + 2 * n_ghost
     Ny_f = Ny_inner + 2 * n_ghost
-    kernel! = _fill_thermal_ghost_simple_kernel!(backend)
+    kernel! = _fill_thermal_ghost_bilinear_kernel!(backend)
     kernel!(g_fine, g_coarse, ratio, Nx_inner, Ny_inner, n_ghost,
             i_offset, j_offset, Nx_c, Ny_c; ndrange=(Nx_f, Ny_f))
     KernelAbstractions.synchronize(backend)
 end
 
-@kernel function _fill_thermal_ghost_simple_kernel!(g_fine, @Const(g_coarse),
-                                                     ratio, Nx_inner, Ny_inner, n_ghost,
-                                                     i_offset, j_offset, Nx_c, Ny_c)
+@kernel function _fill_thermal_ghost_bilinear_kernel!(g_fine, @Const(g_coarse),
+                                                       ratio, Nx_inner, Ny_inner, n_ghost,
+                                                       i_offset, j_offset, Nx_c, Ny_c)
     i_f, j_f = @index(Global, NTuple)
 
     @inbounds begin
-        # Only write ghost cells
         is_ghost = (i_f <= n_ghost) || (i_f > n_ghost + Nx_inner) ||
                    (j_f <= n_ghost) || (j_f > n_ghost + Ny_inner)
         if is_ghost
             T = eltype(g_fine)
-            # Map fine cell center to coarse index
-            x_f = T(i_f - n_ghost - 0.5) / T(ratio)
-            y_f = T(j_f - n_ghost - 0.5) / T(ratio)
 
-            i_c = clamp(round(Int, x_f) + i_offset, 1, Nx_c)
-            j_c = clamp(round(Int, y_f) + j_offset, 1, Ny_c)
+            # Fine cell center → coarse continuous index (same mapping as flow)
+            xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_offset) + T(0.5) / T(ratio)
+            yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_offset) + T(0.5) / T(ratio)
+
+            # Bilinear stencil
+            i0_raw = trunc(Int, xc)
+            j0_raw = trunc(Int, yc)
+            tx = xc - T(i0_raw)
+            ty = yc - T(j0_raw)
+
+            i0 = clamp(i0_raw, 1, Nx_c)
+            i1 = clamp(i0_raw + 1, 1, Nx_c)
+            j0 = clamp(j0_raw, 1, Ny_c)
+            j1 = clamp(j0_raw + 1, 1, Ny_c)
+            tx = clamp(tx, zero(T), one(T))
+            ty = clamp(ty, zero(T), one(T))
+
+            w00 = (one(T) - tx) * (one(T) - ty)
+            w10 = tx * (one(T) - ty)
+            w01 = (one(T) - tx) * ty
+            w11 = tx * ty
+
+            # Interpolate g populations directly (g_eq linear in T → no rescaling)
+            for q in 1:9
+                g_fine[i_f, j_f, q] = w00 * g_coarse[i0, j0, q] +
+                                       w10 * g_coarse[i1, j0, q] +
+                                       w01 * g_coarse[i0, j1, q] +
+                                       w11 * g_coarse[i1, j1, q]
+            end
+        end
+    end
+end
+
+"""Temporal + bilinear interpolation of coarse g into fine ghost cells."""
+function _fill_thermal_ghost_temporal!(g_fine, g_coarse, g_prev,
+                                       ratio, Nx_inner, Ny_inner, n_ghost,
+                                       i_offset, j_offset, Nx_c, Ny_c,
+                                       t_frac)
+    backend = KernelAbstractions.get_backend(g_fine)
+    Nx_f = Nx_inner + 2 * n_ghost
+    Ny_f = Ny_inner + 2 * n_ghost
+    # g_prev local origin: coarse index i_lo maps to g_prev[1,:]
+    i_lo = max(i_offset - 1, 1)
+    j_lo = max(j_offset - 1, 1)
+    kernel! = _fill_thermal_ghost_temporal_kernel!(backend)
+    kernel!(g_fine, g_coarse, g_prev, ratio, Nx_inner, Ny_inner, n_ghost,
+            i_offset, j_offset, Nx_c, Ny_c, t_frac,
+            i_lo, j_lo, Int(size(g_prev, 1)), Int(size(g_prev, 2));
+            ndrange=(Nx_f, Ny_f))
+    KernelAbstractions.synchronize(backend)
+end
+
+@kernel function _fill_thermal_ghost_temporal_kernel!(
+        g_fine, @Const(g_coarse), @Const(g_prev),
+        ratio, Nx_inner, Ny_inner, n_ghost,
+        i_offset, j_offset, Nx_c, Ny_c, t_frac,
+        i_lo, j_lo, Ni_prev, Nj_prev)
+    i_f, j_f = @index(Global, NTuple)
+
+    @inbounds begin
+        is_ghost = (i_f <= n_ghost) || (i_f > n_ghost + Nx_inner) ||
+                   (j_f <= n_ghost) || (j_f > n_ghost + Ny_inner)
+        if is_ghost
+            T = eltype(g_fine)
+            t = T(t_frac)
+
+            xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_offset) + T(0.5) / T(ratio)
+            yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_offset) + T(0.5) / T(ratio)
+
+            i0_raw = trunc(Int, xc)
+            j0_raw = trunc(Int, yc)
+            tx = xc - T(i0_raw)
+            ty = yc - T(j0_raw)
+
+            i0 = clamp(i0_raw, 1, Nx_c)
+            i1 = clamp(i0_raw + 1, 1, Nx_c)
+            j0 = clamp(j0_raw, 1, Ny_c)
+            j1 = clamp(j0_raw + 1, 1, Ny_c)
+            tx = clamp(tx, zero(T), one(T))
+            ty = clamp(ty, zero(T), one(T))
+
+            w00 = (one(T) - tx) * (one(T) - ty)
+            w10 = tx * (one(T) - ty)
+            w01 = (one(T) - tx) * ty
+            w11 = tx * ty
+
+            # Local indices into g_prev buffer
+            ip0 = clamp(i0 - i_lo + 1, 1, Ni_prev)
+            ip1 = clamp(i1 - i_lo + 1, 1, Ni_prev)
+            jp0 = clamp(j0 - j_lo + 1, 1, Nj_prev)
+            jp1 = clamp(j1 - j_lo + 1, 1, Nj_prev)
 
             for q in 1:9
-                g_fine[i_f, j_f, q] = g_coarse[i_c, j_c, q]
+                # Temporal blend at each stencil point
+                g00 = (one(T) - t) * g_prev[ip0, jp0, q] + t * g_coarse[i0, j0, q]
+                g10 = (one(T) - t) * g_prev[ip1, jp0, q] + t * g_coarse[i1, j0, q]
+                g01 = (one(T) - t) * g_prev[ip0, jp1, q] + t * g_coarse[i0, j1, q]
+                g11 = (one(T) - t) * g_prev[ip1, jp1, q] + t * g_coarse[i1, j1, q]
+
+                # Spatial bilinear interpolation
+                g_fine[i_f, j_f, q] = w00 * g00 + w10 * g10 + w01 * g01 + w11 * g11
             end
         end
     end
@@ -265,8 +367,9 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
                 fill_ghost_from_coarse!(patch, f_in, rho, ux, uy,
                                          Float64(domain.base_omega), Nx, Ny)
             end
-            # Thermal ghost: simple injection from coarse
-            fill_thermal_ghost!(patch, thermal, g_in, Nx, Ny)
+            # Thermal ghost: bilinear with temporal interpolation
+            fill_thermal_ghost!(patch, thermal, g_in, Nx, Ny;
+                                t_frac=t_frac)
 
             # Stream both f and g on patch
             stream_2d!(patch.f_out, patch.f_in, patch.Nx, patch.Ny)
