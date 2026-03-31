@@ -571,30 +571,16 @@ function run_natural_convection_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
     copyto!(g_in, g_cpu)
     copyto!(g_out, g_cpu)
 
+    # Fused kernel: 1 GPU launch per step (stream + BC + macroscopic + collide)
     for step in 1:max_steps
-        # 1. Stream (bounce-back on all 4 walls)
-        stream_2d!(f_out, f_in, Nx, Ny)
-        stream_2d!(g_out, g_in, Nx, Ny)
-
-        # 2. Thermal BCs: fixed T on left/right, adiabatic top/bottom (bounce-back)
-        apply_fixed_temp_west_2d!(g_out, T_hot, Ny)
-        apply_fixed_temp_east_2d!(g_out, T_cold, Nx, Ny)
-
-        # 3. Recover macroscopic fields
-        compute_temperature_2d!(Temp, g_out)
-        compute_macroscopic_2d!(ρ, ux, uy, f_out)
-
-        # 4. Collide thermal
-        collide_thermal_2d!(g_out, ux, uy, ω_T)
-
-        # 5. Collide flow with Boussinesq
         if Rc ≈ 1.0
-            collide_boussinesq_2d!(f_out, Temp, is_solid, ω_f, β_g, T_ref_buoy)
+            fused_natconv_step!(f_out, f_in, g_out, g_in, Temp, Nx, Ny,
+                                 ω_f, ω_T, β_g, T_ref_buoy, FT(T_hot), FT(T_cold))
         else
-            collide_boussinesq_vt_modified_2d!(f_out, Temp, is_solid, ν, T0_visc, α_visc, β_g, T_ref_buoy)
+            fused_natconv_vt_step!(f_out, f_in, g_out, g_in, Temp, Nx, Ny,
+                                    ν, T0_visc, α_visc, ω_T, β_g, T_ref_buoy,
+                                    FT(T_hot), FT(T_cold))
         end
-
-        # 6. Swap
         f_in, f_out = f_out, f_in
         g_in, g_out = g_out, g_in
     end

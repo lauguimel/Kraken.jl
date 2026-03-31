@@ -22,6 +22,7 @@ include("kernels/macroscopic.jl")
 include("kernels/boundary_2d.jl")
 include("kernels/boundary_3d.jl")
 include("kernels/thermal_2d.jl")
+include("kernels/fused_thermal_2d.jl")
 include("kernels/collide_mrt_2d.jl")
 include("kernels/species_2d.jl")
 include("kernels/multiphase_2d.jl")
@@ -76,6 +77,7 @@ export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
 export run_rayleigh_benard_2d, run_natural_convection_2d
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
+export fused_natconv_step!, fused_natconv_vt_step!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
