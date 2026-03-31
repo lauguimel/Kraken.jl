@@ -3,31 +3,19 @@
 Parametric study: Rc sweep for natural convection cavity.
 Compares Kraken.jl LBM vs NatConv OpenFOAM results.
 
-Pr=0.71, Ra ∈ {1e3, 1e4}, Rc ∈ {1, 2, 5, 10, 20, 50, 100}, N=256.
+Pr=0.71, Ra ∈ {1e3, 1e4}, Rc ∈ {1, 2, 5, 10, 20, 50, 100}, N=512.
+Requires CUDA — will error if GPU not available.
 """
 
 using Kraken
 using KernelAbstractions
+using CUDA
 using Printf
 using DelimitedFiles
 
-# Auto-detect backend
-const HAS_CUDA = try
-    @eval using CUDA
-    CUDA.functional()
-catch
-    false
-end
-
-function get_backend()
-    if HAS_CUDA
-        println("  Backend: CUDA ($(CUDA.name(CUDA.device())))")
-        return CUDABackend(), Float64
-    else
-        println("  Backend: CPU")
-        return KernelAbstractions.CPU(), Float64
-    end
-end
+# Fail fast if CUDA not working
+@assert CUDA.functional() "CUDA not functional — aborting"
+println("  GPU: ", CUDA.name(CUDA.device()))
 
 function nsteps(N, Ra)
     base_128 = Ra <= 1e3 ? 40_000 : (Ra <= 1e4 ? 80_000 : 160_000)
@@ -57,14 +45,14 @@ end
 function run_rc_sweep()
     println("\n  Kraken.jl — Rc Sweep: Natural Convection (Pr=0.71)\n")
 
-    backend, FT = get_backend()
+    backend = CUDABackend()
+    FT = Float64
 
-    N = 256
+    N = 512
     Pr = 0.71
     Ra_values = [1e3, 1e4]
     Rc_values = [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0]
 
-    # Load NatConv reference
     natconv = load_natconv(joinpath(homedir(),
         "NatConv/analysis_v2/newtonian_v2_results.csv"))
 

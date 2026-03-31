@@ -1,18 +1,17 @@
 #!/bin/bash -l
 #PBS -N kraken_rc_sweep
 #PBS -l select=1:ncpus=4:ngpus=1:mem=32GB
-#PBS -l walltime=06:00:00
+#PBS -l walltime=12:00:00
 #PBS -j oe
 #PBS -V
 
-# --- Rc sweep: natural convection with variable viscosity ---
-# Pr=0.71, Ra={1e3,1e4}, Rc={1,2,5,10,20,50,100}, N=256
+# --- Rc sweep: N=512, Ra={1e3,1e4}, Rc={1..100} on A100 GPU ---
 
 WORKDIR=$HOME/Kraken.jl
 cd $WORKDIR
 
 echo "========================================"
-echo "Job: $PBS_JOBID — Rc sweep"
+echo "Job: $PBS_JOBID — Rc sweep N=512"
 echo "Node: $(hostname)"
 echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
 echo "Start: $(date)"
@@ -23,11 +22,23 @@ export JULIA_CUDA_USE_COMPAT=false
 
 nvidia-smi
 
-# Copy NatConv reference data
-cp ~/NatConv/analysis_v2/newtonian_v2_results.csv . 2>/dev/null || true
-
 julia --project -e 'using Pkg; Pkg.instantiate()' 2>&1
 
+# --- Check CUDA works BEFORE launching the long computation ---
+echo "--- CUDA check ---"
+julia --project -e '
+    using CUDA
+    @assert CUDA.functional() "CUDA not functional!"
+    println("CUDA OK: ", CUDA.name(CUDA.device()))
+' 2>&1
+
+if [ $? -ne 0 ]; then
+    echo "✗ CUDA check failed — aborting"
+    exit 1
+fi
+echo "--- CUDA check passed ---"
+
+# --- Run the sweep ---
 julia --project hpc/natconv_rc_sweep.jl 2>&1
 
 EXIT_CODE=$?
