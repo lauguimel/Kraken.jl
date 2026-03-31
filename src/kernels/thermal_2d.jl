@@ -346,16 +346,17 @@ end
 # --- BGK collision with modified Arrhenius viscosity (linear exponent) ---
 
 """
-    collide_boussinesq_vt_modified_2d!(f, Temp, is_solid, ν_ref, T_ref, α_visc, β_g)
+    collide_boussinesq_vt_modified_2d!(f, Temp, is_solid, ν_ref, T0_visc, α_visc, β_g, T_ref_buoy)
 
 BGK collision with per-node Boussinesq force AND temperature-dependent viscosity.
-ν(T) = ν_ref · exp(α_visc · (T - T_ref))  (modified Arrhenius / Frank-Kamenetskii)
+ν(T) = ν_ref · exp(α_visc · (T - T0_visc))  (modified Arrhenius / Frank-Kamenetskii)
 ω(T) = 1 / (3·ν(T) + 0.5)
+Buoyancy: Fy = β_g · (T - T_ref_buoy)
 
 Used for rheological contrast studies: α_visc = ln(Rc), Rc = η_max/η_min.
 """
 @kernel function collide_boussinesq_vt_modified_2d_kernel!(f, @Const(Temp), @Const(is_solid),
-                                                            ν_ref, T_ref, α_visc, β_g)
+                                                            ν_ref, T0_visc, α_visc, β_g, T_ref_buoy)
     i, j = @index(Global, NTuple)
 
     @inbounds begin
@@ -369,13 +370,13 @@ Used for rheological contrast studies: α_visc = ln(Rc), Rc = η_max/η_min.
             f1=f[i,j,1]; f2=f[i,j,2]; f3=f[i,j,3]; f4=f[i,j,4]
             f5=f[i,j,5]; f6=f[i,j,6]; f7=f[i,j,7]; f8=f[i,j,8]; f9=f[i,j,9]
 
-            # Modified Arrhenius: ν(T) = ν_ref * exp(α * (T - T_ref))
+            # Modified Arrhenius: ν(T) = ν_ref * exp(α * (T - T0_visc))
             T_local = Temp[i,j]
-            ν_local = ν_ref * exp(α_visc * (T_local - T_ref))
+            ν_local = ν_ref * exp(α_visc * (T_local - T0_visc))
             ω_local = one(T) / (T(3) * ν_local + T(0.5))
 
             # Per-node buoyancy
-            fy = β_g * (T_local - T_ref)
+            fy = β_g * (T_local - T_ref_buoy)
             fx = zero(T)
 
             ρ = f1+f2+f3+f4+f5+f6+f7+f8+f9
@@ -426,11 +427,11 @@ Used for rheological contrast studies: α_visc = ln(Rc), Rc = η_max/η_min.
     end
 end
 
-function collide_boussinesq_vt_modified_2d!(f, Temp, is_solid, ν_ref, T_ref, α_visc, β_g)
+function collide_boussinesq_vt_modified_2d!(f, Temp, is_solid, ν_ref, T0_visc, α_visc, β_g, T_ref_buoy)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)
     ET = eltype(f)
     kernel! = collide_boussinesq_vt_modified_2d_kernel!(backend)
-    kernel!(f, Temp, is_solid, ET(ν_ref), ET(T_ref), ET(α_visc), ET(β_g); ndrange=(Nx, Ny))
+    kernel!(f, Temp, is_solid, ET(ν_ref), ET(T0_visc), ET(α_visc), ET(β_g), ET(T_ref_buoy); ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end

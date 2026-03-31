@@ -532,7 +532,7 @@ function run_natural_convection_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
     ΔT = T_hot - T_cold
     H = FT(N)
 
-    # LBM parameters
+    # LBM parameters (NatConv convention: TRef=0, η=Pr, κ=1, β=Pr·Ra)
     ν = FT(0.05)
     α_thermal = ν / FT(Pr)
     β_g = FT(Ra) * ν * α_thermal / (FT(ΔT) * H^3)
@@ -540,9 +540,13 @@ function run_natural_convection_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
     ω_f = FT(1.0 / (3.0 * ν + 0.5))
     ω_T = FT(1.0 / (3.0 * α_thermal + 0.5))
 
-    # Variable viscosity: modified Arrhenius
-    α_visc = FT(log(Rc))
-    T_ref = FT((T_hot + T_cold) / 2)
+    # Variable viscosity: ν(T) = ν_ref · exp(α_visc · (T - T0_visc))
+    # Rc = η_cold/η_hot: hot side is Rc times MORE FLUID
+    # η_cold(T=0) = ν_ref, η_hot(T=1) = ν_ref/Rc → α = -ln(Rc)
+    α_visc = FT(-log(Rc))
+    T0_visc = FT(T_cold)
+    # Buoyancy reference: F = β_g · (T - T_ref_buoy)
+    T_ref_buoy = FT((T_hot + T_cold) / 2)
 
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(ν), u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, FT; backend=backend)
@@ -585,9 +589,9 @@ function run_natural_convection_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
 
         # 5. Collide flow with Boussinesq
         if Rc ≈ 1.0
-            collide_boussinesq_2d!(f_out, Temp, is_solid, ω_f, β_g, T_ref)
+            collide_boussinesq_2d!(f_out, Temp, is_solid, ω_f, β_g, T_ref_buoy)
         else
-            collide_boussinesq_vt_modified_2d!(f_out, Temp, is_solid, ν, T_ref, α_visc, β_g)
+            collide_boussinesq_vt_modified_2d!(f_out, Temp, is_solid, ν, T0_visc, α_visc, β_g, T_ref_buoy)
         end
 
         # 6. Swap
