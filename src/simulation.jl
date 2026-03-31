@@ -601,6 +601,135 @@ function run_natural_convection_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
             Nu=Nu, config=config, Ra=Ra, Pr=Pr, Rc=Rc, ν=Float64(ν), α=Float64(α_thermal))
 end
 
+# --- Natural convection with wall-refined patches ---
+
+"""
+    run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
+                                        T_hot=1.0, T_cold=0.0, max_steps=50000,
+                                        wall_fraction=0.2, ratio=2,
+                                        backend, FT)
+
+Natural convection in a square cavity with patch refinement near the hot (west)
+and cold (east) walls. Patches cover `wall_fraction` of the domain width on
+each side, refined by `ratio` (default 2:1).
+
+Same physics as run_natural_convection_2d but with better boundary layer
+resolution at lower total cost.
+"""
+function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
+                                             T_hot=1.0, T_cold=0.0, max_steps=50000,
+                                             wall_fraction=0.2, ratio=2,
+                                             backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny = N, N
+    ΔT = T_hot - T_cold
+    H = FT(N)
+    dx = FT(1.0)
+
+    # LBM parameters
+    ν = FT(0.05)
+    α_thermal = ν / FT(Pr)
+    β_g = FT(Ra) * ν * α_thermal / (FT(ΔT) * H^3)
+
+    ω_f = FT(1.0 / (3.0 * ν + 0.5))
+    ω_T = FT(1.0 / (3.0 * α_thermal + 0.5))
+
+    α_visc = FT(-log(Rc))
+    T0_visc = FT(T_cold)
+    T_ref_buoy = FT((T_hot + T_cold) / 2)
+
+    # --- Base grid ---
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(ν), u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    g_in  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    g_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    Temp  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    w = weights(D2Q9())
+    g_cpu = zeros(FT, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        T_init = FT(T_hot - ΔT * (i - 1) / (Nx - 1))
+        T_init += FT(0.01 * ΔT) * sin(FT(2π * i / Nx)) * sin(FT(π * j / Ny))
+        for q in 1:9
+            g_cpu[i, j, q] = FT(w[q]) * T_init
+        end
+    end
+    copyto!(g_in, g_cpu)
+    copyto!(g_out, g_cpu)
+
+    # --- Create refinement patches near walls ---
+    L = FT(N * dx)
+    wall_width = wall_fraction * L
+
+    patch_west = create_patch("west_wall", 1, ratio,
+        (0.0, 0.0, Float64(wall_width), Float64(L)),
+        Nx, Ny, Float64(dx), Float64(ω_f), FT; backend=backend)
+    patch_east = create_patch("east_wall", 1, ratio,
+        (Float64(L - wall_width), 0.0, Float64(L), Float64(L)),
+        Nx, Ny, Float64(dx), Float64(ω_f), FT; backend=backend)
+
+    domain = create_refined_domain(Nx, Ny, Float64(dx), Float64(ω_f),
+                                    [patch_west, patch_east])
+
+    # Thermal arrays for patches
+    thermal_west = create_thermal_patch_arrays(patch_west, Float64(ω_T);
+                                                T_init=Float64((T_hot + T_cold) / 2),
+                                                backend=backend)
+    thermal_east = create_thermal_patch_arrays(patch_east, Float64(ω_T);
+                                                T_init=Float64((T_hot + T_cold) / 2),
+                                                backend=backend)
+    thermals = [thermal_west, thermal_east]
+
+    # Thermal BCs for patches at domain walls
+    bc_thermal_patch_fns = Dict{Int, Function}(
+        1 => (g, Nx_p, Ny_p) -> apply_fixed_temp_west_2d!(g, T_hot, Ny_p),
+        2 => (g, Nx_p, Ny_p) -> apply_fixed_temp_east_2d!(g, T_cold, Nx_p, Ny_p),
+    )
+
+    # Fused step closure for base grid
+    fused_step = if Rc ≈ 1.0
+        (fo, fi, go, gi, Te, nx, ny) -> fused_natconv_step!(
+            fo, fi, go, gi, Te, nx, ny,
+            ω_f, ω_T, β_g, T_ref_buoy, FT(T_hot), FT(T_cold))
+    else
+        (fo, fi, go, gi, Te, nx, ny) -> fused_natconv_vt_step!(
+            fo, fi, go, gi, Te, nx, ny,
+            ν, T0_visc, α_visc, ω_T, β_g, T_ref_buoy,
+            FT(T_hot), FT(T_cold))
+    end
+
+    # --- Time loop ---
+    for step in 1:max_steps
+        f_in, f_out, g_in, g_out = advance_thermal_refined_step!(
+            domain, thermals,
+            f_in, f_out, g_in, g_out, ρ, ux, uy, Temp, is_solid;
+            fused_step_fn=fused_step,
+            omega_T_coarse=Float64(ω_T),
+            β_g=Float64(β_g),
+            T_ref_buoy=Float64(T_ref_buoy),
+            bc_thermal_patch_fns=bc_thermal_patch_fns
+        )
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+    compute_temperature_2d!(Temp, g_in)
+
+    # Nusselt at hot wall
+    T_cpu = Array(Temp)
+    Nu_local = zeros(FT, Ny)
+    for j in 2:Ny-1
+        Nu_local[j] = -H * (-3*T_cpu[1,j] + 4*T_cpu[2,j] - T_cpu[3,j]) / (2*dx) / FT(ΔT)
+    end
+    Nu = sum(Nu_local[2:end-1]) / (Ny - 2)
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=T_cpu,
+            Nu=Nu, config=config, Ra=Ra, Pr=Pr, Rc=Rc, ν=Float64(ν), α=Float64(α_thermal),
+            domain=domain, thermals=thermals)
+end
+
 # --- Axisymmetric D2Q9 (z-r coordinates) ---
 
 """
@@ -991,9 +1120,8 @@ function run_rp_axisym_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
 
         # 3. VOF advection (same as Cartesian for incompressible)
-        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
         copyto!(C, C_new)
-        C_cpu = Array(C); clamp!(C_cpu, FT(0), FT(1)); copyto!(C, C_cpu)
 
         # 4. Curvature: meridional (κ₁) + azimuthal (κ₂ = n_r/r)
         compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
@@ -1217,16 +1345,11 @@ function run_static_droplet_2d(; N=128, R=20, σ=0.01, ν=0.1,
         # 2. Macroscopic
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
 
-        # 3. VOF advection
-        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        # 3. VOF advection + clamp
+        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
         copyto!(C, C_new)
 
-        # 4. Clamp C to [0,1]
-        C_cpu = Array(C)
-        clamp!(C_cpu, FT(0), FT(1))
-        copyto!(C, C_cpu)
-
-        # 5. Interface normal + curvature + surface tension
+        # 4. Interface normal + curvature + surface tension
         compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
         compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
         compute_surface_tension_2d!(Fx_st, Fy_st, κ, C, σ, Nx, Ny)
@@ -1337,14 +1460,9 @@ function run_plateau_pinch_2d(; Nx=256, Ny=64, R0=20, λ_ratio=4.5, ε=0.05,
         # 2. Macroscopic
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
 
-        # 3. VOF advection
-        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        # 3. VOF advection + clamp
+        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
         copyto!(C, C_new)
-
-        # Clamp
-        C_cpu = Array(C)
-        clamp!(C_cpu, FT(0), FT(1))
-        copyto!(C, C_cpu)
 
         # 4. Interface + curvature + surface tension
         compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
@@ -1462,14 +1580,9 @@ function run_static_droplet_dualgrid_2d(; N=64, R=15, σ=0.01, ν=0.1,
         prolongate_bilinear_2d!(ux_fine, ux, r; scale=FT(r))
         prolongate_bilinear_2d!(uy_fine, uy, r; scale=FT(r))
 
-        # 4. VOF advection (fine grid, existing kernel with scaled velocity)
-        advect_vof_2d!(C_fine_new, C_fine, ux_fine, uy_fine, Nx_f, Ny_f)
+        # 4. VOF advection + clamp (fine grid)
+        advect_vof_step!(C_fine, C_fine_new, ux_fine, uy_fine, Nx_f, Ny_f)
         copyto!(C_fine, C_fine_new)
-
-        # 5. Clamp C ∈ [0,1]
-        C_cpu = Array(C_fine)
-        clamp!(C_cpu, FT(0), FT(1))
-        copyto!(C_fine, C_cpu)
 
         # 6. Interface geometry (fine grid, physical dx)
         compute_vof_normal_2d!(nx_fine, ny_fine, C_fine, Nx_f, Ny_f)
@@ -1583,9 +1696,8 @@ function run_static_droplet_clsvof_2d(; N=128, R=20, σ=0.01, ν=0.1,
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
 
         # 3. VOF advection (conservative mass transport)
-        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
         copyto!(C, C_new)
-        C_cpu = Array(C); clamp!(C_cpu, FT(0), FT(1)); copyto!(C, C_cpu)
 
         # 4. Reconstruct φ from C + redistance
         ls_from_vof_2d!(phi, C, Nx, Ny)
@@ -1735,9 +1847,8 @@ function run_rp_clsvof_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
         compute_macroscopic_2d!(ρ, ux, uy, f_out)
 
         # 3. VOF advection (conservative mass transport)
-        advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
+        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
         copyto!(C, C_new)
-        C_cpu = Array(C); clamp!(C_cpu, FT(0), FT(1)); copyto!(C, C_cpu)
 
         # 4. Reconstruct φ from C + redistance
         ls_from_vof_2d!(phi, C, Nx, Ny)
@@ -1820,4 +1931,135 @@ function run_rp_clsvof_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
     return (ρ=Array(ρ), uz=Array(ux), ur=Array(uy), C=Array(C), phi=Array(phi),
             r_min=r_min_history, times=times, config=config,
             σ=σ, R0=R0, λ=λ, ε=ε)
+end
+
+# ===========================================================================
+# Prescribed-velocity VOF advection (pure interface transport tests)
+# ===========================================================================
+
+"""
+    run_advection_2d(; Nx=100, Ny=100, max_steps=628, dt=1.0,
+                      velocity_fn, init_C_fn, use_clsvof=false,
+                      output_interval=0, output_dir="", backend, T)
+
+Run pure VOF advection with a prescribed analytical velocity field.
+No LBM solve — used for interface transport validation (Zalesak, reversed
+vortex, shear tests).
+
+# Arguments
+- `velocity_fn(x, y, t) -> (vx, vy)`: analytical velocity at position and time
+- `init_C_fn(x, y) -> C₀`: initial volume fraction (will be clamped to [0,1])
+- `use_clsvof`: if true, also track level-set (reconstruct φ from C each step)
+- `dt`: time step for velocity evaluation (lattice dt=1 by default)
+
+# Returns
+NamedTuple `(C, C0, ux, uy[, phi], mass_history, Nx, Ny, dx)`
+"""
+function run_advection_2d(; Nx=100, Ny=100, max_steps=628, dt=1.0,
+                           velocity_fn,
+                           init_C_fn,
+                           use_clsvof=false,
+                           output_interval=0,
+                           output_dir="",
+                           backend=KernelAbstractions.CPU(),
+                           FT=Float64)
+    dx = FT(1)
+
+    # Allocate arrays
+    C     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_new = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    nx_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ny_n  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ux    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    uy    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    # Initialize C
+    init_vof_field!(C, init_C_fn, dx, FT)
+    C0 = Array(C)  # save initial state
+
+    # CLSVOF arrays
+    phi = nothing
+    phi_work = nothing
+    phi0 = nothing
+    if use_clsvof
+        phi      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        phi_work = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        phi0     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        ls_from_vof_2d!(phi, C, Nx, Ny)
+        reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny)
+    end
+
+    # Output setup
+    pvd = nothing
+    do_output = !isempty(output_dir)
+    if do_output
+        output_dir = setup_output_dir(output_dir)
+        pvd = create_pvd(joinpath(output_dir, "advection"))
+    end
+
+    mass_history = FT[sum(C0)]
+
+    # Check if velocity is time-dependent
+    is_time_dep = try
+        velocity_fn(FT(0.5) * dx, FT(0.5) * dx, FT(0))
+        velocity_fn(FT(0.5) * dx, FT(0.5) * dx, FT(1))
+        true
+    catch
+        false
+    end
+
+    # Fill initial velocity
+    fill_velocity_field!(ux, uy, velocity_fn, dx, FT(0), backend, FT)
+
+    # Time loop
+    for step in 1:max_steps
+        t = FT(step - 1) * dt
+
+        # Update velocity if time-dependent
+        if is_time_dep && step > 1
+            fill_velocity_field!(ux, uy, velocity_fn, dx, t, backend, FT)
+        end
+
+        # Advect VOF (MUSCL-Superbee TVD, 2nd order)
+        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
+        copyto!(C, C_new)
+
+        # CLSVOF: advect LS + redistance (φ provides smooth curvature)
+        if use_clsvof
+            # 1. Advect φ independently (smooth but non-conservative)
+            advect_ls_2d!(phi_work, phi, ux, uy, Nx, Ny)
+            copyto!(phi, phi_work)
+            # 2. Redistance to restore |∇φ| ≈ 1
+            reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny)
+            # Note: C is NOT corrected from φ. The level-set is used only
+            # for curvature computation in coupled simulations (smoother κ).
+            # VOF advection (MUSCL-Superbee) is the sole mass transport.
+        end
+
+        # Track mass
+        push!(mass_history, FT(sum(Array(C))))
+
+        # Output
+        if do_output && step % output_interval == 0
+            fields = Dict("C" => Array(C), "ux" => Array(ux), "uy" => Array(uy))
+            if use_clsvof
+                fields["phi"] = Array(phi)
+            end
+            write_snapshot_2d!(output_dir, step, Nx, Ny, Float64(dx), fields;
+                               pvd=pvd, time=Float64(t))
+        end
+    end
+
+    if do_output && pvd !== nothing
+        vtk_save(pvd)
+    end
+
+    result = (C=Array(C), C0=C0, ux=Array(ux), uy=Array(uy),
+              mass_history=mass_history, Nx=Nx, Ny=Ny, dx=dx)
+
+    if use_clsvof
+        result = merge(result, (phi=Array(phi),))
+    end
+
+    return result
 end

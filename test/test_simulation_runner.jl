@@ -195,7 +195,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
             setup.user_vars, setup.regions, setup.boundaries, setup.initial,
             setup.modules, setup.max_steps,
             OutputSetup(:vtk, 100, [:rho, :ux, :uy], outdir),
-            setup.diagnostics, setup.refinements)
+            setup.diagnostics, setup.refinements, setup.velocity_field)
 
         result = run_simulation(setup_mod)
 

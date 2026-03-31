@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<VTKFile type="Collection" version="1.0" byte_order="LittleEndian" compressor="vtkZLibDataCompressor">
+  <Collection>
+    <DataSet timestep="2000.0" part="0" file="poiseuille_00002000.vtr"/>
+    <DataSet timestep="4000.0" part="0" file="poiseuille_00004000.vtr"/>
+    <DataSet timestep="6000.0" part="0" file="poiseuille_00006000.vtr"/>
+    <DataSet timestep="8000.0" part="0" file="poiseuille_00008000.vtr"/>
+    <DataSet timestep="10000.0" part="0" file="poiseuille_00010000.vtr"/>
+  </Collection>
+</VTKFile>

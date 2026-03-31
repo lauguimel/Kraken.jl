@@ -124,6 +124,7 @@ struct SimulationSetup
     output::Union{OutputSetup, Nothing}
     diagnostics::Union{DiagnosticsSetup, Nothing}
     refinements::Vector{RefineSetup}
+    velocity_field::Union{InitialSetup, Nothing}  # prescribed velocity expressions (ux, uy)
 end
 
 # --- Tokenization: strip comments, join multi-line blocks ---
@@ -235,6 +236,7 @@ function parse_kraken(text::String; kwargs...)
     regions = GeometryRegion[]
     boundaries = BoundarySetup[]
     initial = nothing
+    velocity_field = nothing
     modules = Symbol[]
     max_steps = 0
     output = nothing
@@ -262,6 +264,8 @@ function parse_kraken(text::String; kwargs...)
             push!(refinements, _parse_refine(line, user_vars))
         elseif keyword == "Initial"
             initial = _parse_initial(line, user_vars)
+        elseif keyword == "Velocity"
+            velocity_field = _parse_initial(line, user_vars)  # same { ux = ... uy = ... } syntax
         elseif keyword == "Module"
             push!(modules, _parse_module(line))
         elseif keyword == "Run"
@@ -317,7 +321,8 @@ function parse_kraken(text::String; kwargs...)
 
     return SimulationSetup(name, lattice, domain, physics, user_vars,
                            regions, boundaries, initial, modules,
-                           max_steps, output, diagnostics, refinements)
+                           max_steps, output, diagnostics, refinements,
+                           velocity_field)
 end
 
 # --- Individual statement parsers ---

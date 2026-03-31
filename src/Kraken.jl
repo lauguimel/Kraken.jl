@@ -30,6 +30,7 @@ include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
 include("kernels/levelset_2d.jl")
 include("kernels/clsvof_2d.jl")
+include("kernels/advect_prescribed_2d.jl")
 
 # --- Simulation ---
 include("simulation.jl")
@@ -38,6 +39,7 @@ include("simulation.jl")
 include("refinement/refinement.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
+include("refinement/thermal_refinement.jl")
 
 # --- I/O ---
 include("io/vtk_writer.jl")
@@ -80,7 +82,8 @@ export initialize_cylinder_2d, run_cylinder_2d, compute_drag_mea_2d
 export collide_thermal_2d!, compute_temperature_2d!
 export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
-export run_rayleigh_benard_2d, run_natural_convection_2d
+export run_rayleigh_benard_2d, run_natural_convection_2d, run_natural_convection_refined_2d
+export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_step!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
@@ -111,8 +114,13 @@ export run_static_droplet_dualgrid_2d
 export advect_ls_2d!, reinit_ls_2d!, curvature_ls_2d!, add_azimuthal_curvature_ls_2d!
 
 # CLSVOF
-export ls_from_vof_2d!, surface_tension_clsvof_2d!
+export ls_from_vof_2d!, vof_from_ls_2d!, surface_tension_clsvof_2d!
 export run_static_droplet_clsvof_2d, run_rp_clsvof_2d
+
+# Prescribed-velocity advection
+export clamp_field_2d!, advect_vof_step!, advect_vof_plic_step!
+export advect_vof_plic_2d!, fill_velocity_field!, init_vof_field!
+export run_advection_2d
 
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd
@@ -134,6 +142,7 @@ export rescaling_factor_c2f, rescaling_factor_f2c
 export prolongate_f_rescaled_2d!, restrict_f_rescaled_2d!
 export temporal_interpolate_2d!, copy_macroscopic_overlap_2d!
 export advance_refined_step!
+export TwophaseRefinedArrays, create_twophase_patch_arrays, advance_twophase_refined_step!
 
 # STL geometry
 export STLTriangle, STLMesh, read_stl, transform_mesh

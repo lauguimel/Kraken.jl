@@ -41,6 +41,71 @@ function ls_from_vof_2d!(phi, C, Nx, Ny; half_width=1.0)
     KernelAbstractions.synchronize(backend)
 end
 
+# --- Reconstruct VOF from level-set (the missing CLSVOF coupling) ---
+#
+# After advecting both C (conservative) and φ (smooth), and redistancing φ,
+# correct C in interface cells using the redistanced φ.
+#
+# Strategy (Sussman & Puckett 2000):
+# - Pure cells (|φ| >> dx): C = 0 or 1 (trust the sign of φ)
+# - Interface cells (|φ| < band): C = smooth approximation from φ
+#   C ≈ 0.5 * (1 + tanh(φ / W)) where W is the interface half-width
+# - Conservation fix: rescale C in the band so that total mass matches
+#   the pre-correction total (VOF mass is the truth)
+
+@kernel function vof_from_ls_2d_kernel!(C, @Const(phi), band, W, Nx, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(C)
+        p = phi[i, j]
+
+        if abs(p) > band
+            # Far from interface: C = 0 or 1 from sign of φ
+            C[i, j] = ifelse(p > zero(T), one(T), zero(T))
+        else
+            # Interface band: smooth reconstruction from φ
+            C[i, j] = T(0.5) * (one(T) + tanh(p / W))
+        end
+    end
+end
+
+"""
+    vof_from_ls_2d!(C, phi, Nx, Ny; band=3.0, W=1.5)
+
+Sharpen volume fraction C using the redistanced level-set φ.
+Corrects numerical diffusion in C by replacing it with a tanh profile
+centred on the φ = 0 interface, then rescaling to preserve total mass.
+
+- `band`: cells with |φ| > band are set to pure phase (0 or 1)
+- `W`: interface half-width for the tanh reconstruction
+
+The mass conservation fix rescales C globally so that ΣC_after = ΣC_before.
+"""
+function vof_from_ls_2d!(C, phi, Nx, Ny; band=3.0, W=1.5)
+    backend = KernelAbstractions.get_backend(C)
+    T = eltype(C)
+
+    # Save total mass before correction (VOF mass is the conservative truth)
+    C_cpu_before = Array(C)
+    mass_before = sum(C_cpu_before)
+
+    # Apply LS → VOF reconstruction
+    kernel! = vof_from_ls_2d_kernel!(backend)
+    kernel!(C, phi, T(band), T(W), Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+
+    # Conservation fix: rescale C so total mass is preserved
+    C_cpu = Array(C)
+    mass_after = sum(C_cpu)
+    if mass_after > T(1e-10)
+        scale = mass_before / mass_after
+        C_cpu .*= T(scale)
+        clamp!(C_cpu, zero(T), one(T))
+        copyto!(C, C_cpu)
+    end
+end
+
 # --- Surface tension from CLSVOF: F = σ·κ·δ_ε(φ)·∇φ ---
 #
 # δ_ε(φ) = (1 + cos(πφ/ε)) / (2ε)  for |φ| < ε, else 0

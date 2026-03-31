@@ -96,7 +96,7 @@ using Kraken
     @testset "RP axisym CLSVOF pinch-off" begin
         # Gerris-like setup: small perturbation, LS curvature drives instability
         result = run_rp_clsvof_2d(; Nz=128, Nr=30, R0=12, λ_ratio=7.0, ε=0.05,
-                                    σ=0.01, ν=1/6, ρ_l=1.0, ρ_g=0.5,
+                                    σ=0.005, ν=0.167, ρ_l=1.0, ρ_g=0.5,
                                     max_steps=10000, output_interval=1000)
 
         @test !any(isnan, result.C)

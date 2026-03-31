@@ -11,28 +11,97 @@ using KernelAbstractions
 # - Sussman & Fatemi (1999) doi:10.1137/S1064827596298245
 # ===========================================================================
 
-# --- Level-set advection (first-order upwind) ---
+# --- Minmod limiter (for smooth fields like φ) ---
+
+@inline function _minmod(a::T, b::T) where T
+    ifelse(a * b <= zero(T), zero(T),
+        ifelse(abs(a) < abs(b), a, b))
+end
+
+# --- Level-set advection (MUSCL-Minmod, 2nd order TVD) ---
+#
+# Uses the same MUSCL framework as VOF but with minmod limiter (less
+# compressive, better suited for smooth signed-distance fields).
 
 @kernel function advect_ls_2d_kernel!(phi_new, @Const(phi), @Const(ux), @Const(uy), Nx, Ny)
     i, j = @index(Global, NTuple)
 
     @inbounds begin
         T = eltype(phi)
-        ip = ifelse(i < Nx, i + 1, 1)
-        im = ifelse(i > 1,  i - 1, Nx)
-        jp = ifelse(j < Ny, j + 1, 1)
-        jm = ifelse(j > 1,  j - 1, Ny)
+        ip  = ifelse(i < Nx, i + 1, 1)
+        im  = ifelse(i > 1,  i - 1, Nx)
+        ipp = ifelse(ip < Nx, ip + 1, 1)
+        imm = ifelse(im > 1,  im - 1, Nx)
+        jp  = ifelse(j < Ny, j + 1, 1)
+        jm  = ifelse(j > 1,  j - 1, Ny)
+        jpp = ifelse(jp < Ny, jp + 1, 1)
+        jmm = ifelse(jm > 1,  jm - 1, Ny)
 
         p = phi[i, j]
         u = ux[i, j]
         v = uy[i, j]
 
-        # Upwind differences
-        dphi_dx = ifelse(u > zero(T), p - phi[im, j], phi[ip, j] - p)
-        dphi_dy = ifelse(v > zero(T), p - phi[i, jm], phi[i, jp] - p)
+        # --- x-direction MUSCL ---
+        if u > zero(T)
+            grad_up   = p - phi[im, j]
+            grad_down = phi[ip, j] - p
+            slope = _minmod(grad_up, grad_down)
+            phi_face = p + T(0.5) * slope * max(zero(T), one(T) - abs(u))
+            flux_x = u * phi_face
+        else
+            grad_up   = phi[ip, j] - phi[ipp, j]
+            grad_down = p - phi[ip, j]
+            slope = _minmod(grad_up, grad_down)
+            phi_face = phi[ip, j] - T(0.5) * slope * max(zero(T), one(T) - abs(u))
+            flux_x = u * phi_face
+        end
 
-        # dt = dx = 1 in lattice units
-        phi_new[i, j] = p - (u * dphi_dx + v * dphi_dy)
+        if u > zero(T)
+            # Left face
+            grad_up_l   = phi[im, j] - phi[imm, j]
+            grad_down_l = p - phi[im, j]
+            slope_l = _minmod(grad_up_l, grad_down_l)
+            phi_face_l = phi[im, j] + T(0.5) * slope_l * max(zero(T), one(T) - abs(u))
+        else
+            grad_up_l   = p - phi[ip, j]
+            grad_down_l = phi[im, j] - p
+            slope_l = _minmod(grad_up_l, grad_down_l)
+            phi_face_l = p - T(0.5) * slope_l * max(zero(T), one(T) - abs(u))
+        end
+        u_left = (ux[im, j] + u) / T(2)
+        flux_x_left = u_left * phi_face_l
+
+        # --- y-direction MUSCL ---
+        if v > zero(T)
+            grad_up_y   = p - phi[i, jm]
+            grad_down_y = phi[i, jp] - p
+            slope_y = _minmod(grad_up_y, grad_down_y)
+            phi_face_y = p + T(0.5) * slope_y * max(zero(T), one(T) - abs(v))
+            flux_y = v * phi_face_y
+        else
+            grad_up_y   = phi[i, jp] - phi[i, jpp]
+            grad_down_y = p - phi[i, jp]
+            slope_y = _minmod(grad_up_y, grad_down_y)
+            phi_face_y = phi[i, jp] - T(0.5) * slope_y * max(zero(T), one(T) - abs(v))
+            flux_y = v * phi_face_y
+        end
+
+        if v > zero(T)
+            grad_up_yb   = phi[i, jm] - phi[i, jmm]
+            grad_down_yb = p - phi[i, jm]
+            slope_yb = _minmod(grad_up_yb, grad_down_yb)
+            phi_face_yb = phi[i, jm] + T(0.5) * slope_yb * max(zero(T), one(T) - abs(v))
+        else
+            grad_up_yb   = p - phi[i, jp]
+            grad_down_yb = phi[i, jm] - p
+            slope_yb = _minmod(grad_up_yb, grad_down_yb)
+            phi_face_yb = p - T(0.5) * slope_yb * max(zero(T), one(T) - abs(v))
+        end
+        v_bot = (uy[i, jm] + v) / T(2)
+        flux_y_bot = v_bot * phi_face_yb
+
+        # Update: unsplit advection
+        phi_new[i, j] = p - (flux_x - flux_x_left) - (flux_y - flux_y_bot)
     end
 end
 

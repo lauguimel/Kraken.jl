@@ -100,6 +100,11 @@ makedocs(;
             "examples/08_rayleigh_benard.md",
             "examples/09_hagen_poiseuille.md",
             "examples/10_krk_config.md",
+            "examples/11_zalesak_disk.md",
+            "examples/12_reversed_vortex.md",
+            "examples/13_capillary_wave.md",
+            "examples/14_static_droplet.md",
+            "examples/15_rp_axisym.md",
         ],
         "Tutorials" => [
             "tutorials/02_couette_2d.md",

@@ -23,15 +23,14 @@ echo "========================================"
 # Julia: via juliaup (install first time with: curl -fsSL https://install.julialang.org | sh)
 export PATH=$HOME/.juliaup/bin:$PATH
 
-# CUDA: Julia CUDA.jl uses its own artifacts, but needs the driver visible.
-# On aqua GPU nodes the driver is pre-installed. If module needed, uncomment:
-# module load CUDA/12.1.1
-# module load GCC/13.2.0
+# CUDA: driver 580.x / CUDA 13.0 on aqua A100 nodes.
+# Tell CUDA.jl to use the system driver instead of its own artifact.
+export JULIA_CUDA_USE_COMPAT=false
 
 # Verify GPU is visible
 nvidia-smi
 
-# Install deps (first run only — CUDA.jl downloads its own toolkit)
+# Install deps and check CUDA
 julia --project -e '
     using Pkg
     Pkg.instantiate()
