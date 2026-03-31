@@ -94,6 +94,18 @@ struct DiagnosticsSetup
 end
 
 """
+    RefineSetup
+
+Refinement patch specification from a .krk `Refine` block.
+"""
+struct RefineSetup
+    name::String
+    region::NTuple{4, Float64}   # (x_min, y_min, x_max, y_max)
+    ratio::Int                   # refinement ratio (default 2)
+    parent::String               # parent patch name ("" = base grid)
+end
+
+"""
     SimulationSetup
 
 Top-level simulation configuration parsed from a .krk file.
@@ -111,6 +123,7 @@ struct SimulationSetup
     max_steps::Int
     output::Union{OutputSetup, Nothing}
     diagnostics::Union{DiagnosticsSetup, Nothing}
+    refinements::Vector{RefineSetup}
 end
 
 # --- Tokenization: strip comments, join multi-line blocks ---
@@ -226,6 +239,7 @@ function parse_kraken(text::String; kwargs...)
     max_steps = 0
     output = nothing
     diagnostics = nothing
+    refinements = RefineSetup[]
 
     for line in lines
         keyword = _first_word(line)
@@ -244,6 +258,8 @@ function parse_kraken(text::String; kwargs...)
             push!(regions, _parse_fluid(line, user_vars))
         elseif keyword == "Boundary"
             append!(boundaries, _parse_boundary(line, user_vars))
+        elseif keyword == "Refine"
+            push!(refinements, _parse_refine(line, user_vars))
         elseif keyword == "Initial"
             initial = _parse_initial(line, user_vars)
         elseif keyword == "Module"
@@ -301,7 +317,7 @@ function parse_kraken(text::String; kwargs...)
 
     return SimulationSetup(name, lattice, domain, physics, user_vars,
                            regions, boundaries, initial, modules,
-                           max_steps, output, diagnostics)
+                           max_steps, output, diagnostics, refinements)
 end
 
 # --- Individual statement parsers ---
@@ -386,6 +402,50 @@ end
 """Parse: Fluid <name> { <condition> }"""
 function _parse_fluid(line::String, user_vars::Dict{Symbol,Float64})
     return _parse_geometry_region(line, :fluid, user_vars)
+end
+
+"""
+Parse: Refine <name> { region = [x0, y0, x1, y1], ratio = 2, parent = <name> }
+"""
+function _parse_refine(line::String, user_vars::Dict{Symbol,Float64})
+    # Extract name (second word)
+    after_kw = strip(replace(line, r"^\w+" => ""))
+    name_m = match(r"^(\w+)", after_kw)
+    name_m === nothing && throw(ArgumentError("Missing name in Refine: $line"))
+    name = String(name_m.captures[1])
+
+    # Extract block content inside { ... }
+    brace_m = match(r"\{(.+)\}", line)
+    brace_m === nothing && throw(ArgumentError("Missing { ... } block in Refine: $line"))
+    content = strip(String(brace_m.captures[1]))
+
+    # Parse region = [x0, y0, x1, y1]
+    region_m = match(r"region\s*=\s*\[([^\]]+)\]", content)
+    region_m === nothing && throw(ArgumentError("Missing 'region = [x0, y0, x1, y1]' in Refine: $line"))
+    coords = [_eval_number(strip(s), user_vars) for s in split(region_m.captures[1], ",")]
+    length(coords) == 4 || throw(ArgumentError("Refine region must have 4 values: $line"))
+    region = (coords[1], coords[2], coords[3], coords[4])
+
+    # Parse ratio (default 2)
+    ratio_m = match(r"ratio\s*=\s*(\d+)", content)
+    ratio = ratio_m !== nothing ? parse(Int, ratio_m.captures[1]) : 2
+
+    # Parse parent (default "" = base grid)
+    parent_m = match(r"parent\s*=\s*(\w+)", content)
+    parent = parent_m !== nothing ? String(parent_m.captures[1]) : ""
+
+    return RefineSetup(name, region, ratio, parent)
+end
+
+"""Evaluate a number string, substituting user variables."""
+function _eval_number(s::AbstractString, user_vars::Dict{Symbol,Float64})
+    # Try direct parse first
+    v = tryparse(Float64, s)
+    v !== nothing && return v
+    # Try user variable
+    sym = Symbol(s)
+    haskey(user_vars, sym) && return user_vars[sym]
+    throw(ArgumentError("Cannot evaluate '$s' as a number"))
 end
 
 function _parse_geometry_region(line::String, kind::Symbol, user_vars::Dict{Symbol,Float64})

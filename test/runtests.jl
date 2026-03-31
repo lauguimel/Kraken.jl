@@ -21,4 +21,5 @@ using Kraken
     include("test_simulation_runner.jl")
     include("test_stl.jl")
     include("test_krk_examples.jl")
+    include("test_refinement.jl")
 end

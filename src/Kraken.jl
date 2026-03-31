@@ -34,6 +34,11 @@ include("kernels/clsvof_2d.jl")
 # --- Simulation ---
 include("simulation.jl")
 
+# --- Grid refinement ---
+include("refinement/refinement.jl")
+include("kernels/refinement_exchange_2d.jl")
+include("refinement/time_stepping.jl")
+
 # --- I/O ---
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
@@ -112,14 +117,23 @@ export run_static_droplet_clsvof_2d, run_rp_clsvof_2d
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd
 export setup_output_dir, write_snapshot_2d!
+export write_vtk_multiblock, write_snapshot_refined_2d!
 export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
 
 # .krk config system
 export KrakenExpr, parse_kraken_expr, evaluate, has_variable, is_time_dependent, is_spatial
 export SimulationSetup, DomainSetup, PhysicsSetup, GeometryRegion, BoundarySetup
-export InitialSetup, OutputSetup, DiagnosticsSetup, STLSource
+export InitialSetup, OutputSetup, DiagnosticsSetup, STLSource, RefineSetup
 export load_kraken, parse_kraken
 export run_simulation
+
+# Grid refinement
+export RefinementPatch, RefinedDomain
+export create_patch, create_refined_domain, rescaled_omega
+export rescaling_factor_c2f, rescaling_factor_f2c
+export prolongate_f_rescaled_2d!, restrict_f_rescaled_2d!
+export temporal_interpolate_2d!, copy_macroscopic_overlap_2d!
+export advance_refined_step!
 
 # STL geometry
 export STLTriangle, STLMesh, read_stl, transform_mesh
