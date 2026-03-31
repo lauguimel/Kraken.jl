@@ -16,11 +16,11 @@ using Kraken
         ny = zeros(Float64, N, N)
         compute_vof_normal_2d!(nx, ny, C, N, N)
 
-        # Normal = ∇C/|∇C| → points from gas (C=0) toward liquid (C=1)
-        # At (cx+R, cy): C decreases in +x → ∂C/∂x < 0 → nx < 0
-        # So normal points INWARD (toward liquid center) — this is the convention
+        # Normal = -∇C/|∇C| → points from liquid (C=1) toward gas (C=0)
+        # (Basilisk convention: outward from liquid)
+        # At (cx+R, cy): C decreases in +x → ∂C/∂x < 0 → nx > 0 (outward)
         i_check = cx + Int(round(R)); j_check = cy
-        @test nx[i_check, j_check] < -0.5  # points inward (-x direction)
+        @test nx[i_check, j_check] > 0.5  # points outward (+x direction)
         @test abs(ny[i_check, j_check]) < 0.5
         @info "VOF normal at (cx+R, cy): nx=$(round(nx[i_check,j_check], digits=3))"
     end

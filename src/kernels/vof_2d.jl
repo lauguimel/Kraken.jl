@@ -27,11 +27,12 @@ using KernelAbstractions
         jm = ifelse(j > 1,  j - 1, Ny)
 
         # Youngs' method: mixed central/corner differences for robustness
+        # Convention: n = -∇C (outward from liquid, matching Basilisk geometry.h)
         # ∂C/∂x using Youngs stencil (weighted by y-neighbors)
-        dCdx = (C[ip,jm] + T(2)*C[ip,j] + C[ip,jp] -
-                C[im,jm] - T(2)*C[im,j] - C[im,jp]) / T(8)
-        dCdy = (C[im,jp] + T(2)*C[i,jp] + C[ip,jp] -
-                C[im,jm] - T(2)*C[i,jm] - C[ip,jm]) / T(8)
+        dCdx = (C[im,jm] + T(2)*C[im,j] + C[im,jp] -
+                C[ip,jm] - T(2)*C[ip,j] - C[ip,jp]) / T(8)
+        dCdy = (C[im,jm] + T(2)*C[i,jm] + C[ip,jm] -
+                C[im,jp] - T(2)*C[i,jp] - C[ip,jp]) / T(8)
 
         # Normalize
         mag = sqrt(dCdx^2 + dCdy^2) + T(1e-30)
@@ -124,7 +125,8 @@ end
 # - Donor cell PLIC reconstruction → rectangle_fraction for strip flux
 # - Weymouth-Yue: cc = (C > 0.5) ? 1 : 0 for compression term
 
-@kernel function advect_vof_plic_x_2d_kernel!(C_new, @Const(C), @Const(nx_n), @Const(ny_n),
+@kernel function advect_vof_plic_x_2d_kernel!(C_new, @Const(C), @Const(cc_field),
+                                                @Const(nx_n), @Const(ny_n),
                                                 @Const(ux), Nx, Ny)
     i, j = @index(Global, NTuple)
 
@@ -193,13 +195,13 @@ end
             flux_left = cf_left * u_left  # u_left < 0 → negative flux
         end
 
-        # Weymouth-Yue (2010) correction
-        cc = ifelse(C[i,j] > T(0.5), one(T), zero(T))
-        C_new[i, j] = C[i, j] - (flux_right - flux_left) + cc * (u_right - u_left)
+        # Weymouth-Yue (2010) correction — cc frozen before all sweeps
+        C_new[i, j] = C[i, j] - (flux_right - flux_left) + cc_field[i,j] * (u_right - u_left)
     end
 end
 
-@kernel function advect_vof_plic_y_2d_kernel!(C_new, @Const(C), @Const(nx_n), @Const(ny_n),
+@kernel function advect_vof_plic_y_2d_kernel!(C_new, @Const(C), @Const(cc_field),
+                                                @Const(nx_n), @Const(ny_n),
                                                 @Const(uy), Nx, Ny)
     i, j = @index(Global, NTuple)
 
@@ -270,50 +272,69 @@ end
             flux_bot = cf_bot * u_bot  # u_bot < 0 → negative flux
         end
 
-        # Weymouth-Yue (2010) correction
-        cc = ifelse(C[i,j] > T(0.5), one(T), zero(T))
-        C_new[i, j] = C[i, j] - (flux_top - flux_bot) + cc * (u_top - u_bot)
+        # Weymouth-Yue (2010) correction — cc frozen before all sweeps
+        C_new[i, j] = C[i, j] - (flux_top - flux_bot) + cc_field[i,j] * (u_top - u_bot)
     end
 end
 
 """
-    advect_vof_plic_2d!(C_new, C, nx_n, ny_n, ux, uy, Nx, Ny; step=1)
+    advect_vof_plic_2d!(C_new, C, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step=1)
 
 Geometric PLIC advection of volume fraction C using directional splitting
 with Basilisk-style `rectangle_fraction` flux computation and Weymouth-Yue
 compression correction.
 
-Requires pre-computed interface normals `(nx_n, ny_n)` from `compute_vof_normal_2d!`.
+Requires pre-computed interface normals `(nx_n, ny_n)` from `compute_vof_normal_2d!`
+and a pre-allocated `cc_field` work array (same size as C).
 Strang alternating splitting: x→y on odd steps, y→x on even steps.
 """
-function advect_vof_plic_2d!(C_new, C, nx_n, ny_n, ux, uy, Nx, Ny; step::Int=1)
+function advect_vof_plic_2d!(C_new, C, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step::Int=1)
     backend = KernelAbstractions.get_backend(C)
+
+    # Weymouth-Yue: freeze cc = (C > 0.5) ONCE before all sweeps
+    _compute_cc_field!(cc_field, C, backend, Nx, Ny)
 
     # Strang alternating splitting: x→y on odd steps, y→x on even steps
     # This reduces directional bias for rotational flows
     if isodd(step)
         # x-sweep first
         kernel_x! = advect_vof_plic_x_2d_kernel!(backend)
-        kernel_x!(C_new, C, nx_n, ny_n, ux, Nx, Ny; ndrange=(Nx, Ny))
+        kernel_x!(C_new, C, cc_field, nx_n, ny_n, ux, Nx, Ny; ndrange=(Nx, Ny))
         KernelAbstractions.synchronize(backend)
         copyto!(C, C_new)
         compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
         # y-sweep second
         kernel_y! = advect_vof_plic_y_2d_kernel!(backend)
-        kernel_y!(C_new, C, nx_n, ny_n, uy, Nx, Ny; ndrange=(Nx, Ny))
+        kernel_y!(C_new, C, cc_field, nx_n, ny_n, uy, Nx, Ny; ndrange=(Nx, Ny))
         KernelAbstractions.synchronize(backend)
     else
         # y-sweep first
         kernel_y! = advect_vof_plic_y_2d_kernel!(backend)
-        kernel_y!(C_new, C, nx_n, ny_n, uy, Nx, Ny; ndrange=(Nx, Ny))
+        kernel_y!(C_new, C, cc_field, nx_n, ny_n, uy, Nx, Ny; ndrange=(Nx, Ny))
         KernelAbstractions.synchronize(backend)
         copyto!(C, C_new)
         compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
         # x-sweep second
         kernel_x! = advect_vof_plic_x_2d_kernel!(backend)
-        kernel_x!(C_new, C, nx_n, ny_n, ux, Nx, Ny; ndrange=(Nx, Ny))
+        kernel_x!(C_new, C, cc_field, nx_n, ny_n, ux, Nx, Ny; ndrange=(Nx, Ny))
         KernelAbstractions.synchronize(backend)
     end
+end
+
+# --- Helper: compute Weymouth-Yue cc field on GPU ---
+
+@kernel function _cc_field_kernel!(cc, @Const(C))
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(C)
+        cc[i,j] = ifelse(C[i,j] > T(0.5), one(T), zero(T))
+    end
+end
+
+function _compute_cc_field!(cc, C, backend, Nx, Ny)
+    kernel! = _cc_field_kernel!(backend)
+    kernel!(cc, C; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
 end
 
 # ===================================================================
@@ -557,9 +578,8 @@ end
         if c > T(0.01) && c < T(0.99)
             r = max(T(j) - T(0.5), one(T))  # clamp r ≥ 1 to avoid singularity
             # Azimuthal curvature: κ₂ = n_r / r where n_r = ny_n
-            # For a jet: normal points inward (ny < 0 above axis), κ₂ should be positive
-            # Negate to match sign convention: outward-pointing normal → κ > 0 for convex
-            κ_axi = -ny_n[i,j] / r
+            # Normal points outward (Basilisk convention), so n_r > 0 above axis
+            κ_axi = ny_n[i,j] / r
             # Clamp total curvature to avoid instability
             κ_total = κ[i,j] + κ_axi
             κ[i,j] = clamp(κ_total, -T(0.5), T(0.5))

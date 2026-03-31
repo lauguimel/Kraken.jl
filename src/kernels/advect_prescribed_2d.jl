@@ -46,15 +46,16 @@ function advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
 end
 
 """
-    advect_vof_plic_step!(C, C_new, nx_n, ny_n, ux, uy, Nx, Ny)
+    advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny)
 
 Advect volume fraction `C` one step using geometric PLIC reconstruction,
-then clamp to [0, 1]. Requires pre-allocated normal arrays `(nx_n, ny_n)`.
+then clamp to [0, 1]. Requires pre-allocated normal arrays `(nx_n, ny_n)`
+and Weymouth-Yue work array `cc_field`.
 Normals are computed internally before each sweep.
 """
-function advect_vof_plic_step!(C, C_new, nx_n, ny_n, ux, uy, Nx, Ny; step::Int=1)
+function advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step::Int=1)
     compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
-    advect_vof_plic_2d!(C_new, C, nx_n, ny_n, ux, uy, Nx, Ny; step=step)
+    advect_vof_plic_2d!(C_new, C, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step=step)
     clamp_field_2d!(C_new, zero(eltype(C_new)), one(eltype(C_new)))
 end
 
