@@ -100,7 +100,7 @@ export compute_psi_2d!, compute_sc_force_2d!, collide_sc_2d!
 export run_spinodal_2d, benchmark_mlups
 
 # VOF PLIC
-export compute_vof_normal_2d!, advect_vof_2d!
+export compute_vof_normal_2d!, compute_vof_normal_elvira_2d!, advect_vof_2d!
 export compute_hf_curvature_2d!, compute_surface_tension_2d!
 export collide_twophase_2d!, run_static_droplet_2d, run_plateau_pinch_2d
 export add_azimuthal_curvature_2d!, run_rp_axisym_2d

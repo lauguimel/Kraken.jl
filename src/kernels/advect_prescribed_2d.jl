@@ -46,16 +46,22 @@ function advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
 end
 
 """
-    advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny)
+    advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                          step=1, recon=:myc)
 
 Advect volume fraction `C` one step using geometric PLIC reconstruction,
 then clamp to [0, 1]. Requires pre-allocated normal arrays `(nx_n, ny_n)`
 and Weymouth-Yue work array `cc_field`.
-Normals are computed internally before each sweep.
+
+`recon` selects the normal reconstruction method:
+- `:myc`    — Mixed Youngs-Centered (Basilisk default, O(Δx))
+- `:elvira` — ELVIRA least-squares reconstruction (O(Δx²))
 """
-function advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step::Int=1)
-    compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
-    advect_vof_plic_2d!(C_new, C, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step=step)
+function advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                                step::Int=1, recon::Symbol=:myc)
+    recon_fn! = recon === :elvira ? compute_vof_normal_elvira_2d! : compute_vof_normal_2d!
+    recon_fn!(nx_n, ny_n, C, Nx, Ny)
+    advect_vof_plic_2d!(C_new, C, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step=step, recon=recon)
     clamp_field_2d!(C_new, zero(eltype(C_new)), one(eltype(C_new)))
 end
 

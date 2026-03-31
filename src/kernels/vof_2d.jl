@@ -12,38 +12,224 @@ using KernelAbstractions
 # ===========================================================================
 
 # ===================================================================
-# Part 1: Interface normals (Youngs method, GPU kernel)
+# Part 1: Interface normals (MYC — Mixed Youngs-Centered, GPU kernel)
 # ===================================================================
+#
+# Exact port of Basilisk myc2d.h: compute both central and Youngs
+# normals, keep the one with the largest min-component ratio (better
+# aligned with the interface). Convention: n = -∇C (outward from
+# liquid, matching Basilisk geometry.h).
+#
+# Reference: Aulisa et al. (2007) doi:10.1016/j.jcp.2007.03.015
 
 @kernel function compute_vof_normal_2d_kernel!(nx, ny, @Const(C), Nx, Ny)
     i, j = @index(Global, NTuple)
 
     @inbounds begin
         T = eltype(C)
-        # Central differences with periodic wrapping
         ip = ifelse(i < Nx, i + 1, 1)
         im = ifelse(i > 1,  i - 1, Nx)
         jp = ifelse(j < Ny, j + 1, 1)
         jm = ifelse(j > 1,  j - 1, Ny)
 
-        # Youngs' method: mixed central/corner differences for robustness
-        # Convention: n = -∇C (outward from liquid, matching Basilisk geometry.h)
-        # ∂C/∂x using Youngs stencil (weighted by y-neighbors)
-        dCdx = (C[im,jm] + T(2)*C[im,j] + C[im,jp] -
-                C[ip,jm] - T(2)*C[ip,j] - C[ip,jp]) / T(8)
-        dCdy = (C[im,jm] + T(2)*C[i,jm] + C[ip,jm] -
-                C[im,jp] - T(2)*C[i,jp] - C[ip,jp]) / T(8)
+        # --- Central differences (3-cell sums) ---
+        c_l = C[im,jm] + C[im,j] + C[im,jp]   # left column
+        c_r = C[ip,jm] + C[ip,j] + C[ip,jp]   # right column
+        c_b = C[im,jm] + C[i,jm] + C[ip,jm]   # bottom row
+        c_t = C[im,jp] + C[i,jp] + C[ip,jp]   # top row
 
-        # Normalize
-        mag = sqrt(dCdx^2 + dCdy^2) + T(1e-30)
-        nx[i,j] = dCdx / mag
-        ny[i,j] = dCdy / mag
+        # Central normal (sign: -∇C = left-right, bottom-top)
+        mx0 = (c_l - c_r) / T(2)
+        my0 = (c_b - c_t) / T(2)
+
+        # Determine which component is smaller (ix=1 → |mx|≤|my|)
+        ix = abs(mx0) <= abs(my0)
+        # Clamp the dominant component to ±1
+        mx0 = ifelse(ix, mx0, ifelse(mx0 > zero(T), one(T), -one(T)))
+        my0 = ifelse(ix, ifelse(my0 > zero(T), one(T), -one(T)), my0)
+
+        # --- Youngs stencil (weighted 1-2-1) ---
+        mm1 = C[im,jm] + T(2)*C[im,j] + C[im,jp]
+        mm2 = C[ip,jm] + T(2)*C[ip,j] + C[ip,jp]
+        mx1 = (mm1 - mm2) + T(1e-30)
+
+        mm1 = C[im,jm] + T(2)*C[i,jm] + C[ip,jm]
+        mm2 = C[im,jp] + T(2)*C[i,jp] + C[ip,jp]
+        my1 = (mm1 - mm2) + T(1e-30)
+
+        # --- Pick the better normal ---
+        # For the smaller-component axis (ix), compare the ratio
+        # |minor/major| — larger ratio means better alignment
+        if ix
+            # |mx| was smaller: compare |mx/my| for central vs Youngs
+            ratio_y = abs(mx1) / abs(my1)
+            mx_out = ifelse(ratio_y > abs(mx0), mx1, mx0)
+            my_out = ifelse(ratio_y > abs(mx0), my1, my0)
+        else
+            # |my| was smaller: compare |my/mx| for central vs Youngs
+            ratio_y = abs(my1) / abs(mx1)
+            mx_out = ifelse(ratio_y > abs(my0), mx1, mx0)
+            my_out = ifelse(ratio_y > abs(my0), my1, my0)
+        end
+
+        # Normalize: |mx| + |my| = 1 (L1 norm, matching Basilisk)
+        mm = abs(mx_out) + abs(my_out)
+        nx[i,j] = mx_out / mm
+        ny[i,j] = my_out / mm
     end
 end
 
 function compute_vof_normal_2d!(nx, ny, C, Nx, Ny)
     backend = KernelAbstractions.get_backend(C)
     kernel! = compute_vof_normal_2d_kernel!(backend)
+    kernel!(nx, ny, C, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+# ===================================================================
+# Part 1b: ELVIRA reconstruction (second-order accurate normals)
+# ===================================================================
+#
+# ELVIRA: Efficient Least-squares VOF Interface Reconstruction Algorithm
+# For each interface cell, test 6 candidate normals (3 column-wise slopes
+# giving ny/nx ratios, 3 row-wise slopes giving nx/ny ratios) and keep
+# the one that minimizes the L2 reconstruction error on the 3×3 stencil.
+#
+# This achieves O(Δx²) interface reconstruction vs O(Δx) for Youngs/MYC.
+#
+# Reference: Pilliod & Puckett (2004) doi:10.1016/j.jcp.2003.12.023
+
+# L2 reconstruction error of a candidate normal on a 3×3 stencil
+@inline function _elvira_l2(cnx::T, cny::T, s22::T,
+                             s11::T, s21::T, s31::T,
+                             s12::T, s32::T,
+                             s13::T, s23::T, s33::T) where T
+    alpha = _line_alpha(s22, cnx, cny)
+    err = zero(T)
+    err += (_line_area(cnx, cny, alpha - cnx - cny) - s11)^2
+    err += (_line_area(cnx, cny, alpha       - cny) - s21)^2
+    err += (_line_area(cnx, cny, alpha + cnx - cny) - s31)^2
+    err += (_line_area(cnx, cny, alpha - cnx      ) - s12)^2
+    # center cell exact by construction — skip
+    err += (_line_area(cnx, cny, alpha + cnx      ) - s32)^2
+    err += (_line_area(cnx, cny, alpha - cnx + cny) - s13)^2
+    err += (_line_area(cnx, cny, alpha       + cny) - s23)^2
+    err += (_line_area(cnx, cny, alpha + cnx + cny) - s33)^2
+    err
+end
+
+# Normalize candidate and compute error; update best if better
+@inline function _elvira_try(cnx::T, cny::T, s22::T,
+                              s11::T, s21::T, s31::T,
+                              s12::T, s32::T,
+                              s13::T, s23::T, s33::T,
+                              best_err::T, best_nx::T, best_ny::T) where T
+    mm = abs(cnx) + abs(cny) + T(1e-30)
+    cnx_n = cnx / mm; cny_n = cny / mm
+    err = _elvira_l2(cnx_n, cny_n, s22, s11, s21, s31, s12, s32, s13, s23, s33)
+    do_update = err < best_err
+    best_err = ifelse(do_update, err, best_err)
+    best_nx  = ifelse(do_update, cnx_n, best_nx)
+    best_ny  = ifelse(do_update, cny_n, best_ny)
+    best_err, best_nx, best_ny
+end
+
+@kernel function compute_vof_normal_elvira_2d_kernel!(nx_out, ny_out, @Const(C), Nx, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(C)
+        c = C[i,j]
+
+        ip = ifelse(i < Nx, i + 1, 1)
+        im = ifelse(i > 1,  i - 1, Nx)
+        jp = ifelse(j < Ny, j + 1, 1)
+        jm = ifelse(j > 1,  j - 1, Ny)
+
+        # Non-interface cells: zero normal
+        is_interface = c > T(1e-6) && c < one(T) - T(1e-6)
+
+        # Load 3×3 stencil
+        s11 = C[im,jm]; s21 = C[i,jm]; s31 = C[ip,jm]
+        s12 = C[im,j];  s22 = c;       s32 = C[ip,j]
+        s13 = C[im,jp]; s23 = C[i,jp]; s33 = C[ip,jp]
+
+        # 6 candidate slopes (-∇C convention)
+        # 3 with ny dominant: nx = row-wise central diff, ny = ±1
+        slope_b = (s11 - s31) / T(2)
+        slope_m = (s12 - s32) / T(2)
+        slope_t = (s13 - s33) / T(2)
+        # 3 with nx dominant: ny = column-wise central diff, nx = ±1
+        slope_l = (s11 - s13) / T(2)
+        slope_c = (s21 - s23) / T(2)
+        slope_r = (s31 - s33) / T(2)
+
+        # Sign of dominant direction (from Youngs stencil)
+        youngs_mx = s11 + T(2)*s12 + s13 - s31 - T(2)*s32 - s33
+        youngs_my = s11 + T(2)*s21 + s31 - s13 - T(2)*s23 - s33
+        sign_nx = ifelse(youngs_mx > zero(T), one(T), -one(T))
+        sign_ny = ifelse(youngs_my > zero(T), one(T), -one(T))
+
+        best_err = T(1e30)
+        best_nx = zero(T)
+        best_ny = zero(T)
+
+        # Test 6 candidates × 2 signs = 12 total (brute force, GPU-safe)
+        # ny dominant: (slope, +1) and (slope, -1)
+        best_err, best_nx, best_ny = _elvira_try(
+            slope_b, one(T), s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            slope_b, -one(T), s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            slope_m, one(T), s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            slope_m, -one(T), s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            slope_t, one(T), s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            slope_t, -one(T), s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+
+        # nx dominant: (+1, slope) and (-1, slope)
+        best_err, best_nx, best_ny = _elvira_try(
+            one(T), slope_l, s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            -one(T), slope_l, s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            one(T), slope_c, s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            -one(T), slope_c, s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            one(T), slope_r, s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+        best_err, best_nx, best_ny = _elvira_try(
+            -one(T), slope_r, s22, s11, s21, s31, s12, s32, s13, s23, s33,
+            best_err, best_nx, best_ny)
+
+        # Fix sign: _line_area is symmetric in sign, so we must orient
+        # the normal using the Youngs gradient direction (-∇C = outward)
+        youngs_dot = best_nx * youngs_mx + best_ny * youngs_my
+        flip = youngs_dot < zero(T)
+        best_nx = ifelse(flip, -best_nx, best_nx)
+        best_ny = ifelse(flip, -best_ny, best_ny)
+
+        nx_out[i,j] = ifelse(is_interface, best_nx, zero(T))
+        ny_out[i,j] = ifelse(is_interface, best_ny, zero(T))
+    end
+end
+
+function compute_vof_normal_elvira_2d!(nx, ny, C, Nx, Ny)
+    backend = KernelAbstractions.get_backend(C)
+    kernel! = compute_vof_normal_elvira_2d_kernel!(backend)
     kernel!(nx, ny, C, Nx, Ny; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end
@@ -127,7 +313,7 @@ end
 
 @kernel function advect_vof_plic_x_2d_kernel!(C_new, @Const(C), @Const(cc_field),
                                                 @Const(nx_n), @Const(ny_n),
-                                                @Const(ux), Nx, Ny)
+                                                @Const(ux), dt_factor, Nx, Ny)
     i, j = @index(Global, NTuple)
 
     @inbounds begin
@@ -135,12 +321,11 @@ end
         ip = ifelse(i < Nx, i + 1, 1)
         im = ifelse(i > 1,  i - 1, Nx)
 
-        # --- Right face velocity ---
-        u_right = (ux[i, j] + ux[ip, j]) / T(2)
+        # --- Right face velocity (scaled by dt_factor for sub-stepping) ---
+        u_right = (ux[i, j] + ux[ip, j]) / T(2) * dt_factor
 
         # --- Right face flux (geometric PLIC) ---
         if u_right > zero(T)
-            # Donor = cell (i,j), velocity sweeps rightward
             c_donor = C[i,j]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_right = c_donor
@@ -152,7 +337,6 @@ end
             end
             flux_right = cf_right * u_right
         else
-            # Donor = cell (ip,j), velocity sweeps leftward
             c_donor = C[ip,j]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_right = c_donor
@@ -162,15 +346,14 @@ end
                 cf_right = _rectangle_fraction(-s*nx_n[ip,j], ny_n[ip,j], alpha_d,
                                                -T(0.5), -T(0.5), s*u_right - T(0.5), T(0.5))
             end
-            flux_right = cf_right * u_right  # u_right < 0 → negative flux
+            flux_right = cf_right * u_right
         end
 
         # --- Left face velocity ---
-        u_left = (ux[im, j] + ux[i, j]) / T(2)
+        u_left = (ux[im, j] + ux[i, j]) / T(2) * dt_factor
 
         # --- Left face flux (geometric PLIC) ---
         if u_left > zero(T)
-            # Donor = cell (im,j), velocity sweeps rightward
             c_donor = C[im,j]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_left = c_donor
@@ -182,7 +365,6 @@ end
             end
             flux_left = cf_left * u_left
         else
-            # Donor = cell (i,j), velocity sweeps leftward
             c_donor = C[i,j]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_left = c_donor
@@ -192,7 +374,7 @@ end
                 cf_left = _rectangle_fraction(-s*nx_n[i,j], ny_n[i,j], alpha_d,
                                               -T(0.5), -T(0.5), s*u_left - T(0.5), T(0.5))
             end
-            flux_left = cf_left * u_left  # u_left < 0 → negative flux
+            flux_left = cf_left * u_left
         end
 
         # Weymouth-Yue (2010) correction — cc frozen before all sweeps
@@ -202,7 +384,7 @@ end
 
 @kernel function advect_vof_plic_y_2d_kernel!(C_new, @Const(C), @Const(cc_field),
                                                 @Const(nx_n), @Const(ny_n),
-                                                @Const(uy), Nx, Ny)
+                                                @Const(uy), dt_factor, Nx, Ny)
     i, j = @index(Global, NTuple)
 
     @inbounds begin
@@ -210,14 +392,11 @@ end
         jp = ifelse(j < Ny, j + 1, 1)
         jm = ifelse(j > 1,  j - 1, Ny)
 
-        # --- Top face velocity ---
-        u_top = (uy[i, j] + uy[i, jp]) / T(2)
+        # --- Top face velocity (scaled by dt_factor for sub-stepping) ---
+        u_top = (uy[i, j] + uy[i, jp]) / T(2) * dt_factor
 
         # --- Top face flux (geometric PLIC) ---
-        # Note: for y-direction, the rectangle extends in y (4th arg pair),
-        # and the sign flip is on ny (not nx)
         if u_top > zero(T)
-            # Donor = cell (i,j), velocity sweeps upward
             c_donor = C[i,j]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_top = c_donor
@@ -229,7 +408,6 @@ end
             end
             flux_top = cf_top * u_top
         else
-            # Donor = cell (i,jp), velocity sweeps downward
             c_donor = C[i,jp]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_top = c_donor
@@ -239,15 +417,14 @@ end
                 cf_top = _rectangle_fraction(nx_n[i,jp], -s*ny_n[i,jp], alpha_d,
                                              -T(0.5), -T(0.5), T(0.5), s*u_top - T(0.5))
             end
-            flux_top = cf_top * u_top  # u_top < 0 → negative flux
+            flux_top = cf_top * u_top
         end
 
         # --- Bottom face velocity ---
-        u_bot = (uy[i, jm] + uy[i, j]) / T(2)
+        u_bot = (uy[i, jm] + uy[i, j]) / T(2) * dt_factor
 
         # --- Bottom face flux (geometric PLIC) ---
         if u_bot > zero(T)
-            # Donor = cell (i,jm), velocity sweeps upward
             c_donor = C[i,jm]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_bot = c_donor
@@ -259,7 +436,6 @@ end
             end
             flux_bot = cf_bot * u_bot
         else
-            # Donor = cell (i,j), velocity sweeps downward
             c_donor = C[i,j]
             if c_donor <= zero(T) || c_donor >= one(T)
                 cf_bot = c_donor
@@ -269,7 +445,7 @@ end
                 cf_bot = _rectangle_fraction(nx_n[i,j], -s*ny_n[i,j], alpha_d,
                                              -T(0.5), -T(0.5), T(0.5), s*u_bot - T(0.5))
             end
-            flux_bot = cf_bot * u_bot  # u_bot < 0 → negative flux
+            flux_bot = cf_bot * u_bot
         end
 
         # Weymouth-Yue (2010) correction — cc frozen before all sweeps
@@ -284,41 +460,66 @@ Geometric PLIC advection of volume fraction C using directional splitting
 with Basilisk-style `rectangle_fraction` flux computation and Weymouth-Yue
 compression correction.
 
+Automatic CFL sub-stepping: if max|u|·dt/Δx > 0.5, the step is split
+into N sub-steps so that each sub-step satisfies CFL ≤ 0.5.
+
 Requires pre-computed interface normals `(nx_n, ny_n)` from `compute_vof_normal_2d!`
 and a pre-allocated `cc_field` work array (same size as C).
 Strang alternating splitting: x→y on odd steps, y→x on even steps.
 """
-function advect_vof_plic_2d!(C_new, C, nx_n, ny_n, cc_field, ux, uy, Nx, Ny; step::Int=1)
+function advect_vof_plic_2d!(C_new, C, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                              step::Int=1, recon::Symbol=:myc)
     backend = KernelAbstractions.get_backend(C)
+    T = eltype(C)
 
-    # Weymouth-Yue: freeze cc = (C > 0.5) ONCE before all sweeps
-    _compute_cc_field!(cc_field, C, backend, Nx, Ny)
+    # Select reconstruction function
+    recon_fn! = recon === :elvira ? compute_vof_normal_elvira_2d! : compute_vof_normal_2d!
 
-    # Strang alternating splitting: x→y on odd steps, y→x on even steps
-    # This reduces directional bias for rotational flows
-    if isodd(step)
-        # x-sweep first
-        kernel_x! = advect_vof_plic_x_2d_kernel!(backend)
-        kernel_x!(C_new, C, cc_field, nx_n, ny_n, ux, Nx, Ny; ndrange=(Nx, Ny))
-        KernelAbstractions.synchronize(backend)
+    # Compute CFL and determine sub-stepping
+    u_max = max(maximum(abs, Array(ux)), maximum(abs, Array(uy)))
+    cfl = u_max  # dt/dx = 1 in lattice units
+    n_sub = max(1, ceil(Int, cfl / T(0.45)))  # target CFL ≤ 0.45 per sub-step
+    dt_sub = one(T) / T(n_sub)
+
+    for sub in 1:n_sub
+        # Weymouth-Yue: freeze cc = (C > 0.5) ONCE before all sweeps
+        _compute_cc_field!(cc_field, C, backend, Nx, Ny)
+
+        # Strang alternating: alternate sweep order based on (step + sub)
+        sweep_idx = step + sub - 1
+        if isodd(sweep_idx)
+            _plic_sweep_xy!(C_new, C, cc_field, nx_n, ny_n, ux, uy, dt_sub,
+                            recon_fn!, backend, Nx, Ny)
+        else
+            _plic_sweep_yx!(C_new, C, cc_field, nx_n, ny_n, ux, uy, dt_sub,
+                            recon_fn!, backend, Nx, Ny)
+        end
         copyto!(C, C_new)
-        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
-        # y-sweep second
-        kernel_y! = advect_vof_plic_y_2d_kernel!(backend)
-        kernel_y!(C_new, C, cc_field, nx_n, ny_n, uy, Nx, Ny; ndrange=(Nx, Ny))
-        KernelAbstractions.synchronize(backend)
-    else
-        # y-sweep first
-        kernel_y! = advect_vof_plic_y_2d_kernel!(backend)
-        kernel_y!(C_new, C, cc_field, nx_n, ny_n, uy, Nx, Ny; ndrange=(Nx, Ny))
-        KernelAbstractions.synchronize(backend)
-        copyto!(C, C_new)
-        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
-        # x-sweep second
-        kernel_x! = advect_vof_plic_x_2d_kernel!(backend)
-        kernel_x!(C_new, C, cc_field, nx_n, ny_n, ux, Nx, Ny; ndrange=(Nx, Ny))
-        KernelAbstractions.synchronize(backend)
     end
+end
+
+function _plic_sweep_xy!(C_new, C, cc_field, nx_n, ny_n, ux, uy, dt_sub,
+                          recon_fn!, backend, Nx, Ny)
+    kernel_x! = advect_vof_plic_x_2d_kernel!(backend)
+    kernel_x!(C_new, C, cc_field, nx_n, ny_n, ux, dt_sub, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+    copyto!(C, C_new)
+    recon_fn!(nx_n, ny_n, C, Nx, Ny)
+    kernel_y! = advect_vof_plic_y_2d_kernel!(backend)
+    kernel_y!(C_new, C, cc_field, nx_n, ny_n, uy, dt_sub, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+function _plic_sweep_yx!(C_new, C, cc_field, nx_n, ny_n, ux, uy, dt_sub,
+                          recon_fn!, backend, Nx, Ny)
+    kernel_y! = advect_vof_plic_y_2d_kernel!(backend)
+    kernel_y!(C_new, C, cc_field, nx_n, ny_n, uy, dt_sub, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+    copyto!(C, C_new)
+    recon_fn!(nx_n, ny_n, C, Nx, Ny)
+    kernel_x! = advect_vof_plic_x_2d_kernel!(backend)
+    kernel_x!(C_new, C, cc_field, nx_n, ny_n, ux, dt_sub, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
 end
 
 # --- Helper: compute Weymouth-Yue cc field on GPU ---
