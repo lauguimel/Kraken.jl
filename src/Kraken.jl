@@ -71,10 +71,14 @@ export stream_axisym_inlet_2d!
 export collide_guo_2d!, collide_guo_field_2d!
 export collide_guo_3d!, collide_guo_field_3d!
 export compute_macroscopic_2d!, compute_macroscopic_3d!, compute_macroscopic_forced_2d!
-export compute_macroscopic_forced_3d!
+export compute_macroscopic_forced_3d!, compute_macroscopic_pressure_2d!
 export apply_zou_he_north_2d!, apply_zou_he_south_2d!
 export apply_zou_he_west_2d!, apply_zou_he_pressure_east_2d!, apply_extrapolate_east_2d!
 export apply_zou_he_top_3d!
+export apply_zou_he_bottom_3d!, apply_zou_he_west_3d!, apply_zou_he_east_3d!
+export apply_zou_he_south_3d!, apply_zou_he_north_3d!
+export apply_zou_he_pressure_east_3d!, apply_zou_he_pressure_top_3d!
+export apply_bounce_back_walls_3d!
 
 # Simulation
 export LBMConfig, omega, reynolds
@@ -93,7 +97,7 @@ export fused_natconv_step!, fused_natconv_vt_step!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
-export collide_mrt_2d!, collide_twophase_mrt_2d!
+export collide_mrt_2d!, collide_twophase_mrt_2d!, collide_pressure_mrt_2d!
 
 # Species transport
 export collide_species_2d!, compute_concentration_2d!
@@ -161,5 +165,6 @@ export find_basilisk_snapshot, compare_interfaces
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
 export apply_zou_he_west_spatial_2d!, apply_zou_he_pressure_east_spatial_2d!
+export apply_zou_he_pressure_inlet_west_2d!
 
 end # module Kraken
