@@ -152,6 +152,8 @@ export voxelize_2d, voxelize_3d
 
 # Post-processing
 export extract_line, field_error, probe, domain_stats
+export load_basilisk_interfaces, load_basilisk_interface_contour
+export find_basilisk_snapshot, compare_interfaces
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
