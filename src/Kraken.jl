@@ -112,6 +112,7 @@ export compute_vof_normal_2d!, advect_vof_2d!
 export compute_hf_curvature_2d!, compute_surface_tension_2d!
 export collide_twophase_2d!, run_static_droplet_2d, run_plateau_pinch_2d
 export add_azimuthal_curvature_2d!, add_axisym_viscous_correction_2d!, set_vof_west_2d!
+export apply_density_correction_2d!
 export run_rp_axisym_2d, run_cij_jet_axisym_2d
 
 # Dual-grid VOF
@@ -133,7 +134,7 @@ export run_advection_2d
 
 # I/O
 export write_vtk, create_pvd, write_vtk_to_pvd
-export setup_output_dir, write_snapshot_2d!
+export setup_output_dir, write_snapshot_2d!, write_snapshot_3d!
 export write_vtk_multiblock, write_snapshot_refined_2d!
 export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
 

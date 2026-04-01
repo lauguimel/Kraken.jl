@@ -111,6 +111,44 @@ function write_snapshot_2d!(output_dir::String, step::Int, Nx::Int, Ny::Int, dx,
     end
 end
 
+"""
+    write_snapshot_3d!(output_dir, step, Nx, Ny, Nz, dx, fields; pvd=nothing, time=0.0)
+
+Write a 3D VTK snapshot with a zero-padded filename `snapshot_NNNNNNN`.
+If `pvd` is provided, the snapshot is also registered in the PVD collection.
+
+Fields can be:
+- `String => AbstractArray{T,3}` for scalar fields
+- `String => Tuple{AbstractArray,AbstractArray,AbstractArray}` for 3-component vector fields
+"""
+function write_snapshot_3d!(output_dir::String, step::Int, Nx::Int, Ny::Int, Nz::Int, dx,
+                            fields::Dict;
+                            pvd=nothing, time::Float64=0.0)
+    tag = lpad(step, 7, '0')
+    filename = joinpath(output_dir, "snapshot_$tag")
+    dx_f = Float64(dx)
+
+    xs = collect(range(0.0, step=dx_f, length=Nx + 1))
+    ys = collect(range(0.0, step=dx_f, length=Ny + 1))
+    zs = collect(range(0.0, step=dx_f, length=Nz + 1))
+
+    vtk_grid(filename, xs, ys, zs) do vtk
+        for (name, data) in fields
+            if data isa Tuple{AbstractArray, AbstractArray, AbstractArray}
+                ux_cpu = Array(data[1])
+                uy_cpu = Array(data[2])
+                uz_cpu = Array(data[3])
+                vtk[name] = (ux_cpu, uy_cpu, uz_cpu)
+            else
+                vtk[name] = Array(data)
+            end
+        end
+        if pvd !== nothing
+            pvd[time] = vtk
+        end
+    end
+end
+
 # --- Multi-block output for grid refinement ---
 
 """
