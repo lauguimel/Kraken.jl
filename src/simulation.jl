@@ -1186,6 +1186,256 @@ function run_rp_axisym_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
             σ=σ, R0=R0, λ=λ, ε=ε)
 end
 
+# --- CIJ jet: axisymmetric two-phase with pulsed inlet ---
+
+"""
+    run_cij_jet_axisym_2d(; Re=200, We=600, δ=0.02, R0=40, u_lb=0.04, ...)
+
+Continuous InkJet (CIJ) axisymmetric jet simulation: Rayleigh-Plateau breakup
+of a liquid jet stimulated by a pulsed velocity inlet.
+
+Coordinates: x=z (axial, inlet at i=1), y=r (radial, axis at j=1).
+
+Reproduces the Basilisk setup from Roche et al.: axisymmetric NS-VOF with
+pulsed inlet u(t) = u_lb·(1 + δ·sin(2π·f·t)), where f = u_lb/(7·R0)
+corresponds to a perturbation wavelength λ = 7·R0 (near the Rayleigh-Plateau
+optimal wavenumber k·R0 ≈ 0.9).
+
+Uses MRT collision for stability at high Re (τ close to 0.5).
+
+Physical parameters mapped through dimensionless numbers:
+- Re = u_lb·R0/ν_l  (Reynolds)
+- We = ρ_l·u_lb²·R0/σ (Weber)
+- ρ_l/ρ_g = ρ_ratio, μ_l/μ_g = μ_ratio
+
+Returns interface snapshots at each output step for comparison with reference data.
+"""
+function run_cij_jet_axisym_2d(;
+        Re=200, We=600, δ=0.02,
+        R0=40, u_lb=0.04,
+        domain_ratio=80,    # domain length = domain_ratio × R0
+        nr_ratio=3,         # radial extent = nr_ratio × R0
+        ρ_ratio=10.0,       # ρ_l / ρ_g
+        μ_ratio=10.0,       # μ_l / μ_g
+        init_length=4,      # initial jet length in R0 units
+        max_steps=200_000,
+        output_interval=2000,
+        output_dir="cij_jet",
+        backend=KernelAbstractions.CPU(),
+        FT=Float64)
+
+    # --- Derive LBM parameters from dimensionless numbers ---
+    ρ_l = FT(1.0)
+    ρ_g = ρ_l / FT(ρ_ratio)
+    ν_l = FT(u_lb) * FT(R0) / FT(Re)
+    # μ_l/μ_g = μ_ratio → ρ_l·ν_l / (ρ_g·ν_g) = μ_ratio → ν_g = ρ_l·ν_l / (ρ_g·μ_ratio)
+    ν_g = ρ_l * ν_l / (ρ_g * FT(μ_ratio))
+    σ_lb = ρ_l * FT(u_lb)^2 * FT(R0) / FT(We)
+
+    τ_l = FT(3) * ν_l + FT(0.5)
+    τ_g = FT(3) * ν_g + FT(0.5)
+
+    @info "CIJ jet LBM parameters" Re We δ R0 u_lb ν_l ν_g σ_lb τ_l τ_g ρ_l ρ_g
+
+    if τ_l < FT(0.505) || τ_g < FT(0.505)
+        @warn "Relaxation time close to 0.5 — simulation may be unstable" τ_l τ_g
+    end
+
+    # --- Domain ---
+    Nz = Int(domain_ratio * R0)   # axial
+    Nr = Int(nr_ratio * R0)       # radial
+    Nx, Ny = Nz, Nr
+
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(ν_l), u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    # VOF arrays
+    C      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_new  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    nx_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ny_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    cc_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    κ      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    # Perturbation frequency: λ = 7·R0, period T = 7·R0/u_lb
+    T_period = FT(7) * FT(R0) / FT(u_lb)
+    f_stim = one(FT) / T_period
+
+    # Pre-compute inlet profiles (constant spatial shape, only amplitude varies)
+    ux_inlet = KernelAbstractions.zeros(backend, FT, Ny)
+    uy_inlet = KernelAbstractions.zeros(backend, FT, Ny)
+    # Normalized radial profile: Hagen-Poiseuille (parabolic) with smooth cutoff
+    # u(r) = u_max * max(0, 1 - (r/R0)²) — smooth at r=0, zero gradient at r=R0
+    # Blended with a tanh to avoid discontinuity in first derivative
+    inlet_profile_cpu = zeros(FT, Ny)
+    inlet_vof_cpu = zeros(FT, Ny)
+    W_smooth = FT(3)  # interface smoothing width (lattice units)
+    for j in 1:Ny
+        r = FT(j) - FT(0.5)
+        # Smooth envelope (tanh cutoff at R0)
+        envelope = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / W_smooth))
+        # Flat profile (uniform velocity across jet, like Basilisk flat.c)
+        inlet_profile_cpu[j] = envelope
+        inlet_vof_cpu[j] = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
+    end
+    inlet_profile = KernelAbstractions.zeros(backend, FT, Ny)
+    copyto!(inlet_profile, inlet_profile_cpu)
+    inlet_vof_gpu = KernelAbstractions.zeros(backend, FT, Ny)
+    copyto!(inlet_vof_gpu, inlet_vof_cpu)
+
+    # --- Initialize: flat jet of length init_length·R0 ---
+    C_cpu = zeros(FT, Nx, Ny)
+    f_cpu = zeros(FT, Nx, Ny, 9)
+    w = weights(D2Q9())
+    L_init = FT(init_length * R0)
+
+    for j in 1:Ny, i in 1:Nx
+        r = FT(j) - FT(0.5)
+        z = FT(i) - FT(0.5)
+        c_r = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
+        c_z = FT(0.5) * (one(FT) + tanh((L_init - z) / FT(1.5)))
+        C_cpu[i,j] = c_r * c_z
+        # Uniform LBM density (density ratio captured via body forces, not distributions)
+        ρ_init = ρ_l
+        ux_init = C_cpu[i,j] * FT(u_lb)
+        for q in 1:9
+            cx = FT(velocities_x(D2Q9())[q])
+            cu = cx * ux_init
+            usq = ux_init^2
+            f_cpu[i,j,q] = FT(w[q]) * ρ_init * (one(FT) + FT(3)*cu + FT(4.5)*cu^2 - FT(1.5)*usq)
+        end
+    end
+    copyto!(C, C_cpu)
+    copyto!(f_in, f_cpu)
+    copyto!(f_out, f_cpu)
+
+    # --- Output setup ---
+    mkpath(output_dir)
+    pvd = create_pvd(joinpath(output_dir, "cij_jet"))
+
+    # Storage for interface snapshots and breakup tracking
+    interface_snapshots = Dict{Int, Vector{NTuple{2,FT}}}()
+    breakup_detected = false
+    breakup_step = 0
+
+    @info "CIJ jet simulation" Nz Nr T_period max_steps output_dir
+
+    # --- Main loop ---
+    for step in 1:max_steps
+
+        # 1. Stream (axisym: non-periodic x, specular j=1, wall j=Ny)
+        stream_axisym_inlet_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Inlet BC: pulsed Zou-He velocity (inside jet only)
+        u_t = FT(u_lb) * (one(FT) + FT(δ) * sin(FT(2π) * f_stim * FT(step)))
+        # Scale pre-computed profile by time-varying amplitude
+        ux_inlet .= inlet_profile .* u_t
+        apply_zou_he_west_spatial_2d!(f_out, ux_inlet, uy_inlet, Nx, Ny)
+
+        # 3. Outlet BC: Zou-He pressure (ρ=1 reference, works with MRT stability)
+        apply_zou_he_pressure_east_2d!(f_out, Nx, Ny; ρ_out=1.0)
+
+        # 4. Macroscopic
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+
+        # 5. Impose VOF at inlet (first column, GPU kernel)
+        set_vof_west_2d!(C, inlet_vof_gpu)
+
+        # 6. VOF advection (PLIC with MYC normals, CFL sub-stepping)
+        advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                              step=step)
+        copyto!(C, C_new)
+
+        # 7. Curvature: meridional (κ₁) + azimuthal (κ₂ = n_r/r)
+        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+        add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
+
+        # 8. Surface tension force (CSF: F = σ·κ·∇C)
+        compute_surface_tension_2d!(Fx_st, Fy_st, κ, C, σ_lb, Nx, Ny)
+
+        # 9. Axisymmetric viscous correction: ν/r · ∂u_z/∂r
+        add_axisym_viscous_correction_2d!(Fx_st, ux, C, ν_l, ν_g, Ny)
+
+        # 10. Two-phase MRT collision (stable at high Re / low τ)
+        collide_twophase_mrt_2d!(f_out, C, Fx_st, Fy_st, is_solid;
+                                  ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν_l, ν_g=ν_g)
+
+        # 11. Swap
+        f_in, f_out = f_out, f_in
+
+        # --- Output and diagnostics ---
+        if step % output_interval == 0
+            C_out = Array(C)
+            ux_out = Array(ux)
+
+            # Extract interface contour (C = 0.5)
+            interface_pts = NTuple{2,FT}[]
+            for i in 1:Nx, j in 1:Ny-1
+                if (C_out[i,j] - FT(0.5)) * (C_out[i,j+1] - FT(0.5)) < 0
+                    frac = (FT(0.5) - C_out[i,j]) / (C_out[i,j+1] - C_out[i,j])
+                    push!(interface_pts, (FT(i) - FT(0.5), (FT(j) - FT(0.5)) + frac))
+                end
+            end
+            interface_snapshots[step] = interface_pts
+
+            # Breakup detection: only after jet has had time to grow (> 5 periods)
+            if !breakup_detected && step > 5 * Int(round(T_period))
+                # Scan behind the jet tip for a pinch-off (gap in liquid column)
+                for i in Int(round(5*R0)):Nx-1
+                    # Check if a previously filled region has broken
+                    max_c = maximum(C_out[i, 1:min(2*R0, Ny)])
+                    if max_c < FT(0.01)
+                        # Verify it's a real pinch-off: liquid exists both upstream and downstream
+                        has_upstream = any(C_out[max(1,i-5*R0):i-1, 1] .> FT(0.5))
+                        has_downstream = i + 5 <= Nx && any(C_out[i+1:min(i+5*R0,Nx), 1] .> FT(0.5))
+                        if has_upstream && has_downstream
+                            breakup_detected = true
+                            breakup_step = step
+                            @info "Breakup detected" step z=FT(i)-FT(0.5) t_phys=step*u_lb/R0
+                            break
+                        end
+                    end
+                end
+            end
+
+            # Write VTK (2D: dx = 1.0 in lattice units)
+            t_phys = FT(step) * FT(u_lb) / FT(R0)
+            write_vtk_to_pvd(pvd,
+                joinpath(output_dir, "cij_jet_$(lpad(step, 7, '0'))"),
+                Nx, Ny, 1.0,
+                Dict("C" => C_out, "rho" => Array(ρ),
+                     "ux" => ux_out, "uy" => Array(uy),
+                     "kappa" => Array(κ)),
+                Float64(t_phys))
+
+            ρ_out_arr = Array(ρ)
+            sum_C = sum(C_out)
+            @info "Step $step / $max_steps" t_phys n_interface=length(interface_pts) sum_C ρ_range=extrema(ρ_out_arr) ux_range=extrema(ux_out) breakup=breakup_detected
+        end
+
+        # Stop 3 periods after breakup (like Basilisk)
+        if breakup_detected && step > breakup_step + 3 * Int(round(T_period))
+            @info "Stopping: 3 periods after breakup" step
+            break
+        end
+    end
+
+    # Finalize PVD
+    vtk_save(pvd)
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+
+    return (ρ=Array(ρ), uz=Array(ux), ur=Array(uy), C=Array(C),
+            interfaces=interface_snapshots,
+            breakup_detected=breakup_detected, breakup_step=breakup_step,
+            params=(; Re, We, δ, R0, u_lb, ν_l, ν_g, σ_lb, ρ_l, ρ_g, Nz, Nr, T_period))
+end
+
 # --- Spinodal decomposition (Shan-Chen multiphase) ---
 
 """

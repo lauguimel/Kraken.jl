@@ -124,3 +124,109 @@ function collide_mrt_2d!(f, is_solid, ν; s_e=1.4, s_eps=1.4, s_q=1.2)
     kernel!(f, is_solid, T(s_e), T(s_eps), T(s_q), s_nu; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end
+
+# --- Two-phase MRT collision with per-node viscosity and Guo forcing ---
+
+@kernel function collide_twophase_mrt_2d_kernel!(f, @Const(C), @Const(Fx_st), @Const(Fy_st),
+                                                   @Const(is_solid), ρ_l, ρ_g, ν_l, ν_g,
+                                                   s_e, s_eps, s_q)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        if is_solid[i, j]
+            tmp = f[i,j,2]; f[i,j,2] = f[i,j,4]; f[i,j,4] = tmp
+            tmp = f[i,j,3]; f[i,j,3] = f[i,j,5]; f[i,j,5] = tmp
+            tmp = f[i,j,6]; f[i,j,6] = f[i,j,8]; f[i,j,8] = tmp
+            tmp = f[i,j,7]; f[i,j,7] = f[i,j,9]; f[i,j,9] = tmp
+        else
+            T = eltype(f)
+            f1=f[i,j,1]; f2=f[i,j,2]; f3=f[i,j,3]; f4=f[i,j,4]
+            f5=f[i,j,5]; f6=f[i,j,6]; f7=f[i,j,7]; f8=f[i,j,8]; f9=f[i,j,9]
+
+            c = C[i,j]
+            ν_local = c * ν_l + (one(T) - c) * ν_g
+            s_nu = one(T) / (T(3) * ν_local + T(0.5))
+
+            fx = Fx_st[i,j]
+            fy = Fy_st[i,j]
+
+            # Transform to moment space
+            ρ   = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+            e   = -T(4)*f1 - f2 - f3 - f4 - f5 + T(2)*(f6+f7+f8+f9)
+            eps = T(4)*f1 - T(2)*(f2+f3+f4+f5) + f6+f7+f8+f9
+            jx  = f2 - f4 + f6 - f7 - f8 + f9
+            qx  = -T(2)*f2 + T(2)*f4 + f6 - f7 - f8 + f9
+            jy  = f3 - f5 + f6 + f7 - f8 - f9
+            qy  = -T(2)*f3 + T(2)*f5 + f6 + f7 - f8 - f9
+            pxx = f2 - f3 + f4 - f5
+            pxy = f6 - f7 + f8 - f9
+
+            # Guo forcing: shift momentum by half-force
+            inv_ρ = one(T) / ρ
+            ux = (jx + fx / T(2)) * inv_ρ
+            uy = (jy + fy / T(2)) * inv_ρ
+            usq = ux*ux + uy*uy
+
+            # Equilibrium moments
+            e_eq   = -T(2)*ρ + T(3)*ρ*usq
+            eps_eq = ρ - T(3)*ρ*usq
+            qx_eq  = -ρ*ux
+            qy_eq  = -ρ*uy
+            pxx_eq = ρ*(ux*ux - uy*uy)
+            pxy_eq = ρ*ux*uy
+
+            # Guo source term in moment space (Guo et al., 2002)
+            # S_m = (I - S/2) * M * Guo_source
+            # For MRT: add force contribution to jx, jy moments
+            jx_force = fx
+            jy_force = fy
+
+            # Relax moments
+            e_star   = e   - s_e   * (e   - e_eq)
+            eps_star = eps - s_eps * (eps - eps_eq)
+            jx_star  = jx + jx_force  # momentum + force (conserved + source)
+            jy_star  = jy + jy_force
+            qx_star  = qx  - s_q   * (qx  - qx_eq)
+            qy_star  = qy  - s_q   * (qy  - qy_eq)
+            pxx_star = pxx - s_nu  * (pxx - pxx_eq)
+            pxy_star = pxy - s_nu  * (pxy - pxy_eq)
+
+            # Transform back: f* = M⁻¹·m*
+            r = ρ; es = e_star; ep = eps_star
+            jxs = jx_star; qxs = qx_star; jys = jy_star; qys = qy_star
+            ps = pxx_star; pxys = pxy_star
+
+            f[i,j,1] = T(1/9)*r  - T(1/9)*es  + T(1/9)*ep
+            f[i,j,2] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep + T(1/6)*jxs - T(1/6)*qxs + T(1/4)*ps
+            f[i,j,3] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep + T(1/6)*jys - T(1/6)*qys - T(1/4)*ps
+            f[i,j,4] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep - T(1/6)*jxs + T(1/6)*qxs + T(1/4)*ps
+            f[i,j,5] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep - T(1/6)*jys + T(1/6)*qys - T(1/4)*ps
+            f[i,j,6] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep + T(1/6)*jxs + T(1/12)*qxs + T(1/6)*jys + T(1/12)*qys + T(1/4)*pxys
+            f[i,j,7] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep - T(1/6)*jxs - T(1/12)*qxs + T(1/6)*jys + T(1/12)*qys - T(1/4)*pxys
+            f[i,j,8] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep - T(1/6)*jxs - T(1/12)*qxs - T(1/6)*jys - T(1/12)*qys + T(1/4)*pxys
+            f[i,j,9] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep + T(1/6)*jxs + T(1/12)*qxs - T(1/6)*jys - T(1/12)*qys - T(1/4)*pxys
+        end
+    end
+end
+
+"""
+    collide_twophase_mrt_2d!(f, C, Fx_st, Fy_st, is_solid; ρ_l, ρ_g, ν_l, ν_g, s_e, s_eps, s_q)
+
+Two-phase MRT collision for D2Q9 with per-node viscosity from VOF field C
+and Guo forcing (surface tension + body forces).
+
+Variable viscosity: ν(C) = C·ν_l + (1-C)·ν_g → s_ν = 1/(3ν(C) + 0.5)
+Stability relaxation rates: s_e, s_eps, s_q (defaults from Lallemand & Luo, 2000).
+"""
+function collide_twophase_mrt_2d!(f, C, Fx_st, Fy_st, is_solid;
+                                   ρ_l=1.0, ρ_g=0.001, ν_l=0.1, ν_g=0.1,
+                                   s_e=1.4, s_eps=1.4, s_q=1.2)
+    backend = KernelAbstractions.get_backend(f)
+    Nx, Ny = size(f, 1), size(f, 2)
+    T = eltype(f)
+    kernel! = collide_twophase_mrt_2d_kernel!(backend)
+    kernel!(f, C, Fx_st, Fy_st, is_solid,
+            T(ρ_l), T(ρ_g), T(ν_l), T(ν_g), T(s_e), T(s_eps), T(s_q);
+            ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end

@@ -170,3 +170,28 @@ function apply_zou_he_pressure_east_2d!(f, Nx, Ny; ρ_out=1.0)
     kernel!(f, Nx, eltype(f)(ρ_out); ndrange=(Ny,))
     KernelAbstractions.synchronize(backend)
 end
+
+# --- Zero-gradient (Neumann) outflow on east wall ---
+
+@kernel function extrapolate_east_2d_kernel!(f, Nx)
+    j = @index(Global)
+
+    @inbounds begin
+        for q in 1:9
+            f[Nx, j, q] = f[Nx-1, j, q]
+        end
+    end
+end
+
+"""
+    apply_extrapolate_east_2d!(f, Nx, Ny)
+
+Zero-gradient (Neumann) outflow BC on east wall: copy distributions from i=Nx-1 to i=Nx.
+Suitable for two-phase flows where Zou-He pressure outlet creates density artifacts.
+"""
+function apply_extrapolate_east_2d!(f, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = extrapolate_east_2d_kernel!(backend)
+    kernel!(f, Nx; ndrange=(Ny,))
+    KernelAbstractions.synchronize(backend)
+end

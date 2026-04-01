@@ -135,3 +135,53 @@ function stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
     kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end
+
+# --- Non-periodic x, specular axis (j=1), wall (j=Ny) for axisymmetric inlet/outlet ---
+# Use with Zou-He velocity inlet at i=1 and pressure outlet at i=Nx.
+
+@kernel function stream_axisym_inlet_2d_kernel!(f_out, @Const(f_in), Nx, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        im = max(i - 1, 1); ip = min(i + 1, Nx)
+
+        f_out[i,j,1] = f_in[i, j, 1]  # rest
+
+        # E/W: non-periodic x, bounce-back at boundaries (Zou-He overwrites)
+        f_out[i,j,2] = ifelse(i > 1,  f_in[im, j, 2], f_in[i, j, 4])
+        f_out[i,j,4] = ifelse(i < Nx, f_in[ip, j, 4], f_in[i, j, 2])
+
+        if j == 1
+            # AXIS (symmetry): specular reflection in r direction
+            f_out[i,j,3] = f_in[i, j, 5]             # N ← S (specular)
+            f_out[i,j,5] = f_in[i, j+1, 5]            # from interior
+            f_out[i,j,6] = f_in[i, j, 9]              # NE ← SE (specular)
+            f_out[i,j,7] = f_in[i, j, 8]              # NW ← SW (specular)
+            f_out[i,j,8] = ifelse(i < Nx, f_in[ip, j+1, 8], f_in[i, j, 6])
+            f_out[i,j,9] = ifelse(i > 1,  f_in[im, j+1, 9], f_in[i, j, 7])
+        elseif j == Ny
+            # WALL: bounce-back (no-slip), far-field gas boundary
+            f_out[i,j,3] = f_in[i, j-1, 3]
+            f_out[i,j,5] = f_in[i, j, 3]              # bounce-back
+            f_out[i,j,6] = ifelse(i > 1,  f_in[im, j-1, 6], f_in[i, j, 8])
+            f_out[i,j,7] = ifelse(i < Nx, f_in[ip, j-1, 7], f_in[i, j, 9])
+            f_out[i,j,8] = f_in[i, j, 6]              # bounce-back
+            f_out[i,j,9] = f_in[i, j, 7]              # bounce-back
+        else
+            # Interior: standard pull (j in 2..Ny-1 → j±1 always valid)
+            f_out[i,j,3] = f_in[i, j-1, 3]
+            f_out[i,j,5] = f_in[i, j+1, 5]
+            f_out[i,j,6] = ifelse(i > 1,  f_in[im, j-1, 6], f_in[i, j, 8])
+            f_out[i,j,7] = ifelse(i < Nx, f_in[ip, j-1, 7], f_in[i, j, 9])
+            f_out[i,j,8] = ifelse(i < Nx, f_in[ip, j+1, 8], f_in[i, j, 6])
+            f_out[i,j,9] = ifelse(i > 1,  f_in[im, j+1, 9], f_in[i, j, 7])
+        end
+    end
+end
+
+function stream_axisym_inlet_2d!(f_out, f_in, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f_in)
+    kernel! = stream_axisym_inlet_2d_kernel!(backend)
+    kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
