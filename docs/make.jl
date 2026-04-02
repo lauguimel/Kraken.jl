@@ -92,6 +92,11 @@ makedocs(;
             "theory/12_mrt.md",
             "theory/13_vof_plic.md",
             "theory/14_rheology.md",
+            "theory/15_viscoelastic.md",
+            "theory/16_shan_chen.md",
+            "theory/17_species.md",
+            "theory/18_grid_refinement.md",
+            "theory/19_spatial_bcs.md",
         ],
         "Examples" => [
             "examples/01_poiseuille_2d.md",
