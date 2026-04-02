@@ -42,8 +42,12 @@ include("kernels/collide_rheology_2d.jl")
 include("kernels/collide_twophase_rheology_2d.jl")
 include("kernels/viscoelastic_2d.jl")
 
-# --- Simulation ---
-include("simulation.jl")
+# --- Simulation drivers ---
+include("drivers/basic.jl")
+include("drivers/thermal.jl")
+include("drivers/axisymmetric.jl")
+include("drivers/multiphase.jl")
+include("drivers/rheology.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
