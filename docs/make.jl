@@ -89,6 +89,9 @@ makedocs(;
             "theory/09_axisymmetric.md",
             "theory/10_limitations.md",
             "theory/11_phasefield.md",
+            "theory/12_mrt.md",
+            "theory/13_vof_plic.md",
+            "theory/14_rheology.md",
         ],
         "Examples" => [
             "examples/01_poiseuille_2d.md",
