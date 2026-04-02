@@ -106,6 +106,20 @@ struct RefineSetup
 end
 
 """
+    RheologySetup
+
+Rheology model specification for a single phase.
+The `model` symbol selects the type (`:newtonian`, `:power_law`, `:carreau`,
+`:cross`, `:bingham`, `:herschel_bulkley`, `:oldroyd_b`, `:fene_p`, `:saramito`).
+The `params` dict holds the model parameters (e.g., `K`, `n`, `nu_min`, `nu_max`).
+"""
+struct RheologySetup
+    phase::Symbol                    # :liquid, :gas, or :default
+    model::Symbol                    # :newtonian, :power_law, :carreau, etc.
+    params::Dict{Symbol, Float64}
+end
+
+"""
     SimulationSetup
 
 Top-level simulation configuration parsed from a .krk file.
@@ -125,6 +139,7 @@ struct SimulationSetup
     diagnostics::Union{DiagnosticsSetup, Nothing}
     refinements::Vector{RefineSetup}
     velocity_field::Union{InitialSetup, Nothing}  # prescribed velocity expressions (ux, uy)
+    rheology::Vector{RheologySetup}                # per-phase rheology models
 end
 
 # --- Tokenization: strip comments, join multi-line blocks ---
@@ -242,6 +257,7 @@ function parse_kraken(text::String; kwargs...)
     output = nothing
     diagnostics = nothing
     refinements = RefineSetup[]
+    rheology_setups = RheologySetup[]
 
     for line in lines
         keyword = _first_word(line)
@@ -274,6 +290,8 @@ function parse_kraken(text::String; kwargs...)
             output = _parse_output(line)
         elseif keyword == "Diagnostics"
             diagnostics = _parse_diagnostics(line)
+        elseif keyword == "Rheology"
+            push!(rheology_setups, _parse_rheology(line, user_vars))
         else
             throw(ArgumentError("Unknown keyword '$keyword' in .krk file"))
         end
@@ -322,7 +340,7 @@ function parse_kraken(text::String; kwargs...)
     return SimulationSetup(name, lattice, domain, physics, user_vars,
                            regions, boundaries, initial, modules,
                            max_steps, output, diagnostics, refinements,
-                           velocity_field)
+                           velocity_field, rheology_setups)
 end
 
 # --- Individual statement parsers ---
@@ -622,6 +640,111 @@ function _parse_module(line::String)
     tokens = split(line)
     length(tokens) < 2 && throw(ArgumentError("Module needs a name: $line"))
     return Symbol(tokens[2])
+end
+
+"""
+Parse: Rheology [phase] <model> { key = value ... }
+Examples:
+    Rheology power_law { K = 0.1  n = 0.5 }
+    Rheology liquid  power_law   { K = 0.1  n = 0.5  nu_min = 1e-6 }
+    Rheology gas     newtonian   { nu = 0.01 }
+"""
+function _parse_rheology(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}())
+    # Extract brace block if present
+    params = Dict{Symbol, Float64}()
+    brace_m = match(r"\{(.+)\}", line)
+    if brace_m !== nothing
+        for m in eachmatch(r"(\w+)\s*=\s*([\w.eE+\-*/()]+)", brace_m.captures[1])
+            key = Symbol(m.captures[1])
+            val_str = strip(String(m.captures[2]))
+            val = tryparse(Float64, val_str)
+            if val === nothing
+                expr = parse_kraken_expr(val_str, user_vars)
+                val = Float64(evaluate(expr))
+            end
+            params[key] = val
+        end
+    end
+
+    # Parse tokens before the brace: "Rheology [phase] model"
+    pre_brace = brace_m !== nothing ? strip(line[1:brace_m.offset-1]) : strip(line)
+    tokens = split(pre_brace)
+
+    known_phases = (:liquid, :gas, :default)
+    known_models = (:newtonian, :power_law, :carreau, :cross, :bingham,
+                    :herschel_bulkley, :oldroyd_b, :fene_p, :saramito)
+
+    if length(tokens) >= 3
+        phase = Symbol(tokens[2])
+        model = Symbol(tokens[3])
+        if phase ∉ known_phases
+            # Maybe no phase specified, tokens[2] is the model
+            model = Symbol(tokens[2])
+            phase = :default
+        end
+    elseif length(tokens) == 2
+        phase = :default
+        model = Symbol(tokens[2])
+    else
+        throw(ArgumentError("Rheology needs at least a model name: $line"))
+    end
+
+    model ∉ known_models && throw(ArgumentError("Unknown rheology model '$model'. Known: $known_models"))
+
+    return RheologySetup(phase, model, params)
+end
+
+"""
+    build_rheology_model(rs::RheologySetup; T=Float64) → AbstractRheology
+
+Instantiate a concrete rheology model from a parsed `RheologySetup`.
+"""
+function build_rheology_model(rs::RheologySetup; FT=Float64)
+    p = rs.params
+    g = (k, default) -> FT(get(p, k, default))
+
+    # Thermal coupling
+    thermal = if haskey(p, :E_a)
+        ArrheniusCoupling(g(:T_ref, 1.0), g(:E_a, 0.0))
+    elseif haskey(p, :C1)
+        WLFCoupling(g(:T_ref, 1.0), g(:C1, 8.86), g(:C2, 101.6))
+    else
+        IsothermalCoupling()
+    end
+
+    if rs.model == :newtonian
+        return Newtonian(g(:nu, 0.1); thermal=thermal)
+    elseif rs.model == :power_law
+        return PowerLaw(g(:K, 0.1), g(:n, 1.0);
+                        nu_min=g(:nu_min, 1e-6), nu_max=g(:nu_max, 10.0), thermal=thermal)
+    elseif rs.model == :carreau
+        return CarreauYasuda(g(:eta_0, 1.0), g(:eta_inf, 0.01), g(:lambda, 1.0),
+                             g(:a, 2.0), g(:n, 0.5); thermal=thermal)
+    elseif rs.model == :cross
+        return Cross(g(:eta_0, 1.0), g(:eta_inf, 0.01), g(:K, 1.0), g(:m, 1.0);
+                     thermal=thermal)
+    elseif rs.model == :bingham
+        return Bingham(g(:tau_y, 0.1), g(:mu_p, 0.05);
+                       m_reg=g(:m_reg, 1000.0), thermal=thermal)
+    elseif rs.model == :herschel_bulkley
+        return HerschelBulkley(g(:tau_y, 0.1), g(:K, 0.1), g(:n, 0.5);
+                               m_reg=g(:m_reg, 1000.0), thermal=thermal)
+    elseif rs.model == :oldroyd_b
+        form = haskey(p, :formulation) && p[:formulation] == 0.0 ? StressFormulation() : LogConfFormulation()
+        return OldroydB(g(:nu_s, 0.1), g(:nu_p, 0.05), g(:lambda, 1.0);
+                        formulation=form, thermal=thermal)
+    elseif rs.model == :fene_p
+        form = haskey(p, :formulation) && p[:formulation] == 0.0 ? StressFormulation() : LogConfFormulation()
+        return FENEP(g(:nu_s, 0.1), g(:nu_p, 0.05), g(:lambda, 1.0), g(:L_max, 100.0);
+                     formulation=form, thermal=thermal)
+    elseif rs.model == :saramito
+        form = haskey(p, :formulation) && p[:formulation] == 0.0 ? StressFormulation() : LogConfFormulation()
+        return Saramito(g(:nu_s, 0.1), g(:nu_p, 0.05), g(:lambda, 1.0), g(:tau_y, 0.01);
+                        n=g(:n, 1.0), m_reg=g(:m_reg, 1000.0),
+                        formulation=form, thermal=thermal)
+    else
+        throw(ArgumentError("Unimplemented rheology model: $(rs.model)"))
+    end
 end
 
 """Parse: Run <N> steps"""

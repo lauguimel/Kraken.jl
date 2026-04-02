@@ -160,7 +160,7 @@ export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
 export KrakenExpr, parse_kraken_expr, evaluate, has_variable, is_time_dependent, is_spatial
 export SimulationSetup, DomainSetup, PhysicsSetup, GeometryRegion, BoundarySetup, RheologySetup
 export InitialSetup, OutputSetup, DiagnosticsSetup, STLSource, RefineSetup
-export load_kraken, parse_kraken
+export load_kraken, parse_kraken, build_rheology_model
 export run_simulation
 
 # Grid refinement

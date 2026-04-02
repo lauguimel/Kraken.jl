@@ -98,6 +98,24 @@ function run_simulation(setup::SimulationSetup;
             T(evaluate(setup.physics.body_force[:Fy])) : T(0)
     end
 
+    # --- Non-Newtonian rheology ---
+    has_rheology = !isempty(setup.rheology)
+    rheology_model = nothing
+    tau_field = nothing
+    Fx_field = nothing
+    Fy_field = nothing
+    if has_rheology
+        rs = first(r for r in setup.rheology if r.phase in (:default, :liquid))
+        rheology_model = build_rheology_model(rs; FT=T)
+        tau_field = KernelAbstractions.ones(backend, T, Nx, Ny)  # initial tau = 1
+        if has_body_force
+            Fx_field = KernelAbstractions.zeros(backend, T, Nx, Ny)
+            Fy_field = KernelAbstractions.zeros(backend, T, Nx, Ny)
+            Fx_field .= Fx_val
+            Fy_field .= Fy_val
+        end
+    end
+
     # --- Build boundary handlers ---
     bc_handlers = _build_boundary_handlers(setup, dx, dy, Nx, Ny, T, backend)
 
@@ -118,7 +136,12 @@ function run_simulation(setup::SimulationSetup;
         _apply_boundary_conditions!(f_out, bc_handlers, step, Nx, Ny, dx, dy, dom, T)
 
         # 3. Collide
-        if has_body_force
+        if has_rheology && has_body_force
+            collide_rheology_guo_2d!(f_out, is_solid, rheology_model, tau_field,
+                                      Fx_field, Fy_field)
+        elseif has_rheology
+            collide_rheology_2d!(f_out, is_solid, rheology_model, tau_field)
+        elseif has_body_force
             collide_guo_2d!(f_out, is_solid, ω, Fx_val, Fy_val)
         else
             collide_2d!(f_out, is_solid, ω)
@@ -146,7 +169,11 @@ function run_simulation(setup::SimulationSetup;
     end
 
     # Return on CPU
-    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), setup=setup)
+    result = (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), setup=setup)
+    if has_rheology
+        result = merge(result, (tau_field=Array(tau_field),))
+    end
+    return result
 end
 
 # --- Internal helpers ---
@@ -554,6 +581,19 @@ function _run_twophase_vof(setup::SimulationSetup;
         copyto!(f_out, f_cpu)
     end
 
+    # --- Non-Newtonian rheology for two-phase ---
+    _has_vof_rheology = !isempty(setup.rheology)
+    _rheo_l = nothing
+    _rheo_g = nothing
+    _tau_field_vof = nothing
+    if _has_vof_rheology
+        liq_setups = [r for r in setup.rheology if r.phase in (:liquid, :default)]
+        gas_setups = [r for r in setup.rheology if r.phase == :gas]
+        _rheo_l = isempty(liq_setups) ? Newtonian(T(ν_l)) : build_rheology_model(first(liq_setups); FT=T)
+        _rheo_g = isempty(gas_setups) ? Newtonian(T(ν_g)) : build_rheology_model(first(gas_setups); FT=T)
+        _tau_field_vof = KernelAbstractions.ones(backend, T, Nx, Ny)
+    end
+
     # --- Select streaming kernel ---
     stream_fn! = _select_streaming_kernel(setup)
 
@@ -582,10 +622,16 @@ function _run_twophase_vof(setup::SimulationSetup;
         compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
         compute_surface_tension_2d!(Fx_st, Fy_st, κ, C, σ, Nx, Ny)
 
-        # 5. Two-phase collision
-        collide_twophase_2d!(f_out, C, Fx_st, Fy_st, is_solid;
-                             ρ_l=Float64(ρ_l), ρ_g=Float64(ρ_g),
-                             ν_l=Float64(ν_l), ν_g=Float64(ν_g))
+        # 5. Two-phase collision (non-Newtonian or Newtonian)
+        if _has_vof_rheology
+            collide_twophase_rheology_2d!(f_out, C, Fx_st, Fy_st, is_solid, _tau_field_vof;
+                                          rheology_l=_rheo_l, rheology_g=_rheo_g,
+                                          rho_l=Float64(ρ_l), rho_g=Float64(ρ_g))
+        else
+            collide_twophase_2d!(f_out, C, Fx_st, Fy_st, is_solid;
+                                 ρ_l=Float64(ρ_l), ρ_g=Float64(ρ_g),
+                                 ν_l=Float64(ν_l), ν_g=Float64(ν_g))
+        end
 
         # 6. Swap
         f_in, f_out = f_out, f_in
