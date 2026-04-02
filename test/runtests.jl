@@ -28,4 +28,5 @@ using Kraken
     include("test_vtk_3d.jl")
     include("test_phasefield.jl")
     include("test_twophase_rheology.jl")
+    include("test_postprocess.jl")
 end

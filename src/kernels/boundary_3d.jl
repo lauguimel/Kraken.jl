@@ -1,431 +1,414 @@
 using KernelAbstractions
 
-# --- Zou-He velocity BC on top face (k = Nz) for 3D cavity ---
+# ============================================================================
+# Zou-He 3D boundary conditions — generic parametrized implementation
+# ============================================================================
+#
+# Each face is described by a ZouHeFace3D struct that encodes:
+#   - normal_axis: 1 (x), 2 (y), 3 (z)
+#   - sign: +1 for max-index face, -1 for min-index face
+#   - Population indices for the 5 unknown and 5 opposing (known) populations
+#   - Tangential axis population pairs for transverse corrections
+#
+# Two generic kernels handle all 6 velocity BCs and 2 pressure BCs.
+# The old apply_zou_he_*_3d! wrapper functions are preserved for backward
+# compatibility.
+# ============================================================================
 
 """
-    zou_he_velocity_top_3d!(f, u_wall_x, Nx, Ny, Nz)
+    ZouHeFace3D
+
+Parametrizes a Zou-He boundary face in 3D (D3Q19).
+
+# Fields
+- `normal_axis::Int32`: 1 (x), 2 (y), or 3 (z)
+- `sign::Int32`: +1 for face at max index (e.g. east/north/top),
+                 -1 for face at min index (e.g. west/south/bottom)
+- `q_axis::Int32`: index of the axis-aligned unknown population
+- `q_axis_opp::Int32`: its opposite (the known outgoing axis-aligned pop)
+- `q_diag::NTuple{4,Int32}`: 4 diagonal unknown population indices
+- `q_diag_opp::NTuple{4,Int32}`: their opposites (known outgoing)
+- `tang1_plus::Int32`: index of +tangent1 axis-aligned pop (for transverse correction)
+- `tang1_minus::Int32`: index of -tangent1 axis-aligned pop
+- `tang2_plus::Int32`: index of +tangent2 axis-aligned pop
+- `tang2_minus::Int32`: index of -tangent2 axis-aligned pop
+- `parallel::NTuple{9,Int32}`: 9 populations with zero normal component
+                                (rest + 4 axis-aligned in tang planes + 4 pure-tangential diags)
+- `outgoing::NTuple{5,Int32}`: 5 known outgoing populations (for density sum)
+"""
+struct ZouHeFace3D
+    normal_axis::Int32     # 1=x, 2=y, 3=z
+    sign::Int32            # +1 max face, -1 min face
+    q_axis::Int32          # unknown axis-aligned pop
+    q_axis_opp::Int32      # opposing known axis-aligned pop
+    q_diag::NTuple{4,Int32}
+    q_diag_opp::NTuple{4,Int32}
+    tang1_plus::Int32
+    tang1_minus::Int32
+    tang2_plus::Int32
+    tang2_minus::Int32
+    parallel::NTuple{9,Int32}
+    outgoing::NTuple{5,Int32}
+end
+
+# --- Pre-built face descriptors ---
+# D3Q19 population indexing (1-based):
+#  1: (0,0,0)  2: (+x)  3: (-x)  4: (+y)  5: (-y)  6: (+z)  7: (-z)
+#  8: (+x,+y) 9: (-x,+y) 10: (+x,-y) 11: (-x,-y)
+# 12: (+x,+z) 13: (-x,+z) 14: (+x,-z) 15: (-x,-z)
+# 16: (+y,+z) 17: (-y,+z) 18: (+y,-z) 19: (-y,-z)
+
+# West (i=1): unknown pops have cx=+1 => 2, 8, 10, 12, 14
+const ZH_WEST = ZouHeFace3D(
+    Int32(1), Int32(-1),       # normal_axis=x, sign=-1 (min face)
+    Int32(2), Int32(3),        # axis: f2(+x) unknown, f3(-x) opposing
+    (Int32(8), Int32(10), Int32(12), Int32(14)),   # diag unknown
+    (Int32(11), Int32(9), Int32(15), Int32(13)),    # diag opposing
+    Int32(4), Int32(5),        # tang1 = y: +y=4, -y=5
+    Int32(6), Int32(7),        # tang2 = z: +z=6, -z=7
+    (Int32(1), Int32(4), Int32(5), Int32(6), Int32(7),
+     Int32(16), Int32(17), Int32(18), Int32(19)),   # parallel (cx=0)
+    (Int32(3), Int32(9), Int32(11), Int32(13), Int32(15)),  # outgoing (cx=-1)
+)
+
+# East (i=Nx): unknown pops have cx=-1 => 3, 9, 11, 13, 15
+const ZH_EAST = ZouHeFace3D(
+    Int32(1), Int32(1),        # normal_axis=x, sign=+1 (max face)
+    Int32(3), Int32(2),        # axis: f3(-x) unknown, f2(+x) opposing
+    (Int32(9), Int32(11), Int32(13), Int32(15)),
+    (Int32(10), Int32(8), Int32(14), Int32(12)),
+    Int32(4), Int32(5),        # tang1 = y
+    Int32(6), Int32(7),        # tang2 = z
+    (Int32(1), Int32(4), Int32(5), Int32(6), Int32(7),
+     Int32(16), Int32(17), Int32(18), Int32(19)),
+    (Int32(2), Int32(8), Int32(10), Int32(12), Int32(14)),
+)
+
+# South (j=1): unknown pops have cy=+1 => 4, 8, 9, 16, 18
+const ZH_SOUTH = ZouHeFace3D(
+    Int32(2), Int32(-1),       # normal_axis=y, sign=-1 (min face)
+    Int32(4), Int32(5),        # axis: f4(+y) unknown, f5(-y) opposing
+    (Int32(8), Int32(9), Int32(16), Int32(18)),
+    (Int32(11), Int32(10), Int32(19), Int32(17)),
+    Int32(2), Int32(3),        # tang1 = x: +x=2, -x=3
+    Int32(6), Int32(7),        # tang2 = z: +z=6, -z=7
+    (Int32(1), Int32(2), Int32(3), Int32(6), Int32(7),
+     Int32(12), Int32(13), Int32(14), Int32(15)),
+    (Int32(5), Int32(10), Int32(11), Int32(17), Int32(19)),
+)
+
+# North (j=Ny): unknown pops have cy=-1 => 5, 10, 11, 17, 19
+const ZH_NORTH = ZouHeFace3D(
+    Int32(2), Int32(1),        # normal_axis=y, sign=+1 (max face)
+    Int32(5), Int32(4),        # axis: f5(-y) unknown, f4(+y) opposing
+    (Int32(10), Int32(11), Int32(17), Int32(19)),
+    (Int32(9), Int32(8), Int32(18), Int32(16)),
+    Int32(2), Int32(3),        # tang1 = x
+    Int32(6), Int32(7),        # tang2 = z
+    (Int32(1), Int32(2), Int32(3), Int32(6), Int32(7),
+     Int32(12), Int32(13), Int32(14), Int32(15)),
+    (Int32(4), Int32(8), Int32(9), Int32(16), Int32(18)),
+)
+
+# Bottom (k=1): unknown pops have cz=+1 => 6, 12, 13, 16, 17
+const ZH_BOTTOM = ZouHeFace3D(
+    Int32(3), Int32(-1),       # normal_axis=z, sign=-1 (min face)
+    Int32(6), Int32(7),        # axis: f6(+z) unknown, f7(-z) opposing
+    (Int32(12), Int32(13), Int32(16), Int32(17)),
+    (Int32(15), Int32(14), Int32(19), Int32(18)),
+    Int32(2), Int32(3),        # tang1 = x: +x=2, -x=3
+    Int32(4), Int32(5),        # tang2 = y: +y=4, -y=5
+    (Int32(1), Int32(2), Int32(3), Int32(4), Int32(5),
+     Int32(8), Int32(9), Int32(10), Int32(11)),
+    (Int32(7), Int32(14), Int32(15), Int32(18), Int32(19)),
+)
+
+# Top (k=Nz): unknown pops have cz=-1 => 7, 14, 15, 18, 19
+const ZH_TOP = ZouHeFace3D(
+    Int32(3), Int32(1),        # normal_axis=z, sign=+1 (max face)
+    Int32(7), Int32(6),        # axis: f7(-z) unknown, f6(+z) opposing
+    (Int32(14), Int32(15), Int32(18), Int32(19)),
+    (Int32(13), Int32(12), Int32(17), Int32(16)),
+    Int32(2), Int32(3),        # tang1 = x
+    Int32(4), Int32(5),        # tang2 = y
+    (Int32(1), Int32(2), Int32(3), Int32(4), Int32(5),
+     Int32(8), Int32(9), Int32(10), Int32(11)),
+    (Int32(6), Int32(12), Int32(13), Int32(16), Int32(17)),
+)
+
+# ============================================================================
+# Generic Zou-He velocity kernel for D3Q19
+# ============================================================================
+
+"""
+    zou_he_velocity_3d_kernel!(f, face, idx_fixed, u_normal, u_tang1, u_tang2)
+
+Generic Zou-He velocity BC kernel for any face in D3Q19.
+
+- `face`: ZouHeFace3D descriptor
+- `idx_fixed`: fixed index value on the face (1 or N)
+- `u_normal`: wall velocity along the face normal (positive = into domain)
+- `u_tang1`: wall velocity along first tangential axis
+- `u_tang2`: wall velocity along second tangential axis
+"""
+@kernel function zou_he_velocity_3d_kernel!(f, face::ZouHeFace3D,
+                                            idx_fixed, u_normal, u_tang1, u_tang2)
+    a, b = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f)
+
+        # Map 2D thread indices to 3D grid position based on face normal
+        if face.normal_axis == Int32(1)       # x-face: fixed i, iterate (j,k)
+            i, j, k = idx_fixed, a, b
+        elseif face.normal_axis == Int32(2)   # y-face: fixed j, iterate (i,k)
+            i, j, k = a, idx_fixed, b
+        else                                   # z-face: fixed k, iterate (i,j)
+            i, j, k = a, b, idx_fixed
+        end
+
+        # Sum parallel populations (zero normal component)
+        sum_par = zero(T)
+        for n in 1:9
+            sum_par += f[i,j,k,face.parallel[n]]
+        end
+
+        # Sum outgoing populations (known, pointing away from domain)
+        sum_out = zero(T)
+        for n in 1:5
+            sum_out += f[i,j,k,face.outgoing[n]]
+        end
+
+        # Density: ρ = (sum_par + 2*sum_out) / (1 + sign*u_normal)
+        #   sign=-1 (min face, inflow): /(1 - u_n)
+        #   sign=+1 (max face, outflow): /(1 + u_n)
+        #   u_normal=0: no division effect
+        denom = one(T) + T(face.sign) * u_normal
+        ρ_wall = (sum_par + T(2) * sum_out) / denom
+
+        # Axis-aligned unknown: f_axis = f_opp - sign * 2/3 * ρ * u_n
+        f[i,j,k,face.q_axis] = f[i,j,k,face.q_axis_opp] -
+                                T(face.sign) * T(2.0/3.0) * ρ_wall * u_normal
+
+        # Read tangential population differences
+        tang1_diff = f[i,j,k,face.tang1_plus] - f[i,j,k,face.tang1_minus]
+        tang2_diff = f[i,j,k,face.tang2_plus] - f[i,j,k,face.tang2_minus]
+
+        # Diagonal unknowns: 4 populations grouped in pairs
+        # Pair 1 (tang1 plane): indices 1,2 in q_diag
+        f[i,j,k,face.q_diag[1]] = f[i,j,k,face.q_diag_opp[1]] -
+            T(0.5) * tang1_diff + T(0.5) * ρ_wall * u_tang1 -
+            T(face.sign) * T(1.0/6.0) * ρ_wall * u_normal
+        f[i,j,k,face.q_diag[2]] = f[i,j,k,face.q_diag_opp[2]] +
+            T(0.5) * tang1_diff - T(0.5) * ρ_wall * u_tang1 -
+            T(face.sign) * T(1.0/6.0) * ρ_wall * u_normal
+
+        # Pair 2 (tang2 plane): indices 3,4 in q_diag
+        f[i,j,k,face.q_diag[3]] = f[i,j,k,face.q_diag_opp[3]] -
+            T(0.5) * tang2_diff + T(0.5) * ρ_wall * u_tang2 -
+            T(face.sign) * T(1.0/6.0) * ρ_wall * u_normal
+        f[i,j,k,face.q_diag[4]] = f[i,j,k,face.q_diag_opp[4]] +
+            T(0.5) * tang2_diff - T(0.5) * ρ_wall * u_tang2 -
+            T(face.sign) * T(1.0/6.0) * ρ_wall * u_normal
+    end
+end
+
+# ============================================================================
+# Generic Zou-He pressure kernel for D3Q19
+# ============================================================================
+
+"""
+    zou_he_pressure_3d_kernel!(f, face, idx_fixed, ρ_out)
+
+Generic Zou-He pressure outlet BC kernel for any face in D3Q19.
+Fixes density to `ρ_out` and computes the normal velocity from known populations.
+"""
+@kernel function zou_he_pressure_3d_kernel!(f, face::ZouHeFace3D,
+                                            idx_fixed, ρ_out)
+    a, b = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f)
+
+        if face.normal_axis == Int32(1)
+            i, j, k = idx_fixed, a, b
+        elseif face.normal_axis == Int32(2)
+            i, j, k = a, idx_fixed, b
+        else
+            i, j, k = a, b, idx_fixed
+        end
+
+        # Sum parallel populations
+        sum_par = zero(T)
+        for n in 1:9
+            sum_par += f[i,j,k,face.parallel[n]]
+        end
+
+        # Sum outgoing populations
+        sum_out = zero(T)
+        for n in 1:5
+            sum_out += f[i,j,k,face.outgoing[n]]
+        end
+
+        # Compute normal velocity: u_n = -sign * (1 - (sum_par + 2*sum_out) / ρ_out)
+        #   For max face (sign=+1): u_n = -1 + (sum_par + 2*sum_out) / ρ_out
+        #   For min face (sign=-1): u_n = +1 - (sum_par + 2*sum_out) / ρ_out
+        u_n = -T(face.sign) * (one(T) - (sum_par + T(2) * sum_out) / ρ_out)
+
+        # Axis-aligned unknown
+        f[i,j,k,face.q_axis] = f[i,j,k,face.q_axis_opp] -
+                                T(face.sign) * T(2.0/3.0) * ρ_out * u_n
+
+        # Tangential differences
+        tang1_diff = f[i,j,k,face.tang1_plus] - f[i,j,k,face.tang1_minus]
+        tang2_diff = f[i,j,k,face.tang2_plus] - f[i,j,k,face.tang2_minus]
+
+        # Diagonal unknowns (no tangential velocity => u_tang terms absent)
+        f[i,j,k,face.q_diag[1]] = f[i,j,k,face.q_diag_opp[1]] -
+            T(0.5) * tang1_diff -
+            T(face.sign) * T(1.0/6.0) * ρ_out * u_n
+        f[i,j,k,face.q_diag[2]] = f[i,j,k,face.q_diag_opp[2]] +
+            T(0.5) * tang1_diff -
+            T(face.sign) * T(1.0/6.0) * ρ_out * u_n
+
+        f[i,j,k,face.q_diag[3]] = f[i,j,k,face.q_diag_opp[3]] -
+            T(0.5) * tang2_diff -
+            T(face.sign) * T(1.0/6.0) * ρ_out * u_n
+        f[i,j,k,face.q_diag[4]] = f[i,j,k,face.q_diag_opp[4]] +
+            T(0.5) * tang2_diff -
+            T(face.sign) * T(1.0/6.0) * ρ_out * u_n
+    end
+end
+
+# ============================================================================
+# Generic dispatch helper
+# ============================================================================
+
+function _apply_zou_he_velocity_3d!(f, face::ZouHeFace3D, idx_fixed,
+                                    u_normal, u_tang1, u_tang2, N1, N2)
+    backend = KernelAbstractions.get_backend(f)
+    T = eltype(f)
+    kernel! = zou_he_velocity_3d_kernel!(backend)
+    kernel!(f, face, idx_fixed, T(u_normal), T(u_tang1), T(u_tang2); ndrange=(N1, N2))
+    KernelAbstractions.synchronize(backend)
+end
+
+function _apply_zou_he_pressure_3d!(f, face::ZouHeFace3D, idx_fixed,
+                                    ρ_out, N1, N2)
+    backend = KernelAbstractions.get_backend(f)
+    T = eltype(f)
+    kernel! = zou_he_pressure_3d_kernel!(backend)
+    kernel!(f, face, idx_fixed, T(ρ_out); ndrange=(N1, N2))
+    KernelAbstractions.synchronize(backend)
+end
+
+# ============================================================================
+# Backward-compatible wrapper functions (public API unchanged)
+# ============================================================================
+
+# --- Top face (k = Nz) ---
+
+"""
+    apply_zou_he_top_3d!(f, u_wall_x, Nx, Ny, Nz)
 
 Apply Zou-He velocity BC on the top face (k = Nz).
 Imposes velocity (u_wall_x, 0, 0).
 """
-@kernel function zou_he_velocity_top_3d_kernel!(f, u_wall_x, Nz)
-    i, j = @index(Global, NTuple)
-    k = Nz
-
-    @inbounds begin
-        T = eltype(f)
-
-        # Known: populations not pointing into the domain from k=Nz
-        # rest + axis-aligned in x,y + edges in xy plane + populations with +z
-        f1  = f[i,j,k,1]
-        f2  = f[i,j,k,2]   # +x
-        f3  = f[i,j,k,3]   # -x
-        f4  = f[i,j,k,4]   # +y
-        f5  = f[i,j,k,5]   # -y
-        f6  = f[i,j,k,6]   # +z (known, pointing outward)
-        f8  = f[i,j,k,8]   # +x,+y
-        f9  = f[i,j,k,9]   # -x,+y
-        f10 = f[i,j,k,10]  # +x,-y
-        f11 = f[i,j,k,11]  # -x,-y
-        f12 = f[i,j,k,12]  # +x,+z (known)
-        f13 = f[i,j,k,13]  # -x,+z (known)
-        f16 = f[i,j,k,16]  # +y,+z (known)
-        f17 = f[i,j,k,17]  # -y,+z (known)
-
-        # Unknown: f7 (-z), f14 (+x,-z), f15 (-x,-z), f18 (+y,-z), f19 (-y,-z)
-
-        # Density from known populations (uz_wall = 0)
-        ρ_wall = (f1 + f2 + f3 + f4 + f5 + f8 + f9 + f10 + f11 +
-                  T(2) * (f6 + f12 + f13 + f16 + f17))
-
-        # Zou-He corrections
-        f[i,j,k,7]  = f6   # -z <- +z
-
-        f[i,j,k,14] = f13 - T(0.5) * (f2 - f3) + T(0.5) * ρ_wall * u_wall_x
-        f[i,j,k,15] = f12 + T(0.5) * (f2 - f3) - T(0.5) * ρ_wall * u_wall_x
-
-        f[i,j,k,18] = f17 - T(0.5) * (f4 - f5)
-        f[i,j,k,19] = f16 + T(0.5) * (f4 - f5)
-    end
-end
-
 function apply_zou_he_top_3d!(f, u_wall_x, Nx, Ny, Nz)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_velocity_top_3d_kernel!(backend)
-    kernel!(f, eltype(f)(u_wall_x), Nz; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
+    # Top: normal=z, sign=+1, u_normal=0, tang1=x => u_tang1=u_wall_x, tang2=y => u_tang2=0
+    _apply_zou_he_velocity_3d!(f, ZH_TOP, Nz, 0, u_wall_x, 0, Nx, Ny)
 end
 
-# --- Zou-He velocity BC on bottom face (k = 1) ---
+# --- Bottom face (k = 1) ---
 
 """
-    zou_he_velocity_bottom_3d!(f, ux_w, uy_w, Nx, Ny)
+    apply_zou_he_bottom_3d!(f, ux_w, uy_w, Nx, Ny)
 
 Apply Zou-He velocity BC on the bottom face (k = 1).
-Imposes velocity (ux_w, uy_w, 0). Unknown: f6(+z), f12(+x,+z), f13(-x,+z), f16(+y,+z), f17(-y,+z).
+Imposes velocity (ux_w, uy_w, 0).
 """
-@kernel function zou_he_velocity_bottom_3d_kernel!(f, ux_w, uy_w)
-    i, j = @index(Global, NTuple)
-    k = 1
-
-    @inbounds begin
-        T = eltype(f)
-
-        f1  = f[i,j,k,1]
-        f2  = f[i,j,k,2]   # +x
-        f3  = f[i,j,k,3]   # -x
-        f4  = f[i,j,k,4]   # +y
-        f5  = f[i,j,k,5]   # -y
-        f7  = f[i,j,k,7]   # -z (opposing normal)
-        f8  = f[i,j,k,8]   # +x,+y
-        f9  = f[i,j,k,9]   # -x,+y
-        f10 = f[i,j,k,10]  # +x,-y
-        f11 = f[i,j,k,11]  # -x,-y
-        f14 = f[i,j,k,14]  # +x,-z (known)
-        f15 = f[i,j,k,15]  # -x,-z (known)
-        f18 = f[i,j,k,18]  # +y,-z (known)
-        f19 = f[i,j,k,19]  # -y,-z (known)
-
-        # uz_w = 0 => rho = sum_parallel + 2*sum_opposing_z
-        ρ_wall = (f1 + f2 + f3 + f4 + f5 + f8 + f9 + f10 + f11 +
-                  T(2) * (f7 + f14 + f15 + f18 + f19))
-
-        f[i,j,k,6]  = f7   # +z <- -z
-
-        f[i,j,k,12] = f15 - T(0.5) * (f2 - f3) + T(0.5) * ρ_wall * ux_w
-        f[i,j,k,13] = f14 + T(0.5) * (f2 - f3) - T(0.5) * ρ_wall * ux_w
-
-        f[i,j,k,16] = f19 - T(0.5) * (f4 - f5) + T(0.5) * ρ_wall * uy_w
-        f[i,j,k,17] = f18 + T(0.5) * (f4 - f5) - T(0.5) * ρ_wall * uy_w
-    end
-end
-
 function apply_zou_he_bottom_3d!(f, ux_w, uy_w, Nx, Ny)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_velocity_bottom_3d_kernel!(backend)
-    kernel!(f, eltype(f)(ux_w), eltype(f)(uy_w); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
+    # Bottom: normal=z, sign=-1, u_normal=0, tang1=x => ux_w, tang2=y => uy_w
+    _apply_zou_he_velocity_3d!(f, ZH_BOTTOM, 1, 0, ux_w, uy_w, Nx, Ny)
 end
 
-# --- Zou-He velocity BC on west face (i = 1) ---
+# --- West face (i = 1) ---
 
 """
-    zou_he_velocity_west_3d!(f, ux_w, uy_w, uz_w, Ny, Nz)
+    apply_zou_he_west_3d!(f, ux_w, uy_w, uz_w, Ny, Nz)
 
 Apply Zou-He velocity BC on the west face (i = 1).
 Unknown populations (cx=+1): f2(+x), f8(+x,+y), f10(+x,-y), f12(+x,+z), f14(+x,-z).
 """
-@kernel function zou_he_velocity_west_3d_kernel!(f, ux_w, uy_w, uz_w)
-    j, k = @index(Global, NTuple)
-    i = 1
-
-    @inbounds begin
-        T = eltype(f)
-
-        f1  = f[i,j,k,1]
-        f3  = f[i,j,k,3]   # -x (opposing)
-        f4  = f[i,j,k,4]   # +y
-        f5  = f[i,j,k,5]   # -y
-        f6  = f[i,j,k,6]   # +z
-        f7  = f[i,j,k,7]   # -z
-        f9  = f[i,j,k,9]   # -x,+y (opposing)
-        f11 = f[i,j,k,11]  # -x,-y (opposing)
-        f13 = f[i,j,k,13]  # -x,+z (opposing)
-        f15 = f[i,j,k,15]  # -x,-z (opposing)
-        f16 = f[i,j,k,16]  # +y,+z
-        f17 = f[i,j,k,17]  # -y,+z
-        f18 = f[i,j,k,18]  # +y,-z
-        f19 = f[i,j,k,19]  # -y,-z
-
-        ρ_wall = (f1 + f4 + f5 + f6 + f7 + f16 + f17 + f18 + f19 +
-                  T(2) * (f3 + f9 + f11 + f13 + f15)) / (one(T) - ux_w)
-
-        f[i,j,k,2]  = f3 + T(2.0/3.0) * ρ_wall * ux_w
-
-        f[i,j,k,8]  = f11 - T(0.5) * (f4 - f5) + T(0.5) * ρ_wall * uy_w +
-                       T(1.0/6.0) * ρ_wall * ux_w
-        f[i,j,k,10] = f9  + T(0.5) * (f4 - f5) - T(0.5) * ρ_wall * uy_w +
-                       T(1.0/6.0) * ρ_wall * ux_w
-
-        f[i,j,k,12] = f15 - T(0.5) * (f6 - f7) + T(0.5) * ρ_wall * uz_w +
-                       T(1.0/6.0) * ρ_wall * ux_w
-        f[i,j,k,14] = f13 + T(0.5) * (f6 - f7) - T(0.5) * ρ_wall * uz_w +
-                       T(1.0/6.0) * ρ_wall * ux_w
-    end
-end
-
 function apply_zou_he_west_3d!(f, ux_w, uy_w, uz_w, Ny, Nz)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_velocity_west_3d_kernel!(backend)
-    kernel!(f, eltype(f)(ux_w), eltype(f)(uy_w), eltype(f)(uz_w); ndrange=(Ny, Nz))
-    KernelAbstractions.synchronize(backend)
+    # West: normal=x, sign=-1, u_normal=ux_w, tang1=y => uy_w, tang2=z => uz_w
+    _apply_zou_he_velocity_3d!(f, ZH_WEST, 1, ux_w, uy_w, uz_w, Ny, Nz)
 end
 
-# --- Zou-He velocity BC on east face (i = Nx) ---
+# --- East face (i = Nx) ---
 
 """
-    zou_he_velocity_east_3d!(f, ux_w, uy_w, uz_w, Nx, Ny, Nz)
+    apply_zou_he_east_3d!(f, ux_w, uy_w, uz_w, Nx, Ny, Nz)
 
 Apply Zou-He velocity BC on the east face (i = Nx).
 Unknown populations (cx=-1): f3(-x), f9(-x,+y), f11(-x,-y), f13(-x,+z), f15(-x,-z).
 """
-@kernel function zou_he_velocity_east_3d_kernel!(f, ux_w, uy_w, uz_w, Nx)
-    j, k = @index(Global, NTuple)
-    i = Nx
-
-    @inbounds begin
-        T = eltype(f)
-
-        f1  = f[i,j,k,1]
-        f2  = f[i,j,k,2]   # +x (opposing)
-        f4  = f[i,j,k,4]   # +y
-        f5  = f[i,j,k,5]   # -y
-        f6  = f[i,j,k,6]   # +z
-        f7  = f[i,j,k,7]   # -z
-        f8  = f[i,j,k,8]   # +x,+y (opposing)
-        f10 = f[i,j,k,10]  # +x,-y (opposing)
-        f12 = f[i,j,k,12]  # +x,+z (opposing)
-        f14 = f[i,j,k,14]  # +x,-z (opposing)
-        f16 = f[i,j,k,16]  # +y,+z
-        f17 = f[i,j,k,17]  # -y,+z
-        f18 = f[i,j,k,18]  # +y,-z
-        f19 = f[i,j,k,19]  # -y,-z
-
-        ρ_wall = (f1 + f4 + f5 + f6 + f7 + f16 + f17 + f18 + f19 +
-                  T(2) * (f2 + f8 + f10 + f12 + f14)) / (one(T) + ux_w)
-
-        f[i,j,k,3]  = f2 - T(2.0/3.0) * ρ_wall * ux_w
-
-        f[i,j,k,9]  = f10 - T(0.5) * (f4 - f5) + T(0.5) * ρ_wall * uy_w -
-                       T(1.0/6.0) * ρ_wall * ux_w
-        f[i,j,k,11] = f8  + T(0.5) * (f4 - f5) - T(0.5) * ρ_wall * uy_w -
-                       T(1.0/6.0) * ρ_wall * ux_w
-
-        f[i,j,k,13] = f14 - T(0.5) * (f6 - f7) + T(0.5) * ρ_wall * uz_w -
-                       T(1.0/6.0) * ρ_wall * ux_w
-        f[i,j,k,15] = f12 + T(0.5) * (f6 - f7) - T(0.5) * ρ_wall * uz_w -
-                       T(1.0/6.0) * ρ_wall * ux_w
-    end
-end
-
 function apply_zou_he_east_3d!(f, ux_w, uy_w, uz_w, Nx, Ny, Nz)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_velocity_east_3d_kernel!(backend)
-    kernel!(f, eltype(f)(ux_w), eltype(f)(uy_w), eltype(f)(uz_w), Nx; ndrange=(Ny, Nz))
-    KernelAbstractions.synchronize(backend)
+    # East: normal=x, sign=+1, u_normal=ux_w, tang1=y => uy_w, tang2=z => uz_w
+    _apply_zou_he_velocity_3d!(f, ZH_EAST, Nx, ux_w, uy_w, uz_w, Ny, Nz)
 end
 
-# --- Zou-He velocity BC on south face (j = 1) ---
+# --- South face (j = 1) ---
 
 """
-    zou_he_velocity_south_3d!(f, ux_w, uy_w, uz_w, Nx, Nz)
+    apply_zou_he_south_3d!(f, ux_w, uy_w, uz_w, Nx, Nz)
 
 Apply Zou-He velocity BC on the south face (j = 1).
 Unknown populations (cy=+1): f4(+y), f8(+x,+y), f9(-x,+y), f16(+y,+z), f18(+y,-z).
 """
-@kernel function zou_he_velocity_south_3d_kernel!(f, ux_w, uy_w, uz_w)
-    i, k = @index(Global, NTuple)
-    j = 1
-
-    @inbounds begin
-        T = eltype(f)
-
-        f1  = f[i,j,k,1]
-        f2  = f[i,j,k,2]   # +x
-        f3  = f[i,j,k,3]   # -x
-        f5  = f[i,j,k,5]   # -y (opposing)
-        f6  = f[i,j,k,6]   # +z
-        f7  = f[i,j,k,7]   # -z
-        f10 = f[i,j,k,10]  # +x,-y (opposing)
-        f11 = f[i,j,k,11]  # -x,-y (opposing)
-        f12 = f[i,j,k,12]  # +x,+z
-        f13 = f[i,j,k,13]  # -x,+z
-        f14 = f[i,j,k,14]  # +x,-z
-        f15 = f[i,j,k,15]  # -x,-z
-        f17 = f[i,j,k,17]  # -y,+z (opposing)
-        f19 = f[i,j,k,19]  # -y,-z (opposing)
-
-        ρ_wall = (f1 + f2 + f3 + f6 + f7 + f12 + f13 + f14 + f15 +
-                  T(2) * (f5 + f10 + f11 + f17 + f19)) / (one(T) - uy_w)
-
-        f[i,j,k,4]  = f5 + T(2.0/3.0) * ρ_wall * uy_w
-
-        f[i,j,k,8]  = f11 - T(0.5) * (f2 - f3) + T(0.5) * ρ_wall * ux_w +
-                       T(1.0/6.0) * ρ_wall * uy_w
-        f[i,j,k,9]  = f10 + T(0.5) * (f2 - f3) - T(0.5) * ρ_wall * ux_w +
-                       T(1.0/6.0) * ρ_wall * uy_w
-
-        f[i,j,k,16] = f19 - T(0.5) * (f6 - f7) + T(0.5) * ρ_wall * uz_w +
-                       T(1.0/6.0) * ρ_wall * uy_w
-        f[i,j,k,18] = f17 + T(0.5) * (f6 - f7) - T(0.5) * ρ_wall * uz_w +
-                       T(1.0/6.0) * ρ_wall * uy_w
-    end
-end
-
 function apply_zou_he_south_3d!(f, ux_w, uy_w, uz_w, Nx, Nz)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_velocity_south_3d_kernel!(backend)
-    kernel!(f, eltype(f)(ux_w), eltype(f)(uy_w), eltype(f)(uz_w); ndrange=(Nx, Nz))
-    KernelAbstractions.synchronize(backend)
+    # South: normal=y, sign=-1, u_normal=uy_w, tang1=x => ux_w, tang2=z => uz_w
+    _apply_zou_he_velocity_3d!(f, ZH_SOUTH, 1, uy_w, ux_w, uz_w, Nx, Nz)
 end
 
-# --- Zou-He velocity BC on north face (j = Ny) ---
+# --- North face (j = Ny) ---
 
 """
-    zou_he_velocity_north_3d!(f, ux_w, uy_w, uz_w, Nx, Ny, Nz)
+    apply_zou_he_north_3d!(f, ux_w, uy_w, uz_w, Nx, Ny, Nz)
 
 Apply Zou-He velocity BC on the north face (j = Ny).
 Unknown populations (cy=-1): f5(-y), f10(+x,-y), f11(-x,-y), f17(-y,+z), f19(-y,-z).
 """
-@kernel function zou_he_velocity_north_3d_kernel!(f, ux_w, uy_w, uz_w, Ny)
-    i, k = @index(Global, NTuple)
-    j = Ny
-
-    @inbounds begin
-        T = eltype(f)
-
-        f1  = f[i,j,k,1]
-        f2  = f[i,j,k,2]   # +x
-        f3  = f[i,j,k,3]   # -x
-        f4  = f[i,j,k,4]   # +y (opposing)
-        f6  = f[i,j,k,6]   # +z
-        f7  = f[i,j,k,7]   # -z
-        f8  = f[i,j,k,8]   # +x,+y (opposing)
-        f9  = f[i,j,k,9]   # -x,+y (opposing)
-        f12 = f[i,j,k,12]  # +x,+z
-        f13 = f[i,j,k,13]  # -x,+z
-        f14 = f[i,j,k,14]  # +x,-z
-        f15 = f[i,j,k,15]  # -x,-z
-        f16 = f[i,j,k,16]  # +y,+z (opposing)
-        f18 = f[i,j,k,18]  # +y,-z (opposing)
-
-        ρ_wall = (f1 + f2 + f3 + f6 + f7 + f12 + f13 + f14 + f15 +
-                  T(2) * (f4 + f8 + f9 + f16 + f18)) / (one(T) + uy_w)
-
-        f[i,j,k,5]  = f4 - T(2.0/3.0) * ρ_wall * uy_w
-
-        f[i,j,k,10] = f9  - T(0.5) * (f2 - f3) + T(0.5) * ρ_wall * ux_w -
-                       T(1.0/6.0) * ρ_wall * uy_w
-        f[i,j,k,11] = f8  + T(0.5) * (f2 - f3) - T(0.5) * ρ_wall * ux_w -
-                       T(1.0/6.0) * ρ_wall * uy_w
-
-        f[i,j,k,17] = f18 - T(0.5) * (f6 - f7) + T(0.5) * ρ_wall * uz_w -
-                       T(1.0/6.0) * ρ_wall * uy_w
-        f[i,j,k,19] = f16 + T(0.5) * (f6 - f7) - T(0.5) * ρ_wall * uz_w -
-                       T(1.0/6.0) * ρ_wall * uy_w
-    end
-end
-
 function apply_zou_he_north_3d!(f, ux_w, uy_w, uz_w, Nx, Ny, Nz)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_velocity_north_3d_kernel!(backend)
-    kernel!(f, eltype(f)(ux_w), eltype(f)(uy_w), eltype(f)(uz_w), Ny; ndrange=(Nx, Nz))
-    KernelAbstractions.synchronize(backend)
+    # North: normal=y, sign=+1, u_normal=uy_w, tang1=x => ux_w, tang2=z => uz_w
+    _apply_zou_he_velocity_3d!(f, ZH_NORTH, Ny, uy_w, ux_w, uz_w, Nx, Nz)
 end
 
-# --- Zou-He pressure outlet on east face (i = Nx) ---
+# --- Pressure outlet on east face (i = Nx) ---
 
 """
-    zou_he_pressure_east_3d!(f, Nx, Ny, Nz; ρ_out=1.0)
+    apply_zou_he_pressure_east_3d!(f, Nx, Ny, Nz; ρ_out=1.0)
 
 Apply Zou-He pressure outlet BC on the east face (i = Nx).
 Fixes density ρ_out, computes ux from known populations.
-Unknown: f3(-x), f9(-x,+y), f11(-x,-y), f13(-x,+z), f15(-x,-z).
 """
-@kernel function zou_he_pressure_east_3d_kernel!(f, Nx, ρ_out)
-    j, k = @index(Global, NTuple)
-    i = Nx
-
-    @inbounds begin
-        T = eltype(f)
-
-        f1  = f[i,j,k,1]
-        f2  = f[i,j,k,2]   # +x
-        f4  = f[i,j,k,4]   # +y
-        f5  = f[i,j,k,5]   # -y
-        f6  = f[i,j,k,6]   # +z
-        f7  = f[i,j,k,7]   # -z
-        f8  = f[i,j,k,8]   # +x,+y
-        f10 = f[i,j,k,10]  # +x,-y
-        f12 = f[i,j,k,12]  # +x,+z
-        f14 = f[i,j,k,14]  # +x,-z
-        f16 = f[i,j,k,16]  # +y,+z
-        f17 = f[i,j,k,17]  # -y,+z
-        f18 = f[i,j,k,18]  # +y,-z
-        f19 = f[i,j,k,19]  # -y,-z
-
-        ux = -one(T) + (f1 + f4 + f5 + f6 + f7 + f16 + f17 + f18 + f19 +
-              T(2) * (f2 + f8 + f10 + f12 + f14)) / ρ_out
-
-        f[i,j,k,3]  = f2 - T(2.0/3.0) * ρ_out * ux
-
-        f[i,j,k,9]  = f10 - T(0.5) * (f4 - f5) - T(1.0/6.0) * ρ_out * ux
-        f[i,j,k,11] = f8  + T(0.5) * (f4 - f5) - T(1.0/6.0) * ρ_out * ux
-
-        f[i,j,k,13] = f14 - T(0.5) * (f6 - f7) - T(1.0/6.0) * ρ_out * ux
-        f[i,j,k,15] = f12 + T(0.5) * (f6 - f7) - T(1.0/6.0) * ρ_out * ux
-    end
-end
-
 function apply_zou_he_pressure_east_3d!(f, Nx, Ny, Nz; ρ_out=1.0)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_pressure_east_3d_kernel!(backend)
-    kernel!(f, Nx, eltype(f)(ρ_out); ndrange=(Ny, Nz))
-    KernelAbstractions.synchronize(backend)
+    _apply_zou_he_pressure_3d!(f, ZH_EAST, Nx, ρ_out, Ny, Nz)
 end
 
-# --- Zou-He pressure outlet on top face (k = Nz) ---
+# --- Pressure outlet on top face (k = Nz) ---
 
 """
-    zou_he_pressure_top_3d!(f, Nx, Ny, Nz; ρ_out=1.0)
+    apply_zou_he_pressure_top_3d!(f, Nx, Ny, Nz; ρ_out=1.0)
 
 Apply Zou-He pressure outlet BC on the top face (k = Nz).
 Fixes density ρ_out, computes uz from known populations.
-Unknown: f7(-z), f14(+x,-z), f15(-x,-z), f18(+y,-z), f19(-y,-z).
 """
-@kernel function zou_he_pressure_top_3d_kernel!(f, Nz, ρ_out)
-    i, j = @index(Global, NTuple)
-    k = Nz
-
-    @inbounds begin
-        T = eltype(f)
-
-        f1  = f[i,j,k,1]
-        f2  = f[i,j,k,2]
-        f3  = f[i,j,k,3]
-        f4  = f[i,j,k,4]
-        f5  = f[i,j,k,5]
-        f6  = f[i,j,k,6]   # +z
-        f8  = f[i,j,k,8]
-        f9  = f[i,j,k,9]
-        f10 = f[i,j,k,10]
-        f11 = f[i,j,k,11]
-        f12 = f[i,j,k,12]  # +x,+z
-        f13 = f[i,j,k,13]  # -x,+z
-        f16 = f[i,j,k,16]  # +y,+z
-        f17 = f[i,j,k,17]  # -y,+z
-
-        uz = -one(T) + (f1 + f2 + f3 + f4 + f5 + f8 + f9 + f10 + f11 +
-              T(2) * (f6 + f12 + f13 + f16 + f17)) / ρ_out
-
-        f[i,j,k,7]  = f6 - T(2.0/3.0) * ρ_out * uz
-
-        f[i,j,k,14] = f13 - T(0.5) * (f2 - f3) - T(1.0/6.0) * ρ_out * uz
-        f[i,j,k,15] = f12 + T(0.5) * (f2 - f3) - T(1.0/6.0) * ρ_out * uz
-
-        f[i,j,k,18] = f17 - T(0.5) * (f4 - f5) - T(1.0/6.0) * ρ_out * uz
-        f[i,j,k,19] = f16 + T(0.5) * (f4 - f5) - T(1.0/6.0) * ρ_out * uz
-    end
-end
-
 function apply_zou_he_pressure_top_3d!(f, Nx, Ny, Nz; ρ_out=1.0)
-    backend = KernelAbstractions.get_backend(f)
-    kernel! = zou_he_pressure_top_3d_kernel!(backend)
-    kernel!(f, Nz, eltype(f)(ρ_out); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
+    _apply_zou_he_pressure_3d!(f, ZH_TOP, Nz, ρ_out, Nx, Ny)
 end
 
-# --- Bounce-back on 5 walls of 3D cavity (all except top) ---
+# ============================================================================
+# Bounce-back on walls (unchanged)
+# ============================================================================
 
 @kernel function bounce_back_face_3d_kernel!(f, N1, N2, Nfull, face_id)
     a, b = @index(Global, NTuple)
