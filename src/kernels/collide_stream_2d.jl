@@ -37,58 +37,25 @@ end
 
     @inbounds begin
         if is_solid[i, j]
-            # Solid obstacle: full bounce-back (swap opposite directions)
-            tmp2 = f[i,j,2]; f[i,j,2] = f[i,j,4]; f[i,j,4] = tmp2
-            tmp3 = f[i,j,3]; f[i,j,3] = f[i,j,5]; f[i,j,5] = tmp3
-            tmp6 = f[i,j,6]; f[i,j,6] = f[i,j,8]; f[i,j,8] = tmp6
-            tmp7 = f[i,j,7]; f[i,j,7] = f[i,j,9]; f[i,j,9] = tmp7
+            bounce_back_2d!(f, i, j)
         else
             T = eltype(f)
             f1 = f[i,j,1]; f2 = f[i,j,2]; f3 = f[i,j,3]
             f4 = f[i,j,4]; f5 = f[i,j,5]; f6 = f[i,j,6]
             f7 = f[i,j,7]; f8 = f[i,j,8]; f9 = f[i,j,9]
 
-            ρ = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
-            inv_ρ = one(T) / ρ
-            ux = (f2 - f4 + f6 - f7 - f8 + f9) * inv_ρ
-            uy = (f3 - f5 + f6 + f7 - f8 - f9) * inv_ρ
+            ρ, ux, uy = moments_2d(f1, f2, f3, f4, f5, f6, f7, f8, f9)
             usq = ux * ux + uy * uy
 
-            cu = zero(T)
-            feq = T(4.0/9.0) * ρ * (one(T) - T(1.5) * usq)
-            f[i,j,1] = f1 - ω * (f1 - feq)
-
-            cu = ux
-            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,2] = f2 - ω * (f2 - feq)
-
-            cu = uy
-            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,3] = f3 - ω * (f3 - feq)
-
-            cu = -ux
-            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,4] = f4 - ω * (f4 - feq)
-
-            cu = -uy
-            feq = T(1.0/9.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,5] = f5 - ω * (f5 - feq)
-
-            cu = ux + uy
-            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,6] = f6 - ω * (f6 - feq)
-
-            cu = -ux + uy
-            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,7] = f7 - ω * (f7 - feq)
-
-            cu = -ux - uy
-            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,8] = f8 - ω * (f8 - feq)
-
-            cu = ux - uy
-            feq = T(1.0/36.0) * ρ * (one(T) + T(3)*cu + T(4.5)*cu*cu - T(1.5)*usq)
-            f[i,j,9] = f9 - ω * (f9 - feq)
+            f[i,j,1] = f1 - ω * (f1 - feq_2d(Val(1), ρ, ux, uy, usq))
+            f[i,j,2] = f2 - ω * (f2 - feq_2d(Val(2), ρ, ux, uy, usq))
+            f[i,j,3] = f3 - ω * (f3 - feq_2d(Val(3), ρ, ux, uy, usq))
+            f[i,j,4] = f4 - ω * (f4 - feq_2d(Val(4), ρ, ux, uy, usq))
+            f[i,j,5] = f5 - ω * (f5 - feq_2d(Val(5), ρ, ux, uy, usq))
+            f[i,j,6] = f6 - ω * (f6 - feq_2d(Val(6), ρ, ux, uy, usq))
+            f[i,j,7] = f7 - ω * (f7 - feq_2d(Val(7), ρ, ux, uy, usq))
+            f[i,j,8] = f8 - ω * (f8 - feq_2d(Val(8), ρ, ux, uy, usq))
+            f[i,j,9] = f9 - ω * (f9 - feq_2d(Val(9), ρ, ux, uy, usq))
         end
     end
 end

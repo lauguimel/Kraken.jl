@@ -13,7 +13,6 @@ using Kraken
     include("test_species.jl")
     include("test_multiphase.jl")
     include("test_vof.jl")
-    include("test_clsvof.jl")
     include("test_benchmark.jl")
     include("test_cavity.jl")
     include("test_cavity_3d.jl")
@@ -28,4 +27,5 @@ using Kraken
     include("test_krk_multiphase.jl")
     include("test_vtk_3d.jl")
     include("test_phasefield.jl")
+    include("test_twophase_rheology.jl")
 end

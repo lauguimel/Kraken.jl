@@ -54,8 +54,6 @@ function run_simulation(setup::SimulationSetup;
     # --- Dispatch to specialized runners based on modules ---
     if :advection_only in setup.modules
         return _run_advection_only(setup; backend=backend, T=T)
-    elseif :twophase_clsvof in setup.modules
-        return _run_twophase_clsvof(setup; backend=backend, T=T)
     elseif :twophase_vof in setup.modules
         return _run_twophase_vof(setup; backend=backend, T=T)
     end
@@ -490,15 +488,12 @@ function _run_advection_only(setup::SimulationSetup;
         return evaluate(C_expr; kw...)
     end
 
-    use_clsvof = :twophase_clsvof in setup.modules
-
     output_interval = setup.output !== nothing ? setup.output.interval : 0
     output_dir = setup.output !== nothing ? setup.output.directory : ""
 
     adv_result = run_advection_2d(; Nx=Nx, Ny=Ny, max_steps=setup.max_steps,
                                    velocity_fn=velocity_fn,
                                    init_C_fn=init_C_fn,
-                                   use_clsvof=use_clsvof,
                                    output_interval=output_interval,
                                    output_dir=output_dir,
                                    backend=backend, FT=T)
@@ -660,139 +655,3 @@ function _run_twophase_vof(setup::SimulationSetup;
             max_u_spurious=max_u, setup=setup)
 end
 
-# ===========================================================================
-# Two-phase CLSVOF runner (hybrid LS curvature + VOF advection)
-# ===========================================================================
-
-"""
-    _run_twophase_clsvof(setup; backend, T)
-
-Run a two-phase LBM simulation with CLSVOF interface tracking.
-Uses hybrid approach: LS curvature + VOF ∇C for force localization.
-"""
-function _run_twophase_clsvof(setup::SimulationSetup;
-                              backend=KernelAbstractions.CPU(), T=Float64)
-    dom = setup.domain
-    Nx, Ny = dom.Nx, dom.Ny
-    dx = T(dom.Lx / Nx)
-    dy = T(dom.Ly / Ny)
-    Lx, Ly = T(dom.Lx), T(dom.Ly)
-
-    params = setup.physics.params
-    ν   = T(params[:nu])
-    σ   = T(get(params, :sigma, 0.01))
-    ρ_l = T(get(params, :rho_l, 1.0))
-    ρ_g = T(get(params, :rho_g, 0.001))
-    ν_l = T(get(params, :nu_l, ν))
-    ν_g = T(get(params, :nu_g, ν))
-
-    # --- Initialize LBM ---
-    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(ν), u_lid=0.0,
-                       max_steps=setup.max_steps, output_interval=1000)
-    state = initialize_2d(config, T; backend=backend)
-    f_in, f_out = state.f_in, state.f_out
-    ρ, ux, uy = state.ρ, state.ux, state.uy
-    is_solid = state.is_solid
-
-    _apply_geometry!(is_solid, setup, Float64(dx), Float64(dy))
-
-    # --- VOF + LS arrays ---
-    C      = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    C_new  = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    nx_n   = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    ny_n   = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    κ_ls   = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    Fx_st  = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    Fy_st  = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    phi      = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    phi_work = KernelAbstractions.zeros(backend, T, Nx, Ny)
-    phi0     = KernelAbstractions.zeros(backend, T, Nx, Ny)
-
-    # --- Initialize C ---
-    if setup.initial !== nothing && haskey(setup.initial.fields, :C)
-        C_expr = setup.initial.fields[:C]
-        C_cpu = zeros(T, Nx, Ny)
-        for j in 1:Ny, i in 1:Nx
-            x = (i - T(0.5)) * dx
-            y = (j - T(0.5)) * dy
-            kw = (; x=Float64(x), y=Float64(y), Lx=Float64(Lx), Ly=Float64(Ly),
-                    Nx=Float64(Nx), Ny=Float64(Ny), dx=Float64(dx))
-            C_cpu[i, j] = clamp(T(evaluate(C_expr; kw...)), zero(T), one(T))
-        end
-        copyto!(C, C_cpu)
-
-        w = weights(D2Q9())
-        f_cpu = zeros(T, Nx, Ny, 9)
-        for j in 1:Ny, i in 1:Nx
-            ρ_init = C_cpu[i,j] * ρ_l + (one(T) - C_cpu[i,j]) * ρ_g
-            for q in 1:9
-                f_cpu[i, j, q] = T(w[q]) * ρ_init
-            end
-        end
-        copyto!(f_in, f_cpu)
-        copyto!(f_out, f_cpu)
-    end
-
-    # Initialize level-set from C
-    ls_from_vof_2d!(phi, C, Nx, Ny)
-    reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny)
-
-    # --- Select streaming kernel ---
-    stream_fn! = _select_streaming_kernel(setup)
-
-    # --- Setup output ---
-    pvd = nothing
-    output_dir = ""
-    if setup.output !== nothing
-        output_dir = setup_output_dir(setup.output.directory)
-        pvd = create_pvd(joinpath(output_dir, setup.name))
-    end
-
-    # --- Time loop ---
-    for step in 1:setup.max_steps
-        # 1. Stream
-        stream_fn!(f_out, f_in, Nx, Ny)
-
-        # 2. Macroscopic
-        compute_macroscopic_2d!(ρ, ux, uy, f_out)
-
-        # 3. VOF advection + clamp
-        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
-        copyto!(C, C_new)
-
-        # 4. Reconstruct LS from VOF + redistanciate
-        ls_from_vof_2d!(phi, C, Nx, Ny)
-        reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny)
-
-        # 5. LS curvature (more accurate than HF)
-        curvature_ls_2d!(κ_ls, phi, Nx, Ny)
-
-        # 6. Hybrid surface tension: LS κ + VOF ∇C
-        compute_surface_tension_2d!(Fx_st, Fy_st, κ_ls, C, σ, Nx, Ny)
-
-        # 7. Two-phase collision
-        collide_twophase_2d!(f_out, C, Fx_st, Fy_st, is_solid;
-                             ρ_l=Float64(ρ_l), ρ_g=Float64(ρ_g),
-                             ν_l=Float64(ν_l), ν_g=Float64(ν_g))
-
-        # 8. Swap
-        f_in, f_out = f_out, f_in
-
-        # 9. Output
-        if setup.output !== nothing && step % setup.output.interval == 0
-            _write_output(ρ, ux, uy, setup, pvd, output_dir, Float64(dx), step;
-                          extra_fields=Dict("C" => Array(C), "phi" => Array(phi),
-                                            "kappa" => Array(κ_ls)))
-        end
-    end
-
-    if pvd !== nothing
-        vtk_save(pvd)
-    end
-
-    compute_macroscopic_2d!(ρ, ux, uy, f_in)
-
-    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), C=Array(C),
-            phi=Array(phi), max_u_spurious=sqrt(maximum(Array(ux).^2 .+ Array(uy).^2)),
-            setup=setup)
-end

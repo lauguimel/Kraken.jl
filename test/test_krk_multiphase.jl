@@ -49,25 +49,6 @@ using Kraken
         @info "twophase_vof config parsed OK"
     end
 
-    @testset "Parse twophase_clsvof module" begin
-        setup = parse_kraken("""
-            Simulation drop_clsvof D2Q9
-            Domain L = 64 x 64  N = 64 x 64
-            Physics nu = 0.1  sigma = 0.01  rho_l = 1.0  rho_g = 0.001
-            Module twophase_clsvof
-
-            Boundary x periodic
-            Boundary y periodic
-
-            Initial { C = 0.5*(1 - tanh((sqrt((x-32)^2 + (y-32)^2) - 10) / 2)) }
-
-            Run 100 steps
-        """)
-
-        @test :twophase_clsvof in setup.modules
-        @info "twophase_clsvof config parsed OK"
-    end
-
     @testset "Run advection_only via .krk" begin
         setup = parse_kraken("""
             Simulation circle_rot D2Q9
@@ -114,28 +95,6 @@ using Kraken
         @test !any(isnan, result.ρ)
         @test !any(isnan, result.C)
         @info "twophase_vof via .krk runs OK, max|u| = $(round(result.max_u_spurious, sigdigits=3))"
-    end
-
-    @testset "Run twophase_clsvof via .krk (short)" begin
-        setup = parse_kraken("""
-            Simulation drop_clsvof D2Q9
-            Domain L = 32 x 32  N = 32 x 32
-            Physics nu = 0.1  sigma = 0.01  rho_l = 1.0  rho_g = 0.01
-            Module twophase_clsvof
-
-            Boundary x periodic
-            Boundary y periodic
-
-            Initial { C = 0.5*(1 - tanh((sqrt((x-16)^2 + (y-16)^2) - 8) / 2)) }
-
-            Run 50 steps
-        """)
-
-        result = run_simulation(setup)
-        @test !any(isnan, result.ρ)
-        @test !any(isnan, result.C)
-        @test !any(isnan, result.phi)
-        @info "twophase_clsvof via .krk runs OK, max|u| = $(round(result.max_u_spurious, sigdigits=3))"
     end
 
     @testset "Velocity field with Refine block" begin

@@ -1874,322 +1874,13 @@ function run_static_droplet_dualgrid_2d(; N=64, R=15, σ=0.01, ν=0.1,
             config=config, σ=σ, R=R, refine=r)
 end
 
-# --- CLSVOF static droplet (Level-Set curvature + VOF mass) ---
-
-"""
-    run_static_droplet_clsvof_2d(; N=128, R=20, σ=0.01, ν=0.1, ...)
-
-Static droplet with CLSVOF: VOF advects C (conservative), level-set φ
-provides smooth curvature κ = -∇·(∇φ/|∇φ|). The LS is reconstructed from
-C at each step and redistanced to maintain |∇φ| ≈ 1.
-"""
-function run_static_droplet_clsvof_2d(; N=128, R=20, σ=0.01, ν=0.1,
-                                        ρ_l=1.0, ρ_g=0.001, max_steps=5000,
-                                        n_reinit=5, dtau_reinit=0.5, ε_delta=1.5,
-                                        output_dir="", output_interval=100,
-                                        backend=KernelAbstractions.CPU(), FT=Float64)
-    Nx, Ny = N, N
-    cx, cy = N ÷ 2, N ÷ 2
-
-    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
-    state = initialize_2d(config, FT; backend=backend)
-    f_in, f_out = state.f_in, state.f_out
-    ρ, ux, uy = state.ρ, state.ux, state.uy
-    is_solid = state.is_solid
-
-    # VOF arrays
-    C     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    C_new = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    Fx_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    Fy_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-
-    # Level-set arrays
-    phi      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    phi_work = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    phi0     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    κ_ls     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-
-    # Initialize C (tanh) and φ (exact signed distance)
-    C_cpu   = zeros(FT, Nx, Ny)
-    phi_cpu = zeros(FT, Nx, Ny)
-    w = weights(D2Q9())
-    f_cpu = zeros(FT, Nx, Ny, 9)
-    for j in 1:Ny, i in 1:Nx
-        r = sqrt(FT((i - cx)^2 + (j - cy)^2))
-        C_cpu[i, j]   = FT(0.5) * (one(FT) - tanh((r - FT(R)) / FT(2)))
-        phi_cpu[i, j] = FT(R) - r   # exact signed distance
-        ρ_init = C_cpu[i,j] * FT(ρ_l) + (one(FT) - C_cpu[i,j]) * FT(ρ_g)
-        for q in 1:9
-            f_cpu[i, j, q] = FT(w[q]) * ρ_init
-        end
-    end
-    copyto!(C, C_cpu)
-    copyto!(phi, phi_cpu)
-    copyto!(f_in, f_cpu)
-    copyto!(f_out, f_cpu)
-
-    # Output setup
-    do_output = !isempty(output_dir)
-    local pvd, diag_logger
-    if do_output
-        setup_output_dir(output_dir)
-        pvd = create_pvd(joinpath(output_dir, "clsvof_droplet"))
-        diag_logger = open_diagnostics(joinpath(output_dir, "diagnostics.csv"),
-                                       ["step", "mass", "max_u"])
-    end
-
-    for step in 1:max_steps
-        # 1. Stream
-        stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
-
-        # 2. Macroscopic
-        compute_macroscopic_2d!(ρ, ux, uy, f_out)
-
-        # 3. VOF advection (conservative mass transport)
-        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
-        copyto!(C, C_new)
-
-        # 4. Reconstruct φ from C + redistance
-        ls_from_vof_2d!(phi, C, Nx, Ny)
-        reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny;
-                       n_iter=n_reinit, dtau=dtau_reinit)
-
-        # 5. Curvature from level-set (smooth!)
-        curvature_ls_2d!(κ_ls, phi, Nx, Ny)
-
-        # 6. Surface tension from LS
-        surface_tension_clsvof_2d!(Fx_st, Fy_st, κ_ls, phi, σ, Nx, Ny;
-                                    epsilon=ε_delta)
-
-        # 7. Two-phase collision (C for density/viscosity, F from LS)
-        collide_twophase_2d!(f_out, C, Fx_st, Fy_st, is_solid;
-                             ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν, ν_g=ν)
-
-        # Output snapshot
-        if do_output && step % output_interval == 0
-            C_out = Array(C)
-            ux_out = Array(ux)
-            uy_out = Array(uy)
-            mass = sum(C_out)
-            max_u_out = sqrt(maximum(ux_out .^ 2 .+ uy_out .^ 2))
-            log_diagnostics!(diag_logger, step, mass, max_u_out)
-            fields = Dict("rho" => Array(ρ), "ux" => ux_out, "uy" => uy_out,
-                          "C" => C_out, "phi" => Array(phi), "kappa" => Array(κ_ls))
-            write_snapshot_2d!(output_dir, step, Nx, Ny, 1.0, fields;
-                               pvd=pvd, time=Float64(step))
-        end
-
-        f_in, f_out = f_out, f_in
-    end
-
-    # Close output
-    if do_output
-        close_diagnostics!(diag_logger)
-        vtk_save(pvd)
-    end
-
-    compute_macroscopic_2d!(ρ, ux, uy, f_in)
-
-    ρ_cpu = Array(ρ)
-    ux_cpu = Array(ux)
-    uy_cpu = Array(uy)
-    C_cpu = Array(C)
-    phi_cpu = Array(phi)
-
-    max_u = sqrt(maximum(ux_cpu .^ 2 .+ uy_cpu .^ 2))
-    inside_mask = [(i-cx)^2 + (j-cy)^2 < (R-3)^2 for i in 1:Nx, j in 1:Ny]
-    outside_mask = [(i-cx)^2 + (j-cy)^2 > (R+3)^2 for i in 1:Nx, j in 1:Ny]
-    p_in = sum(ρ_cpu[inside_mask]) / sum(inside_mask) / 3
-    p_out = sum(ρ_cpu[outside_mask]) / sum(outside_mask) / 3
-    Δp = p_in - p_out
-    Δp_analytical = σ / R
-
-    return (ρ=ρ_cpu, ux=ux_cpu, uy=uy_cpu, C=C_cpu, phi=phi_cpu,
-            max_u_spurious=max_u, Δp=Δp, Δp_analytical=Δp_analytical,
-            config=config, σ=σ, R=R)
-end
-
-# --- Rayleigh-Plateau capillary pinch-off with CLSVOF (axisymmetric) ---
-
-"""
-    run_rp_clsvof_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05, ...)
-
-Rayleigh-Plateau capillary instability with CLSVOF in axisymmetric geometry.
-VOF advects C (conservative), level-set φ provides smooth curvature.
-
-Setup (cf. Popinet 2009, Gerris plateau example):
-- Axisymmetric jet of radius R0 with perturbation R(z) = R0(1-ε·cos(2πz/λ))
-- λ > 2πR0 → Rayleigh-unstable → pinch-off
-- Total curvature: κ = κ_meridional(φ) + κ_azimuthal(φ) where κ₂ = -(1/r)·n_r
-
-Analytical growth rate (inviscid linear theory):
-  ω² = σ/(ρ·R0³) · x(1-x²) · I₁(x)/I₀(x)  where x = 2πR0/λ
-"""
-function run_rp_clsvof_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
-                            σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.01,
-                            n_reinit=5, dtau_reinit=0.5, ε_delta=1.5,
-                            max_steps=10000, output_interval=500,
-                            output_dir="",
-                            backend=KernelAbstractions.CPU(), FT=Float64)
-    Nx, Ny = Nz, Nr
-    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
-    state = initialize_2d(config, FT; backend=backend)
-    f_in, f_out = state.f_in, state.f_out
-    ρ, ux, uy = state.ρ, state.ux, state.uy
-    is_solid = state.is_solid
-
-    # VOF arrays
-    C     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    C_new = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    Fx_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    Fy_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-
-    # Level-set arrays
-    phi      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    phi_work = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    phi0     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    κ_ls     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-
-    # Axisymmetric force arrays
-    Fz_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    Fr_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-
-    λ = FT(λ_ratio * R0)
-
-    # Initialize: axisymmetric jet with perturbation
-    C_cpu   = zeros(FT, Nx, Ny)
-    phi_cpu = zeros(FT, Nx, Ny)
-    w = weights(D2Q9())
-    f_cpu = zeros(FT, Nx, Ny, 9)
-    for j in 1:Ny, i in 1:Nx
-        r = FT(j) - FT(0.5)  # radial position
-        R_local = FT(R0) * (one(FT) - FT(ε) * cos(FT(2π) * FT(i - 1) / λ))
-        C_cpu[i, j]   = FT(0.5) * (one(FT) - tanh((r - R_local) / FT(1.5)))
-        phi_cpu[i, j] = R_local - r  # signed distance (positive inside jet)
-        ρ_init = C_cpu[i,j] * FT(ρ_l) + (one(FT) - C_cpu[i,j]) * FT(ρ_g)
-        for q in 1:9
-            f_cpu[i, j, q] = FT(w[q]) * ρ_init
-        end
-    end
-    copyto!(C, C_cpu)
-    copyto!(phi, phi_cpu)
-    copyto!(f_in, f_cpu)
-    copyto!(f_out, f_cpu)
-
-    r_min_history = FT[]
-    times = Int[]
-
-    # Output setup
-    do_output = !isempty(output_dir)
-    local pvd_rp, diag_logger_rp
-    if do_output
-        setup_output_dir(output_dir)
-        pvd_rp = create_pvd(joinpath(output_dir, "clsvof_rp"))
-        diag_logger_rp = open_diagnostics(joinpath(output_dir, "diagnostics.csv"),
-                                          ["step", "mass", "max_u", "r_min"])
-    end
-
-    for step in 1:max_steps
-        # 1. Stream (axisym: periodic z, specular axis, wall at Nr)
-        stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
-
-        # 2. Macroscopic
-        compute_macroscopic_2d!(ρ, ux, uy, f_out)
-
-        # 3. VOF advection (conservative mass transport)
-        advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
-        copyto!(C, C_new)
-
-        # 4. Reconstruct φ from C + redistance
-        ls_from_vof_2d!(phi, C, Nx, Ny)
-        reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny;
-                       n_iter=n_reinit, dtau=dtau_reinit)
-
-        # 5. Curvature: meridional (LS) + azimuthal (LS)
-        curvature_ls_2d!(κ_ls, phi, Nx, Ny)
-        add_azimuthal_curvature_ls_2d!(κ_ls, phi, Ny)
-
-        # 6. Surface tension: hybrid LS curvature + VOF gradient
-        compute_surface_tension_2d!(Fx_st, Fy_st, κ_ls, C, σ, Nx, Ny)
-
-        # 7. Axisymmetric viscous correction
-        uz_cpu = Array(ux)
-        Fz_cpu = zeros(FT, Nx, Ny)
-        Fr_cpu = Array(Fy_st)
-        Fx_st_cpu = Array(Fx_st)
-        for j in 1:Ny, i in 1:Nx
-            r = FT(j) - FT(0.5)
-            if j > 1 && j < Ny
-                duz_dr = (uz_cpu[i,j+1] - uz_cpu[i,j-1]) / FT(2)
-            elseif j == 1
-                duz_dr = FT(2) * (uz_cpu[i,2] - uz_cpu[i,1])
-            else
-                duz_dr = zero(FT)
-            end
-            axisym_corr = j == 1 ? FT(ν) * duz_dr : FT(ν) / r * duz_dr
-            Fz_cpu[i,j] = Fx_st_cpu[i,j] + axisym_corr
-            Fr_cpu[i,j] = Fr_cpu[i,j]
-        end
-        copyto!(Fz_field, Fz_cpu)
-        copyto!(Fr_field, Fr_cpu)
-
-        # 8. Two-phase collision
-        collide_twophase_2d!(f_out, C, Fz_field, Fr_field, is_solid;
-                             ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν, ν_g=ν)
-
-        f_in, f_out = f_out, f_in
-
-        # Track minimum jet radius
-        if step % output_interval == 0 || step == 1
-            C_cpu = Array(C)
-            r_min_val = FT(Inf)
-            for i in 1:Nx
-                for j in 1:Ny-1
-                    if C_cpu[i,j] > 0.5 && C_cpu[i,j+1] <= 0.5
-                        r_interf = (j - 0.5) + (C_cpu[i,j] - 0.5) / (C_cpu[i,j] - C_cpu[i,j+1])
-                        r_min_val = min(r_min_val, r_interf)
-                        break
-                    end
-                end
-            end
-            push!(r_min_history, r_min_val)
-            push!(times, step)
-
-            # Output snapshot
-            if do_output && step % output_interval == 0
-                ux_out = Array(ux)
-                uy_out = Array(uy)
-                mass = sum(C_cpu)
-                max_u_out = sqrt(maximum(ux_out .^ 2 .+ uy_out .^ 2))
-                log_diagnostics!(diag_logger_rp, step, mass, max_u_out, r_min_val)
-                fields = Dict("rho" => Array(ρ), "uz" => ux_out, "ur" => uy_out,
-                              "C" => C_cpu, "phi" => Array(phi), "kappa" => Array(κ_ls))
-                write_snapshot_2d!(output_dir, step, Nx, Ny, 1.0, fields;
-                                   pvd=pvd_rp, time=Float64(step))
-            end
-        end
-    end
-
-    # Close output
-    if do_output
-        close_diagnostics!(diag_logger_rp)
-        vtk_save(pvd_rp)
-    end
-
-    compute_macroscopic_2d!(ρ, ux, uy, f_in)
-
-    return (ρ=Array(ρ), uz=Array(ux), ur=Array(uy), C=Array(C), phi=Array(phi),
-            r_min=r_min_history, times=times, config=config,
-            σ=σ, R0=R0, λ=λ, ε=ε)
-end
-
 # ===========================================================================
 # Prescribed-velocity VOF advection (pure interface transport tests)
 # ===========================================================================
 
 """
     run_advection_2d(; Nx=100, Ny=100, max_steps=628, dt=1.0,
-                      velocity_fn, init_C_fn, use_clsvof=false,
+                      velocity_fn, init_C_fn,
                       output_interval=0, output_dir="", backend, T)
 
 Run pure VOF advection with a prescribed analytical velocity field.
@@ -2199,16 +1890,14 @@ vortex, shear tests).
 # Arguments
 - `velocity_fn(x, y, t) -> (vx, vy)`: analytical velocity at position and time
 - `init_C_fn(x, y) -> C₀`: initial volume fraction (will be clamped to [0,1])
-- `use_clsvof`: if true, also track level-set (reconstruct φ from C each step)
 - `dt`: time step for velocity evaluation (lattice dt=1 by default)
 
 # Returns
-NamedTuple `(C, C0, ux, uy[, phi], mass_history, Nx, Ny, dx)`
+NamedTuple `(C, C0, ux, uy, mass_history, Nx, Ny, dx)`
 """
 function run_advection_2d(; Nx=100, Ny=100, max_steps=628, dt=1.0,
                            velocity_fn,
                            init_C_fn,
-                           use_clsvof=false,
                            output_interval=0,
                            output_dir="",
                            backend=KernelAbstractions.CPU(),
@@ -2226,18 +1915,6 @@ function run_advection_2d(; Nx=100, Ny=100, max_steps=628, dt=1.0,
     # Initialize C
     init_vof_field!(C, init_C_fn, dx, FT)
     C0 = Array(C)  # save initial state
-
-    # CLSVOF arrays
-    phi = nothing
-    phi_work = nothing
-    phi0 = nothing
-    if use_clsvof
-        phi      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-        phi_work = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-        phi0     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-        ls_from_vof_2d!(phi, C, Nx, Ny)
-        reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny)
-    end
 
     # Output setup
     pvd = nothing
@@ -2274,27 +1951,12 @@ function run_advection_2d(; Nx=100, Ny=100, max_steps=628, dt=1.0,
         advect_vof_step!(C, C_new, ux, uy, Nx, Ny)
         copyto!(C, C_new)
 
-        # CLSVOF: advect LS + redistance (φ provides smooth curvature)
-        if use_clsvof
-            # 1. Advect φ independently (smooth but non-conservative)
-            advect_ls_2d!(phi_work, phi, ux, uy, Nx, Ny)
-            copyto!(phi, phi_work)
-            # 2. Redistance to restore |∇φ| ≈ 1
-            reinit_ls_2d!(phi, phi_work, phi0, Nx, Ny)
-            # Note: C is NOT corrected from φ. The level-set is used only
-            # for curvature computation in coupled simulations (smoother κ).
-            # VOF advection (MUSCL-Superbee) is the sole mass transport.
-        end
-
         # Track mass
         push!(mass_history, FT(sum(Array(C))))
 
         # Output
         if do_output && step % output_interval == 0
             fields = Dict("C" => Array(C), "ux" => Array(ux), "uy" => Array(uy))
-            if use_clsvof
-                fields["phi"] = Array(phi)
-            end
             write_snapshot_2d!(output_dir, step, Nx, Ny, Float64(dx), fields;
                                pvd=pvd, time=Float64(t))
         end
@@ -2304,14 +1966,8 @@ function run_advection_2d(; Nx=100, Ny=100, max_steps=628, dt=1.0,
         vtk_save(pvd)
     end
 
-    result = (C=Array(C), C0=C0, ux=Array(ux), uy=Array(uy),
-              mass_history=mass_history, Nx=Nx, Ny=Ny, dx=dx)
-
-    if use_clsvof
-        result = merge(result, (phi=Array(phi),))
-    end
-
-    return result
+    return (C=Array(C), C0=C0, ux=Array(ux), uy=Array(uy),
+            mass_history=mass_history, Nx=Nx, Ny=Ny, dx=dx)
 end
 
 # --- Phase-field static droplet (Laplace law validation) ---

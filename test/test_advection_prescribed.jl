@@ -100,25 +100,4 @@ using Kraken
         @info "Reversed vortex: L1 recovery error = $(round(L1_err, digits=4))"
     end
 
-    @testset "CLSVOF advection — circle rotation with level-set" begin
-        N = 64
-        R = 15.0
-        cx, cy = N / 2, N / 2
-        angular_vel = 2π / (4 * N)
-
-        velocity_fn(x, y, t) = (-(y - cy) * angular_vel, (x - cx) * angular_vel)
-        init_fn(x, y) = 0.5 * (1 - tanh((sqrt((x - cx)^2 + (y - cy)^2) - R) / 2))
-
-        max_steps = 4 * N
-        result = run_advection_2d(; Nx=N, Ny=N, max_steps=max_steps,
-                                   velocity_fn=velocity_fn, init_C_fn=init_fn,
-                                   use_clsvof=true)
-
-        @test hasproperty(result, :phi)
-        mass_initial = result.mass_history[1]
-        mass_final = result.mass_history[end]
-        rel_mass_err = abs(mass_final - mass_initial) / mass_initial
-        @test rel_mass_err < 0.05
-        @info "CLSVOF circle rotation: mass error = $(round(rel_mass_err*100, digits=2))%"
-    end
 end

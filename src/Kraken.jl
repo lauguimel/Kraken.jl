@@ -20,6 +20,7 @@ include("rheology/strain_rate.jl")
 include("rheology/linalg.jl")
 
 # --- GPU kernels ---
+include("kernels/equilibrium_helpers.jl")
 include("kernels/collide_stream_2d.jl")
 include("kernels/collide_stream_3d.jl")
 include("kernels/stream_periodic_2d.jl")
@@ -35,8 +36,6 @@ include("kernels/species_2d.jl")
 include("kernels/multiphase_2d.jl")
 include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
-include("kernels/levelset_2d.jl")
-include("kernels/clsvof_2d.jl")
 include("kernels/phasefield_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
 include("kernels/collide_rheology_2d.jl")
@@ -140,12 +139,6 @@ export prolongate_bilinear_2d!, restrict_average_2d!
 export compute_hf_curvature_dx_2d!, compute_surface_tension_dx_2d!
 export run_static_droplet_dualgrid_2d
 
-# Level-set
-export advect_ls_2d!, reinit_ls_2d!, curvature_ls_2d!, add_azimuthal_curvature_ls_2d!
-
-# CLSVOF
-export ls_from_vof_2d!, vof_from_ls_2d!, surface_tension_clsvof_2d!
-export run_static_droplet_clsvof_2d, run_rp_clsvof_2d
 
 # Prescribed-velocity advection
 export clamp_field_2d!, advect_vof_step!, advect_vof_plic_step!
