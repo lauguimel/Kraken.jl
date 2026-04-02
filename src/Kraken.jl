@@ -17,6 +17,7 @@ include("lattice/d3q19.jl")
 include("rheology/models.jl")
 include("rheology/viscosity.jl")
 include("rheology/strain_rate.jl")
+include("rheology/linalg.jl")
 
 # --- GPU kernels ---
 include("kernels/collide_stream_2d.jl")
@@ -40,6 +41,7 @@ include("kernels/phasefield_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
 include("kernels/collide_rheology_2d.jl")
 include("kernels/collide_twophase_rheology_2d.jl")
+include("kernels/viscoelastic_2d.jl")
 
 # --- Simulation ---
 include("simulation.jl")
@@ -191,6 +193,12 @@ export effective_viscosity, effective_viscosity_thermal, thermal_shift_factor
 export strain_rate_magnitude_2d, strain_rate_magnitude_3d
 export collide_rheology_2d!, collide_rheology_guo_2d!, collide_rheology_thermal_2d!
 export collide_twophase_rheology_2d!
+
+# Viscoelastic
+export eigen_sym2x2, mat_exp_sym2x2, mat_log_sym2x2, decompose_velocity_gradient
+export compute_polymeric_force_2d!
+export evolve_stress_2d!, evolve_logconf_2d!
+export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
