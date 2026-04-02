@@ -31,6 +31,7 @@ include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
 include("kernels/levelset_2d.jl")
 include("kernels/clsvof_2d.jl")
+include("kernels/phasefield_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
 
 # --- Simulation ---
@@ -97,7 +98,7 @@ export fused_natconv_step!, fused_natconv_vt_step!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
-export collide_mrt_2d!, collide_twophase_mrt_2d!, collide_pressure_mrt_2d!
+export collide_mrt_2d!, collide_twophase_mrt_2d!
 
 # Species transport
 export collide_species_2d!, compute_concentration_2d!
@@ -113,7 +114,17 @@ export compute_hf_curvature_2d!, compute_surface_tension_2d!
 export collide_twophase_2d!, run_static_droplet_2d, run_plateau_pinch_2d
 export add_azimuthal_curvature_2d!, add_axisym_viscous_correction_2d!, set_vof_west_2d!
 export apply_density_correction_2d!
-export run_rp_axisym_2d, run_cij_jet_axisym_2d
+export run_rp_axisym_2d, run_cij_jet_axisym_2d, run_cij_jet_phasefield_2d
+
+# Phase-field (Allen-Cahn + pressure-based)
+export phasefield_params, compute_phi_2d!, compute_chemical_potential_2d!
+export add_azimuthal_chemical_potential_2d!, compute_phasefield_force_2d!
+export compute_antidiffusion_flux_2d!
+export collide_allen_cahn_2d!, add_azimuthal_allen_cahn_source_2d!
+export collide_pressure_phasefield_mrt_2d!, compute_macroscopic_phasefield_2d!
+export set_phasefield_west_2d!, extrapolate_phasefield_east_2d!
+export init_phasefield_equilibrium, init_pressure_equilibrium
+export run_static_droplet_phasefield_2d
 
 # Dual-grid VOF
 export prolongate_bilinear_2d!, restrict_average_2d!

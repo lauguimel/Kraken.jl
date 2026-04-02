@@ -27,4 +27,5 @@ using Kraken
     include("test_advection_prescribed.jl")
     include("test_krk_multiphase.jl")
     include("test_vtk_3d.jl")
+    include("test_phasefield.jl")
 end
