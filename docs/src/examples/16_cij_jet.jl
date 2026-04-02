@@ -52,6 +52,21 @@
 #
 # ## Kraken.jl approach
 #
+# ### Two simulation models
+#
+# Kraken.jl provides **two drivers** for the CIJ jet:
+#
+# | Driver | Model | Max ``\rho_l/\rho_g`` | Interface tracking |
+# |:-------|:------|:---------------------:|:-------------------|
+# | `run_cij_jet_axisym_2d` | MRT + VOF PLIC | ~10 | Geometric (PLIC) |
+# | `run_cij_jet_phasefield_2d` | Phase-field + pressure MRT | **1000** | Allen-Cahn |
+#
+# The **phase-field driver** uses two D2Q9 distributions:
+# - ``f_q``: pressure-based MRT (modified equilibrium, ``\rho_\text{lbm} \approx 1``)
+# - ``g_q``: conservative Allen-Cahn for order parameter ``\varphi``
+#
+# See the [Phase-Field Theory](@ref) page for the mathematical formulation.
+#
 # ### LBM parameter mapping
 #
 # We map the dimensionless numbers to lattice units:
@@ -61,71 +76,69 @@
 # \tau = 3\,\nu_l + \tfrac{1}{2}
 # ```
 #
-# **Stability constraint**: BGK collision is unstable when ``\tau`` approaches
-# ``0.5``.  For high Re, we use **MRT (Multiple Relaxation Time) collision**
-# (Lallemand & Luo, 2000) which provides enhanced stability through separate
-# relaxation of non-hydrodynamic moments.
+# **Stability constraint**: MRT collision is used since BGK becomes unstable
+# when ``\tau`` approaches ``0.5``.  With ``R_0 = 40`` and
+# ``u_\text{lb} = 0.04``, we obtain ``\tau = 0.524`` for ``\text{Re} = 200``.
 #
-# With ``R_0 = 40`` and ``u_\text{lb} = 0.04``, we obtain ``\tau = 0.524``
-# for ``\text{Re} = 200``, well within the stable regime.
+# ### Simulation components (phase-field driver)
 #
-# ### Simulation components
-#
-# - **Streaming**: `stream_axisym_inlet_2d!` — non-periodic axial direction
-#   with Zou-He velocity inlet (west) and pressure outlet (east), specular
-#   reflection at the axis (``j = 1``), wall at far field (``j = N_r``)
-# - **VOF**: PLIC advection with MYC normal reconstruction and CFL
-#   sub-stepping (`advect_vof_plic_step!`)
-# - **Curvature**: Height-function meridional curvature + azimuthal correction
-#   ``\kappa_2 = n_r / r`` (`add_azimuthal_curvature_2d!`)
-# - **Surface tension**: CSF model ``\mathbf{F} = \sigma\,\kappa\,\nabla C``
-# - **Collision**: Two-phase MRT with variable viscosity ``\nu(C)`` and Guo
-#   forcing (`collide_twophase_mrt_2d!`)
+# - **Streaming**: `stream_axisym_inlet_2d!` — specular reflection at axis
+#   (``j = 1``), wall at far field (``j = N_r``)
+# - **Inlet**: Zou-He velocity BC for ``f_q``, equilibrium BC for ``g_q``
+# - **Outlet**: Zou-He pressure for ``f_q``, zero-gradient extrapolation for ``g_q``
+# - **Interface**: conservative Allen-Cahn with antidiffusion flux
+# - **Surface tension**: ``\mathbf{F} = \mu\,\nabla\varphi`` from chemical potential
+#   (+ azimuthal correction ``\kappa/r\,\partial\varphi/\partial r``)
+# - **Collision**: pressure-based MRT with variable viscosity ``\nu(\varphi)``
 # - **Axisymmetric correction**: viscous term ``\nu/r \cdot \partial u_z / \partial r``
-#   added as body force (`add_axisym_viscous_correction_2d!`)
 #
 # ## Setup
+#
+# ### VOF-based driver (moderate density ratio)
 
 using Kraken
-
-# We run a single validation case at ``\text{Re} = 200``,
-# ``\text{We} = 600``, ``\delta = 0.02`` (moderate stimulation amplitude).
 
 Re = 200
 We = 600
 δ = 0.02
-R0 = 40       # lattice units — gives τ = 0.524
-u_lb = 0.04   # lattice velocity
+R0 = 40
+u_lb = 0.04
 
-# Derived parameters:
 ν_l = u_lb * R0 / Re
 σ_lb = u_lb^2 * R0 / We
 τ = 3ν_l + 0.5
-T_period = 7 * R0 / u_lb
 
 println("LBM parameters:")
 println("  ν = $ν_l, τ = $τ, σ = $σ_lb")
-println("  T_period = $T_period steps")
 
-# ## Run simulation
-#
-# The `run_cij_jet_axisym_2d` function handles everything: initialization,
-# pulsed inlet, VOF tracking, curvature, surface tension, and output.
+# The VOF driver uses geometric interface tracking (PLIC) and is limited to
+# moderate density ratios:
 
-#nb # Note: this is a long-running simulation. The full run with
-#nb # `domain_ratio=80` and `max_steps=100_000` takes ~30 minutes on CPU.
-#nb # For the documentation build, we use a shorter domain.
-
-result = run_cij_jet_axisym_2d(;
+result_vof = run_cij_jet_axisym_2d(;
     Re=Re, We=We, δ=δ,
     R0=R0, u_lb=u_lb,
     domain_ratio=40, nr_ratio=3,
     ρ_ratio=10.0, μ_ratio=10.0,
     max_steps=10_000, output_interval=2000,
-    output_dir=joinpath(@__DIR__, "cij_output"))
+    output_dir=joinpath(@__DIR__, "cij_vof_output"))
 
-println("Breakup detected: ", result.breakup_detected)
-println("Interface snapshots: ", length(result.interfaces))
+println("VOF driver — breakup: ", result_vof.breakup_detected)
+
+# ### Phase-field driver (high density ratio)
+#
+# The phase-field driver handles ``\rho_l/\rho_g = 1000`` using the
+# pressure-based formulation where distributions stay ``O(1)``:
+
+result_pf = run_cij_jet_phasefield_2d(;
+    Re=Re, We=We, δ=δ,
+    R0=R0, u_lb=u_lb,
+    domain_ratio=40, nr_ratio=3,
+    ρ_ratio=1000.0, μ_ratio=10.0,
+    W_pf=5.0, τ_g=0.6,
+    max_steps=10_000, output_interval=2000,
+    output_dir=joinpath(@__DIR__, "cij_pf_output"))
+
+println("Phase-field driver — breakup: ", result_pf.breakup_detected)
 
 # ## Load Basilisk reference
 #
@@ -133,23 +146,17 @@ println("Interface snapshots: ", length(result.interfaces))
 # physical time.
 
 basilisk_dir = "/Users/guillaume/Documents/Recherche/Rheodrop/data/numerical/ds_num"
-t_phys = 10_000 * u_lb / R0  # physical time of last snapshot
+t_phys = 10_000 * u_lb / R0
 
 bas_file = find_basilisk_snapshot(basilisk_dir, Re, δ, 155.0; tol=1.0)
 if bas_file !== nothing
     bas_contour = load_basilisk_interface_contour(bas_file)
     println("Basilisk interface: $(length(bas_contour)) points")
-    println("  z range: ", extrema(first.(bas_contour)), " R₀")
-    println("  r range: ", extrema(last.(bas_contour)), " R₀")
 end
 
 # ## Comparison
 #
-# The comparison below overlays the Kraken interface (at the last output
-# step) with the Basilisk reference at a comparable physical time.  Since
-# the LBM simulation uses reduced density and viscosity ratios
-# (``\rho_l/\rho_g = 10`` vs 1000 in Basilisk), exact agreement is not
-# expected — the key validation metrics are:
+# The key validation metrics are:
 #
 # 1. **Jet morphology**: wavelength of the perturbation, satellite drop
 #    formation pattern
@@ -157,7 +164,8 @@ end
 #    pinch-off point
 # 3. **Drop size and spacing**: regularity of the main drops
 #
-# A quantitative comparison with the full Basilisk dataset across multiple
-# Re and δ values is the subject of ongoing work.
+# With the phase-field driver at ``\rho_l/\rho_g = 1000``, Kraken.jl
+# matches the Basilisk density ratio exactly, enabling direct quantitative
+# comparison of interface shapes and breakup dynamics.
 
 nothing  # suppress REPL output

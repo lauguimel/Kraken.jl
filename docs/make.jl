@@ -88,6 +88,7 @@ makedocs(;
             "theory/08_thermal_ddf.md",
             "theory/09_axisymmetric.md",
             "theory/10_limitations.md",
+            "theory/11_phasefield.md",
         ],
         "Examples" => [
             "examples/01_poiseuille_2d.md",
@@ -105,6 +106,7 @@ makedocs(;
             "examples/13_capillary_wave.md",
             "examples/14_static_droplet.md",
             "examples/15_rp_axisym.md",
+            "examples/16_cij_jet.md",
         ],
         "Tutorials" => [
             "tutorials/02_couette_2d.md",
