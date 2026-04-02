@@ -13,6 +13,11 @@ include("lattice/lattice.jl")
 include("lattice/d2q9.jl")
 include("lattice/d3q19.jl")
 
+# --- Rheology models ---
+include("rheology/models.jl")
+include("rheology/viscosity.jl")
+include("rheology/strain_rate.jl")
+
 # --- GPU kernels ---
 include("kernels/collide_stream_2d.jl")
 include("kernels/collide_stream_3d.jl")
@@ -33,6 +38,8 @@ include("kernels/levelset_2d.jl")
 include("kernels/clsvof_2d.jl")
 include("kernels/phasefield_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
+include("kernels/collide_rheology_2d.jl")
+include("kernels/collide_twophase_rheology_2d.jl")
 
 # --- Simulation ---
 include("simulation.jl")
@@ -119,7 +126,7 @@ export run_rp_axisym_2d, run_cij_jet_axisym_2d, run_cij_jet_phasefield_2d
 # Phase-field (Allen-Cahn + pressure-based)
 export phasefield_params, compute_phi_2d!, compute_chemical_potential_2d!
 export add_azimuthal_chemical_potential_2d!, compute_phasefield_force_2d!
-export compute_antidiffusion_flux_2d!
+export compute_vof_from_phi_2d!, compute_antidiffusion_flux_2d!
 export collide_allen_cahn_2d!, add_azimuthal_allen_cahn_source_2d!
 export collide_pressure_phasefield_mrt_2d!, compute_macroscopic_phasefield_2d!
 export set_phasefield_west_2d!, extrapolate_phasefield_east_2d!
@@ -173,6 +180,17 @@ export voxelize_2d, voxelize_3d
 export extract_line, field_error, probe, domain_stats
 export load_basilisk_interfaces, load_basilisk_interface_contour
 export find_basilisk_snapshot, compare_interfaces
+
+# Rheology
+export AbstractRheology, GeneralizedNewtonian, Viscoelastic
+export AbstractThermalCoupling, IsothermalCoupling, ArrheniusCoupling, WLFCoupling
+export Newtonian, PowerLaw, CarreauYasuda, Cross, Bingham, HerschelBulkley
+export OldroydB, FENEP, Saramito
+export StressFormulation, LogConfFormulation
+export effective_viscosity, effective_viscosity_thermal, thermal_shift_factor
+export strain_rate_magnitude_2d, strain_rate_magnitude_3d
+export collide_rheology_2d!, collide_rheology_guo_2d!, collide_rheology_thermal_2d!
+export collide_twophase_rheology_2d!
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!

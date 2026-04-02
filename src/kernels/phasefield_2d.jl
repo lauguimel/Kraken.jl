@@ -60,6 +60,29 @@ function compute_phi_2d!(φ, g)
     KernelAbstractions.synchronize(backend)
 end
 
+# --- Compute VOF C = (1+φ)/2 from order parameter ---
+
+@kernel function compute_vof_from_phi_2d_kernel!(C, @Const(φ))
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(φ)
+        C[i,j] = (one(T) + φ[i,j]) / T(2)
+    end
+end
+
+"""
+    compute_vof_from_phi_2d!(C, φ)
+
+Compute volume fraction C = (1+φ)/2 from order parameter φ ∈ [-1,1].
+"""
+function compute_vof_from_phi_2d!(C, φ)
+    backend = KernelAbstractions.get_backend(φ)
+    Nx, Ny = size(φ)
+    kernel! = compute_vof_from_phi_2d_kernel!(backend)
+    kernel!(C, φ; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
 # --- Chemical potential ---
 
 @kernel function compute_chemical_potential_2d_kernel!(μ, @Const(φ), β, κ, Nx, Ny)

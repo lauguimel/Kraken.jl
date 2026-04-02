@@ -2499,6 +2499,7 @@ function run_cij_jet_phasefield_2d(;
     Fy_st = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Ax    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Ay    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_gpu = KernelAbstractions.zeros(backend, FT, Nx, Ny)  # VOF from φ for axisym correction
     is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
 
     # Perturbation frequency
@@ -2588,12 +2589,8 @@ function run_cij_jet_phasefield_2d(;
                                            ρ_l=ρ_l, ρ_g=ρ_g)
 
         # 8. Axisymmetric viscous correction: ν/r · ∂uz/∂r
-        # Compute C from φ for the existing kernel
-        # Use Fx_st additively (kernel adds to existing force)
-        # Need C field on GPU for this — compute inline via φ
-        # Actually the kernel needs C; compute as (1+φ)/2 passed via a temporary
-        # For now, skip the viscous correction (it's a small O(ν/r) term)
-        # TODO: add axisym viscous correction with phase-field
+        compute_vof_from_phi_2d!(C_gpu, φ)
+        add_axisym_viscous_correction_2d!(Fx_st, ux, C_gpu, ν_l, ν_g, Ny)
 
         # 9. Allen-Cahn collision (conservative) + azimuthal correction
         compute_antidiffusion_flux_2d!(Ax, Ay, φ)
