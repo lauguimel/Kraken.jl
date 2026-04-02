@@ -110,43 +110,34 @@ end
     fx = zero(T)
     usq = ux * ux + uy * uy
     guo_pref = one(T) - ω / T(2)
-    t3 = T(3); t45 = T(4.5); t15 = T(1.5)
+    t3 = T(3)
 
-    feq = T(4.0/9.0)*ρ*(one(T)-t15*usq)
     Sq = T(4.0/9.0)*((-ux)*fx+(-uy)*fy)*t3
-    f1 = f1 - ω*(f1-feq) + guo_pref*Sq
+    f1 = f1 - ω*(f1-feq_2d(Val(1), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=ux; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
     Sq=T(1.0/9.0)*((one(T)-ux)*fx+(-uy)*fy)*t3+T(1.0/9.0)*ux*fx*T(9)
-    f2 = f2 - ω*(f2-feq) + guo_pref*Sq
+    f2 = f2 - ω*(f2-feq_2d(Val(2), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=uy; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
     Sq=T(1.0/9.0)*((-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/9.0)*uy*fy*T(9)
-    f3 = f3 - ω*(f3-feq) + guo_pref*Sq
+    f3 = f3 - ω*(f3-feq_2d(Val(3), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=-ux; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
     Sq=T(1.0/9.0)*((-one(T)-ux)*fx+(-uy)*fy)*t3+T(1.0/9.0)*ux*fx*T(9)
-    f4 = f4 - ω*(f4-feq) + guo_pref*Sq
+    f4 = f4 - ω*(f4-feq_2d(Val(4), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=-uy; feq=T(1.0/9.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
     Sq=T(1.0/9.0)*((-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/9.0)*uy*fy*T(9)
-    f5 = f5 - ω*(f5-feq) + guo_pref*Sq
+    f5 = f5 - ω*(f5-feq_2d(Val(5), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=ux+uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
-    Sq=T(1.0/36.0)*((one(T)-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(fx+fy)*T(9)
-    f6 = f6 - ω*(f6-feq) + guo_pref*Sq
+    Sq=T(1.0/36.0)*((one(T)-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/36.0)*(ux+uy)*(fx+fy)*T(9)
+    f6 = f6 - ω*(f6-feq_2d(Val(6), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=-ux+uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
-    Sq=T(1.0/36.0)*((-one(T)-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(-fx+fy)*T(9)
-    f7 = f7 - ω*(f7-feq) + guo_pref*Sq
+    Sq=T(1.0/36.0)*((-one(T)-ux)*fx+(one(T)-uy)*fy)*t3+T(1.0/36.0)*(-ux+uy)*(-fx+fy)*T(9)
+    f7 = f7 - ω*(f7-feq_2d(Val(7), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=-ux-uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
-    Sq=T(1.0/36.0)*((-one(T)-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(-fx-fy)*T(9)
-    f8 = f8 - ω*(f8-feq) + guo_pref*Sq
+    Sq=T(1.0/36.0)*((-one(T)-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/36.0)*(-ux-uy)*(-fx-fy)*T(9)
+    f8 = f8 - ω*(f8-feq_2d(Val(8), ρ, ux, uy, usq)) + guo_pref*Sq
 
-    cu=ux-uy; feq=T(1.0/36.0)*ρ*(one(T)+t3*cu+t45*cu*cu-t15*usq)
-    Sq=T(1.0/36.0)*((one(T)-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/36.0)*cu*(fx-fy)*T(9)
-    f9 = f9 - ω*(f9-feq) + guo_pref*Sq
+    Sq=T(1.0/36.0)*((one(T)-ux)*fx+(-one(T)-uy)*fy)*t3+T(1.0/36.0)*(ux-uy)*(fx-fy)*T(9)
+    f9 = f9 - ω*(f9-feq_2d(Val(9), ρ, ux, uy, usq)) + guo_pref*Sq
 
     return (f1, f2, f3, f4, f5, f6, f7, f8, f9)
 end
