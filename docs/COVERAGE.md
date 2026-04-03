@@ -1,6 +1,6 @@
 # Documentation Coverage Matrix
 
-Last updated: 2026-04-02
+Last updated: 2026-04-03
 
 ## Theory Pages
 
@@ -17,14 +17,14 @@ Last updated: 2026-04-02
 | 09 | Axisymmetric | `simulation.jl` | `theory/09_axisymmetric` | Done |
 | 10 | Limitations | — | `theory/10_limitations` | Done |
 | 11 | Phase-field | `phasefield_2d.jl` | `theory/11_phasefield` | Done |
-| 12 | MRT collision | `collide_mrt_2d.jl` | — | **Missing** |
-| 13 | VOF-PLIC | `vof_2d.jl` | — | **Missing** |
-| 14 | Rheology (GNF) | `rheology/*.jl` | — | **Missing** |
-| 15 | Viscoelastic | `viscoelastic_2d.jl` | — | **Missing** |
-| 16 | Shan-Chen | `multiphase_2d.jl` | — | **Missing** |
-| 17 | Species transport | `species_2d.jl` | — | **Missing** |
-| 18 | Grid refinement | `refinement/*.jl` | — | **Missing** |
-| 19 | Spatial BCs | `boundary_spatial_2d.jl` | — | **Missing** |
+| 12 | MRT collision | `collide_mrt_2d.jl` | `theory/12_mrt` | Done |
+| 13 | VOF-PLIC | `vof_2d.jl` | `theory/13_vof_plic` | Done |
+| 14 | Rheology (GNF) | `rheology/*.jl` | `theory/14_rheology` | Done |
+| 15 | Viscoelastic | `viscoelastic_2d.jl` | `theory/15_viscoelastic` | Done |
+| 16 | Shan-Chen | `multiphase_2d.jl` | `theory/16_shan_chen` | Done |
+| 17 | Species transport | `species_2d.jl` | `theory/17_species` | Done |
+| 18 | Grid refinement | `refinement/*.jl` | `theory/18_grid_refinement` | Done |
+| 19 | Spatial BCs | `boundary_spatial_2d.jl` | `theory/19_spatial_bcs` | Done |
 
 ## Examples
 
@@ -46,11 +46,11 @@ Last updated: 2026-04-02
 | 14 | Static droplet | `vof_2d.jl` | `examples/14_static_droplet` | Done |
 | 15 | Rayleigh-Plateau | `vof_2d.jl` | `examples/15_rp_axisym` | Done |
 | 16 | CIJ jet | `phasefield_2d.jl` | `examples/16_cij_jet` | Done |
-| — | Rheology Poiseuille | `collide_rheology_2d.jl` | — | **Missing** |
-| — | Shan-Chen spinodal | `multiphase_2d.jl` | — | **Missing** |
-| — | Species diffusion | `species_2d.jl` | — | **Missing** |
-| — | Grid refinement | `refinement/*.jl` | — | **Missing** |
-| — | Viscoelastic channel | `viscoelastic_2d.jl` | — | **Missing** |
+| 17 | Rheology Poiseuille | `collide_rheology_2d.jl` | `examples/17_poiseuille_rheology` | Done |
+| 18 | Shan-Chen spinodal | `multiphase_2d.jl` | `examples/18_shan_chen_spinodal` | Done |
+| 19 | Species diffusion | `species_2d.jl` | `examples/19_species_diffusion` | Done |
+| 20 | Grid refinement cavity | `refinement/*.jl` | `examples/20_grid_refinement_cavity` | Done |
+| 21 | Viscoelastic channel | `viscoelastic_2d.jl` | `examples/21_viscoelastic_channel` | Done |
 
 ## Benchmarks
 
@@ -74,7 +74,7 @@ Last updated: 2026-04-02
 | `collide_guo_3d.jl` | test_poiseuille_3d | OK |
 | `collide_mrt_2d.jl` | test_mrt | OK |
 | `collide_rheology_2d.jl` | test_rheology | OK |
-| `collide_twophase_rheology_2d.jl` | — | **Missing** |
+| `collide_twophase_rheology_2d.jl` | test_twophase_rheology | OK |
 | `thermal_2d.jl` | test_thermal | OK |
 | `fused_thermal_2d.jl` | test_thermal (indirect) | Partial |
 | `species_2d.jl` | test_species | OK |
@@ -86,4 +86,4 @@ Last updated: 2026-04-02
 | `advect_prescribed_2d.jl` | test_advection_prescribed | OK |
 | `refinement_exchange_2d.jl` | test_refinement | OK |
 | `dualgrid_2d.jl` | test_vof (partial) | Partial |
-| `postprocess.jl` | — | **Missing** |
+| `postprocess.jl` | test_postprocess | OK |
