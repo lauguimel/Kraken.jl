@@ -115,6 +115,11 @@ makedocs(;
             "examples/14_static_droplet.md",
             "examples/15_rp_axisym.md",
             "examples/16_cij_jet.md",
+            "examples/17_poiseuille_rheology.md",
+            "examples/18_shan_chen_spinodal.md",
+            "examples/19_species_diffusion.md",
+            "examples/20_grid_refinement_cavity.md",
+            "examples/21_viscoelastic_channel.md",
         ],
         "Tutorials" => [
             "tutorials/02_couette_2d.md",
