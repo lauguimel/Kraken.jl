@@ -17,12 +17,12 @@ using KernelAbstractions
     end
 end
 
-function compute_macroscopic_2d!(ρ, ux, uy, f)
+function compute_macroscopic_2d!(ρ, ux, uy, f; sync=true)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(ρ)
     kernel! = compute_macroscopic_2d_kernel!(backend)
     kernel!(ρ, ux, uy, f; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
+    sync && KernelAbstractions.synchronize(backend)
 end
 
 # --- 3D macroscopic computation ---

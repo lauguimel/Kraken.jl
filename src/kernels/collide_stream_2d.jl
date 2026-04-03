@@ -62,17 +62,17 @@ end
 
 # --- Public API ---
 
-function stream_2d!(f_out, f_in, Nx, Ny)
+function stream_2d!(f_out, f_in, Nx, Ny; sync=true)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_2d_kernel!(backend)
     kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
+    sync && KernelAbstractions.synchronize(backend)
 end
 
-function collide_2d!(f, is_solid, ω)
+function collide_2d!(f, is_solid, ω; sync=true)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)
     kernel! = collide_2d_kernel!(backend)
     kernel!(f, is_solid, ω; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
+    sync && KernelAbstractions.synchronize(backend)
 end

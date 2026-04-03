@@ -37,6 +37,8 @@ include("kernels/multiphase_2d.jl")
 include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
 include("kernels/phasefield_2d.jl")
+include("kernels/fused_bgk_2d.jl")
+include("kernels/aa_bgk_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
 include("kernels/collide_rheology_2d.jl")
 include("kernels/collide_twophase_rheology_2d.jl")
@@ -107,6 +109,7 @@ export run_rayleigh_benard_2d, run_natural_convection_2d, run_natural_convection
 export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_step!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!
+export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
