@@ -150,11 +150,16 @@ function run_optimization_benchmark(; N=1024, steps=500, gpu=false, peak_bw=3350
         (6, "AA+f32",         Float32, :aa),
     ]
 
+    # Theoretical peak MLUPS for each precision
+    peak_mlups_f64 = peak_bw / (18 * sizeof(Float64)) * 1e3  # GB/s → MLUPS
+    peak_mlups_f32 = peak_bw / (18 * sizeof(Float32)) * 1e3
+
     println("\n=== GPU Optimization Benchmark (N=$N, steps=$steps, $backend_name) ===")
-    @printf("  %-7s %-18s %-10s %8s %10s %7s %7s\n",
-            "Level", "Label", "Precision", "MLUPS", "BW(GB/s)", "%Peak", "vs L0")
-    @printf("  %-7s %-18s %-10s %8s %10s %7s %7s\n",
-            "-----", "---------------", "---------", "------", "--------", "-----", "-----")
+    println("  Peak BW: $(peak_bw) GB/s → $(round(Int, peak_mlups_f64)) MLUPS (f64) / $(round(Int, peak_mlups_f32)) MLUPS (f32)")
+    @printf("  %-7s %-18s %-9s %8s %10s %7s %9s %7s\n",
+            "Level", "Label", "Prec.", "MLUPS", "BW(GB/s)", "%BW", "%MLUPS", "vs L0")
+    @printf("  %-7s %-18s %-9s %8s %10s %7s %9s %7s\n",
+            "-----", "---------------", "-------", "------", "--------", "-----", "-------", "-----")
 
     mlups_l0 = 0.0
 
@@ -222,27 +227,29 @@ function run_optimization_benchmark(; N=1024, steps=500, gpu=false, peak_bw=3350
         end
 
         mlups = compute_mlups(N, steps, elapsed)
-        pct_peak = bw / peak_bw * 100
+        pct_bw = bw / peak_bw * 100
+        peak_mlups = T == Float32 ? peak_mlups_f32 : peak_mlups_f64
+        pct_mlups = mlups / peak_mlups * 100
         if level == 0
             mlups_l0 = mlups
         end
         speedup = mlups_l0 > 0 ? mlups / mlups_l0 : 1.0
 
-        @printf("  %-7d %-18s %-10s %8.0f %10.1f %6.1f%% %6.2fx\n",
-                level, label, T == Float32 ? "Float32" : "Float64",
-                mlups, bw, pct_peak, speedup)
+        @printf("  %-7d %-18s %-9s %8.0f %10.1f %6.1f%% %8.1f%% %6.2fx\n",
+                level, label, T == Float32 ? "f32" : "f64",
+                mlups, bw, pct_bw, pct_mlups, speedup)
     end
     println()
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     gpu = "--gpu" in ARGS
-    N = 1024
+    local bench_N = 1024
     for a in ARGS
         m = match(r"^--N=(\d+)$", a)
         if !isnothing(m)
-            N = parse(Int, m.captures[1])
+            bench_N = parse(Int, m.captures[1])
         end
     end
-    run_optimization_benchmark(; N=N, gpu=gpu)
+    run_optimization_benchmark(; N=bench_N, gpu=gpu)
 end
