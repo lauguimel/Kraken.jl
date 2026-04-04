@@ -138,9 +138,10 @@ end
         p_local = (f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9) / T(3)
         p[i,j] = p_local
 
-        # Physical density from VOF
+        # Physical density from VOF (floor at ρ_l/100 for high density ratio stability)
         c = C[i,j]
-        ρ_local = c * ρ_l + (one(T) - c) * ρ_g
+        ρ_raw = c * ρ_l + (one(T) - c) * ρ_g
+        ρ_local = max(ρ_raw, ρ_l * T(0.01))
 
         # Velocity: u = (j + F/2) / ρ(C)
         inv_ρ = one(T) / ρ_local
