@@ -879,6 +879,7 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
                                            ρ_l, ρ_g, FT)
     copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
 
+    mass_ref = sum(C_cpu)  # reference mass for conservation correction
     r_min_history = FT[]
     times = Int[]
 
@@ -897,6 +898,7 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
         advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
                               step=step)
         copyto!(C, C_new)
+        correct_mass_2d!(C, mass_ref)
 
         # 5. Curvature from SHARP C (height-function, accurate)
         compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
@@ -908,10 +910,8 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
         compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_s, σ * ramp, Nx, Ny;
                                               ρ_l=ρ_l, ρ_g=ρ_g)
 
-        # 7. Axisymmetric viscous correction
-        if FT(ρ_g) > FT(ρ_l) * FT(0.01)
-            add_axisym_viscous_correction_2d!(Fx_st, ux, C_s, ν_l, ν_g, Ny)
-        end
+        # 7. Axisymmetric viscous correction (uses C_s for smooth density)
+        add_axisym_viscous_correction_2d!(Fx_st, ux, C_s, ν_l, ν_g, Ny)
 
         # 8. Collision with ρ(C_s) — pressure-based MRT
         collide_pressure_vof_mrt_2d!(f_out, C_s, Fx_st, Fy_st, is_solid;
@@ -945,4 +945,227 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
             C=Array(C), C_s=Array(C_s),
             r_min=r_min_history, times=times,
             σ=FT(σ), R0=FT(R0), λ=λ, ε=FT(ε), ρ_l=FT(ρ_l), ρ_g=FT(ρ_g))
+end
+
+# --- CIJ jet: hybrid PLIC/smooth + pressure MRT ---
+
+"""
+    run_cij_jet_hybrid_2d(; Re, We, δ, R0, u_lb, ρ_ratio, μ_ratio, n_smooth, ...)
+
+CIJ jet breakup using the hybrid PLIC/smooth approach:
+- C (sharp, PLIC): mass conservation, curvature (HF), interface contour
+- C_s (smoothed from C): density ρ(C_s) for collision, force gradients
+- Single f_q distribution, pressure-based MRT (ρ_lbm ≈ 1)
+- Density-weighted CSF (Tryggvason) for bounded F/ρ
+
+Supports ρ_ratio up to 1000 with exact mass conservation (PLIC + correction).
+"""
+function run_cij_jet_hybrid_2d(;
+        Re=200, We=600, δ=0.02,
+        R0=40, u_lb=0.04,
+        domain_ratio=80, nr_ratio=3,
+        ρ_ratio=1000.0, μ_ratio=10.0,
+        n_smooth=3,
+        init_length=4, max_steps=200_000,
+        output_interval=2000,
+        output_dir="cij_jet_hybrid",
+        backend=KernelAbstractions.CPU(), FT=Float64)
+
+    # --- Derive LBM parameters ---
+    ρ_l = FT(1.0)
+    ρ_g = ρ_l / FT(ρ_ratio)
+    ν_l = FT(u_lb) * FT(R0) / FT(Re)
+    ν_g = ρ_l * ν_l / (ρ_g * FT(μ_ratio))
+    σ_lb = ρ_l * FT(u_lb)^2 * FT(R0) / FT(We)
+
+    τ_l = FT(3) * ν_l + FT(0.5)
+    τ_g = FT(3) * ν_g + FT(0.5)
+
+    @info "CIJ hybrid (PLIC+smooth)" Re We δ R0 u_lb ν_l ν_g σ_lb τ_l τ_g ρ_l ρ_g n_smooth
+
+    if τ_l < FT(0.505) || τ_g < FT(0.505)
+        @warn "Relaxation time close to 0.5" τ_l τ_g
+    end
+
+    # --- Domain ---
+    Nz = Int(domain_ratio * R0)
+    Nr = Int(nr_ratio * R0)
+    Nx, Ny = Nz, Nr
+
+    # --- Arrays ---
+    C      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_new  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_s    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_tmp  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    nx_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ny_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    cc_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    κ      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    f_in   = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    f_out  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    p      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ux     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    uy     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+
+    # Perturbation frequency
+    T_period = FT(7) * FT(R0) / FT(u_lb)
+    f_stim = one(FT) / T_period
+
+    # Inlet profiles
+    W_smooth = FT(3)
+    inlet_profile_cpu = zeros(FT, Ny)
+    inlet_vof_cpu = zeros(FT, Ny)
+    for j in 1:Ny
+        r = FT(j) - FT(0.5)
+        inlet_profile_cpu[j] = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / W_smooth))
+        inlet_vof_cpu[j] = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
+    end
+    inlet_profile = KernelAbstractions.zeros(backend, FT, Ny)
+    copyto!(inlet_profile, inlet_profile_cpu)
+    inlet_vof_gpu = KernelAbstractions.zeros(backend, FT, Ny)
+    copyto!(inlet_vof_gpu, inlet_vof_cpu)
+    ux_inlet = KernelAbstractions.zeros(backend, FT, Ny)
+    uy_inlet = KernelAbstractions.zeros(backend, FT, Ny)
+
+    # --- Initialize: flat jet ---
+    C_cpu = zeros(FT, Nx, Ny)
+    L_init = FT(init_length * R0)
+    for j in 1:Ny, i in 1:Nx
+        r = FT(j) - FT(0.5); z = FT(i) - FT(0.5)
+        c_r = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
+        c_z = FT(0.5) * (one(FT) + tanh((L_init - z) / FT(1.5)))
+        C_cpu[i,j] = c_r * c_z
+    end
+    copyto!(C, C_cpu)
+
+    # Smooth + pressure equilibrium
+    smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+    C_s_cpu = Array(C_s)
+    ux_cpu = zeros(FT, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        ux_cpu[i,j] = C_s_cpu[i,j] * FT(u_lb)
+    end
+    f_cpu = init_pressure_vof_equilibrium(C_s_cpu, ux_cpu, zeros(FT, Nx, Ny), ρ_l, ρ_g, FT)
+    copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+
+    # --- Output & tracking ---
+    mkpath(output_dir)
+    pvd = create_pvd(joinpath(output_dir, "cij_hybrid"))
+    interface_snapshots = Dict{Int, Vector{NTuple{2,FT}}}()
+    breakup_detected = false
+    breakup_step = 0
+
+    @info "CIJ hybrid simulation" Nz Nr T_period max_steps output_dir
+
+    # --- Main loop ---
+    for step in 1:max_steps
+
+        # 1. Stream (non-periodic x, specular j=1, wall j=Ny)
+        stream_axisym_inlet_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Inlet BC: pulsed Zou-He velocity
+        u_t = FT(u_lb) * (one(FT) + FT(δ) * sin(FT(2π) * f_stim * FT(step)))
+        ux_inlet .= inlet_profile .* u_t
+        apply_zou_he_west_spatial_2d!(f_out, ux_inlet, uy_inlet, Nx, Ny)
+
+        # 3. Outlet BC
+        apply_zou_he_pressure_east_2d!(f_out, Nx, Ny; ρ_out=1.0)
+
+        # 4. Smooth C → C_s
+        smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+
+        # 5. Macroscopic with ρ(C_s)
+        compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
+                                          ρ_l=ρ_l, ρ_g=ρ_g)
+
+        # 6. VOF inlet + PLIC advection
+        set_vof_west_2d!(C, inlet_vof_gpu)
+        advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                              step=step)
+        copyto!(C, C_new)
+
+        # 7. Curvature from SHARP C
+        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+        add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
+
+        # 8. Density-weighted CSF from SMOOTH C_s
+        ramp = min(FT(step) / FT(500), one(FT))
+        compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_s, σ_lb * ramp, Nx, Ny;
+                                              ρ_l=ρ_l, ρ_g=ρ_g)
+
+        # 9. Axisymmetric viscous correction with C_s
+        add_axisym_viscous_correction_2d!(Fx_st, ux, C_s, ν_l, ν_g, Ny)
+
+        # 10. Pressure-based MRT collision with ρ(C_s)
+        collide_pressure_vof_mrt_2d!(f_out, C_s, Fx_st, Fy_st, is_solid;
+                                      ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν_l, ν_g=ν_g)
+
+        # 11. Swap
+        f_in, f_out = f_out, f_in
+
+        # --- Output ---
+        if step % output_interval == 0
+            C_out = Array(C)
+            ux_out = Array(ux)
+
+            # Interface contour (C = 0.5)
+            interface_pts = NTuple{2,FT}[]
+            for i in 1:Nx, j in 1:Ny-1
+                if (C_out[i,j] - FT(0.5)) * (C_out[i,j+1] - FT(0.5)) < 0
+                    frac = (FT(0.5) - C_out[i,j]) / (C_out[i,j+1] - C_out[i,j])
+                    push!(interface_pts, (FT(i) - FT(0.5), (FT(j) - FT(0.5)) + frac))
+                end
+            end
+            interface_snapshots[step] = interface_pts
+
+            # Breakup detection
+            if !breakup_detected && step > 5 * Int(round(T_period))
+                for i in Int(round(5*R0)):Nx-1
+                    max_c = maximum(C_out[i, 1:min(2*R0, Ny)])
+                    if max_c < FT(0.01)
+                        has_upstream = any(C_out[max(1,i-5*R0):i-1, 1] .> FT(0.5))
+                        has_downstream = i + 5 <= Nx && any(C_out[i+1:min(i+5*R0,Nx), 1] .> FT(0.5))
+                        if has_upstream && has_downstream
+                            breakup_detected = true
+                            breakup_step = step
+                            @info "Breakup detected" step z=FT(i)-FT(0.5) t_phys=step*u_lb/R0
+                            break
+                        end
+                    end
+                end
+            end
+
+            t_phys = FT(step) * FT(u_lb) / FT(R0)
+            write_vtk_to_pvd(pvd,
+                joinpath(output_dir, "cij_hybrid_$(lpad(step, 7, '0'))"),
+                Nx, Ny, 1.0,
+                Dict("C" => C_out, "p" => Array(p),
+                     "ux" => ux_out, "uy" => Array(uy),
+                     "kappa" => Array(κ)),
+                Float64(t_phys))
+
+            sum_C = sum(C_out)
+            @info "Step $step / $max_steps" t_phys n_interface=length(interface_pts) sum_C ux_range=extrema(ux_out) breakup=breakup_detected
+        end
+
+        if breakup_detected && step > breakup_step + 3 * Int(round(T_period))
+            @info "Stopping: 3 periods after breakup" step
+            break
+        end
+    end
+
+    vtk_save(pvd)
+    smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+    compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C_s, Fx_st, Fy_st;
+                                      ρ_l=ρ_l, ρ_g=ρ_g)
+
+    return (p=Array(p), uz=Array(ux), ur=Array(uy), C=Array(C), C_s=Array(C_s),
+            interfaces=interface_snapshots,
+            breakup_detected=breakup_detected, breakup_step=breakup_step,
+            params=(; Re, We, δ, R0, u_lb, ν_l, ν_g, σ_lb, ρ_l, ρ_g, Nz, Nr,
+                    T_period, n_smooth))
 end

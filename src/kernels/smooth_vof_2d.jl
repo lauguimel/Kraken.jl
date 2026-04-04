@@ -62,3 +62,45 @@ function smooth_vof_2d!(C_s, C, C_tmp; n_passes=3)
         copyto!(C_s, C_tmp)
     end
 end
+
+# --- Mass correction: redistribute PLIC mass error to interface cells ---
+
+@kernel function correct_mass_2d_kernel!(C, correction_per_cell, Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(C)
+        c = C[i,j]
+        # Only correct at interface cells (0 < C < 1)
+        if c > T(1e-6) && c < one(T) - T(1e-6)
+            C[i,j] = clamp(c + correction_per_cell, zero(T), one(T))
+        end
+    end
+end
+
+"""
+    correct_mass_2d!(C, mass_ref)
+
+Redistribute mass error uniformly across interface cells to enforce exact
+mass conservation after PLIC advection.
+
+Corrects ΔM = mass_ref - sum(C) by distributing equally to cells where 0 < C < 1.
+"""
+function correct_mass_2d!(C, mass_ref)
+    backend = KernelAbstractions.get_backend(C)
+    Nx, Ny = size(C)
+    T = eltype(C)
+
+    mass_current = sum(C)
+    δm = T(mass_ref) - mass_current
+
+    # Count interface cells (CPU reduction — fast for small arrays, GPU reduction for large)
+    C_host = Array(C)
+    n_interface = count(c -> c > 1e-6 && c < 1.0 - 1e-6, C_host)
+
+    if n_interface > 0
+        correction = T(δm / n_interface)
+        kernel! = correct_mass_2d_kernel!(backend)
+        kernel!(C, correction, Int32(Nx), Int32(Ny); ndrange=(Nx, Ny))
+        KernelAbstractions.synchronize(backend)
+    end
+end
