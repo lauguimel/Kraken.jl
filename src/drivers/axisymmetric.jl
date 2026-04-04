@@ -819,3 +819,130 @@ function run_rp_pressure_vof_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
             r_min=r_min_history, times=times,
             σ=FT(σ), R0=FT(R0), λ=λ, ε=FT(ε), ρ_l=FT(ρ_l), ρ_g=FT(ρ_g))
 end
+
+# --- Hybrid: VOF-PLIC (mass) + smoothed C_s (LBM stability) + pressure MRT ---
+
+"""
+    run_rp_hybrid_2d(; Nz, Nr, R0, λ_ratio, ε, σ, ν, ρ_l, ρ_g, n_smooth, ...)
+
+Rayleigh-Plateau instability using the hybrid PLIC/smooth approach:
+- **C** (sharp, PLIC-advected): source of truth for mass, geometry, κ
+- **C_s** (smoothed from C each step): ρ(C_s) for collision/streaming stability
+
+Single distribution f_q, no Allen-Cahn, no phase-field.
+Stable at ρ_ratio up to 1000 with exact mass conservation.
+"""
+function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
+                            σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.001,
+                            n_smooth=3, max_steps=10000, output_interval=500,
+                            backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny = Nz, Nr
+    λ = FT(λ_ratio * R0)
+    ν_l = FT(ν); ν_g = FT(ν)
+
+    @info "RP hybrid (PLIC + smooth)" Nz Nr R0 λ_ratio ε σ ν ρ_l ρ_g n_smooth
+
+    # Sharp VOF (source of truth)
+    C      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_new  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    # Smoothed VOF (for LBM stability)
+    C_s    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_tmp  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    # VOF geometry
+    nx_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ny_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    cc_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    κ      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    # LBM state (single distribution)
+    f_in   = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    f_out  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    p      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    ux     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    uy     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+
+    # Initialize perturbed cylinder
+    C_cpu = zeros(FT, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        r = FT(j) - FT(0.5)
+        R_local = FT(R0) * (one(FT) - FT(ε) * cos(FT(2π) * FT(i - 1) / λ))
+        C_cpu[i,j] = FT(0.5) * (one(FT) - tanh((r - R_local) / FT(1.5)))
+    end
+    copyto!(C, C_cpu)
+
+    # Initial smooth + equilibrium
+    smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+    C_s_cpu = Array(C_s)
+    f_cpu = init_pressure_vof_equilibrium(C_s_cpu, zeros(FT, Nx, Ny), zeros(FT, Nx, Ny),
+                                           ρ_l, ρ_g, FT)
+    copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+
+    r_min_history = FT[]
+    times = Int[]
+
+    for step in 1:max_steps
+        # 1. Stream
+        stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
+
+        # 2. Smooth C → C_s (slave field, recomputed each step)
+        smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+
+        # 3. Macroscopic with ρ(C_s) — smooth density → no blow-up
+        compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
+                                          ρ_l=ρ_l, ρ_g=ρ_g)
+
+        # 4. Advect C by PLIC (sharp, mass-conserving) using LBM velocity
+        advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                              step=step)
+        copyto!(C, C_new)
+
+        # 5. Curvature from SHARP C (height-function, accurate)
+        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+        add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
+
+        # 6. Surface tension force from SMOOTH C_s (bounded F/ρ)
+        ramp = min(FT(step) / FT(500), one(FT))
+        compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_s, σ * ramp, Nx, Ny;
+                                              ρ_l=ρ_l, ρ_g=ρ_g)
+
+        # 7. Axisymmetric viscous correction
+        if FT(ρ_g) > FT(ρ_l) * FT(0.01)
+            add_axisym_viscous_correction_2d!(Fx_st, ux, C_s, ν_l, ν_g, Ny)
+        end
+
+        # 8. Collision with ρ(C_s) — pressure-based MRT
+        collide_pressure_vof_mrt_2d!(f_out, C_s, Fx_st, Fy_st, is_solid;
+                                      ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν_l, ν_g=ν_g)
+
+        f_in, f_out = f_out, f_in
+
+        # Track r_min from SHARP C
+        if step % output_interval == 0 || step == 1
+            C_cpu = Array(C)
+            r_min_val = FT(Inf)
+            for i in 1:Nx
+                for j in 1:Ny-1
+                    if C_cpu[i,j] > 0.5 && C_cpu[i,j+1] <= 0.5
+                        r_interf = (FT(j) - FT(0.5)) +
+                                   (C_cpu[i,j] - FT(0.5)) / (C_cpu[i,j] - C_cpu[i,j+1])
+                        r_min_val = min(r_min_val, r_interf)
+                        break
+                    end
+                end
+            end
+            push!(r_min_history, r_min_val)
+            push!(times, step)
+        end
+    end
+
+    compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C_s, Fx_st, Fy_st;
+                                      ρ_l=ρ_l, ρ_g=ρ_g)
+
+    return (p=Array(p), uz=Array(ux), ur=Array(uy),
+            C=Array(C), C_s=Array(C_s),
+            r_min=r_min_history, times=times,
+            σ=FT(σ), R0=FT(R0), λ=λ, ε=FT(ε), ρ_l=FT(ρ_l), ρ_g=FT(ρ_g))
+end

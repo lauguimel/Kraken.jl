@@ -38,6 +38,7 @@ include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
 include("kernels/phasefield_2d.jl")
 include("kernels/pressure_vof_2d.jl")
+include("kernels/smooth_vof_2d.jl")
 include("kernels/fused_bgk_2d.jl")
 include("kernels/aa_bgk_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
@@ -130,10 +131,10 @@ export compute_hf_curvature_2d!, compute_surface_tension_2d!
 export collide_twophase_2d!, run_static_droplet_2d, run_plateau_pinch_2d
 export add_azimuthal_curvature_2d!, add_axisym_viscous_correction_2d!, set_vof_west_2d!
 export apply_density_correction_2d!
-export run_rp_axisym_2d, run_rp_pressure_vof_2d
+export run_rp_axisym_2d, run_rp_pressure_vof_2d, run_rp_hybrid_2d
 export run_cij_jet_axisym_2d, run_cij_jet_phasefield_2d
 export collide_pressure_vof_mrt_2d!, compute_surface_tension_weighted_2d!
-export init_pressure_vof_equilibrium
+export init_pressure_vof_equilibrium, smooth_vof_2d!
 
 # Phase-field (Allen-Cahn + pressure-based)
 export phasefield_params, compute_phi_2d!, compute_chemical_potential_2d!

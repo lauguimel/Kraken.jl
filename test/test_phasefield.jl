@@ -208,4 +208,53 @@ using Statistics
         @test mass_err < 0.02
         @info "Pressure-VOF mass: error = $(round(mass_err * 100, digits=2))%"
     end
+
+    # --- Hybrid PLIC+smooth tests ---
+
+    @testset "Hybrid RP pinch-off (ρ_ratio=1000)" begin
+        result = run_rp_hybrid_2d(;
+            Nz=128, Nr=30, R0=12, λ_ratio=7.0, ε=0.05,
+            σ=0.01, ν=0.1, ρ_l=1.0, ρ_g=0.001, n_smooth=3,
+            max_steps=3000, output_interval=500)
+
+        @test all(isfinite.(result.p))
+        @test all(isfinite.(result.C))
+        # Pinch-off: r_min should reach near zero at some point
+        @test minimum(result.r_min) < result.r_min[1] * 0.5
+        @info "Hybrid RP (ρ=1000): r_min $(round(result.r_min[1], digits=2)) → min $(round(minimum(result.r_min), digits=2))"
+    end
+
+    @testset "Hybrid RP selectivity" begin
+        r_unstable = run_rp_hybrid_2d(;
+            Nz=128, Nr=30, R0=12, λ_ratio=7.0, ε=0.05,
+            σ=0.01, ν=0.1, ρ_l=1.0, ρ_g=1.0, n_smooth=3,
+            max_steps=3000, output_interval=500)
+
+        r_stable = run_rp_hybrid_2d(;
+            Nz=64, Nr=30, R0=12, λ_ratio=5.0, ε=0.05,
+            σ=0.01, ν=0.1, ρ_l=1.0, ρ_g=1.0, n_smooth=3,
+            max_steps=3000, output_interval=500)
+
+        Δr_u = r_unstable.r_min[1] - r_unstable.r_min[end]
+        Δr_s = r_stable.r_min[1] - r_stable.r_min[end]
+        @test Δr_u > Δr_s * 2.0  # clear separation
+        @info "Hybrid selectivity: Δr_unstable=$(round(Δr_u, digits=3)) vs Δr_stable=$(round(Δr_s, digits=3))"
+    end
+
+    @testset "Hybrid mass conservation" begin
+        result = run_rp_hybrid_2d(;
+            Nz=128, Nr=30, R0=12, λ_ratio=7.0, ε=0.05,
+            σ=0.01, ν=0.1, ρ_l=1.0, ρ_g=1.0, n_smooth=3,
+            max_steps=2000, output_interval=2000)
+
+        C_init = zeros(Float64, 128, 30)
+        for j in 1:30, i in 1:128
+            r = Float64(j) - 0.5
+            R_loc = 12.0 * (1.0 - 0.05 * cos(2π * (i-1) / 84.0))
+            C_init[i,j] = 0.5 * (1.0 - tanh((r - R_loc) / 1.5))
+        end
+        mass_err = abs(sum(result.C) - sum(C_init)) / sum(C_init)
+        @test mass_err < 0.02
+        @info "Hybrid mass: error = $(round(mass_err * 100, digits=2))%"
+    end
 end
