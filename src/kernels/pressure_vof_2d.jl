@@ -185,3 +185,49 @@ function init_pressure_vof_equilibrium(C, ux, uy, ρ_l, ρ_g, FT=Float64)
     end
     return f
 end
+
+# --- Density-weighted axisymmetric viscous correction ---
+# Same physics as add_axisym_viscous_correction_2d! but with density weighting:
+#   F_z += ν(C)/r · ∂u_z/∂r · ρ(C)/ρ̄
+# This ensures F/ρ is bounded for any density ratio (same idea as weighted CSF).
+
+@kernel function axisym_viscous_weighted_2d_kernel!(Fz, @Const(uz), @Const(C),
+                                                      ν_l, ν_g, ρ_l, ρ_g, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(Fz)
+        c = C[i,j]
+        ν_local = c * ν_l + (one(T) - c) * ν_g
+        ρ_local = c * ρ_l + (one(T) - c) * ρ_g
+        ρ_mean = (ρ_l + ρ_g) / T(2)
+        weight = ρ_local / ρ_mean
+
+        r = T(j) - T(0.5)
+        jp = min(j + 1, Int(Ny)); jm = max(j - 1, 1)
+
+        if j == 1
+            duz_dr = T(2) * (uz[i, 2] - uz[i, 1])
+            Fz[i,j] = Fz[i,j] + ν_local * duz_dr * weight
+        else
+            duz_dr = (uz[i, jp] - uz[i, jm]) / T(2)
+            Fz[i,j] = Fz[i,j] + ν_local / r * duz_dr * weight
+        end
+    end
+end
+
+"""
+    add_axisym_viscous_weighted_2d!(Fz, uz, C, ν_l, ν_g, ρ_l, ρ_g, Ny)
+
+Density-weighted axisymmetric viscous correction: ν(C)/r · ∂u_z/∂r · ρ(C)/ρ̄.
+The density weighting ensures F/ρ is bounded at any density ratio,
+preventing velocity blow-up in the gas phase.
+"""
+function add_axisym_viscous_weighted_2d!(Fz, uz, C, ν_l, ν_g, ρ_l, ρ_g, Ny)
+    backend = KernelAbstractions.get_backend(Fz)
+    Nx = size(Fz, 1)
+    T = eltype(Fz)
+    kernel! = axisym_viscous_weighted_2d_kernel!(backend)
+    kernel!(Fz, uz, C, T(ν_l), T(ν_g), T(ρ_l), T(ρ_g), Int32(Ny);
+            ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end

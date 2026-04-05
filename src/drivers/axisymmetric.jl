@@ -834,28 +834,33 @@ Stable at ρ_ratio up to 1000 with exact mass conservation.
 """
 function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
                             σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.001,
-                            n_smooth=3, max_steps=10000, output_interval=500,
+                            gas_model::Symbol=:smooth,
+                            n_smooth=3,
+                            n_ghost_layers=3, C_ghost_threshold=0.5,
+                            W_pf=4.0, τ_g=0.7,
+                            max_steps=10000, output_interval=500,
                             backend=KernelAbstractions.CPU(), FT=Float64)
+    gas_model in (:smooth, :ghost, :phasefield) ||
+        error("gas_model must be :smooth, :ghost, or :phasefield (got :$gas_model)")
+
     Nx, Ny = Nz, Nr
     λ = FT(λ_ratio * R0)
     ν_l = FT(ν); ν_g = FT(ν)
 
-    @info "RP hybrid (PLIC + smooth)" Nz Nr R0 λ_ratio ε σ ν ρ_l ρ_g n_smooth
+    # Effective LBM densities: ghost runs at ρ=1 everywhere
+    if gas_model == :ghost
+        ρ_eff_l = one(FT); ρ_eff_g = one(FT)
+    else
+        ρ_eff_l = FT(ρ_l); ρ_eff_g = FT(ρ_g)
+    end
 
-    # Sharp VOF (source of truth)
+    @info "RP hybrid" gas_model Nz Nr R0 λ_ratio ε σ ν ρ_eff_l ρ_eff_g
+
+    # --- Common arrays ---
     C      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    C_new  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    # Smoothed VOF (for LBM stability)
-    C_s    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    C_tmp  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    # VOF geometry
-    nx_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    ny_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    cc_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    κ      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Fx_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Fy_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    # LBM state (single distribution)
+    κ      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     f_in   = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     f_out  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     p      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
@@ -863,7 +868,38 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
     uy     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
 
-    # Initialize perturbed cylinder
+    # VOF geometry (smooth/ghost use PLIC)
+    C_new    = gas_model != :phasefield ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : nothing
+    nx_n     = gas_model != :phasefield ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : nothing
+    ny_n     = KernelAbstractions.zeros(backend, FT, Nx, Ny)  # also used for azimuthal κ
+    cc_field = gas_model != :phasefield ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : nothing
+
+    # --- Model-specific arrays ---
+    C_s = C_tmp = nothing
+    ux_tmp = uy_tmp = is_valid = is_valid_new = nothing
+    φ = μ_pf = g_in = g_out = Ax = Ay = nothing
+    β_pf = κ_pf = zero(FT)
+
+    if gas_model == :smooth
+        C_s  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        C_tmp = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    elseif gas_model == :ghost
+        ux_tmp     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        uy_tmp     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        is_valid     = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+        is_valid_new = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+    elseif gas_model == :phasefield
+        φ    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        μ_pf = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        g_in  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+        g_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+        Ax   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        Ay   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        pf = phasefield_params(FT(σ), FT(W_pf))
+        β_pf = FT(pf.β); κ_pf = FT(pf.κ)
+    end
+
+    # --- Initialize perturbed cylinder ---
     C_cpu = zeros(FT, Nx, Ny)
     for j in 1:Ny, i in 1:Nx
         r = FT(j) - FT(0.5)
@@ -872,54 +908,113 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
     end
     copyto!(C, C_cpu)
 
-    # Initial smooth + equilibrium
-    smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
-    C_s_cpu = Array(C_s)
-    f_cpu = init_pressure_vof_equilibrium(C_s_cpu, zeros(FT, Nx, Ny), zeros(FT, Nx, Ny),
-                                           ρ_l, ρ_g, FT)
-    copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+    # --- Equilibrium initialization ---
+    if gas_model == :phasefield
+        φ_cpu = FT(2) .* C_cpu .- one(FT)  # C ∈ [0,1] → φ ∈ [-1,1]
+        copyto!(φ, φ_cpu)
+        g_cpu = init_phasefield_equilibrium(φ_cpu, zeros(FT, Nx, Ny), zeros(FT, Nx, Ny), FT)
+        copyto!(g_in, g_cpu); copyto!(g_out, g_cpu)
+        f_cpu = init_pressure_equilibrium(φ_cpu, zeros(FT, Nx, Ny), zeros(FT, Nx, Ny),
+                                           ρ_eff_l, ρ_eff_g, FT)
+        copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+    elseif gas_model == :smooth
+        smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+        C_s_cpu = Array(C_s)
+        f_cpu = init_pressure_vof_equilibrium(C_s_cpu, zeros(FT, Nx, Ny), zeros(FT, Nx, Ny),
+                                               ρ_eff_l, ρ_eff_g, FT)
+        copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+    else  # :ghost
+        f_cpu = init_pressure_vof_equilibrium(C_cpu, zeros(FT, Nx, Ny), zeros(FT, Nx, Ny),
+                                               ρ_eff_l, ρ_eff_g, FT)
+        copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+    end
 
-    mass_ref = sum(C_cpu)  # reference mass for conservation correction
+    mass_ref = sum(C_cpu)
     r_min_history = FT[]
     times = Int[]
 
     for step in 1:max_steps
         # 1. Stream
         stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
+        if gas_model == :phasefield
+            stream_periodic_x_axisym_2d!(g_out, g_in, Nx, Ny)
+        end
 
-        # 2. Smooth C → C_s (slave field, recomputed each step)
-        smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+        # 2. Interface update + macroscopic
+        if gas_model == :smooth
+            smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+            compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
+                                              ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+        elseif gas_model == :ghost
+            compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C, Fx_st, Fy_st;
+                                              ρ_l=one(FT), ρ_g=one(FT))
+            extrapolate_velocity_ghost_2d!(ux, uy, C, ux_tmp, uy_tmp,
+                                            is_valid, is_valid_new;
+                                            C_threshold=FT(C_ghost_threshold),
+                                            n_layers=n_ghost_layers)
+        else  # :phasefield
+            compute_phi_2d!(φ, g_out)
+            compute_vof_from_phi_2d!(C, φ)
+            compute_macroscopic_phasefield_2d!(p, ux, uy, f_out, φ, Fx_st, Fy_st;
+                                                ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+        end
 
-        # 3. Macroscopic with ρ(C_s) — smooth density → no blow-up
-        compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
-                                          ρ_l=ρ_l, ρ_g=ρ_g)
+        # 3. VOF advection (PLIC, sharp — skip for phasefield)
+        if gas_model != :phasefield
+            advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                                  step=step)
+            copyto!(C, C_new)
+            correct_mass_2d!(C, mass_ref)
+        end
 
-        # 4. Advect C by PLIC (sharp, mass-conserving) using LBM velocity
-        advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
-                              step=step)
-        copyto!(C, C_new)
-        correct_mass_2d!(C, mass_ref)
-
-        # 5. Curvature from SHARP C (height-function, accurate)
-        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
-        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
-        add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
-
-        # 6. Surface tension force from SMOOTH C_s (bounded F/ρ)
+        # 4. Surface tension
         ramp = min(FT(step) / FT(500), one(FT))
-        compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_s, σ * ramp, Nx, Ny;
-                                              ρ_l=ρ_l, ρ_g=ρ_g)
+        if gas_model == :phasefield
+            compute_chemical_potential_2d!(μ_pf, φ, β_pf, κ_pf)
+            add_azimuthal_chemical_potential_2d!(μ_pf, φ, κ_pf, Ny)
+            compute_phasefield_force_2d!(Fx_st, Fy_st, μ_pf, φ)
+            if ramp < one(FT)
+                Fx_st .*= ramp; Fy_st .*= ramp
+            end
+        else
+            compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+            compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+            add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
+            C_grad = gas_model == :smooth ? C_s : C
+            compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_grad, σ * ramp, Nx, Ny;
+                                                  ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+        end
 
-        # 7. Axisymmetric viscous correction (uses C_s for smooth density)
-        add_axisym_viscous_correction_2d!(Fx_st, ux, C_s, ν_l, ν_g, Ny)
+        # 5. Axisymmetric viscous correction
+        C_ref = gas_model == :smooth ? C_s : C
+        add_axisym_viscous_weighted_2d!(Fx_st, ux, C_ref, ν_l, ν_g, ρ_eff_l, ρ_eff_g, Ny)
 
-        # 8. Collision with ρ(C_s) — pressure-based MRT
-        collide_pressure_vof_mrt_2d!(f_out, C_s, Fx_st, Fy_st, is_solid;
-                                      ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν_l, ν_g=ν_g)
+        # 6. Collision
+        if gas_model == :phasefield
+            compute_antidiffusion_flux_2d!(Ax, Ay, φ)
+            collide_allen_cahn_2d!(g_out, ux, uy, Ax, Ay; τ_g=FT(τ_g), W=FT(W_pf))
+            add_azimuthal_allen_cahn_source_2d!(g_out, φ; τ_g=FT(τ_g))
+            collide_pressure_phasefield_mrt_2d!(f_out, φ, Fx_st, Fy_st, is_solid;
+                                                  ρ_l=ρ_eff_l, ρ_g=ρ_eff_g,
+                                                  ν_l=ν_l, ν_g=ν_g)
+        else
+            C_coll = gas_model == :smooth ? C_s : C
+            collide_pressure_vof_mrt_2d!(f_out, C_coll, Fx_st, Fy_st, is_solid;
+                                          ρ_l=ρ_eff_l, ρ_g=ρ_eff_g,
+                                          ν_l=ν_l, ν_g=ν_g)
+        end
+
+        # Ghost: reset gas f to equilibrium with extrapolated velocity
+        if gas_model == :ghost
+            reset_feq_ghost_2d!(f_out, ux, uy, C; C_threshold=FT(C_ghost_threshold))
+        end
 
         f_in, f_out = f_out, f_in
+        if gas_model == :phasefield
+            g_in, g_out = g_out, g_in
+        end
 
-        # Track r_min from SHARP C
+        # Track r_min from C
         if step % output_interval == 0 || step == 1
             C_cpu = Array(C)
             r_min_val = FT(Inf)
@@ -938,53 +1033,75 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
         end
     end
 
-    compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C_s, Fx_st, Fy_st;
-                                      ρ_l=ρ_l, ρ_g=ρ_g)
+    # Final macroscopic
+    if gas_model == :phasefield
+        compute_macroscopic_phasefield_2d!(p, ux, uy, f_in, φ, Fx_st, Fy_st;
+                                            ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+    elseif gas_model == :smooth
+        compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C_s, Fx_st, Fy_st;
+                                          ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+    else  # :ghost
+        compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C, Fx_st, Fy_st;
+                                          ρ_l=one(FT), ρ_g=one(FT))
+    end
 
     return (p=Array(p), uz=Array(ux), ur=Array(uy),
-            C=Array(C), C_s=Array(C_s),
+            C=Array(C), C_s=isnothing(C_s) ? nothing : Array(C_s),
             r_min=r_min_history, times=times,
-            σ=FT(σ), R0=FT(R0), λ=λ, ε=FT(ε), ρ_l=FT(ρ_l), ρ_g=FT(ρ_g))
+            gas_model=gas_model,
+            σ=FT(σ), R0=FT(R0), λ=λ, ε=FT(ε), ρ_l=FT(ρ_eff_l), ρ_g=FT(ρ_eff_g))
 end
 
 # --- CIJ jet: hybrid PLIC/smooth + pressure MRT ---
 
 """
-    run_cij_jet_hybrid_2d(; Re, We, δ, R0, u_lb, ρ_ratio, μ_ratio, n_smooth, ...)
+    run_cij_jet_hybrid_2d(; gas_model=:smooth, Re, We, δ, R0, u_lb, ρ_ratio, μ_ratio, ...)
 
-CIJ jet breakup using the hybrid PLIC/smooth approach:
-- C (sharp, PLIC): mass conservation, curvature (HF), interface contour
-- C_s (smoothed from C): density ρ(C_s) for collision, force gradients
-- Single f_q distribution, pressure-based MRT (ρ_lbm ≈ 1)
-- Density-weighted CSF (Tryggvason) for bounded F/ρ
+CIJ jet breakup with selectable gas model:
+- `:smooth` — PLIC + smoothed VOF for collision/forces (default)
+- `:ghost`  — PLIC + ghost fluid (ρ_lbm=1 everywhere, gas velocity extrapolated)
+- `:phasefield` — Allen-Cahn diffuse interface (second LBM distribution)
 
-Supports ρ_ratio up to 1000 with exact mass conservation (PLIC + correction).
+All models use pressure-based MRT collision and axisymmetric geometry.
 """
 function run_cij_jet_hybrid_2d(;
         Re=200, We=600, δ=0.02,
         R0=40, u_lb=0.04,
         domain_ratio=80, nr_ratio=3,
         ρ_ratio=1000.0, μ_ratio=10.0,
+        gas_model::Symbol=:smooth,
         n_smooth=3,
+        n_ghost_layers=5, C_ghost_threshold=0.5,
+        W_pf=4.0, τ_ac=0.7,
         init_length=4, max_steps=200_000,
         output_interval=2000,
         output_dir="cij_jet_hybrid",
         backend=KernelAbstractions.CPU(), FT=Float64)
 
+    gas_model in (:smooth, :ghost, :phasefield) ||
+        error("gas_model must be :smooth, :ghost, or :phasefield (got :$gas_model)")
+
     # --- Derive LBM parameters ---
     ρ_l = FT(1.0)
-    ρ_g = ρ_l / FT(ρ_ratio)
-    ν_l = FT(u_lb) * FT(R0) / FT(Re)
-    ν_g = ρ_l * ν_l / (ρ_g * FT(μ_ratio))
     σ_lb = ρ_l * FT(u_lb)^2 * FT(R0) / FT(We)
+    ν_l = FT(u_lb) * FT(R0) / FT(Re)
+
+    if gas_model == :ghost
+        ρ_eff_l = one(FT); ρ_eff_g = one(FT)
+        ν_g = ν_l / FT(μ_ratio)  # μ_g/ρ_lbm = (μ_l/μ_ratio)/1
+    else
+        ρ_eff_l = ρ_l
+        ρ_eff_g = ρ_l / FT(ρ_ratio)
+        ν_g = ρ_l * ν_l / (ρ_eff_g * FT(μ_ratio))
+    end
 
     τ_l = FT(3) * ν_l + FT(0.5)
-    τ_g = FT(3) * ν_g + FT(0.5)
+    τ_g_visc = FT(3) * ν_g + FT(0.5)
 
-    @info "CIJ hybrid (PLIC+smooth)" Re We δ R0 u_lb ν_l ν_g σ_lb τ_l τ_g ρ_l ρ_g n_smooth
+    @info "CIJ jet" gas_model Re We δ R0 u_lb ν_l ν_g σ_lb τ_l τ_g_visc ρ_eff_l ρ_eff_g
 
-    if τ_l < FT(0.505) || τ_g < FT(0.505)
-        @warn "Relaxation time close to 0.5" τ_l τ_g
+    if τ_l < FT(0.505) || τ_g_visc < FT(0.505)
+        @warn "Relaxation time close to 0.5" τ_l τ_g_visc
     end
 
     # --- Domain ---
@@ -992,120 +1109,243 @@ function run_cij_jet_hybrid_2d(;
     Nr = Int(nr_ratio * R0)
     Nx, Ny = Nz, Nr
 
-    # --- Arrays ---
+    # --- Common arrays ---
     C      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    C_new  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    C_s    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    C_tmp  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    nx_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    ny_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    cc_field = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    κ      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Fx_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Fy_st  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    κ      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     f_in   = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     f_out  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     p      = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     ux     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     uy     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+    ny_n   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    # VOF geometry (smooth/ghost use PLIC)
+    C_new    = gas_model != :phasefield ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : nothing
+    nx_n     = gas_model != :phasefield ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : nothing
+    cc_field = gas_model != :phasefield ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : nothing
+
+    # --- Model-specific arrays ---
+    C_s = C_tmp = nothing
+    ux_tmp = uy_tmp = is_valid = is_valid_new = nothing
+    φ = μ_pf = g_in = g_out = Ax = Ay = nothing
+    β_pf = κ_pf = zero(FT)
+
+    if gas_model == :smooth
+        C_s  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        C_tmp = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    elseif gas_model == :ghost
+        ux_tmp     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        uy_tmp     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        is_valid     = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+        is_valid_new = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+    elseif gas_model == :phasefield
+        φ    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        μ_pf = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        g_in  = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+        g_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+        Ax   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        Ay   = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        pf = phasefield_params(σ_lb, FT(W_pf))
+        β_pf = FT(pf.β); κ_pf = FT(pf.κ)
+    end
 
     # Perturbation frequency
     T_period = FT(7) * FT(R0) / FT(u_lb)
     f_stim = one(FT) / T_period
 
-    # Inlet profiles
+    # --- Inlet profiles ---
     W_smooth = FT(3)
     inlet_profile_cpu = zeros(FT, Ny)
-    inlet_vof_cpu = zeros(FT, Ny)
     for j in 1:Ny
         r = FT(j) - FT(0.5)
         inlet_profile_cpu[j] = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / W_smooth))
-        inlet_vof_cpu[j] = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
     end
     inlet_profile = KernelAbstractions.zeros(backend, FT, Ny)
     copyto!(inlet_profile, inlet_profile_cpu)
-    inlet_vof_gpu = KernelAbstractions.zeros(backend, FT, Ny)
-    copyto!(inlet_vof_gpu, inlet_vof_cpu)
     ux_inlet = KernelAbstractions.zeros(backend, FT, Ny)
     uy_inlet = KernelAbstractions.zeros(backend, FT, Ny)
 
-    # --- Initialize: flat jet ---
-    C_cpu = zeros(FT, Nx, Ny)
-    L_init = FT(init_length * R0)
-    for j in 1:Ny, i in 1:Nx
-        r = FT(j) - FT(0.5); z = FT(i) - FT(0.5)
-        c_r = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
-        c_z = FT(0.5) * (one(FT) + tanh((L_init - z) / FT(1.5)))
-        C_cpu[i,j] = c_r * c_z
+    # VOF inlet profile (smooth/ghost)
+    inlet_vof_gpu = nothing
+    if gas_model != :phasefield
+        inlet_vof_cpu = zeros(FT, Ny)
+        for j in 1:Ny
+            r = FT(j) - FT(0.5)
+            inlet_vof_cpu[j] = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
+        end
+        inlet_vof_gpu = KernelAbstractions.zeros(backend, FT, Ny)
+        copyto!(inlet_vof_gpu, inlet_vof_cpu)
     end
-    copyto!(C, C_cpu)
 
-    # Smooth + pressure equilibrium
-    smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
-    C_s_cpu = Array(C_s)
-    ux_cpu = zeros(FT, Nx, Ny)
-    for j in 1:Ny, i in 1:Nx
-        ux_cpu[i,j] = C_s_cpu[i,j] * FT(u_lb)
+    # Phasefield inlet profile
+    inlet_phi_gpu = nothing
+    if gas_model == :phasefield
+        inlet_phi_cpu = zeros(FT, Ny)
+        for j in 1:Ny
+            r = FT(j) - FT(0.5)
+            inlet_phi_cpu[j] = -tanh((r - FT(R0)) / FT(W_pf))
+        end
+        inlet_phi_gpu = KernelAbstractions.zeros(backend, FT, Ny)
+        copyto!(inlet_phi_gpu, inlet_phi_cpu)
     end
-    f_cpu = init_pressure_vof_equilibrium(C_s_cpu, ux_cpu, zeros(FT, Nx, Ny), ρ_l, ρ_g, FT)
-    copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+
+    # --- Initialize: flat jet ---
+    L_init = FT(init_length * R0)
+
+    if gas_model == :phasefield
+        φ_cpu = zeros(FT, Nx, Ny)
+        ux_cpu = zeros(FT, Nx, Ny)
+        for j in 1:Ny, i in 1:Nx
+            r = FT(j) - FT(0.5); z = FT(i) - FT(0.5)
+            φ_r = -tanh((r - FT(R0)) / FT(W_pf))
+            φ_z = tanh((L_init - z) / FT(W_pf))
+            φ_cpu[i,j] = min(φ_r, φ_z)
+            ux_cpu[i,j] = max(zero(FT), (one(FT) + φ_cpu[i,j]) / FT(2)) * FT(u_lb)
+        end
+        copyto!(φ, φ_cpu)
+        C_cpu = (φ_cpu .+ one(FT)) ./ FT(2)
+        copyto!(C, C_cpu)
+        f_cpu = init_pressure_equilibrium(φ_cpu, ux_cpu, zeros(FT, Nx, Ny),
+                                           ρ_eff_l, ρ_eff_g, FT)
+        g_cpu = init_phasefield_equilibrium(φ_cpu, ux_cpu, zeros(FT, Nx, Ny), FT)
+        copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+        copyto!(g_in, g_cpu); copyto!(g_out, g_cpu)
+    else
+        C_cpu = zeros(FT, Nx, Ny)
+        for j in 1:Ny, i in 1:Nx
+            r = FT(j) - FT(0.5); z = FT(i) - FT(0.5)
+            c_r = FT(0.5) * (one(FT) - tanh((r - FT(R0)) / FT(1.5)))
+            c_z = FT(0.5) * (one(FT) + tanh((L_init - z) / FT(1.5)))
+            C_cpu[i,j] = c_r * c_z
+        end
+        copyto!(C, C_cpu)
+
+        ux_cpu = zeros(FT, Nx, Ny)
+        if gas_model == :smooth
+            smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+            C_init_cpu = Array(C_s)
+        else  # :ghost — use sharp C
+            C_init_cpu = copy(C_cpu)
+        end
+        for j in 1:Ny, i in 1:Nx
+            ux_cpu[i,j] = C_init_cpu[i,j] * FT(u_lb)
+        end
+        f_cpu = init_pressure_vof_equilibrium(C_init_cpu, ux_cpu, zeros(FT, Nx, Ny),
+                                               ρ_eff_l, ρ_eff_g, FT)
+        copyto!(f_in, f_cpu); copyto!(f_out, f_cpu)
+    end
 
     # --- Output & tracking ---
     mkpath(output_dir)
-    pvd = create_pvd(joinpath(output_dir, "cij_hybrid"))
+    pvd = create_pvd(joinpath(output_dir, "cij_$(gas_model)"))
     interface_snapshots = Dict{Int, Vector{NTuple{2,FT}}}()
     breakup_detected = false
     breakup_step = 0
 
-    @info "CIJ hybrid simulation" Nz Nr T_period max_steps output_dir
+    @info "CIJ simulation" gas_model Nz Nr T_period max_steps output_dir
 
     # --- Main loop ---
     for step in 1:max_steps
 
-        # 1. Stream (non-periodic x, specular j=1, wall j=Ny)
+        # 1. Stream
         stream_axisym_inlet_2d!(f_out, f_in, Nx, Ny)
+        if gas_model == :phasefield
+            stream_axisym_inlet_2d!(g_out, g_in, Nx, Ny)
+        end
 
         # 2. Inlet BC: pulsed Zou-He velocity
         u_t = FT(u_lb) * (one(FT) + FT(δ) * sin(FT(2π) * f_stim * FT(step)))
         ux_inlet .= inlet_profile .* u_t
         apply_zou_he_west_spatial_2d!(f_out, ux_inlet, uy_inlet, Nx, Ny)
 
-        # 3. Outlet BC
+        # 3. Phasefield inlet BC
+        if gas_model == :phasefield
+            set_phasefield_west_2d!(g_out, inlet_phi_gpu, ux_inlet)
+        end
+
+        # 4. Outlet BC
         apply_zou_he_pressure_east_2d!(f_out, Nx, Ny; ρ_out=1.0)
+        if gas_model == :phasefield
+            extrapolate_phasefield_east_2d!(g_out, Nx, Ny)
+        end
 
-        # 4. Smooth C → C_s
-        smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+        # 5. Interface update + macroscopic
+        if gas_model == :smooth
+            smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+            compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
+                                              ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+        elseif gas_model == :ghost
+            compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C, Fx_st, Fy_st;
+                                              ρ_l=one(FT), ρ_g=one(FT))
+            extrapolate_velocity_ghost_2d!(ux, uy, C, ux_tmp, uy_tmp,
+                                            is_valid, is_valid_new;
+                                            C_threshold=FT(C_ghost_threshold),
+                                            n_layers=n_ghost_layers)
+        else  # :phasefield
+            compute_phi_2d!(φ, g_out)
+            compute_vof_from_phi_2d!(C, φ)
+            compute_macroscopic_phasefield_2d!(p, ux, uy, f_out, φ, Fx_st, Fy_st;
+                                                ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+        end
 
-        # 5. Macroscopic with ρ(C_s)
-        compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
-                                          ρ_l=ρ_l, ρ_g=ρ_g)
+        # 6. VOF advection (smooth/ghost only)
+        if gas_model != :phasefield
+            set_vof_west_2d!(C, inlet_vof_gpu)
+            advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
+                                  step=step)
+            copyto!(C, C_new)
+        end
 
-        # 6. VOF inlet + PLIC advection
-        set_vof_west_2d!(C, inlet_vof_gpu)
-        advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
-                              step=step)
-        copyto!(C, C_new)
-
-        # 7. Curvature from SHARP C
-        compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
-        compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
-        add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
-
-        # 8. Density-weighted CSF from SMOOTH C_s
+        # 7. Surface tension
         ramp = min(FT(step) / FT(500), one(FT))
-        compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_s, σ_lb * ramp, Nx, Ny;
-                                              ρ_l=ρ_l, ρ_g=ρ_g)
+        if gas_model == :phasefield
+            compute_chemical_potential_2d!(μ_pf, φ, β_pf, κ_pf)
+            add_azimuthal_chemical_potential_2d!(μ_pf, φ, κ_pf, Ny)
+            compute_phasefield_force_2d!(Fx_st, Fy_st, μ_pf, φ)
+            if ramp < one(FT)
+                Fx_st .*= ramp; Fy_st .*= ramp
+            end
+        else
+            compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
+            compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
+            add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
+            C_grad = gas_model == :smooth ? C_s : C
+            compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_grad, σ_lb * ramp, Nx, Ny;
+                                                  ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+        end
 
-        # 9. Axisymmetric viscous correction with C_s
-        add_axisym_viscous_correction_2d!(Fx_st, ux, C_s, ν_l, ν_g, Ny)
+        # 8. Axisymmetric viscous correction
+        C_ref = gas_model == :smooth ? C_s : C
+        add_axisym_viscous_weighted_2d!(Fx_st, ux, C_ref, ν_l, ν_g, ρ_eff_l, ρ_eff_g, Ny)
 
-        # 10. Pressure-based MRT collision with ρ(C_s)
-        collide_pressure_vof_mrt_2d!(f_out, C_s, Fx_st, Fy_st, is_solid;
-                                      ρ_l=ρ_l, ρ_g=ρ_g, ν_l=ν_l, ν_g=ν_g)
+        # 9. Collision
+        if gas_model == :phasefield
+            compute_antidiffusion_flux_2d!(Ax, Ay, φ)
+            collide_allen_cahn_2d!(g_out, ux, uy, Ax, Ay; τ_g=FT(τ_ac), W=FT(W_pf))
+            add_azimuthal_allen_cahn_source_2d!(g_out, φ; τ_g=FT(τ_ac))
+            collide_pressure_phasefield_mrt_2d!(f_out, φ, Fx_st, Fy_st, is_solid;
+                                                  ρ_l=ρ_eff_l, ρ_g=ρ_eff_g,
+                                                  ν_l=ν_l, ν_g=ν_g)
+        else
+            C_coll = gas_model == :smooth ? C_s : C
+            collide_pressure_vof_mrt_2d!(f_out, C_coll, Fx_st, Fy_st, is_solid;
+                                          ρ_l=ρ_eff_l, ρ_g=ρ_eff_g,
+                                          ν_l=ν_l, ν_g=ν_g)
+        end
 
-        # 11. Swap
+        # Ghost: reset gas f to equilibrium
+        if gas_model == :ghost
+            reset_feq_ghost_2d!(f_out, ux, uy, C; C_threshold=FT(C_ghost_threshold))
+        end
+
+        # 10. Swap
         f_in, f_out = f_out, f_in
+        if gas_model == :phasefield
+            g_in, g_out = g_out, g_in
+        end
 
         # --- Output ---
         if step % output_interval == 0
@@ -1141,7 +1381,7 @@ function run_cij_jet_hybrid_2d(;
 
             t_phys = FT(step) * FT(u_lb) / FT(R0)
             write_vtk_to_pvd(pvd,
-                joinpath(output_dir, "cij_hybrid_$(lpad(step, 7, '0'))"),
+                joinpath(output_dir, "cij_$(gas_model)_$(lpad(step, 7, '0'))"),
                 Nx, Ny, 1.0,
                 Dict("C" => C_out, "p" => Array(p),
                      "ux" => ux_out, "uy" => Array(uy),
@@ -1159,13 +1399,27 @@ function run_cij_jet_hybrid_2d(;
     end
 
     vtk_save(pvd)
-    smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
-    compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C_s, Fx_st, Fy_st;
-                                      ρ_l=ρ_l, ρ_g=ρ_g)
 
-    return (p=Array(p), uz=Array(ux), ur=Array(uy), C=Array(C), C_s=Array(C_s),
+    # Final macroscopic
+    if gas_model == :phasefield
+        compute_phi_2d!(φ, g_in)
+        compute_chemical_potential_2d!(μ_pf, φ, β_pf, κ_pf)
+        compute_phasefield_force_2d!(Fx_st, Fy_st, μ_pf, φ)
+        compute_macroscopic_phasefield_2d!(p, ux, uy, f_in, φ, Fx_st, Fy_st;
+                                            ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+    elseif gas_model == :smooth
+        smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
+        compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C_s, Fx_st, Fy_st;
+                                          ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
+    else  # :ghost
+        compute_macroscopic_pressure_2d!(p, ux, uy, f_in, C, Fx_st, Fy_st;
+                                          ρ_l=one(FT), ρ_g=one(FT))
+    end
+
+    return (p=Array(p), uz=Array(ux), ur=Array(uy),
+            C=Array(C), C_s=isnothing(C_s) ? nothing : Array(C_s),
             interfaces=interface_snapshots,
             breakup_detected=breakup_detected, breakup_step=breakup_step,
-            params=(; Re, We, δ, R0, u_lb, ν_l, ν_g, σ_lb, ρ_l, ρ_g, Nz, Nr,
-                    T_period, n_smooth))
+            params=(; Re, We, δ, R0, u_lb, ν_l, ν_g, σ_lb, gas_model,
+                    ρ_l=ρ_eff_l, ρ_g=ρ_eff_g, Nz, Nr, T_period))
 end

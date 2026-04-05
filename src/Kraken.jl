@@ -39,6 +39,7 @@ include("kernels/dualgrid_2d.jl")
 include("kernels/phasefield_2d.jl")
 include("kernels/pressure_vof_2d.jl")
 include("kernels/smooth_vof_2d.jl")
+include("kernels/ghost_fluid_2d.jl")
 include("kernels/fused_bgk_2d.jl")
 include("kernels/aa_bgk_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
@@ -135,6 +136,8 @@ export run_rp_axisym_2d, run_rp_pressure_vof_2d, run_rp_hybrid_2d
 export run_cij_jet_axisym_2d, run_cij_jet_phasefield_2d, run_cij_jet_hybrid_2d
 export collide_pressure_vof_mrt_2d!, compute_surface_tension_weighted_2d!
 export init_pressure_vof_equilibrium, smooth_vof_2d!, correct_mass_2d!
+export add_axisym_viscous_weighted_2d!
+export extrapolate_velocity_ghost_2d!, reset_feq_ghost_2d!
 
 # Phase-field (Allen-Cahn + pressure-based)
 export phasefield_params, compute_phi_2d!, compute_chemical_potential_2d!
