@@ -185,9 +185,10 @@ Generic Zou-He velocity BC kernel for any face in D3Q19.
         denom = one(T) + T(face.sign) * u_normal
         ρ_wall = (sum_par + T(2) * sum_out) / denom
 
-        # Axis-aligned unknown: f_axis = f_opp - sign * 2/3 * ρ * u_n
+        # Axis-aligned unknown: f_axis = f_opp - sign * 1/3 * ρ * u_n
+        # D3Q19: 2*w_axis*3 = 2*(1/18)*3 = 1/3 (NOT 2/3 from D2Q9)
         f[i,j,k,face.q_axis] = f[i,j,k,face.q_axis_opp] -
-                                T(face.sign) * T(2.0/3.0) * ρ_wall * u_normal
+                                T(face.sign) * T(1.0/3.0) * ρ_wall * u_normal
 
         # Read tangential population differences
         tang1_diff = f[i,j,k,face.tang1_plus] - f[i,j,k,face.tang1_minus]
@@ -253,9 +254,9 @@ Fixes density to `ρ_out` and computes the normal velocity from known population
         #   For min face (sign=-1): u_n = +1 - (sum_par + 2*sum_out) / ρ_out
         u_n = -T(face.sign) * (one(T) - (sum_par + T(2) * sum_out) / ρ_out)
 
-        # Axis-aligned unknown
+        # Axis-aligned unknown (D3Q19: coefficient 1/3)
         f[i,j,k,face.q_axis] = f[i,j,k,face.q_axis_opp] -
-                                T(face.sign) * T(2.0/3.0) * ρ_out * u_n
+                                T(face.sign) * T(1.0/3.0) * ρ_out * u_n
 
         # Tangential differences
         tang1_diff = f[i,j,k,face.tang1_plus] - f[i,j,k,face.tang1_minus]
