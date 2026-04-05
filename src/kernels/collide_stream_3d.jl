@@ -6,33 +6,38 @@ using KernelAbstractions
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
+        # Clamped neighbor indices — safe for CPU where ifelse evaluates both branches
+        im = max(i-1, 1); ip = min(i+1, Nx)
+        jm = max(j-1, 1); jp = min(j+1, Ny)
+        km = max(k-1, 1); kp = min(k+1, Nz)
+
         f_out[i,j,k,1] = f_in[i, j, k, 1]  # rest
 
         # Axis-aligned
-        f_out[i,j,k,2]  = ifelse(i > 1,             f_in[i-1, j, k, 2],  f_in[i,j,k, 3])
-        f_out[i,j,k,3]  = ifelse(i < Nx,            f_in[i+1, j, k, 3],  f_in[i,j,k, 2])
-        f_out[i,j,k,4]  = ifelse(j > 1,             f_in[i, j-1, k, 4],  f_in[i,j,k, 5])
-        f_out[i,j,k,5]  = ifelse(j < Ny,            f_in[i, j+1, k, 5],  f_in[i,j,k, 4])
-        f_out[i,j,k,6]  = ifelse(k > 1,             f_in[i, j, k-1, 6],  f_in[i,j,k, 7])
-        f_out[i,j,k,7]  = ifelse(k < Nz,            f_in[i, j, k+1, 7],  f_in[i,j,k, 6])
+        f_out[i,j,k,2]  = ifelse(i > 1,             f_in[im, j,  k,  2],  f_in[i,j,k, 3])
+        f_out[i,j,k,3]  = ifelse(i < Nx,            f_in[ip, j,  k,  3],  f_in[i,j,k, 2])
+        f_out[i,j,k,4]  = ifelse(j > 1,             f_in[i,  jm, k,  4],  f_in[i,j,k, 5])
+        f_out[i,j,k,5]  = ifelse(j < Ny,            f_in[i,  jp, k,  5],  f_in[i,j,k, 4])
+        f_out[i,j,k,6]  = ifelse(k > 1,             f_in[i,  j,  km, 6],  f_in[i,j,k, 7])
+        f_out[i,j,k,7]  = ifelse(k < Nz,            f_in[i,  j,  kp, 7],  f_in[i,j,k, 6])
 
         # Edge xy
-        f_out[i,j,k,8]  = ifelse(i > 1  && j > 1,   f_in[i-1,j-1,k, 8],  f_in[i,j,k,11])
-        f_out[i,j,k,9]  = ifelse(i < Nx && j > 1,   f_in[i+1,j-1,k, 9],  f_in[i,j,k,10])
-        f_out[i,j,k,10] = ifelse(i > 1  && j < Ny,  f_in[i-1,j+1,k,10],  f_in[i,j,k, 9])
-        f_out[i,j,k,11] = ifelse(i < Nx && j < Ny,  f_in[i+1,j+1,k,11],  f_in[i,j,k, 8])
+        f_out[i,j,k,8]  = ifelse(i > 1  && j > 1,   f_in[im,jm,k, 8],  f_in[i,j,k,11])
+        f_out[i,j,k,9]  = ifelse(i < Nx && j > 1,   f_in[ip,jm,k, 9],  f_in[i,j,k,10])
+        f_out[i,j,k,10] = ifelse(i > 1  && j < Ny,  f_in[im,jp,k,10],  f_in[i,j,k, 9])
+        f_out[i,j,k,11] = ifelse(i < Nx && j < Ny,  f_in[ip,jp,k,11],  f_in[i,j,k, 8])
 
         # Edge xz
-        f_out[i,j,k,12] = ifelse(i > 1  && k > 1,   f_in[i-1,j,k-1,12],  f_in[i,j,k,15])
-        f_out[i,j,k,13] = ifelse(i < Nx && k > 1,   f_in[i+1,j,k-1,13],  f_in[i,j,k,14])
-        f_out[i,j,k,14] = ifelse(i > 1  && k < Nz,  f_in[i-1,j,k+1,14],  f_in[i,j,k,13])
-        f_out[i,j,k,15] = ifelse(i < Nx && k < Nz,  f_in[i+1,j,k+1,15],  f_in[i,j,k,12])
+        f_out[i,j,k,12] = ifelse(i > 1  && k > 1,   f_in[im,j,km,12],  f_in[i,j,k,15])
+        f_out[i,j,k,13] = ifelse(i < Nx && k > 1,   f_in[ip,j,km,13],  f_in[i,j,k,14])
+        f_out[i,j,k,14] = ifelse(i > 1  && k < Nz,  f_in[im,j,kp,14],  f_in[i,j,k,13])
+        f_out[i,j,k,15] = ifelse(i < Nx && k < Nz,  f_in[ip,j,kp,15],  f_in[i,j,k,12])
 
         # Edge yz
-        f_out[i,j,k,16] = ifelse(j > 1  && k > 1,   f_in[i,j-1,k-1,16],  f_in[i,j,k,19])
-        f_out[i,j,k,17] = ifelse(j < Ny && k > 1,   f_in[i,j+1,k-1,17],  f_in[i,j,k,18])
-        f_out[i,j,k,18] = ifelse(j > 1  && k < Nz,  f_in[i,j-1,k+1,18],  f_in[i,j,k,17])
-        f_out[i,j,k,19] = ifelse(j < Ny && k < Nz,  f_in[i,j+1,k+1,19],  f_in[i,j,k,16])
+        f_out[i,j,k,16] = ifelse(j > 1  && k > 1,   f_in[i,jm,km,16],  f_in[i,j,k,19])
+        f_out[i,j,k,17] = ifelse(j < Ny && k > 1,   f_in[i,jp,km,17],  f_in[i,j,k,18])
+        f_out[i,j,k,18] = ifelse(j > 1  && k < Nz,  f_in[i,jm,kp,18],  f_in[i,j,k,17])
+        f_out[i,j,k,19] = ifelse(j < Ny && k < Nz,  f_in[i,jp,kp,19],  f_in[i,j,k,16])
     end
 end
 
