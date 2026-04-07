@@ -42,6 +42,7 @@ include("kernels/smooth_vof_2d.jl")
 include("kernels/ghost_fluid_2d.jl")
 include("kernels/fused_bgk_2d.jl")
 include("kernels/aa_bgk_2d.jl")
+include("kernels/persistent_bgk_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
 include("kernels/collide_rheology_2d.jl")
 include("kernels/collide_twophase_rheology_2d.jl")
@@ -53,6 +54,7 @@ include("drivers/thermal.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
+include("drivers/viscoelastic.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
@@ -113,6 +115,7 @@ export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
+export persistent_fused_bgk!, persistent_aa_bgk!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
@@ -207,6 +210,7 @@ export eigen_sym2x2, mat_exp_sym2x2, mat_log_sym2x2, decompose_velocity_gradient
 export compute_polymeric_force_2d!
 export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
+export run_viscoelastic_cylinder_2d
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!

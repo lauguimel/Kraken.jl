@@ -1,0 +1,47 @@
+#!/bin/bash -l
+#PBS -N kraken_quick_wins
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -V
+
+# --- GPU optimization quick-wins benchmark on H100 ---
+# Persistent kernels + workgroup-size sweep, AA+f32, N=1024.
+
+WORKDIR=$HOME/Kraken.jl
+cd $WORKDIR
+
+echo "========================================"
+echo "Job: $PBS_JOBID"
+echo "Node: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "Start: $(date)"
+echo "========================================"
+
+export PATH=$HOME/.juliaup/bin:$PATH
+export JULIA_CUDA_USE_COMPAT=false
+
+nvidia-smi
+
+julia --project -e '
+    using Pkg
+    Pkg.instantiate()
+    Pkg.add("CUDA")
+    using CUDA
+    CUDA.versioninfo()
+' 2>&1
+
+julia --project benchmarks/perf_quick_wins.jl --gpu 2>&1
+
+EXIT_CODE=$?
+
+echo "========================================"
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "Completed successfully"
+else
+    echo "Failed (exit code: $EXIT_CODE)"
+fi
+echo "End: $(date)"
+echo "========================================"
+
+exit $EXIT_CODE
