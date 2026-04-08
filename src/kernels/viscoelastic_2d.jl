@@ -109,12 +109,15 @@ end
         dvdx = (uy[ip,j] - uy[im,j]) / T(2)
         dvdy = (uy[i,jp] - uy[i,jm]) / T(2)
 
-        # --- Source: upper-convected derivative ---
-        # τ·∇u + (∇u)ᵀ·τ
+        # --- Source: upper-convected derivative L·τ + τ·Lᵀ ---
+        # L_ij = ∂u_i/∂x_j (transpose convention).
+        # (L·τ + τ·Lᵀ)_xx = 2·(L11·τxx + L12·τxy) = 2·(dudx·τxx + dudy·τxy)
+        # (L·τ + τ·Lᵀ)_yy = 2·(L21·τxy + L22·τyy) = 2·(dvdx·τxy + dvdy·τyy)
+        # (L·τ + τ·Lᵀ)_xy = (dudx+dvdy)·τxy + dudy·τyy + dvdx·τxx
         txx = tau_xx[i,j]; txy = tau_xy[i,j]; tyy = tau_yy[i,j]
-        src_xx = T(2) * (txx * dudx + txy * dvdx)
-        src_xy = txx * dudy + tyy * dvdx + txy * (dudx + dvdy)  # fixed: should be symmetric
-        src_yy = T(2) * (txy * dudy + tyy * dvdy)
+        src_xx = T(2) * (txx * dudx + txy * dudy)
+        src_xy = txx * dvdx + tyy * dudy + txy * (dudx + dvdy)
+        src_yy = T(2) * (txy * dvdx + tyy * dvdy)
 
         # Newtonian contribution: (ν_p/λ)·(∇u + (∇u)ᵀ)
         newt_xx = nu_p * inv_lambda * T(2) * dudx
@@ -208,9 +211,10 @@ end
         exp_λ1 = exp(λ1)
         exp_λ2 = exp(λ2)
 
-        # --- Decompose ∇u in eigenbasis ---
+        # --- Decompose ∇u in eigenbasis (Fattal & Kupferman 2004) ---
+        # NOTE: pass eigenvalues of Θ (not C); the function uses exp(λ) internally.
         Omega12, B11, B22 = decompose_velocity_gradient(dudx, dudy, dvdx, dvdy,
-                                                         e1x, e1y, e2x, e2y)
+                                                         e1x, e1y, e2x, e2y, λ1, λ2)
 
         # --- Source terms in Θ equation ---
         # ΩΘ - ΘΩ + 2B  (in eigenbasis, then transform back)

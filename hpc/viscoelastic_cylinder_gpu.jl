@@ -60,7 +60,7 @@ for Wi in Wi_values
     r = run_viscoelastic_cylinder_2d(;
         Nx=Nx, Ny=Ny, radius=radius, u_in=u_in,
         ν_s=ν_s, ν_p=ν_p, lambda=lambda,
-        formulation=:logconf, L_max=0.0,
+        formulation=:stress, L_max=0.0,
         max_steps=max_steps, avg_window=avg_window,
         backend=backend, FT=FT)
     dt = time() - t0

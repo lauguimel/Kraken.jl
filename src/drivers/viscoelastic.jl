@@ -69,7 +69,7 @@ end
 """
     run_viscoelastic_cylinder_2d(; Nx=400, Ny=80, radius=10, cx=nothing, cy=nothing,
                                    u_in=0.02, ν_s=0.08, ν_p=0.02, lambda=1.0,
-                                   L_max=0.0, formulation=:logconf,
+                                   L_max=0.0, formulation=:stress,
                                    max_steps=50000, avg_window=5000,
                                    backend=CPU(), FT=Float64)
 
@@ -97,7 +97,7 @@ Returns `(ux, uy, ρ, Cd, Fx_drag, Fy_drag, tau_p_xx, tau_p_xy, tau_p_yy,
 function run_viscoelastic_cylinder_2d(;
         Nx=400, Ny=80, radius=10, cx=nothing, cy=nothing,
         u_in=0.02, ν_s=0.08, ν_p=0.02, lambda=1.0,
-        L_max=0.0, formulation=:logconf,
+        L_max=0.0, formulation=:stress,
         max_steps=50000, avg_window=5000,
         backend=KernelAbstractions.CPU(), FT=Float64)
 
