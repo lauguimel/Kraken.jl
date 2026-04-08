@@ -153,6 +153,81 @@ function prolongate_f_rescaled_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c,
     KernelAbstractions.synchronize(backend)
 end
 
+# --- Full prolongation (interior + ghost) — used once at init ---
+
+@kernel function prolongate_f_rescaled_full_2d_kernel!(
+        f_fine, @Const(f_coarse), @Const(rho_c), @Const(ux_c), @Const(uy_c),
+        ratio, Nx_inner, Ny_inner, n_ghost,
+        i_c_start, j_c_start, Nx_c, Ny_c, alpha_c2f)
+
+    i_f, j_f = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(f_fine)
+
+        xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_c_start) + T(0.5) / T(ratio)
+        yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_c_start) + T(0.5) / T(ratio)
+
+        i0_raw = trunc(Int, xc)
+        j0_raw = trunc(Int, yc)
+        tx = xc - T(i0_raw)
+        ty = yc - T(j0_raw)
+
+        i0 = clamp(i0_raw, 1, Nx_c)
+        i1 = clamp(i0_raw + 1, 1, Nx_c)
+        j0 = clamp(j0_raw, 1, Ny_c)
+        j1 = clamp(j0_raw + 1, 1, Ny_c)
+        tx = clamp(tx, zero(T), one(T))
+        ty = clamp(ty, zero(T), one(T))
+
+        w00 = (one(T) - tx) * (one(T) - ty)
+        w10 = tx * (one(T) - ty)
+        w01 = (one(T) - tx) * ty
+        w11 = tx * ty
+
+        rho_f = w00 * rho_c[i0, j0] + w10 * rho_c[i1, j0] +
+                w01 * rho_c[i0, j1] + w11 * rho_c[i1, j1]
+        ux_f  = w00 * ux_c[i0, j0] + w10 * ux_c[i1, j0] +
+                w01 * ux_c[i0, j1] + w11 * ux_c[i1, j1]
+        uy_f  = w00 * uy_c[i0, j0] + w10 * uy_c[i1, j0] +
+                w01 * uy_c[i0, j1] + w11 * uy_c[i1, j1]
+
+        for q in 1:9
+            feq_f = _feq_d2q9(q, rho_f, ux_f, uy_f)
+            fneq_00 = f_coarse[i0, j0, q] - _feq_d2q9(q, rho_c[i0, j0], ux_c[i0, j0], uy_c[i0, j0])
+            fneq_10 = f_coarse[i1, j0, q] - _feq_d2q9(q, rho_c[i1, j0], ux_c[i1, j0], uy_c[i1, j0])
+            fneq_01 = f_coarse[i0, j1, q] - _feq_d2q9(q, rho_c[i0, j1], ux_c[i0, j1], uy_c[i0, j1])
+            fneq_11 = f_coarse[i1, j1, q] - _feq_d2q9(q, rho_c[i1, j1], ux_c[i1, j1], uy_c[i1, j1])
+            fneq_interp = w00 * fneq_00 + w10 * fneq_10 + w01 * fneq_01 + w11 * fneq_11
+            f_fine[i_f, j_f, q] = feq_f + T(alpha_c2f) * fneq_interp
+        end
+    end
+end
+
+"""
+    prolongate_f_rescaled_full_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c, ...)
+
+Like `prolongate_f_rescaled_2d!` but fills BOTH interior and ghost cells.
+Used to initialize a fresh patch from the coarse state.
+"""
+function prolongate_f_rescaled_full_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c,
+                                        ratio::Int, Nx_inner::Int, Ny_inner::Int,
+                                        n_ghost::Int, i_c_start::Int, j_c_start::Int,
+                                        Nx_c::Int, Ny_c::Int,
+                                        omega_coarse::Real, omega_fine::Real)
+    backend = KernelAbstractions.get_backend(f_fine)
+    T = eltype(f_fine)
+    alpha = T(rescaling_factor_c2f(omega_coarse, omega_fine, ratio))
+    Nx_f = Nx_inner + 2 * n_ghost
+    Ny_f = Ny_inner + 2 * n_ghost
+    kernel! = prolongate_f_rescaled_full_2d_kernel!(backend)
+    kernel!(f_fine, f_coarse, rho_c, ux_c, uy_c,
+            ratio, Nx_inner, Ny_inner, n_ghost,
+            i_c_start, j_c_start, Nx_c, Ny_c, alpha;
+            ndrange=(Nx_f, Ny_f))
+    KernelAbstractions.synchronize(backend)
+end
+
 # --- Restriction: fine → coarse with inverse rescaling ---
 
 """

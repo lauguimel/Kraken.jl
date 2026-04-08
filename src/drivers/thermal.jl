@@ -258,6 +258,36 @@ function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
         2 => (g, Nx_p, Ny_p) -> apply_fixed_temp_east_2d!(g, T_cold, Nx_p, Ny_p),
     )
 
+    # Flow no-slip BCs for patches: each patch spans the full vertical extent
+    # so it touches south, north, AND its respective lateral wall.
+    bc_flow_patch_fns = Dict{Int, Function}(
+        1 => (f, Nx_p, Ny_p) -> begin
+            apply_bounce_back_wall_2d!(f, Nx_p, Ny_p, :west)
+            apply_bounce_back_wall_2d!(f, Nx_p, Ny_p, :south)
+            apply_bounce_back_wall_2d!(f, Nx_p, Ny_p, :north)
+        end,
+        2 => (f, Nx_p, Ny_p) -> begin
+            apply_bounce_back_wall_2d!(f, Nx_p, Ny_p, :east)
+            apply_bounce_back_wall_2d!(f, Nx_p, Ny_p, :south)
+            apply_bounce_back_wall_2d!(f, Nx_p, Ny_p, :north)
+        end,
+    )
+
+    # Initialize patch interiors from coarse state (otherwise patches start
+    # at uniform T=0.5 / rest and pollute the coarse grid via restriction).
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+    compute_temperature_2d!(Temp, g_in)
+    for (pidx, patch) in enumerate(domain.patches)
+        Kraken.prolongate_f_rescaled_full_2d!(
+            patch.f_in, f_in, ρ, ux, uy,
+            patch.ratio, patch.Nx_inner, patch.Ny_inner,
+            patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
+            Nx, Ny, Float64(ω_f), Float64(patch.omega))
+        copyto!(patch.f_out, patch.f_in)
+        compute_macroscopic_2d!(patch.rho, patch.ux, patch.uy, patch.f_in)
+        fill_thermal_full!(patch, thermals[pidx], g_in, Nx, Ny)
+    end
+
     # Fused step closure for base grid
     fused_step = if Rc ≈ 1.0
         (fo, fi, go, gi, Te, nx, ny) -> fused_natconv_step!(
@@ -279,7 +309,8 @@ function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
             omega_T_coarse=Float64(ω_T),
             β_g=Float64(β_g),
             T_ref_buoy=Float64(T_ref_buoy),
-            bc_thermal_patch_fns=bc_thermal_patch_fns
+            bc_thermal_patch_fns=bc_thermal_patch_fns,
+            bc_flow_patch_fns=bc_flow_patch_fns
         )
     end
 

@@ -104,20 +104,14 @@ function fill_thermal_ghost!(patch::RefinementPatch{T},
                               g_coarse,
                               Nx_c::Int, Ny_c::Int;
                               t_frac::Real=zero(T)) where T
-    if t_frac > zero(T)
-        # Temporal + spatial interpolation
-        _fill_thermal_ghost_temporal!(
-            thermal.g_in, g_coarse, thermal.g_prev,
-            patch.ratio, patch.Nx_inner, patch.Ny_inner,
-            patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
-            Nx_c, Ny_c, T(t_frac))
-    else
-        _fill_thermal_ghost_simple!(
-            thermal.g_in, g_coarse,
-            patch.ratio, patch.Nx_inner, patch.Ny_inner,
-            patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
-            Nx_c, Ny_c)
-    end
+    # Always use the temporal path: at t_frac=0 it reads from g_prev (saved at
+    # coarse time n) which is what we want, since at sub_step=1 the current
+    # coarse g_in has already been advanced to time n+1 by the fused base step.
+    _fill_thermal_ghost_temporal!(
+        thermal.g_in, g_coarse, thermal.g_prev,
+        patch.ratio, patch.Nx_inner, patch.Ny_inner,
+        patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
+        Nx_c, Ny_c, T(t_frac))
 end
 
 """Bilinear interpolation of coarse g into fine ghost cells."""
@@ -251,6 +245,63 @@ end
 end
 
 """
+    fill_thermal_full!(patch, thermal, g_coarse, Nx_c, Ny_c)
+
+Bilinearly prolongate coarse g into ALL cells (interior + ghost) of the
+fine patch. Used once at initialization so the patch state matches the
+coarse state instead of starting from a uniform T_init.
+"""
+function fill_thermal_full!(patch::RefinementPatch{T},
+                             thermal::ThermalPatchArrays{T},
+                             g_coarse, Nx_c::Int, Ny_c::Int) where T
+    backend = KernelAbstractions.get_backend(thermal.g_in)
+    Nx_f = patch.Nx_inner + 2 * patch.n_ghost
+    Ny_f = patch.Ny_inner + 2 * patch.n_ghost
+    kernel! = _fill_thermal_full_kernel!(backend)
+    kernel!(thermal.g_in, g_coarse, patch.ratio,
+            patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
+            Nx_c, Ny_c; ndrange=(Nx_f, Ny_f))
+    KernelAbstractions.synchronize(backend)
+    copyto!(thermal.g_out, thermal.g_in)
+end
+
+@kernel function _fill_thermal_full_kernel!(g_fine, @Const(g_coarse),
+                                             ratio, n_ghost,
+                                             i_offset, j_offset, Nx_c, Ny_c)
+    i_f, j_f = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(g_fine)
+        xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_offset) + T(0.5) / T(ratio)
+        yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_offset) + T(0.5) / T(ratio)
+
+        i0_raw = trunc(Int, xc)
+        j0_raw = trunc(Int, yc)
+        tx = xc - T(i0_raw)
+        ty = yc - T(j0_raw)
+
+        i0 = clamp(i0_raw, 1, Nx_c)
+        i1 = clamp(i0_raw + 1, 1, Nx_c)
+        j0 = clamp(j0_raw, 1, Ny_c)
+        j1 = clamp(j0_raw + 1, 1, Ny_c)
+        tx = clamp(tx, zero(T), one(T))
+        ty = clamp(ty, zero(T), one(T))
+
+        w00 = (one(T) - tx) * (one(T) - ty)
+        w10 = tx * (one(T) - ty)
+        w01 = (one(T) - tx) * ty
+        w11 = tx * ty
+
+        for q in 1:9
+            g_fine[i_f, j_f, q] = w00 * g_coarse[i0, j0, q] +
+                                   w10 * g_coarse[i1, j0, q] +
+                                   w01 * g_coarse[i0, j1, q] +
+                                   w11 * g_coarse[i1, j1, q]
+        end
+    end
+end
+
+"""
     restrict_thermal_to_coarse!(patch, thermal, g_coarse, Temp_c)
 
 Restrict fine thermal populations back to coarse overlap (block average).
@@ -332,7 +383,8 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
                                         omega_T_coarse::Real,
                                         β_g::Real=zero(T),
                                         T_ref_buoy::Real=zero(T),
-                                        bc_thermal_patch_fns=nothing) where T
+                                        bc_thermal_patch_fns=nothing,
+                                        bc_flow_patch_fns=nothing) where T
     Nx = domain.base_Nx
     Ny = domain.base_Ny
 
@@ -375,6 +427,14 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
             stream_2d!(patch.f_out, patch.f_in, patch.Nx, patch.Ny)
             stream_2d!(thermal.g_out, thermal.g_in, patch.Nx, patch.Ny)
 
+            # Flow BCs on patch (if patch edge touches a domain wall)
+            if bc_flow_patch_fns !== nothing
+                bc_f_fn = get(bc_flow_patch_fns, pidx, nothing)
+                if bc_f_fn !== nothing
+                    bc_f_fn(patch.f_out, patch.Nx, patch.Ny)
+                end
+            end
+
             # Thermal BCs on patch (if patch edge touches domain wall)
             if bc_thermal_patch_fns !== nothing
                 bc_fn = get(bc_thermal_patch_fns, pidx, nothing)
@@ -390,9 +450,13 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
 
             # Collide thermal
             collide_thermal_2d!(thermal.g_out, patch.ux, patch.uy, thermal.omega_T)
-            # Collide flow with Boussinesq
+            # Collide flow with Boussinesq.
+            # Body force scales with the local lattice spacing: in fine units
+            # the acceleration must be multiplied by `ratio` so it produces
+            # the same physical acceleration as on the coarse grid.
             collide_boussinesq_2d!(patch.f_out, thermal.Temp, patch.is_solid,
-                                    patch.omega, T(β_g), T(T_ref_buoy))
+                                    patch.omega, T(β_g) * T(patch.ratio),
+                                    T(T_ref_buoy))
 
             # Swap for next sub-step
             copyto!(patch.f_in, patch.f_out)

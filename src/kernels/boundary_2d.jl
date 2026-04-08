@@ -69,7 +69,11 @@ end
             f[Nx, j, 4] = f[Nx, j, 2]
             f[Nx, j, 7] = f[Nx, j, 9]
             f[Nx, j, 8] = f[Nx, j, 6]
-        elseif wall_id == 4  # South already handled, this is unused
+        elseif wall_id == 4  # North (j=Ny)
+            i = idx
+            f[i, Ny, 5] = f[i, Ny, 3]
+            f[i, Ny, 8] = f[i, Ny, 6]
+            f[i, Ny, 9] = f[i, Ny, 7]
         end
     end
 end
@@ -91,6 +95,29 @@ function apply_bounce_back_walls_2d!(f, Nx, Ny)
     # East wall (i=Nx)
     kernel!(f, Nx, Ny, Int32(3); ndrange=(Ny,))
 
+    KernelAbstractions.synchronize(backend)
+end
+
+"""
+    apply_bounce_back_wall_2d!(f, Nx, Ny, side)
+
+Apply bounce-back on a single wall. `side ∈ (:south, :west, :east, :north)`.
+Used by refinement patches that touch only some domain walls.
+"""
+function apply_bounce_back_wall_2d!(f, Nx, Ny, side::Symbol)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = bounce_back_walls_2d_kernel!(backend)
+    if side === :south
+        kernel!(f, Nx, Ny, Int32(1); ndrange=(Nx,))
+    elseif side === :west
+        kernel!(f, Nx, Ny, Int32(2); ndrange=(Ny,))
+    elseif side === :east
+        kernel!(f, Nx, Ny, Int32(3); ndrange=(Ny,))
+    elseif side === :north
+        kernel!(f, Nx, Ny, Int32(4); ndrange=(Nx,))
+    else
+        error("apply_bounce_back_wall_2d!: unknown side $(side)")
+    end
     KernelAbstractions.synchronize(backend)
 end
 
