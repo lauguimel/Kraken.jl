@@ -837,6 +837,8 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
                             gas_model::Symbol=:smooth,
                             n_smooth=3,
                             n_ghost_layers=3, C_ghost_threshold=0.5,
+                            ghost_reset_feq::Bool=true, ghost_extrap::Bool=true,
+                            mass_correction::Bool=true,
                             W_pf=4.0, τ_g=0.7,
                             max_steps=10000, output_interval=500,
                             backend=KernelAbstractions.CPU(), FT=Float64)
@@ -888,6 +890,9 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
         uy_tmp     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         is_valid     = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
         is_valid_new = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+        # Smoothed C for CSF gradient only (collision uses sharp C at ρ=1)
+        C_s  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        C_tmp = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     elseif gas_model == :phasefield
         φ    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         μ_pf = KernelAbstractions.zeros(backend, FT, Nx, Ny)
@@ -946,12 +951,16 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
             compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
                                               ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
         elseif gas_model == :ghost
+            # Smoothed C for CSF gradient (sharp C is too narrow for HF curvature)
+            smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
             compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C, Fx_st, Fy_st;
                                               ρ_l=one(FT), ρ_g=one(FT))
-            extrapolate_velocity_ghost_2d!(ux, uy, C, ux_tmp, uy_tmp,
-                                            is_valid, is_valid_new;
-                                            C_threshold=FT(C_ghost_threshold),
-                                            n_layers=n_ghost_layers)
+            if ghost_extrap
+                extrapolate_velocity_ghost_2d!(ux, uy, C, ux_tmp, uy_tmp,
+                                                is_valid, is_valid_new;
+                                                C_threshold=FT(C_ghost_threshold),
+                                                n_layers=n_ghost_layers)
+            end
         else  # :phasefield
             compute_phi_2d!(φ, g_out)
             compute_vof_from_phi_2d!(C, φ)
@@ -964,7 +973,9 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
             advect_vof_plic_step!(C, C_new, nx_n, ny_n, cc_field, ux, uy, Nx, Ny;
                                   step=step)
             copyto!(C, C_new)
-            correct_mass_2d!(C, mass_ref)
+            if mass_correction
+                correct_mass_2d!(C, mass_ref)
+            end
         end
 
         # 4. Surface tension
@@ -980,7 +991,7 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
             compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
             compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
             add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
-            C_grad = gas_model == :smooth ? C_s : C
+            C_grad = (gas_model == :smooth || gas_model == :ghost) ? C_s : C
             compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_grad, σ * ramp, Nx, Ny;
                                                   ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
         end
@@ -1005,7 +1016,7 @@ function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
         end
 
         # Ghost: reset gas f to equilibrium with extrapolated velocity
-        if gas_model == :ghost
+        if gas_model == :ghost && ghost_reset_feq
             reset_feq_ghost_2d!(f_out, ux, uy, C; C_threshold=FT(C_ghost_threshold))
         end
 
@@ -1141,6 +1152,9 @@ function run_cij_jet_hybrid_2d(;
         uy_tmp     = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         is_valid     = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
         is_valid_new = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+        # Smoothed C for CSF gradient only (collision uses sharp C at ρ=1)
+        C_s  = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        C_tmp = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     elseif gas_model == :phasefield
         φ    = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         μ_pf = KernelAbstractions.zeros(backend, FT, Nx, Ny)
@@ -1278,6 +1292,7 @@ function run_cij_jet_hybrid_2d(;
             compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C_s, Fx_st, Fy_st;
                                               ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
         elseif gas_model == :ghost
+            smooth_vof_2d!(C_s, C, C_tmp; n_passes=n_smooth)
             compute_macroscopic_pressure_2d!(p, ux, uy, f_out, C, Fx_st, Fy_st;
                                               ρ_l=one(FT), ρ_g=one(FT))
             extrapolate_velocity_ghost_2d!(ux, uy, C, ux_tmp, uy_tmp,
@@ -1312,7 +1327,7 @@ function run_cij_jet_hybrid_2d(;
             compute_vof_normal_2d!(nx_n, ny_n, C, Nx, Ny)
             compute_hf_curvature_2d!(κ, C, nx_n, ny_n, Nx, Ny)
             add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
-            C_grad = gas_model == :smooth ? C_s : C
+            C_grad = (gas_model == :smooth || gas_model == :ghost) ? C_s : C
             compute_surface_tension_weighted_2d!(Fx_st, Fy_st, κ, C_grad, σ_lb * ramp, Nx, Ny;
                                                   ρ_l=ρ_eff_l, ρ_g=ρ_eff_g)
         end
