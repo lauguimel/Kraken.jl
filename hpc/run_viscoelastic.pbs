@@ -1,0 +1,26 @@
+#!/bin/bash -l
+#PBS -N kraken_ve_cyl
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+# --- Julia environment ---
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+
+# --- Pre-flight ---
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+echo "=== Viscoelastic cylinder benchmark at $(date) ==="
+echo "Node: $(hostname), GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+
+mkdir -p results
+
+# --- Run benchmark ---
+julia --project=. hpc/viscoelastic_cylinder_gpu.jl 2>&1 | tee results/viscoelastic_cylinder.txt
+
+echo "=== Done at $(date) ==="
