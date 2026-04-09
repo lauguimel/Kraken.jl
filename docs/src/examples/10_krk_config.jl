@@ -1,5 +1,17 @@
 # # Configuration Files (`.krk`)
 #
+# **Concepts:** [Spatial boundary conditions](../theory/19_spatial_bcs.md) ·
+# `.krk` DSL parser, presets, helpers
+#
+# **Validates against:** tutorial example — no quantitative validation target.
+# Each .krk in this tutorial is a working case covered by other example pages.
+#
+# **Download:** [`cavity.krk`](../assets/cavity.krk) (and the other .krk files
+# linked from their respective example pages)
+#
+# **Hardware:** n/a (tutorial, cases run from other pages)
+#
+# ---
 #
 # ## Overview
 #
