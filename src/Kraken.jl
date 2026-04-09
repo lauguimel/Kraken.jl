@@ -55,6 +55,8 @@ include("kernels/advect_prescribed_2d.jl")
 include("kernels/collide_rheology_2d.jl")
 include("kernels/collide_twophase_rheology_2d.jl")
 include("kernels/viscoelastic_2d.jl")
+include("kernels/conformation_lbm_2d.jl")
+include("kernels/collide_viscoelastic_source_2d.jl")
 
 # --- Kernel DSL (runtime fusion) ---
 include("kernels/dsl/lbm_spec.jl")
@@ -281,6 +283,11 @@ export compute_polymeric_force_2d!
 export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 export run_viscoelastic_cylinder_2d
+
+# Conformation TRT-LBM (Liu et al. 2025)
+export collide_conformation_2d!, init_conformation_field_2d!
+export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!
+export collide_viscoelastic_source_2d!, collide_viscoelastic_source_guo_2d!
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
