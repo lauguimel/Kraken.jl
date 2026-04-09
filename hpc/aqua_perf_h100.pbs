@@ -1,0 +1,35 @@
+#!/bin/bash -l
+#PBS -N kraken_perf_h100
+#PBS -l select=1:ncpus=4:mem=32GB:ngpus=1:gpu_id=H100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -M maitreje@aqua.qut.edu.au
+
+# Kraken.jl GPU MLUPS benchmark on H100
+# Expected runtime: ~30-60 min at full sweep (N = 64..1024)
+# Output: benchmarks/results/*.csv
+
+cd $PBS_O_WORKDIR
+
+# --- Pre-flight GPU check ---
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+echo "--- GPU check passed ---"
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+
+# --- Julia environment ---
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+julia --version
+
+echo "--- Instantiating Julia environment ---"
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+# --- Run MLUPS benchmark ---
+mkdir -p benchmarks/results
+echo "--- Running MLUPS benchmark ---"
+julia --project benchmarks/perf_mlups.jl --gpu 2>&1 | tee benchmarks/results/perf_h100_${PBS_JOBID}.log
+
+echo "--- Done ---"
+ls -la benchmarks/results/
+
