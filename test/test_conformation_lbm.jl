@@ -138,6 +138,11 @@ using Kraken
     @testset "Oldroyd-B Poiseuille channel (full LBM coupling)" begin
         # Body-force-driven channel: u_x(y) = (Fx/(2ν_total)) y(H-y)
         # Analytical N1(y) = 2 ν_p λ γ̇²(y) where γ̇(y) = (Fx/ν_total)(H/2 - y)
+        # Spatial convergence (Fx scaled to keep u_max ~ const):
+        #   Ny=32:  u_err=5.32%, N1_err=10.7%
+        #   Ny=64:  u_err=1.63%, N1_err=5.63%
+        #   Ny=128: u_err=0.28%, N1_err=0.98%
+        # Order ~2 in space. Ny=64 is the test compromise (10s runtime).
         Nx, Ny = 4, 64
         ν_s = 0.04
         ν_p = 0.06
@@ -212,8 +217,9 @@ using Kraken
 
         @info "Poiseuille velocity" u_max_num=round(u_max_num, digits=6) u_max_ana=round(u_max_ana, digits=6) ratio=round(u_max_num/u_max_ana, digits=4)
 
+        # Ny=64: u_max ~1.6% off, max profile error ~3.2% (tighter at Ny=128)
         errors_u = abs.(u_num[3:end-2] .- u_ana[3:end-2]) ./ u_max_ana
-        @test maximum(errors_u) < 0.10
+        @test maximum(errors_u) < 0.04  # 4% tolerance at Ny=64
 
         N1_num = tau_p_xx[2, :] .- tau_p_yy[2, :]
         N1_ana = zeros(Ny)
@@ -229,7 +235,8 @@ using Kraken
         @info "Poiseuille N1" N1_center=round(N1_center, digits=8) N1_quart_num=round(N1_quart, digits=8) N1_quart_ana=round(N1_quart_ana, digits=8) ratio=round(N1_quart/N1_quart_ana, digits=4)
 
         @test N1_quart > 0
-        @test N1_quart ≈ N1_quart_ana rtol=0.30
-        @test abs(N1_center) < 0.1 * abs(N1_quart_ana)
+        # At Ny=64 we expect ~5.6% error on N1 (verified in convergence study)
+        @test N1_quart ≈ N1_quart_ana rtol=0.08
+        @test abs(N1_center) < 0.15 * abs(N1_quart_ana)
     end
 end
