@@ -1,0 +1,14 @@
+name = "KrakenView"
+uuid = "b8f1c4d2-9a7e-4b3c-8d5f-1e2a3b4c5d6e"
+authors = ["Guillaume"]
+version = "0.1.0"
+
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Colors = "5ae59095-9a9b-59fe-a467-6f913c188581"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+Kraken = "b9c8ae56-6711-4442-a2ee-93cdf3c40864"
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+Observables = "510215fc-4207-5dde-b226-833fc4488ee2"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

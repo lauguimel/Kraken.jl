@@ -39,18 +39,28 @@ result = run_simulation("examples/cavity.krk"; Re=400, N=256)
 ```
 """
 function run_simulation(filename::String;
-                        backend=KernelAbstractions.CPU(), T=Float64, kwargs...)
+                        backend=KernelAbstractions.CPU(), T=Float64,
+                        callback::Union{Nothing,Function}=nothing,
+                        callback_every::Int=100, kwargs...)
     setup = load_kraken(filename; kwargs...)
-    return run_simulation(setup; backend=backend, T=T)
+    return run_simulation(setup; backend=backend, T=T,
+                          callback=callback, callback_every=callback_every)
 end
 
 """
-    run_simulation(setup::SimulationSetup; backend=CPU(), T=Float64)
+    run_simulation(setup::SimulationSetup; backend=CPU(), T=Float64,
+                   callback=nothing, callback_every=100)
 
 Run an LBM simulation from a parsed `SimulationSetup`.
+
+If `callback` is provided, it is called every `callback_every` steps as
+`callback(step, state)` where `state` is a NamedTuple `(; rho, ux, uy)` of
+CPU arrays. Used by KrakenView to drive live visualization.
 """
 function run_simulation(setup::SimulationSetup;
-                        backend=KernelAbstractions.CPU(), T=Float64)
+                        backend=KernelAbstractions.CPU(), T=Float64,
+                        callback::Union{Nothing,Function}=nothing,
+                        callback_every::Int=100)
     # --- Sanity checks (tau, Mach, CFL) ---
     sanity_check(setup)
 
@@ -161,6 +171,11 @@ function run_simulation(setup::SimulationSetup;
         # 6. Output
         if setup.output !== nothing && step % setup.output.interval == 0
             _write_output(ρ, ux, uy, setup, pvd, output_dir, dx, step)
+        end
+
+        # 7. Callback (live visualization / probes)
+        if callback !== nothing && step % callback_every == 0
+            callback(step, (; rho=Array(ρ), ux=Array(ux), uy=Array(uy)))
         end
     end
 
