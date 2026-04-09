@@ -549,4 +549,70 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         @test occursin("U_ref", out)
         @test occursin("0.15", out)
     end
+
+    @testset "Axisymmetric boundary aliases" begin
+        # With Module axisymmetric, the (z, r) face aliases must resolve:
+        #   z    -> x      (streamwise, periodic)
+        #   wall -> north  (outer radial wall at r = R)
+        #   axis -> south  (axis of symmetry at r = 0)
+        text = """
+        Simulation hagen_poiseuille D2Q9
+        Domain L = 0.125 x 1.0 N = 4 x 32
+        Physics nu = 0.1 Fz = 1e-5
+        Module axisymmetric
+        Boundary z    periodic
+        Boundary wall wall
+        Boundary axis symmetry
+        Run 100 steps
+        """
+        setup = parse_kraken(text)
+        @test :axisymmetric in setup.modules
+        faces = Dict(b.face => b for b in setup.boundaries)
+        # `z periodic` expands to west + east periodic
+        @test haskey(faces, :west)
+        @test haskey(faces, :east)
+        @test faces[:west].type == :periodic
+        @test faces[:east].type == :periodic
+        # `wall` alias -> north wall
+        @test haskey(faces, :north)
+        @test faces[:north].type == :wall
+        # `axis` alias -> south symmetry
+        @test haskey(faces, :south)
+        @test faces[:south].type == :symmetry
+        # Fz was promoted to body_force
+        @test haskey(setup.physics.body_force, :Fz)
+
+        # Without Module axisymmetric, `Boundary z periodic` must still error.
+        bad_text = """
+        Simulation bad D2Q9
+        Domain L = 1.0 x 1.0 N = 8 x 8
+        Physics nu = 0.1
+        Boundary z periodic
+        Boundary south wall
+        Boundary north wall
+        Run 10 steps
+        """
+        @test_throws ArgumentError parse_kraken(bad_text)
+
+        bad_wall = """
+        Simulation bad D2Q9
+        Domain L = 1.0 x 1.0 N = 8 x 8
+        Physics nu = 0.1
+        Boundary x periodic
+        Boundary wall wall
+        Boundary south wall
+        Run 10 steps
+        """
+        @test_throws ArgumentError parse_kraken(bad_wall)
+    end
+
+    @testset "Hagen-Poiseuille example parses" begin
+        setup = load_kraken(joinpath(EXAMPLES_DIR, "hagen_poiseuille.krk"))
+        @test setup.name == "hagen_poiseuille"
+        @test :axisymmetric in setup.modules
+        @test haskey(setup.physics.body_force, :Fz)
+        faces = Set(b.face for b in setup.boundaries)
+        @test :west in faces && :east in faces
+        @test :north in faces && :south in faces
+    end
 end

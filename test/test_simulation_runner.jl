@@ -280,4 +280,12 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         result = run_simulation(setup_axi)
         @test !any(isnan, result.ρ)
     end
+
+    @testset "Dispatch: axisymmetric hagen_poiseuille via .krk example" begin
+        path = joinpath(@__DIR__, "..", "examples", "hagen_poiseuille.krk")
+        setup = load_kraken(path)
+        @test :axisymmetric in setup.modules
+        result = run_simulation(path; max_steps=100)
+        @test !any(isnan, result.ρ)
+    end
 end

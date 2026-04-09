@@ -335,6 +335,13 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     initial = nothing
     velocity_field = nothing
     modules = Symbol[]
+    # Pre-scan modules so boundary parsing can honour module-specific aliases
+    # (e.g. `Module axisymmetric` enables `Boundary z/wall/axis ...`).
+    for line in lines
+        _first_word(line) == "Module" || continue
+        push!(modules, _parse_module(line))
+    end
+    is_axisym = :axisymmetric in modules
     max_steps = 0
     output = nothing
     diagnostics = nothing
@@ -358,7 +365,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
         elseif keyword == "Fluid"
             push!(regions, _parse_fluid(line, user_vars))
         elseif keyword == "Boundary"
-            append!(boundaries, _parse_boundary(line, user_vars))
+            append!(boundaries, _parse_boundary(line, user_vars; is_axisym=is_axisym))
         elseif keyword == "Refine"
             push!(refinements, _parse_refine(line, user_vars))
         elseif keyword == "Initial"
@@ -366,7 +373,8 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
         elseif keyword == "Velocity"
             velocity_field = _parse_initial(line, user_vars)  # same { ux = ... uy = ... } syntax
         elseif keyword == "Module"
-            push!(modules, _parse_module(line))
+            # Already collected in the pre-scan above
+
         elseif keyword == "Run"
             max_steps = _parse_run(line)
         elseif keyword == "Output"
@@ -610,10 +618,42 @@ function _parse_geometry_region(line::String, kind::Symbol, user_vars::Dict{Symb
     return GeometryRegion(name, kind, condition, nothing, bc_type, bc_values)
 end
 
+"""
+    _resolve_axisym_face(face) -> String
+
+Alias resolution for `Module axisymmetric` cases. The axisymmetric solver
+lives on a 2D `(z, r)` mesh where `z` is the streamwise axis (mapped to the
+`x` direction of the underlying D2Q9 grid) and `r` is the radial coordinate
+(mapped to `y`). Hence the user-facing aliases:
+
+- `z`     → `x`      (streamwise axis, usually periodic)
+- `wall`  → `north`  (outer radial wall at r = R, i.e. y = Ly)
+- `axis`  → `south`  (axis of symmetry at r = 0,  i.e. y = 0)
+"""
+_resolve_axisym_face(face::AbstractString) =
+    face == "z"    ? "x"     :
+    face == "wall" ? "north" :
+    face == "axis" ? "south" : String(face)
+
 """Parse: Boundary <face> <type>(<params>) or Boundary <axis> periodic"""
-function _parse_boundary(line::String, user_vars::Dict{Symbol,Float64})
+function _parse_boundary(line::String, user_vars::Dict{Symbol,Float64};
+                         is_axisym::Bool=false)
     # Remove keyword
     rest = strip(replace(line, r"^Boundary\s+" => ""))
+
+    # In axisymmetric mode, rewrite the first token using the (z, r) aliases
+    # before the generic face/type parsing runs.
+    if is_axisym
+        tok_m = match(r"^(\S+)(\s.*)?$", rest)
+        if tok_m !== nothing
+            first_tok = String(tok_m.captures[1])
+            resolved = _resolve_axisym_face(first_tok)
+            if resolved != first_tok
+                tail = tok_m.captures[2] === nothing ? "" : String(tok_m.captures[2])
+                rest = resolved * tail
+            end
+        end
+    end
 
     # Check for axis periodic shorthand: "Boundary x periodic"
     axis_m = match(r"^(x|y|z)\s+periodic$", rest)
@@ -645,7 +685,11 @@ function _parse_boundary(line::String, user_vars::Dict{Symbol,Float64})
 
     values = Dict{Symbol, KrakenExpr}()
 
-    known_bc_types = (:wall, :velocity, :pressure, :periodic, :outflow, :neumann)
+    # `symmetry` is accepted by the parser (emitted on the axis face in
+    # axisymmetric cases); the axisymmetric kernel enforces the axis
+    # condition internally, so non-axisym runners may treat it as a no-op.
+    known_bc_types = (:wall, :velocity, :pressure, :periodic, :outflow,
+                      :neumann, :symmetry)
 
     # Check for type(params) format — find matching parentheses
     type_m = match(r"^(\w+)\(", after_face)
@@ -1103,6 +1147,11 @@ Reject 3D-only face names (`:top`, `:bottom`) when the lattice is D2Q9.
 Allowed:
 - D2Q9:  `:north`, `:south`, `:east`, `:west` (+ `:front`/`:back` legacy aliases)
 - D3Q19: all of the above + `:top`, `:bottom`
+
+Axisymmetric cases (`Module axisymmetric`) express boundaries with the
+(z, r) aliases `z`/`wall`/`axis` in the user-facing .krk text; those are
+rewritten to `x`/`north`/`south` in `_parse_boundary` before this check
+runs, so by the time we get here only standard face symbols remain.
 """
 function _validate_faces_vs_lattice(setup::SimulationSetup)
     d2_faces = (:north, :south, :east, :west, :front, :back)
