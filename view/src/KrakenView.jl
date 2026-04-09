@@ -28,10 +28,19 @@ using Colors
 using GeometryBasics
 using FileIO
 
-export view_krk, run_view, KrakenScene
+export view_krk, run_view, KrakenScene,
+       heatmap_field, profile_plot, convergence_plot,
+       streamline_plot, save_figure, generate_figures,
+       fit_loglog_slope
 
 include("colormaps.jl")
 include("scene_2d.jl")
 include("run_hook.jl")
+
+# Figure primitives — used by the doc build and benchmark pipelines.
+# Each file under `figures/` defines one public figure function; the
+# `__init__.jl` module-level file wires them into KrakenView's namespace.
+include("figures/__init__.jl")
+include("generate_figures.jl")
 
 end # module

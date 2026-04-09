@@ -40,3 +40,5 @@ const CAVITY = joinpath(@__DIR__, "..", "..", "examples", "cavity.krk")
            boundaries=scene.setup.boundaries,
            regions=scene.setup.regions))
 end
+
+include("test_figures.jl")

@@ -4,6 +4,13 @@ using Literate
 using PlutoStaticHTML
 using Kraken
 
+# --- Living-documentation helpers (Phase 4.1A) ---
+# Loaded into Main so Literate.jl preprocessing and @example blocks
+# can call extract_function / krk_download / api_page_data directly.
+include(joinpath(@__DIR__, "src", "_helpers", "source_extract.jl"))
+include(joinpath(@__DIR__, "src", "_helpers", "krk_download.jl"))
+include(joinpath(@__DIR__, "src", "_helpers", "api_extract.jl"))
+
 # --- Process Literate.jl files ---
 
 const DOCS_SRC = joinpath(@__DIR__, "src")
@@ -28,6 +35,21 @@ for dir in LITERATE_DIRS
             # To enable execution (for CI with GPU), change to:
             #   codefence = nothing  (default, generates @example blocks)
             codefence = "```julia" => "```",
+        )
+    end
+end
+
+# --- Phase 4.1A proof-of-concept: build _helpers/_test_helpers.jl ---
+# Only the `_test_helpers.jl` file in docs/src/_helpers/ is a Literate page;
+# the other .jl files there are plain Julia helper modules loaded above.
+let helpers_dir = joinpath(DOCS_SRC, "_helpers"),
+    test_file  = joinpath(helpers_dir, "_test_helpers.jl")
+    if isfile(test_file)
+        Literate.markdown(
+            test_file, helpers_dir;
+            documenter = true,
+            credit = false,
+            execute = true,
         )
     end
 end
