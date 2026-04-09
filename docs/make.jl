@@ -22,6 +22,35 @@ const LITERATE_DIRS = [
     "tutorials",
 ]
 
+# --- Living-doc preprocessing: expand @@EXTRACT path symbol@@ markers ---
+# Markers in Literate sources are replaced at build-time with a fenced
+# Julia code block extracted from the real source file via
+# `extract_function`. This keeps theory pages in sync with the code.
+const _SRC_ROOT = joinpath(@__DIR__, "..")
+
+# The `@@EXTRACT path symbol@@` marker sits inside a Literate `# ...`
+# comment block. It is expanded at build time into a fenced julia code
+# block that still lives in the Literate comment region (each emitted
+# line is prefixed with `# `), so Literate renders it as raw markdown.
+function literate_preprocess(content::AbstractString)
+    re = r"(?m)^#\s*@@EXTRACT\s+(\S+)\s+(\S+?)@@\s*$"
+    return replace(content, re => function (m)
+        mm = match(re, m)
+        relpath = String(mm.captures[1])
+        symname = Symbol(String(mm.captures[2]))
+        filepath = joinpath(_SRC_ROOT, relpath)
+        try
+            r = extract_function(filepath, symname)
+            # Emit as a Literate markdown block: each line prefixed with "# "
+            lines = split(r.full_text, '\n')
+            return join(("# " * l for l in lines), '\n')
+        catch err
+            @warn "EXTRACT marker expansion failed" relpath symname err
+            return "# `extract failed: $(relpath) :$(symname)`"
+        end
+    end)
+end
+
 for dir in LITERATE_DIRS
     src_dir = joinpath(DOCS_SRC, dir)
     out_dir = joinpath(DOCS_SRC, dir)
@@ -31,6 +60,7 @@ for dir in LITERATE_DIRS
             joinpath(src_dir, file), out_dir;
             documenter = true,
             credit = false,
+            preprocess = literate_preprocess,
             # Non-executable code blocks: show code without running simulations
             # To enable execution (for CI with GPU), change to:
             #   codefence = nothing  (default, generates @example blocks)
@@ -102,9 +132,6 @@ makedocs(;
         # v0.1.0 scope: single-phase LBM (2D/3D), thermal, grid refinement,
         # spatial BCs, .krk DSL. Out-of-scope pages (phasefield, VOF/PLIC,
         # rheology, viscoelastic, Shan-Chen, species) are excluded here.
-        # TODO(Phase 4): re-add theory 12 (MRT), 18 (grid refinement),
-        # 19 (spatial BCs) and example 20 (grid refinement cavity) once the
-        # corresponding .jl source files are authored.
         "Theory" => [
             "theory/01_lbm_fundamentals.md",
             "theory/02_d2q9_lattice.md",
@@ -116,6 +143,9 @@ makedocs(;
             "theory/08_thermal_ddf.md",
             "theory/09_axisymmetric.md",
             "theory/10_limitations.md",
+            "theory/12_mrt.md",
+            "theory/18_grid_refinement.md",
+            "theory/19_spatial_bcs.md",
         ],
         "Examples" => [
             "examples/01_poiseuille_2d.md",

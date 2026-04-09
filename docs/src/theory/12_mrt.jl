@@ -165,5 +165,21 @@
 #
 # In Kraken.jl, the CIJ jet simulation (example 16) uses MRT collision
 # for the pressure equation in the phase-field formulation.
+#
+# ## Real source excerpt
+#
+# The single-phase MRT kernel lives in `src/kernels/collide_mrt_2d.jl`.
+# The block below is injected verbatim from that source file at doc-build
+# time by the `source_extract` helper, so the theory and the code cannot
+# drift apart:
+#
+# @@EXTRACT src/kernels/collide_mrt_2d.jl collide_mrt_2d!@@
+#
+# ## See in action
+#
+# - [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — BGK baseline; swap to
+#   MRT via the `collision = :mrt` kwarg.
+# - [Taylor–Green vortex](../examples/03_taylor_green_2d.md) — low-viscosity
+#   test where MRT stability gains are most visible.
 
 nothing  # suppress REPL output

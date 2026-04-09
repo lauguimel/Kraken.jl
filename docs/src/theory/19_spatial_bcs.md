@@ -172,6 +172,81 @@ The full pipeline from `.krk` file to GPU boundary arrays is:
 This design keeps the GPU kernels simple (no expression evaluation on
 GPU) while allowing arbitrarily complex spatial/temporal profiles.
 
+## Real source excerpts
+
+The KrakenExpr parser entry point (`src/io/expression.jl`):
+
+```julia
+"""
+    parse_kraken_expr(source::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}()) -> KrakenExpr
+
+Parse a math expression string from a .krk file, validate it against the
+whitelist, and compile it to a Julia function.
+
+The compiled function accepts keyword arguments for all builtin variables
+(`x`, `y`, `z`, `t`, `Lx`, `Ly`, `Lz`, `Nx`, `Ny`, `Nz`, `dx`, `dy`, `dz`)
+and any user-defined variables (`Define` in .krk).
+
+# Example
+```julia
+expr = parse_kraken_expr("sin(2*pi*x/Lx) + U*y")
+result = expr.func(x=0.5, y=1.0, Lx=1.0, U=0.1)
+```
+"""
+function parse_kraken_expr(source::AbstractString,
+                           user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}())
+    # Parse the string into a Julia AST
+    parsed = Meta.parse(source)
+
+    # Collect all user variable names
+    user_var_names = Set{Symbol}(keys(user_vars))
+    all_allowed = union(EXPR_BUILTIN_VARS, user_var_names)
+
+    # Validate the AST
+    validate_ast!(parsed, all_allowed)
+
+    # Collect referenced variables
+    all_vars = collect_variables(parsed)
+
+    # Substitute constants and user variables with known values
+    substituted = _substitute_constants(parsed, user_vars)
+
+    # Build the list of free variables (those that need to be passed at eval time)
+    free_vars = setdiff(all_vars, keys(EXPR_CONSTANTS), keys(user_vars))
+
+    # Compile to a function with keyword arguments for free variables
+    func = _compile_expr(substituted, free_vars)
+
+    return KrakenExpr(source, func, all_vars)
+end
+```
+
+The west-boundary spatial Zou-He kernel
+(`src/kernels/boundary_spatial_2d.jl`):
+
+```julia
+"""
+    apply_zou_he_west_spatial_2d!(f, ux_arr, uy_arr, Nx, Ny)
+
+Zou-He velocity BC on west wall with per-node velocity arrays.
+"""
+function apply_zou_he_west_spatial_2d!(f, ux_arr, uy_arr, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = zou_he_velocity_west_spatial_2d_kernel!(backend)
+    kernel!(f, ux_arr, uy_arr, Ny; ndrange=(Ny,))
+    KernelAbstractions.synchronize(backend)
+end
+```
+
+## See in action
+
+- [Poiseuille channel](../examples/01_poiseuille_2d.md) — parabolic inlet
+  as a spatial Zou-He velocity BC.
+- [Flow past a cylinder](../examples/06_cylinder_2d.md) — non-uniform
+  inflow profile from a `.krk` expression.
+- [.krk configuration](../examples/10_krk_config.md) — how the expression
+  strings enter the config language.
+
 ```julia
 nothing  # suppress REPL output
 ```

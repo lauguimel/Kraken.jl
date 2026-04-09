@@ -170,6 +170,39 @@ MRT is recommended when:
 In Kraken.jl, the CIJ jet simulation (example 16) uses MRT collision
 for the pressure equation in the phase-field formulation.
 
+## Real source excerpt
+
+The single-phase MRT kernel lives in `src/kernels/collide_mrt_2d.jl`.
+The block below is injected verbatim from that source file at doc-build
+time by the `source_extract` helper, so the theory and the code cannot
+drift apart:
+
+```julia
+"""
+    collide_mrt_2d!(f, is_solid, ν; s_e=1.4, s_eps=1.4, s_q=1.2)
+
+MRT collision for D2Q9 (Lallemand & Luo, 2000).
+The stress relaxation rate s_ν = 1/(3ν + 0.5) is computed from viscosity.
+Other rates (s_e, s_eps, s_q) can be tuned for stability (default values from literature).
+"""
+function collide_mrt_2d!(f, is_solid, ν; s_e=1.4, s_eps=1.4, s_q=1.2)
+    backend = KernelAbstractions.get_backend(f)
+    Nx, Ny = size(f, 1), size(f, 2)
+    T = eltype(f)
+    s_nu = T(1.0 / (3.0 * ν + 0.5))
+    kernel! = collide_mrt_2d_kernel!(backend)
+    kernel!(f, is_solid, T(s_e), T(s_eps), T(s_q), s_nu; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+```
+
+## See in action
+
+- [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — BGK baseline; swap to
+  MRT via the `collision = :mrt` kwarg.
+- [Taylor–Green vortex](../examples/03_taylor_green_2d.md) — low-viscosity
+  test where MRT stability gains are most visible.
+
 ```julia
 nothing  # suppress REPL output
 ```

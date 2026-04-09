@@ -167,5 +167,25 @@
 #
 # This design keeps the GPU kernels simple (no expression evaluation on
 # GPU) while allowing arbitrarily complex spatial/temporal profiles.
+#
+# ## Real source excerpts
+#
+# The KrakenExpr parser entry point (`src/io/expression.jl`):
+#
+# @@EXTRACT src/io/expression.jl parse_kraken_expr@@
+#
+# The west-boundary spatial Zou-He kernel
+# (`src/kernels/boundary_spatial_2d.jl`):
+#
+# @@EXTRACT src/kernels/boundary_spatial_2d.jl apply_zou_he_west_spatial_2d!@@
+#
+# ## See in action
+#
+# - [Poiseuille channel](../examples/01_poiseuille_2d.md) — parabolic inlet
+#   as a spatial Zou-He velocity BC.
+# - [Flow past a cylinder](../examples/06_cylinder_2d.md) — non-uniform
+#   inflow profile from a `.krk` expression.
+# - [.krk configuration](../examples/10_krk_config.md) — how the expression
+#   strings enter the config language.
 
 nothing  # suppress REPL output

@@ -125,3 +125,8 @@ macroscopic field recovery with half-force correction.
     parabola. The L2 error should decrease as ``O(\Delta x^2)`` under grid
     refinement.
 
+## See in action
+
+- [Poiseuille channel](../examples/01_poiseuille_2d.md) — Guo body-force
+  scheme driving the parabolic profile.
+

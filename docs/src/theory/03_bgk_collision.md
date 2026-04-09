@@ -122,3 +122,9 @@ f_post = f .- ω .* (f .- feq)
 @show f_post[2] - feq[2]  # after collision ≈ 0.01 * (1 - ω)
 ```
 
+## See in action
+
+- [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — BGK at moderate Re.
+- [Taylor–Green vortex](../examples/03_taylor_green_2d.md) — BGK viscous
+  decay validated against the analytical solution.
+

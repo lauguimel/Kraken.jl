@@ -147,3 +147,8 @@ Fx = 4.0 * ν * u_max / R^2  # required body force
 # The `run_hagen_poiseuille_2d` driver validates both axisymmetric kernels
 # against the parabolic pipe flow profile. The Li scheme typically achieves
 # lower error than the Zhou scheme at the same resolution.
+
+# ## See in action
+#
+# - [Hagen–Poiseuille pipe flow](../examples/09_hagen_poiseuille.md) —
+#   axisymmetric LBM validated against the analytical parabola.

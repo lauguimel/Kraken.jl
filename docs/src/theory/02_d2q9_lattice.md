@@ -116,3 +116,10 @@ feq = [equilibrium(lattice, rho, ux, uy, q) for q in 1:9]
 @show sum(feq .* cy)  # should be ≈ 0.0
 ```
 
+## See in action
+
+- [Poiseuille channel](../examples/01_poiseuille_2d.md) — D2Q9 in its
+  simplest workflow.
+- [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — the reference
+  D2Q9 benchmark.
+

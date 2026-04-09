@@ -125,3 +125,11 @@ end
 # ```julia
 # apply_zou_he_north_2d!(f, u_lid, Nx, Ny)
 # ```
+
+# ## See in action
+#
+# - [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — Zou-He velocity
+#   BC on the lid, bounce-back on the other walls.
+# - [Couette flow](../examples/02_couette_2d.md) — moving wall BC.
+# - [Flow past a cylinder](../examples/06_cylinder_2d.md) — curved
+#   bounce-back on an immersed obstacle.

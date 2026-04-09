@@ -94,3 +94,12 @@ lattice = D2Q9()
 
 ## Speed of sound squared (lattice units)
 @show cs2(lattice)           # 1/3
+
+# ## See in action
+#
+# - [Poiseuille channel](../examples/01_poiseuille_2d.md) — the simplest
+#   end-to-end LBM case: D2Q9 + BGK + body force.
+# - [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — canonical benchmark
+#   exercising streaming, collision and Zou-He walls.
+# - [Taylor–Green vortex](../examples/03_taylor_green_2d.md) — analytical
+#   reference for second-order convergence.

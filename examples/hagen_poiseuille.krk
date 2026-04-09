@@ -1,0 +1,33 @@
+# Axisymmetric Hagen-Poiseuille pipe flow
+# Validation: parabolic velocity profile u_z(r) = u_max (1 - (r/R)^2)
+#
+# Cylindrical pipe driven by an axial body force Fz, no-slip at the
+# wall, axisymmetric centerline. Solved on a (z, r) 2D mesh using
+# the Li et al. (2010) axisymmetric collision kernel.
+#
+# As of Kraken.jl v0.1.0 the .krk parser does not yet support the
+# axisymmetric boundary names (axis, wall) nor the `Module axisymmetric`
+# dispatcher. To run this case, use the Julia API:
+#
+#   using Kraken
+#   result = run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1,
+#                                      Fz=1e-5, max_steps=10000)
+#
+# The expected wall-normal profile follows the analytical parabola
+# u_max = Fz · R^2 / (4ν).
+#
+# The intended .krk syntax (target for v0.2.0) is documented below
+# as a comment block:
+#
+# Simulation hagen_poiseuille D2Q9
+# Domain L = 0.125 x 1.0  N = 4 x 32
+# Physics nu = 0.1 Fz = 1e-5
+#
+# Module axisymmetric
+#
+# Boundary z      periodic
+# Boundary wall   wall
+# Boundary axis   symmetry
+#
+# Run 10000 steps
+# Output vtk every 2000 [rho, uz, ur]

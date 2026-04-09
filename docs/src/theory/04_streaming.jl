@@ -115,3 +115,8 @@ end
 # ```
 #
 # This swap is a simple pointer exchange, not a data copy.
+
+# ## See in action
+#
+# - [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — exercises the
+#   pull-streaming kernel on a closed domain.

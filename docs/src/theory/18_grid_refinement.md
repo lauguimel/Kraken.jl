@@ -155,6 +155,62 @@ advance_twophase_refined_step!(domain, f_in, f_out, rho, ux, uy,
     streaming stencils.  Wider stencils (e.g. for higher-order
     interpolation) may require increasing `n_ghost`.
 
+## Real source excerpts
+
+The Filippova–Hänel rescaling utility (`src/refinement/refinement.jl`):
+
+```julia
+"""
+    rescaled_omega(omega_parent, ratio) -> Float64
+
+Compute the relaxation parameter at the fine level to preserve physical
+viscosity across refinement levels.
+
+    tau_fine = ratio * (tau_parent - 0.5) + 0.5
+    omega_fine = 1 / tau_fine
+"""
+function rescaled_omega(omega_parent::Real, ratio::Int)
+    tau_parent = 1.0 / omega_parent
+    tau_fine = ratio * (tau_parent - 0.5) + 0.5
+    return 1.0 / tau_fine
+end
+```
+
+Prolongation kernel (`src/kernels/refinement_exchange_2d.jl`):
+
+```julia
+"""
+    prolongate_f_rescaled_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c, patch)
+
+Fill ghost cells of fine patch from coarse grid data with Filippova-Hanel
+non-equilibrium rescaling.
+"""
+function prolongate_f_rescaled_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c,
+                                   ratio::Int, Nx_inner::Int, Ny_inner::Int,
+                                   n_ghost::Int, i_c_start::Int, j_c_start::Int,
+                                   Nx_c::Int, Ny_c::Int,
+                                   omega_coarse::Real, omega_fine::Real)
+    backend = KernelAbstractions.get_backend(f_fine)
+    T = eltype(f_fine)
+    alpha = T(rescaling_factor_c2f(omega_coarse, omega_fine, ratio))
+    Nx_f = Nx_inner + 2 * n_ghost
+    Ny_f = Ny_inner + 2 * n_ghost
+    kernel! = prolongate_f_rescaled_2d_kernel!(backend)
+    kernel!(f_fine, f_coarse, rho_c, ux_c, uy_c,
+            ratio, Nx_inner, Ny_inner, n_ghost,
+            i_c_start, j_c_start, Nx_c, Ny_c, alpha;
+            ndrange=(Nx_f, Ny_f))
+    KernelAbstractions.synchronize(backend)
+end
+```
+
+## See in action
+
+- [Grid-refined cavity](../examples/20_grid_refinement_cavity.md) — nested
+  patches around the top-lid singularity.
+- [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — uniform-grid
+  baseline to compare against.
+
 ```julia
 nothing  # suppress REPL output
 ```

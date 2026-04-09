@@ -125,3 +125,12 @@ Despite these limitations, LBM remains an excellent choice for
 low-to-moderate Reynolds number flows on regular geometries, especially
 when GPU acceleration makes the explicit time stepping very fast.
 
+## See in action
+
+- [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — low-Mach regime
+  where LBM shines.
+- [Taylor–Green vortex](../examples/03_taylor_green_2d.md) — convergence
+  at second order in space and time.
+- [Rayleigh–Bénard convection](../examples/08_rayleigh_benard.md) —
+  coupled multi-physics within the LBM framework.
+

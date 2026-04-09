@@ -149,3 +149,10 @@ for step in 1:max_steps
 end
 ```
 
+## See in action
+
+- [Heat conduction](../examples/07_heat_conduction.md) — passive scalar
+  DDF validated against the analytical diffusion kernel.
+- [Rayleigh–Bénard convection](../examples/08_rayleigh_benard.md) — full
+  Boussinesq coupling between the flow and thermal DDFs.
+

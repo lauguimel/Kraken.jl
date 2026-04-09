@@ -142,3 +142,10 @@ Pr = 0.71
 #     g_in, g_out = g_out, g_in
 # end
 # ```
+
+# ## See in action
+#
+# - [Heat conduction](../examples/07_heat_conduction.md) — passive scalar
+#   DDF validated against the analytical diffusion kernel.
+# - [Rayleigh–Bénard convection](../examples/08_rayleigh_benard.md) — full
+#   Boussinesq coupling between the flow and thermal DDFs.

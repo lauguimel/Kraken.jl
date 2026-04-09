@@ -150,5 +150,22 @@
 #     The default ghost width of 2 cells is sufficient for D2Q9/D3Q19
 #     streaming stencils.  Wider stencils (e.g. for higher-order
 #     interpolation) may require increasing `n_ghost`.
+#
+# ## Real source excerpts
+#
+# The Filippova–Hänel rescaling utility (`src/refinement/refinement.jl`):
+#
+# @@EXTRACT src/refinement/refinement.jl rescaled_omega@@
+#
+# Prolongation kernel (`src/kernels/refinement_exchange_2d.jl`):
+#
+# @@EXTRACT src/kernels/refinement_exchange_2d.jl prolongate_f_rescaled_2d!@@
+#
+# ## See in action
+#
+# - [Grid-refined cavity](../examples/20_grid_refinement_cavity.md) — nested
+#   patches around the top-lid singularity.
+# - [Lid-driven cavity 2D](../examples/04_cavity_2d.md) — uniform-grid
+#   baseline to compare against.
 
 nothing  # suppress REPL output

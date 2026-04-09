@@ -112,3 +112,8 @@ end
 # collide_3d!(f_out, f_in, ρ, ux, uy, uz, ω, lattice; ndrange=(Nx, Ny, Nz))
 # stream_3d!(f_out, f_in, lattice; ndrange=(Nx, Ny, Nz))
 # ```
+
+# ## See in action
+#
+# - [Lid-driven cavity 3D](../examples/05_cavity_3d.md) — D3Q19 reference
+#   case on GPU.
