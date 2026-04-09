@@ -5,3 +5,7 @@ Manifest.toml
 *.jl.mem
 deps/build.log
 docs/build/
+
+# Local outputs and intermediate results
+output/
+results/

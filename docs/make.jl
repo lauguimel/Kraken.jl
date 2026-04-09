@@ -77,6 +77,12 @@ makedocs(;
     pages = [
         "Home" => "index.md",
         "Installation" => "installation.md",
+        # v0.1.0 scope: single-phase LBM (2D/3D), thermal, grid refinement,
+        # spatial BCs, .krk DSL. Out-of-scope pages (phasefield, VOF/PLIC,
+        # rheology, viscoelastic, Shan-Chen, species) are excluded here.
+        # TODO(Phase 4): re-add theory 12 (MRT), 18 (grid refinement),
+        # 19 (spatial BCs) and example 20 (grid refinement cavity) once the
+        # corresponding .jl source files are authored.
         "Theory" => [
             "theory/01_lbm_fundamentals.md",
             "theory/02_d2q9_lattice.md",
@@ -88,15 +94,6 @@ makedocs(;
             "theory/08_thermal_ddf.md",
             "theory/09_axisymmetric.md",
             "theory/10_limitations.md",
-            "theory/11_phasefield.md",
-            "theory/12_mrt.md",
-            "theory/13_vof_plic.md",
-            "theory/14_rheology.md",
-            "theory/15_viscoelastic.md",
-            "theory/16_shan_chen.md",
-            "theory/17_species.md",
-            "theory/18_grid_refinement.md",
-            "theory/19_spatial_bcs.md",
         ],
         "Examples" => [
             "examples/01_poiseuille_2d.md",
@@ -109,17 +106,6 @@ makedocs(;
             "examples/08_rayleigh_benard.md",
             "examples/09_hagen_poiseuille.md",
             "examples/10_krk_config.md",
-            "examples/11_zalesak_disk.md",
-            "examples/12_reversed_vortex.md",
-            "examples/13_capillary_wave.md",
-            "examples/14_static_droplet.md",
-            "examples/15_rp_axisym.md",
-            "examples/16_cij_jet.md",
-            "examples/17_poiseuille_rheology.md",
-            "examples/18_shan_chen_spinodal.md",
-            "examples/19_species_diffusion.md",
-            "examples/20_grid_refinement_cavity.md",
-            "examples/21_viscoelastic_channel.md",
         ],
         "Tutorials" => [
             "tutorials/02_couette_2d.md",
