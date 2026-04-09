@@ -65,74 +65,73 @@ using Kraken
         @test C_yy[i,j] ≈ ana_yy rtol=0.05
     end
 
-    @testset "Pure shear: Oldroyd-B steady state" begin
-        # u_x = γ̇·y, prescribed velocity
+    @testset "Pure shear: Oldroyd-B steady state (fully periodic)" begin
+        # u_x = γ̇·y, prescribed velocity, FULLY PERIODIC streaming.
+        # Note: bounce-back streaming pollutes the bulk for prescribed
+        # velocity tests — must use stream_fully_periodic_2d!.
         # Analytical Oldroyd-B steady state:
         #   C_xx = 1 + 2(λγ̇)²
         #   C_xy = λγ̇
         #   C_yy = 1
         Nx, Ny = 16, 32
-        ν_p = 0.05
         lambda = 10.0
-        γ̇ = 0.01
-        tau_plus = 1.0
-
-        ux = zeros(Float64, Nx, Ny)
-        uy = zeros(Float64, Nx, Ny)
-        for j in 1:Ny, i in 1:Nx
-            ux[i,j] = γ̇ * (j - 0.5)
-        end
-
-        C_xx = ones(Float64, Nx, Ny)
-        C_xy = zeros(Float64, Nx, Ny)
-        C_yy = ones(Float64, Nx, Ny)
-
-        g_xx = zeros(Float64, Nx, Ny, 9)
-        g_xy = zeros(Float64, Nx, Ny, 9)
-        g_yy = zeros(Float64, Nx, Ny, 9)
-        init_conformation_field_2d!(g_xx, C_xx, ux, uy)
-        init_conformation_field_2d!(g_xy, C_xy, ux, uy)
-        init_conformation_field_2d!(g_yy, C_yy, ux, uy)
-
+        tau_plus = 1.0  # κ = 1/6 — sweet spot for accuracy at low Wi
         is_solid = falses(Nx, Ny)
-        g_xx_buf = similar(g_xx); g_xy_buf = similar(g_xy); g_yy_buf = similar(g_yy)
 
-        for step in 1:50_000
-            stream_2d!(g_xx_buf, g_xx, Nx, Ny)
-            stream_2d!(g_xy_buf, g_xy, Nx, Ny)
-            stream_2d!(g_yy_buf, g_yy, Nx, Ny)
-            g_xx, g_xx_buf = g_xx_buf, g_xx
-            g_xy, g_xy_buf = g_xy_buf, g_xy
-            g_yy, g_yy_buf = g_yy_buf, g_yy
+        for γ̇ in [0.01, 0.03, 0.05]
+            Wi = lambda * γ̇
 
+            ux = zeros(Float64, Nx, Ny)
+            uy = zeros(Float64, Nx, Ny)
+            for j in 1:Ny, i in 1:Nx
+                ux[i,j] = γ̇ * (j - 0.5)
+            end
+
+            C_xx = ones(Float64, Nx, Ny)
+            C_xy = zeros(Float64, Nx, Ny)
+            C_yy = ones(Float64, Nx, Ny)
+
+            g_xx = zeros(Float64, Nx, Ny, 9)
+            g_xy = zeros(Float64, Nx, Ny, 9)
+            g_yy = zeros(Float64, Nx, Ny, 9)
+            init_conformation_field_2d!(g_xx, C_xx, ux, uy)
+            init_conformation_field_2d!(g_xy, C_xy, ux, uy)
+            init_conformation_field_2d!(g_yy, C_yy, ux, uy)
+
+            g_xx_buf = similar(g_xx); g_xy_buf = similar(g_xy); g_yy_buf = similar(g_yy)
+
+            for _ in 1:50_000
+                stream_fully_periodic_2d!(g_xx_buf, g_xx, Nx, Ny)
+                stream_fully_periodic_2d!(g_xy_buf, g_xy, Nx, Ny)
+                stream_fully_periodic_2d!(g_yy_buf, g_yy, Nx, Ny)
+                g_xx, g_xx_buf = g_xx_buf, g_xx
+                g_xy, g_xy_buf = g_xy_buf, g_xy
+                g_yy, g_yy_buf = g_yy_buf, g_yy
+
+                compute_conformation_macro_2d!(C_xx, g_xx)
+                compute_conformation_macro_2d!(C_xy, g_xy)
+                compute_conformation_macro_2d!(C_yy, g_yy)
+
+                collide_conformation_2d!(g_xx, C_xx, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=1)
+                collide_conformation_2d!(g_xy, C_xy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=2)
+                collide_conformation_2d!(g_yy, C_yy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=3)
+            end
             compute_conformation_macro_2d!(C_xx, g_xx)
             compute_conformation_macro_2d!(C_xy, g_xy)
             compute_conformation_macro_2d!(C_yy, g_yy)
 
-            collide_conformation_2d!(g_xx, C_xx, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=1)
-            collide_conformation_2d!(g_xy, C_xy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=2)
-            collide_conformation_2d!(g_yy, C_yy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=3)
+            i, j = Nx÷2, Ny÷2
+            ana_xx = 1.0 + 2*Wi^2
+            ana_xy = Wi
+            err_xx = (C_xx[i,j] - ana_xx) / ana_xx * 100
+            err_xy = (C_xy[i,j] - ana_xy) / ana_xy * 100
+
+            @info "Pure shear" γ̇ Wi Cxx=round(C_xx[i,j],digits=6) ana_xx=round(ana_xx,digits=6) err_xx=round(err_xx,digits=3) Cxy=round(C_xy[i,j],digits=6) ana_xy=round(ana_xy,digits=6) err_xy=round(err_xy,digits=3)
+
+            # Tight tolerance now that bounce-back is gone
+            @test C_xx[i,j] ≈ ana_xx rtol=0.005
+            @test C_xy[i,j] ≈ ana_xy rtol=0.005
+            @test C_yy[i,j] ≈ 1.0 atol=1e-6
         end
-        compute_conformation_macro_2d!(C_xx, g_xx)
-        compute_conformation_macro_2d!(C_xy, g_xy)
-        compute_conformation_macro_2d!(C_yy, g_yy)
-
-        i, j = Nx÷2, Ny÷2
-        Wi = lambda*γ̇
-        ana_xx = 1.0 + 2*Wi^2
-        ana_xy = Wi
-        ana_yy = 1.0
-
-        err_xx = (C_xx[i,j] - ana_xx) / ana_xx * 100
-        err_xy = (C_xy[i,j] - ana_xy) / ana_xy * 100
-        err_yy = (C_yy[i,j] - ana_yy) / ana_yy * 100
-
-        @info "Pure shear (TRT-LBM)" Wi Cxx=round(C_xx[i,j],digits=4) Cxx_ana=round(ana_xx,digits=4) err_xx=round(err_xx,digits=2) Cxy=round(C_xy[i,j],digits=4) Cxy_ana=round(ana_xy,digits=4) err_xy=round(err_xy,digits=2) Cyy=round(C_yy[i,j],digits=4) Cyy_ana=round(ana_yy,digits=4) err_yy=round(err_yy,digits=2)
-
-        # Tolerance: 15% (artificial diffusion broadens the response,
-        # but we want correct sign and magnitude)
-        @test C_xx[i,j] ≈ ana_xx rtol=0.15
-        @test C_xy[i,j] ≈ ana_xy rtol=0.15
-        @test C_yy[i,j] ≈ ana_yy rtol=0.05
     end
 end
