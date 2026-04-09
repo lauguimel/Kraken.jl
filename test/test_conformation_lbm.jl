@@ -134,4 +134,102 @@ using Kraken
             @test C_yy[i,j] ≈ 1.0 atol=1e-6
         end
     end
+
+    @testset "Oldroyd-B Poiseuille channel (full LBM coupling)" begin
+        # Body-force-driven channel: u_x(y) = (Fx/(2ν_total)) y(H-y)
+        # Analytical N1(y) = 2 ν_p λ γ̇²(y) where γ̇(y) = (Fx/ν_total)(H/2 - y)
+        Nx, Ny = 4, 64
+        ν_s = 0.04
+        ν_p = 0.06
+        ν_total = ν_s + ν_p
+        lambda = 50.0
+        Fx_val = 1e-5
+        max_steps = 100_000
+        G = ν_p / lambda
+        ω_s = 1.0 / (3.0 * ν_s + 0.5)
+        tau_plus = 1.0
+
+        f_in  = zeros(Float64, Nx, Ny, 9)
+        f_out = zeros(Float64, Nx, Ny, 9)
+        is_solid = falses(Nx, Ny)
+        ux = zeros(Float64, Nx, Ny)
+        uy = zeros(Float64, Nx, Ny)
+        ρ  = ones(Float64, Nx, Ny)
+
+        for j in 1:Ny, i in 1:Nx, q in 1:9
+            f_in[i,j,q] = Kraken.equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+        end
+        copy!(f_out, f_in)
+
+        C_xx = ones(Float64, Nx, Ny)
+        C_xy = zeros(Float64, Nx, Ny)
+        C_yy = ones(Float64, Nx, Ny)
+        g_xx = zeros(Float64, Nx, Ny, 9)
+        g_xy = zeros(Float64, Nx, Ny, 9)
+        g_yy = zeros(Float64, Nx, Ny, 9)
+        init_conformation_field_2d!(g_xx, C_xx, ux, uy)
+        init_conformation_field_2d!(g_xy, C_xy, ux, uy)
+        init_conformation_field_2d!(g_yy, C_yy, ux, uy)
+        g_xx_buf = similar(g_xx); g_xy_buf = similar(g_xy); g_yy_buf = similar(g_yy)
+
+        tau_p_xx = zeros(Float64, Nx, Ny)
+        tau_p_xy = zeros(Float64, Nx, Ny)
+        tau_p_yy = zeros(Float64, Nx, Ny)
+
+        for step in 1:max_steps
+            stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+            collide_viscoelastic_source_guo_2d!(f_out, is_solid, ω_s,
+                                                 Fx_val, 0.0,
+                                                 tau_p_xx, tau_p_xy, tau_p_yy)
+            f_in, f_out = f_out, f_in
+            compute_macroscopic_2d!(ρ, ux, uy, f_in)
+
+            stream_periodic_x_wall_y_2d!(g_xx_buf, g_xx, Nx, Ny)
+            stream_periodic_x_wall_y_2d!(g_xy_buf, g_xy, Nx, Ny)
+            stream_periodic_x_wall_y_2d!(g_yy_buf, g_yy, Nx, Ny)
+            g_xx, g_xx_buf = g_xx_buf, g_xx
+            g_xy, g_xy_buf = g_xy_buf, g_xy
+            g_yy, g_yy_buf = g_yy_buf, g_yy
+
+            compute_conformation_macro_2d!(C_xx, g_xx)
+            compute_conformation_macro_2d!(C_xy, g_xy)
+            compute_conformation_macro_2d!(C_yy, g_yy)
+
+            collide_conformation_2d!(g_xx, C_xx, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=1)
+            collide_conformation_2d!(g_xy, C_xy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=2)
+            collide_conformation_2d!(g_yy, C_yy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=3)
+
+            @. tau_p_xx = G * (C_xx - 1.0)
+            @. tau_p_xy = G * C_xy
+            @. tau_p_yy = G * (C_yy - 1.0)
+        end
+
+        H = Float64(Ny)
+        u_ana = [Fx_val / (2 * ν_total) * (j - 0.5) * (H + 0.5 - j) for j in 1:Ny]
+        u_num = ux[2, :]
+        u_max_ana = maximum(u_ana)
+        u_max_num = maximum(u_num)
+
+        @info "Poiseuille velocity" u_max_num=round(u_max_num, digits=6) u_max_ana=round(u_max_ana, digits=6) ratio=round(u_max_num/u_max_ana, digits=4)
+
+        errors_u = abs.(u_num[3:end-2] .- u_ana[3:end-2]) ./ u_max_ana
+        @test maximum(errors_u) < 0.10
+
+        N1_num = tau_p_xx[2, :] .- tau_p_yy[2, :]
+        N1_ana = zeros(Ny)
+        for j in 1:Ny
+            γ_dot = Fx_val / ν_total * (H/2 - (j - 0.5))
+            N1_ana[j] = 2 * ν_p * lambda * γ_dot^2
+        end
+
+        N1_center = N1_num[Ny÷2]
+        N1_quart  = N1_num[Ny÷4]
+        N1_quart_ana = N1_ana[Ny÷4]
+
+        @info "Poiseuille N1" N1_center=round(N1_center, digits=8) N1_quart_num=round(N1_quart, digits=8) N1_quart_ana=round(N1_quart_ana, digits=8) ratio=round(N1_quart/N1_quart_ana, digits=4)
+
+        @test N1_quart > 0
+        @test N1_quart ≈ N1_quart_ana rtol=0.30
+        @test abs(N1_center) < 0.1 * abs(N1_quart_ana)
+    end
 end

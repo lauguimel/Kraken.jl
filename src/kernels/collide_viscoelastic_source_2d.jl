@@ -44,7 +44,9 @@ using KernelAbstractions
             feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
 
             txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
-            pre = -T(9.0/2.0)
+            # Liu et al. 2025 Eq. 25: T_i = -w_i H_iαβ /(2 cs⁴ τ_s) τ_αβ
+            # τ_s,1 = 1/ω → pre = -ω · 9/2 for D2Q9.
+            pre = -ω * T(9.0/2.0)
             cs2 = T(1/3)
             wr = T(4/9); wa = T(1/9); we = T(1/36)
 

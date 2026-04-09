@@ -57,6 +57,7 @@ include("kernels/collide_twophase_rheology_2d.jl")
 include("kernels/viscoelastic_2d.jl")
 include("kernels/conformation_lbm_2d.jl")
 include("kernels/collide_viscoelastic_source_2d.jl")
+include("kernels/collide_viscoelastic_guo_2d.jl")
 
 # --- Kernel DSL (runtime fusion) ---
 include("kernels/dsl/lbm_spec.jl")
