@@ -1,28 +1,19 @@
-# Lid-driven cavity flow in 3D at Re = 100
+# Lid-driven cavity flow in 3D at Re ~ 100
 # Validation: Ku, Hirsh & Taylor (1987) — centerline profiles
 #
-# As of Kraken.jl v0.1.0 the .krk parser does not yet support
-# 3D-specific boundary faces (top/bottom) and the runner does not
-# dispatch on D3Q19 cases. To run this case, use the Julia API:
-#
-#   using Kraken
-#   config = LBMConfig(D3Q19(); Nx=64, Ny=64, Nz=64,
-#                      ν=0.064, u_lid=0.1, max_steps=20000)
-#   result = run_cavity_3d(config)
-#
-# The intended .krk syntax (target for v0.2.0 once the parser is
-# extended) is documented below as a comment block:
-#
-# Simulation cavity_3d D3Q19
-# Domain L = 1.0 x 1.0 x 1.0  N = 64 x 64 x 64
-# Physics nu = 0.064
-#
-# Boundary top    velocity(ux = 0.1, uy = 0, uz = 0)
-# Boundary bottom wall
-# Boundary north  wall
-# Boundary south  wall
-# Boundary east   wall
-# Boundary west   wall
-#
-# Run 20000 steps
-# Output vtk every 5000 [rho, ux, uy, uz]
+# Cubic cavity, top lid moving in x at u_lid = 0.1, all other walls no-slip.
+# D3Q19 lattice, BGK collision, Zou-He BCs on all 6 faces.
+
+Simulation cavity_3d D3Q19
+Domain L = 1.0 x 1.0 x 1.0  N = 64 x 64 x 64
+Physics nu = 0.064
+
+Boundary top    velocity(ux = 0.1, uy = 0, uz = 0)
+Boundary bottom wall
+Boundary north  wall
+Boundary south  wall
+Boundary east   wall
+Boundary west   wall
+
+Run 20000 steps
+Output vtk every 5000 [rho, ux, uy, uz]

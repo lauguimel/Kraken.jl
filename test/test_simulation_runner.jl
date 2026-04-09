@@ -203,4 +203,81 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         @test !any(isnan, result.ρ)
         @info "Output test: simulation runs with output enabled"
     end
+
+    @testset "Dispatch: thermal rayleigh_benard via .krk" begin
+        path = joinpath(EXAMPLES_DIR, "rayleigh_benard.krk")
+        result = run_simulation(path; max_steps=100)
+        @test !any(isnan, result.ρ)
+        @test !any(isnan, result.ux)
+        @test haskey(result, :Temp)
+        @test !any(isnan, result.Temp)
+    end
+
+    @testset "Dispatch: thermal heat_conduction via .krk" begin
+        path = joinpath(EXAMPLES_DIR, "heat_conduction.krk")
+        # Falls back to run_rayleigh_benard_2d with Ra≈0 (pragmatic v0.1.0)
+        result = run_simulation(path; max_steps=100)
+        @test !any(isnan, result.ρ)
+        @test haskey(result, :Temp)
+    end
+
+    @testset "Dispatch: refined grid_refinement_cavity emits clear error" begin
+        path = joinpath(EXAMPLES_DIR, "grid_refinement_cavity.krk")
+        # Refined non-thermal cavity is not wired to .krk in v0.1.0
+        @test_throws ArgumentError run_simulation(path; max_steps=100)
+    end
+
+    @testset "Dispatch: D3Q19 cavity_3d (parser does not yet emit D3Q19 setups)" begin
+        # The example file currently keeps the D3Q19 case commented out
+        # because the parser does not yet support 3D faces. We exercise the
+        # dispatch directly by constructing a SimulationSetup with lattice=:D3Q19.
+        setup_2d = parse_kraken("""
+            Simulation cavity_3d D2Q9
+            Domain L = 1 x 1  N = 8 x 8
+            Physics nu = 0.1
+            Boundary north velocity(ux = 0.1, uy = 0)
+            Boundary south wall
+            Boundary east  wall
+            Boundary west  wall
+            Run 10 steps
+        """)
+        # Promote to D3Q19 with a small 3D domain.
+        dom3 = Kraken.DomainSetup(8, 8, 8, 1.0, 1.0, 1.0)
+        setup_3d = Kraken.SimulationSetup(
+            "cavity_3d", :D3Q19, dom3, setup_2d.physics,
+            setup_2d.user_vars, setup_2d.regions, setup_2d.boundaries,
+            setup_2d.initial, setup_2d.modules, 10,
+            setup_2d.output, setup_2d.diagnostics, setup_2d.refinements,
+            setup_2d.velocity_field, setup_2d.rheology)
+        result = run_simulation(setup_3d)
+        @test !any(isnan, result.ρ)
+        @test haskey(result, :uz)
+    end
+
+    @testset "Dispatch: axisymmetric hagen_poiseuille (synthetic setup)" begin
+        # The example .krk keeps the axisym case commented out (parser
+        # does not support `axis`/`symmetry` boundaries yet). Exercise
+        # dispatch via a synthetic setup that already declares the module.
+        setup_base = parse_kraken("""
+            Simulation hagen_poiseuille D2Q9
+            Domain L = 0.125 x 1.0  N = 4 x 16
+            Physics nu = 0.1 Fx = 1e-5
+            Boundary x periodic
+            Boundary south wall
+            Boundary north wall
+            Run 50 steps
+        """)
+        # Inject :axisymmetric module and rename Fx → Fz via body_force.
+        bf = Dict{Symbol, Kraken.KrakenExpr}()
+        bf[:Fz] = Kraken.parse_kraken_expr("1e-5", Dict{Symbol,Float64}())
+        physics_axi = Kraken.PhysicsSetup(setup_base.physics.params, bf)
+        setup_axi = Kraken.SimulationSetup(
+            "hagen_poiseuille", :D2Q9, setup_base.domain, physics_axi,
+            setup_base.user_vars, setup_base.regions, setup_base.boundaries,
+            setup_base.initial, [:axisymmetric], 50,
+            setup_base.output, setup_base.diagnostics, setup_base.refinements,
+            setup_base.velocity_field, setup_base.rheology)
+        result = run_simulation(setup_axi)
+        @test !any(isnan, result.ρ)
+    end
 end

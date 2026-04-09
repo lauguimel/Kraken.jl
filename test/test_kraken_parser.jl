@@ -465,4 +465,88 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         @test setup.domain.Lz ≈ 1.0
         @test setup.domain.Nz == 32
     end
+
+    @testset "3D face names (D3Q19)" begin
+        # All six physical faces including top/bottom must parse cleanly
+        text = """
+        Simulation box3d D3Q19
+        Domain L = 1 x 1 x 1  N = 16 x 16 x 16
+        Physics nu = 0.01
+        Boundary west  wall
+        Boundary east  wall
+        Boundary south wall
+        Boundary north wall
+        Boundary bottom wall
+        Boundary top    velocity(ux = 0.05, uy = 0)
+        Run 10 steps
+        """
+        setup = parse_kraken(text)
+        @test setup.lattice == :D3Q19
+        @test length(setup.boundaries) == 6
+        faces = Set(b.face for b in setup.boundaries)
+        @test :top in faces
+        @test :bottom in faces
+    end
+
+    @testset "3D face names rejected on D2Q9" begin
+        text = """
+        Simulation bad2d D2Q9
+        Domain L = 1 x 1 N = 32 x 32
+        Physics nu = 0.01
+        Boundary top wall
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 10 steps
+        """
+        err = try
+            parse_kraken(text); nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("D2Q9", err.msg)
+        @test occursin("north/south/east/west", err.msg)
+    end
+
+    @testset "No Mach warning at default U_ref = 0.1" begin
+        # U_ref falls back to 0.1 (default / probed from BC) → no warning
+        text = """
+        Simulation quiet D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 0.01
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 10 steps
+        """
+        io = IOBuffer()
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+            parse_kraken(text)
+        end
+        out = String(take!(io))
+        @test !occursin("Mach", out)
+        @test !occursin("compressibility", out)
+    end
+
+    @testset "Mach warning fires when U_ref > 0.1" begin
+        text = """
+        Simulation loud D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 0.01
+        Boundary north velocity(ux = 0.15, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 10 steps
+        """
+        io = IOBuffer()
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+            parse_kraken(text)
+        end
+        out = String(take!(io))
+        @test occursin("U_ref", out)
+        @test occursin("0.15", out)
+    end
 end

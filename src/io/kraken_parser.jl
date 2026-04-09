@@ -439,6 +439,9 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
                             max_steps, output, diagnostics, refinements,
                             velocity_field, rheology_setups)
 
+    # --- Validate face names against lattice dimensionality ---
+    _validate_faces_vs_lattice(setup)
+
     # --- Run sanity checks (warnings only) ---
     sanity_check(setup)
 
@@ -629,8 +632,14 @@ function _parse_boundary(line::String, user_vars::Dict{Symbol,Float64})
     face_m = match(r"^(\w+)\s+", rest)
     face_m === nothing && throw(ArgumentError("Cannot parse Boundary face: $line"))
     face = Symbol(face_m.captures[1])
-    face in (:north, :south, :east, :west, :front, :back) ||
-        throw(ArgumentError("Unknown boundary face '$face'. Use north/south/east/west"))
+    # Allowed faces:
+    #   2D (D2Q9):  west (x=0), east (x=Lx), south (y=0), north (y=Ly)
+    #   3D (D3Q19): + bottom (z=0), top (z=Lz); front/back kept as legacy aliases
+    # Lattice-specific validation (2D rejects top/bottom) happens post-parse
+    # in `_validate_faces_vs_lattice` once the lattice symbol is known.
+    face in (:north, :south, :east, :west, :front, :back, :top, :bottom) ||
+        throw(ArgumentError("Unknown boundary face '$face'. " *
+              "Use north/south/east/west (2D) or +top/bottom (3D)"))
 
     after_face = strip(rest[face_m.offset + length(face_m.match):end])
 
@@ -1087,6 +1096,28 @@ function _apply_setup_helpers!(physics_params::Dict{Symbol,Float64},
     return
 end
 
+"""
+    _validate_faces_vs_lattice(setup)
+
+Reject 3D-only face names (`:top`, `:bottom`) when the lattice is D2Q9.
+Allowed:
+- D2Q9:  `:north`, `:south`, `:east`, `:west` (+ `:front`/`:back` legacy aliases)
+- D3Q19: all of the above + `:top`, `:bottom`
+"""
+function _validate_faces_vs_lattice(setup::SimulationSetup)
+    d2_faces = (:north, :south, :east, :west, :front, :back)
+    if setup.lattice == :D2Q9
+        for b in setup.boundaries
+            if !(b.face in d2_faces)
+                throw(ArgumentError(
+                    "Boundary face ':$(b.face)' is not valid for D2Q9. " *
+                    "2D face names are: north/south/east/west."))
+            end
+        end
+    end
+    return nothing
+end
+
 """Scan boundary conditions for a velocity BC and return its magnitude, or 0.1."""
 function _probe_U_ref(boundaries::Vector{BoundarySetup})
     for b in boundaries
@@ -1108,9 +1139,18 @@ end
 """
     sanity_check(setup::SimulationSetup) -> Nothing
 
-Validate LBM stability parameters (tau, Mach) for a parsed setup.
+Validate LBM stability parameters for a parsed setup.
 Emits `@warn` for soft issues and throws `ErrorException` for tau < 0.5.
-Messages include actionable suggestions.
+
+Checks:
+- `tau < 0.5`  → error (unstable)
+- `tau < 0.51` → warn (marginally stable)
+- `U_ref > 0.1` → warn (compressibility; standard LBM bound)
+- `U_ref > 0.3` → warn (CFL risk)
+
+Note: the compressibility bound is expressed on `U_ref` (lattice units)
+rather than on `Ma = U_ref / cs`, because the textbook bound U_ref ≤ 0.1
+maps to Ma ≤ 0.1*sqrt(3) ≈ 0.173, not Ma ≤ 0.1.
 """
 function sanity_check(setup::SimulationSetup)
     ν = get(setup.physics.params, :nu, NaN)
@@ -1128,11 +1168,17 @@ function sanity_check(setup::SimulationSetup)
     end
 
     U_ref = _probe_U_ref(setup.boundaries)
-    cs = 1.0 / sqrt(3.0)
-    Ma = U_ref / cs
-    if Ma > 0.1
-        @warn "Mach number Ma = $Ma exceeds 0.1 (compressibility errors). " *
-              "To fix: decrease U_ref from $U_ref to ≤ $(0.1*cs), " *
+    # Standard LBM compressibility bound is U_ref ≤ 0.1 in lattice units
+    # (textbook, e.g. Krüger et al. 2017). In Mach-number space this is
+    # Ma = U_ref/cs ≤ 0.1*sqrt(3) ≈ 0.173 — NOT Ma ≤ 0.1. We therefore
+    # compare U_ref against 0.1 directly to avoid a false-positive that
+    # fired on every default case where U_ref fell back to 0.1 exactly.
+    if U_ref > 0.1
+        cs = 1.0 / sqrt(3.0)
+        Ma = U_ref / cs
+        @warn "Lattice velocity U_ref = $U_ref exceeds 0.1 " *
+              "(Mach number Ma = $Ma, compressibility errors likely). " *
+              "To fix: decrease U_ref to ≤ 0.1, " *
               "or increase grid N to reduce lattice velocity."
     end
     if U_ref > 0.3

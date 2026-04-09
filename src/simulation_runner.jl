@@ -25,26 +25,64 @@ struct BoundaryHandler
 end
 
 """
-    run_simulation(filename::String; backend=CPU(), T=Float64, kwargs...) -> NamedTuple
+    run_simulation(filename::String; backend=CPU(), T=Float64,
+                   max_steps=nothing, kwargs...) -> NamedTuple
 
 Run an LBM simulation defined by a `.krk` configuration file.
 Keyword arguments override `Define` defaults for parametric studies.
+Pass `max_steps` to override the `Run N steps` directive (useful for tests).
 
 Returns a NamedTuple with final fields on CPU: `(ρ, ux, uy, setup)`.
+
+## Dispatch rules
+The runner selects a backend driver based on `setup.modules`, `setup.lattice`,
+`setup.refinements`, and the `setup.name` (case name):
+
+1. `:advection_only in modules`  → pure VOF advection (no LBM solve)
+2. `:twophase_vof   in modules`  → two-phase LBM with surface tension
+3. `:axisymmetric   in modules`  → `run_hagen_poiseuille_2d` if the case
+   name contains `hagen_poiseuille`, otherwise an informative error
+4. `!isempty(setup.refinements)` → refined-grid drivers. Only refined
+   natural convection is currently supported via the .krk runner;
+   other refined cases raise an informative error (run them via the
+   Julia API — see `create_refined_domain` / `create_thermal_patch_arrays`).
+5. `:thermal in modules`         → `run_rayleigh_benard_2d`,
+   `run_natural_convection_2d`, or a thermal-conduction fallback
+   depending on the case name
+6. `setup.lattice === :D3Q19`    → `run_cavity_3d` if the case name
+   contains `cavity_3d`, otherwise an informative error
+7. Default (`:D2Q9`, no modules) → generic single-phase LBM loop
+   (existing behavior, compatible with all cavity/Poiseuille/Couette/
+   Taylor-Green/cylinder examples).
 
 # Example
 ```julia
 result = run_simulation("examples/cavity.krk")
 result = run_simulation("examples/cavity.krk"; Re=400, N=256)
+result = run_simulation("examples/rayleigh_benard.krk"; max_steps=100)
 ```
 """
 function run_simulation(filename::String;
                         backend=KernelAbstractions.CPU(), T=Float64,
                         callback::Union{Nothing,Function}=nothing,
-                        callback_every::Int=100, kwargs...)
+                        callback_every::Int=100,
+                        max_steps::Union{Nothing,Int}=nothing, kwargs...)
     setup = load_kraken(filename; kwargs...)
+    if max_steps !== nothing
+        setup = _override_max_steps(setup, max_steps)
+    end
     return run_simulation(setup; backend=backend, T=T,
                           callback=callback, callback_every=callback_every)
+end
+
+"""Return a copy of `setup` with `max_steps` overridden."""
+function _override_max_steps(setup::SimulationSetup, new_max::Int)
+    return SimulationSetup(
+        setup.name, setup.lattice, setup.domain, setup.physics,
+        setup.user_vars, setup.regions, setup.boundaries, setup.initial,
+        setup.modules, new_max,
+        setup.output, setup.diagnostics, setup.refinements,
+        setup.velocity_field, setup.rheology)
 end
 
 """
@@ -69,6 +107,14 @@ function run_simulation(setup::SimulationSetup;
         return _run_advection_only(setup; backend=backend, T=T)
     elseif :twophase_vof in setup.modules
         return _run_twophase_vof(setup; backend=backend, T=T)
+    elseif :axisymmetric in setup.modules
+        return _run_axisymmetric(setup; backend=backend, T=T)
+    elseif !isempty(setup.refinements)
+        return _run_refined(setup; backend=backend, T=T)
+    elseif :thermal in setup.modules
+        return _run_thermal(setup; backend=backend, T=T)
+    elseif setup.lattice === :D3Q19
+        return _run_d3q19(setup; backend=backend, T=T)
     end
 
     # --- Default: single-phase LBM ---
@@ -673,3 +719,122 @@ function _run_twophase_vof(setup::SimulationSetup;
             max_u_spurious=max_u, setup=setup)
 end
 
+
+# ===========================================================================
+# Dispatch helpers for 3D / axisymmetric / refined / thermal cases
+# ===========================================================================
+
+"""Dispatch D3Q19 cases to the appropriate 3D driver."""
+function _run_d3q19(setup::SimulationSetup;
+                    backend=KernelAbstractions.CPU(), T=Float64)
+    name = lowercase(setup.name)
+    dom  = setup.domain
+    ν    = setup.physics.params[:nu]
+    if occursin("cavity_3d", name) || occursin("cavity3d", name)
+        # Look for a velocity BC on top/north for u_lid; default to 0.1.
+        u_lid = 0.1
+        for b in setup.boundaries
+            if b.type == :velocity && haskey(b.values, :ux)
+                try
+                    u_lid = Float64(evaluate(b.values[:ux]))
+                catch
+                end
+                break
+            end
+        end
+        config = LBMConfig(D3Q19(); Nx=dom.Nx, Ny=dom.Ny, Nz=dom.Nz,
+                           ν=Float64(ν), u_lid=u_lid,
+                           max_steps=setup.max_steps)
+        result = run_cavity_3d(config; backend=backend, T=T)
+        return merge(result, (setup=setup,))
+    else
+        throw(ArgumentError(
+            "D3Q19 dispatch: only `cavity_3d` is supported in v0.1.0 " *
+            "(got case name: $(setup.name)). Use the Julia API for other 3D cases."))
+    end
+end
+
+"""Dispatch axisymmetric cases. Only Hagen-Poiseuille is supported in v0.1.0."""
+function _run_axisymmetric(setup::SimulationSetup;
+                           backend=KernelAbstractions.CPU(), T=Float64)
+    name = lowercase(setup.name)
+    dom  = setup.domain
+    params = setup.physics.params
+    ν  = Float64(params[:nu])
+    Fz = haskey(setup.physics.body_force, :Fz) ?
+         Float64(evaluate(setup.physics.body_force[:Fz])) : 1e-5
+    if occursin("hagen_poiseuille", name) || occursin("hagen-poiseuille", name)
+        result = run_hagen_poiseuille_2d(; Nz=dom.Nx, Nr=dom.Ny, ν=ν, Fz=Fz,
+                                          max_steps=setup.max_steps,
+                                          backend=backend, FT=T)
+        return merge(result, (setup=setup,))
+    else
+        throw(ArgumentError(
+            "axisymmetric dispatch: only `hagen_poiseuille` is supported in " *
+            "v0.1.0 (got case name: $(setup.name))."))
+    end
+end
+
+"""Dispatch grid-refined cases.
+
+.krk-level refinement is only wired up for natural-convection-style refined
+runs; other refined configurations (cavity, two-phase, ...) still require
+manual patch construction via `create_refined_domain` / the Julia API.
+"""
+function _run_refined(setup::SimulationSetup;
+                      backend=KernelAbstractions.CPU(), T=Float64)
+    if :thermal in setup.modules && occursin("natural_convection", lowercase(setup.name))
+        params = setup.physics.params
+        N  = setup.domain.Nx
+        Ra = Float64(get(params, :Ra, 1e4))
+        Pr = Float64(get(params, :Pr, 0.71))
+        Rc = Float64(get(params, :Rc, 1.0))
+        result = run_natural_convection_refined_2d(; N=N, Ra=Ra, Pr=Pr, Rc=Rc,
+                                                    max_steps=setup.max_steps,
+                                                    backend=backend, FT=T)
+        return merge(result, (setup=setup,))
+    else
+        throw(ArgumentError(
+            "refined .krk dispatch: only refined thermal natural-convection " *
+            "is supported in v0.1.0 (got case name: $(setup.name)). " *
+            "Refined cases require manual patch construction via the Julia API " *
+            "(`create_refined_domain` / `create_thermal_patch_arrays`); .krk " *
+            "runner support for generic refined cases is deferred to v0.2.0."))
+    end
+end
+
+"""Dispatch thermal cases (non-refined) to the appropriate thermal driver."""
+function _run_thermal(setup::SimulationSetup;
+                      backend=KernelAbstractions.CPU(), T=Float64)
+    name   = lowercase(setup.name)
+    dom    = setup.domain
+    params = setup.physics.params
+    Ra = Float64(get(params, :Ra, 1e4))
+    Pr = Float64(get(params, :Pr, 0.71))
+
+    if occursin("rayleigh_benard", name) || occursin("rayleigh-benard", name)
+        result = run_rayleigh_benard_2d(; Nx=dom.Nx, Ny=dom.Ny, Ra=Ra, Pr=Pr,
+                                         max_steps=setup.max_steps,
+                                         backend=backend, FT=T)
+        return merge(result, (setup=setup,))
+    elseif occursin("natural_convection", name)
+        result = run_natural_convection_2d(; N=dom.Nx, Ra=Ra, Pr=Pr,
+                                            max_steps=setup.max_steps,
+                                            backend=backend, FT=T)
+        return merge(result, (setup=setup,))
+    elseif occursin("heat_conduction", name) || occursin("conduction", name)
+        # No dedicated conduction driver: run Rayleigh-Bénard with Ra≈0
+        # so buoyancy is negligible and diffusion dominates. Documented
+        # as a pragmatic fallback — the resulting temperature field
+        # matches a 1D diffusive profile once steady state is reached.
+        result = run_rayleigh_benard_2d(; Nx=dom.Nx, Ny=dom.Ny,
+                                         Ra=1e-8, Pr=Pr,
+                                         max_steps=setup.max_steps,
+                                         backend=backend, FT=T)
+        return merge(result, (setup=setup,))
+    else
+        throw(ArgumentError(
+            "thermal dispatch: unrecognized case name '$(setup.name)'. " *
+            "Known cases: rayleigh_benard, natural_convection, heat_conduction."))
+    end
+end
