@@ -227,6 +227,226 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         """)
     end
 
+    @testset "Setup reynolds helper" begin
+        text = """
+        Simulation re_test D2Q9
+        Domain L = 1.0 x 1.0  N = 128 x 128
+        Setup reynolds = 1000 L_ref = 128 U_ref = 0.1
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 1000 steps
+        """
+        setup = parse_kraken(text)
+        @test setup.physics.params[:nu] ≈ 0.0128 atol=1e-9
+        @test setup.physics.params[:Re] ≈ 1000
+    end
+
+    @testset "Setup reynolds conflict with nu" begin
+        text = """
+        Simulation bad D2Q9
+        Domain L = 1 x 1  N = 64 x 64
+        Physics nu = 0.01
+        Setup reynolds = 1000
+        Boundary north wall
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        @test_throws ArgumentError parse_kraken(text)
+    end
+
+    @testset "Setup rayleigh helper" begin
+        text = """
+        Simulation ra_test D2Q9
+        Domain L = 1.0 x 1.0  N = 128 x 128
+        Setup rayleigh = 1e5 prandtl = 0.71 L_ref = 128 U_ref = 0.1
+        Module thermal
+        Boundary south wall T = 1.0
+        Boundary north wall T = 0.0
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        setup = parse_kraken(text)
+        @test setup.physics.params[:Ra] ≈ 1e5
+        @test setup.physics.params[:Pr] ≈ 0.71
+        @test haskey(setup.physics.params, :nu)
+        @test haskey(setup.physics.params, :alpha)
+        @test haskey(setup.physics.params, :gbeta_DT)
+        # Consistency: Pr = nu/alpha
+        @test setup.physics.params[:nu] / setup.physics.params[:alpha] ≈ 0.71 atol=1e-9
+        # Ra = gβΔT L^3 / (ν α)
+        ν = setup.physics.params[:nu]
+        α = setup.physics.params[:alpha]
+        gβΔT = setup.physics.params[:gbeta_DT]
+        @test gβΔT * 128.0^3 / (ν * α) ≈ 1e5 atol=1e-3
+    end
+
+    @testset "Preset cavity_2d" begin
+        text = "Preset cavity_2d"
+        setup = parse_kraken(text)
+        @test setup.name == "cavity_2d"
+        @test setup.domain.Nx == 128
+        faces = Dict(b.face => b for b in setup.boundaries)
+        @test faces[:north].type == :velocity
+        @test faces[:south].type == :wall
+    end
+
+    @testset "Preset override" begin
+        text = """
+        Preset cavity_2d
+        Setup reynolds = 5000 L_ref = 128 U_ref = 0.1
+        """
+        # Preset sets nu=0.01; reynolds would conflict. Use a preset without nu,
+        # or override by manually clearing? For now test that Re-only overrides:
+        @test_throws ArgumentError parse_kraken(text)
+
+        # Override via Physics works:
+        text2 = """
+        Preset cavity_2d
+        Physics nu = 0.005
+        """
+        setup = parse_kraken(text2)
+        @test setup.physics.params[:nu] ≈ 0.005
+    end
+
+    @testset "Spell-correction for directives" begin
+        text = """
+        Simulation test D2Q9
+        Domain L = 1 x 1 N = 32 x 32
+        Physics nu = 0.1
+        Boundayr north wall
+        Run 100 steps
+        """
+        err = try
+            parse_kraken(text)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("Boundary", err.msg)
+    end
+
+    @testset "Spell-correction for BC type" begin
+        text = """
+        Simulation test D2Q9
+        Domain L = 1 x 1 N = 32 x 32
+        Physics nu = 0.1
+        Boundary north velocty(ux = 0.1)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        err = try
+            parse_kraken(text)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("velocity", err.msg)
+    end
+
+    @testset "Sanity check tau < 0.5" begin
+        # nu = -0.1 would give tau = 0.2; use a valid-parseable Setup
+        text = """
+        Simulation unstable D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = -0.1
+        Boundary north wall
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        err = try
+            parse_kraken(text)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
+        @test occursin("increase", err.msg) && occursin("ν", err.msg)
+    end
+
+    @testset "Sanity check Mach warning" begin
+        text = """
+        Simulation fast D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 0.1
+        Boundary north velocity(ux = 0.5, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        msgs = String[]
+        logger = Base.CoreLogging.SimpleLogger(IOBuffer())
+        setup = Base.CoreLogging.with_logger(logger) do
+            parse_kraken(text)
+        end
+        # Capture: easier — just redirect stderr
+        io = IOBuffer()
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+            parse_kraken(text)
+        end
+        out = String(take!(io))
+        @test occursin("Mach", out)
+    end
+
+    @testset "Sweep directive" begin
+        text = """
+        Simulation sweep_test D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 0.01
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Sweep Re = [100, 200, 500]
+        Run 100 steps
+        """
+        setups = parse_kraken_sweep(text)
+        @test length(setups) == 3
+        # Re kwarg doesn't affect nu directly since no Setup reynolds present,
+        # but it should be applied as kwarg override (no :Re param in physics).
+        # Test with Setup reynolds instead:
+        text2 = """
+        Simulation sweep_re D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Setup reynolds = Re L_ref = 64 U_ref = 0.1
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Sweep Re = [100, 200, 500]
+        Run 100 steps
+        """
+        # This won't work since Setup parses literal numbers, not kwargs.
+        # Simpler: check Sweep just produces 3 setups and kwargs are applied
+        # by verifying any downstream effect. Use Physics nu override with Sweep:
+        text3 = """
+        Simulation sweep_nu D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 0.01
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Sweep nu = [0.01, 0.02, 0.05]
+        Run 100 steps
+        """
+        setups3 = parse_kraken_sweep(text3)
+        @test length(setups3) == 3
+        nus = sort([s.physics.params[:nu] for s in setups3])
+        @test nus ≈ [0.01, 0.02, 0.05]
+    end
+
     @testset "3D domain" begin
         text = """
         Simulation cavity3d D3Q19

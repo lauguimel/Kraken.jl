@@ -51,6 +51,9 @@ Run an LBM simulation from a parsed `SimulationSetup`.
 """
 function run_simulation(setup::SimulationSetup;
                         backend=KernelAbstractions.CPU(), T=Float64)
+    # --- Sanity checks (tau, Mach, CFL) ---
+    sanity_check(setup)
+
     # --- Dispatch to specialized runners based on modules ---
     if :advection_only in setup.modules
         return _run_advection_only(setup; backend=backend, T=T)

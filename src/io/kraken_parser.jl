@@ -227,8 +227,90 @@ setup = parse_kraken(text; Re=400, N=256)
 ```
 """
 function parse_kraken(text::String; kwargs...)
+    setups = _parse_kraken_internal(text; kwargs...)
+    length(setups) == 1 || throw(ArgumentError(
+        "parse_kraken: got $(length(setups)) setups (Sweep directive present?). " *
+        "Use parse_kraken_sweep for sweeps."))
+    return setups[1]
+end
+
+"""
+    parse_kraken_sweep(text::String; kwargs...) -> Vector{SimulationSetup}
+
+Parse a .krk file containing zero or more `Sweep param = [a, b, c]` directives
+and return one `SimulationSetup` per combination of sweep values. If no sweep
+is present, returns a single-element vector.
+"""
+function parse_kraken_sweep(text::String; kwargs...)
+    return _parse_kraken_internal(text; kwargs...)
+end
+
+"""
+    load_kraken_sweep(filename::String; kwargs...) -> Vector{SimulationSetup}
+
+File version of [`parse_kraken_sweep`](@ref).
+"""
+function load_kraken_sweep(filename::String; kwargs...)
+    return parse_kraken_sweep(read(filename, String); kwargs...)
+end
+
+function _parse_kraken_internal(text::String; kwargs...)
     lines = _preprocess_lines(text)
 
+    # --- Pre-pass: Preset expansion ---
+    expanded = String[]
+    for line in lines
+        if _first_word(line) == "Preset"
+            append!(expanded, _expand_preset(line))
+        else
+            push!(expanded, line)
+        end
+    end
+    lines = expanded
+
+    # --- Sweep pre-pass: collect sweeps and expand combinations ---
+    sweeps = Pair{Symbol, Vector{Float64}}[]
+    non_sweep_lines = String[]
+    for line in lines
+        if _first_word(line) == "Sweep"
+            push!(sweeps, _parse_sweep(line))
+        else
+            push!(non_sweep_lines, line)
+        end
+    end
+    lines = non_sweep_lines
+
+    if !isempty(sweeps)
+        setups = SimulationSetup[]
+        # Cartesian product
+        counters = ones(Int, length(sweeps))
+        sizes = [length(s.second) for s in sweeps]
+        while true
+            sweep_kwargs = Dict{Symbol, Any}(kwargs)
+            for (i, sw) in enumerate(sweeps)
+                sweep_kwargs[sw.first] = sw.second[counters[i]]
+            end
+            append!(setups, _parse_kraken_internal_single(lines; sweep_kwargs...))
+            # advance
+            k = length(counters)
+            while k > 0
+                counters[k] += 1
+                if counters[k] > sizes[k]
+                    counters[k] = 1
+                    k -= 1
+                else
+                    break
+                end
+            end
+            k == 0 && break
+        end
+        return setups
+    end
+
+    return _parse_kraken_internal_single(lines; kwargs...)
+end
+
+function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     # --- First pass: collect Define defaults ---
     user_vars = Dict{Symbol, Float64}()
     for line in lines
@@ -258,6 +340,7 @@ function parse_kraken(text::String; kwargs...)
     diagnostics = nothing
     refinements = RefineSetup[]
     rheology_setups = RheologySetup[]
+    setup_helpers = Dict{Symbol, Float64}()  # reynolds, rayleigh, prandtl, L_ref, U_ref
 
     for line in lines
         keyword = _first_word(line)
@@ -292,8 +375,19 @@ function parse_kraken(text::String; kwargs...)
             diagnostics = _parse_diagnostics(line)
         elseif keyword == "Rheology"
             push!(rheology_setups, _parse_rheology(line, user_vars))
+        elseif keyword == "Setup"
+            merge!(setup_helpers, _parse_setup(line, user_vars))
         else
-            throw(ArgumentError("Unknown keyword '$keyword' in .krk file"))
+            known = ("Simulation", "Domain", "Physics", "Define", "Obstacle",
+                     "Fluid", "Boundary", "Refine", "Initial", "Velocity",
+                     "Module", "Run", "Output", "Diagnostics", "Rheology",
+                     "Setup", "Preset", "Sweep")
+            suggestion = _suggest_name(keyword, known)
+            msg = "Unknown keyword '$keyword' in .krk file"
+            if suggestion !== nothing
+                msg *= " (did you mean: $suggestion?)"
+            end
+            throw(ArgumentError(msg))
         end
     end
 
@@ -335,12 +429,20 @@ function parse_kraken(text::String; kwargs...)
         end
     end
 
+    # --- Apply Setup helpers (Reynolds, Rayleigh) ---
+    _apply_setup_helpers!(physics_params, setup_helpers, domain, boundaries)
+
     physics = PhysicsSetup(physics_params, body_force)
 
-    return SimulationSetup(name, lattice, domain, physics, user_vars,
-                           regions, boundaries, initial, modules,
-                           max_steps, output, diagnostics, refinements,
-                           velocity_field, rheology_setups)
+    setup = SimulationSetup(name, lattice, domain, physics, user_vars,
+                            regions, boundaries, initial, modules,
+                            max_steps, output, diagnostics, refinements,
+                            velocity_field, rheology_setups)
+
+    # --- Run sanity checks (warnings only) ---
+    sanity_check(setup)
+
+    return [setup]
 end
 
 # --- Individual statement parsers ---
@@ -534,10 +636,18 @@ function _parse_boundary(line::String, user_vars::Dict{Symbol,Float64})
 
     values = Dict{Symbol, KrakenExpr}()
 
+    known_bc_types = (:wall, :velocity, :pressure, :periodic, :outflow, :neumann)
+
     # Check for type(params) format — find matching parentheses
     type_m = match(r"^(\w+)\(", after_face)
     if type_m !== nothing
         bc_type = Symbol(type_m.captures[1])
+        if bc_type ∉ known_bc_types
+            sug = _suggest_name(String(type_m.captures[1]), known_bc_types)
+            msg = "Unknown boundary type '$bc_type'"
+            sug !== nothing && (msg *= " (did you mean: $sug?)")
+            throw(ArgumentError(msg))
+        end
         paren_start = length(type_m.match)
         params_str = _extract_balanced_parens(after_face, paren_start)
         for kv in _split_params(params_str)
@@ -560,6 +670,12 @@ function _parse_boundary(line::String, user_vars::Dict{Symbol,Float64})
     simple_m = match(r"^(\w+)(.*)", after_face)
     if simple_m !== nothing
         bc_type = Symbol(simple_m.captures[1])
+        if bc_type ∉ known_bc_types
+            sug = _suggest_name(String(simple_m.captures[1]), known_bc_types)
+            msg = "Unknown boundary type '$bc_type'"
+            sug !== nothing && (msg *= " (did you mean: $sug?)")
+            throw(ArgumentError(msg))
+        end
         extra = strip(String(simple_m.captures[2]))
         if !isempty(extra)
             _parse_kv_pairs!(values, extra, user_vars)
@@ -832,3 +948,294 @@ function _parse_stl_params(params_str::AbstractString)
 
     return STLSource(file, scale, translate, z_slice)
 end
+
+# =============================================================================
+# Phase 2 helpers: Setup directive, Presets, Sanity, Sweeps, spell-correction
+# =============================================================================
+#
+# These helpers extend the .krk DSL with convenience directives:
+#   - `Setup reynolds = 1000 [L_ref = ...] [U_ref = ...]`
+#   - `Setup rayleigh = 1e5 prandtl = 0.71`
+#   - `Preset <name>`  (cavity_2d, poiseuille_2d, couette_2d, taylor_green_2d,
+#                        rayleigh_benard_2d)
+#   - `Sweep param = [a, b, c]` (expands into multiple SimulationSetups)
+# Sanity checks (tau, Mach) run at parse time.
+# Unknown identifiers get Levenshtein-based "did you mean?" suggestions.
+
+"""
+    _levenshtein(a::AbstractString, b::AbstractString) -> Int
+
+Compute Levenshtein edit distance between two strings.
+"""
+function _levenshtein(a::AbstractString, b::AbstractString)
+    m, n = length(a), length(b)
+    m == 0 && return n
+    n == 0 && return m
+    av = collect(a)
+    bv = collect(b)
+    prev = collect(0:n)
+    curr = zeros(Int, n + 1)
+    for i in 1:m
+        curr[1] = i
+        for j in 1:n
+            cost = av[i] == bv[j] ? 0 : 1
+            curr[j+1] = min(curr[j] + 1, prev[j+1] + 1, prev[j] + cost)
+        end
+        prev, curr = curr, prev
+    end
+    return prev[n + 1]
+end
+
+"""
+    _suggest_name(name, candidates) -> Union{String, Nothing}
+
+Return the closest candidate by Levenshtein distance if within threshold
+(distance ≤ max(2, length(name) ÷ 3)), otherwise `nothing`.
+"""
+function _suggest_name(name::AbstractString, candidates)
+    best = nothing
+    best_d = typemax(Int)
+    for c in candidates
+        d = _levenshtein(lowercase(String(name)), lowercase(String(c)))
+        if d < best_d
+            best_d = d
+            best = String(c)
+        end
+    end
+    threshold = max(2, length(name) ÷ 3)
+    return best_d <= threshold ? best : nothing
+end
+
+"""
+    _parse_setup(line, user_vars) -> Dict{Symbol,Float64}
+
+Parse a `Setup key = value ...` directive. Known keys:
+`reynolds`, `rayleigh`, `prandtl`, `L_ref`, `U_ref`.
+"""
+function _parse_setup(line::String, user_vars::Dict{Symbol,Float64})
+    out = Dict{Symbol, Float64}()
+    known = (:reynolds, :rayleigh, :prandtl, :L_ref, :U_ref)
+    for m in eachmatch(r"(\w+)\s*=\s*([\w.eE+\-*/()]+)", line)
+        m.captures[1] == "Setup" && continue
+        key = Symbol(m.captures[1])
+        if key ∉ known
+            sug = _suggest_name(String(m.captures[1]), known)
+            msg = "Unknown Setup key '$key'"
+            sug !== nothing && (msg *= " (did you mean: $sug?)")
+            throw(ArgumentError(msg))
+        end
+        val_str = strip(String(m.captures[2]))
+        val = tryparse(Float64, val_str)
+        if val === nothing
+            val = Float64(evaluate(parse_kraken_expr(val_str, user_vars)))
+        end
+        out[key] = val
+    end
+    return out
+end
+
+"""
+    _apply_setup_helpers!(physics_params, helpers, domain, boundaries)
+
+Mutate `physics_params` to add auto-computed `nu`, `alpha`, `gbeta_DT` from
+`reynolds`/`rayleigh`/`prandtl` helpers. Errors if conflicts exist.
+"""
+function _apply_setup_helpers!(physics_params::Dict{Symbol,Float64},
+                               helpers::Dict{Symbol,Float64},
+                               domain,
+                               boundaries::Vector{BoundarySetup})
+    isempty(helpers) && return
+
+    # Determine L_ref: explicit > domain min(Nx, Ny) in lattice units
+    L_ref = get(helpers, :L_ref, Float64(min(domain.Nx, domain.Ny)))
+
+    # Determine U_ref: explicit > probe a velocity BC > default 0.1
+    U_ref = get(helpers, :U_ref, _probe_U_ref(boundaries))
+
+    if haskey(helpers, :reynolds)
+        Re = helpers[:reynolds]
+        if haskey(physics_params, :nu)
+            throw(ArgumentError(
+                "Setup reynolds conflicts with Physics nu (both specified). " *
+                "Remove one: either use `Setup reynolds = $Re` or `Physics nu = ...`."))
+        end
+        ν = U_ref * L_ref / Re
+        physics_params[:nu] = ν
+        physics_params[:Re] = Re
+    end
+
+    if haskey(helpers, :rayleigh)
+        Ra = helpers[:rayleigh]
+        Pr = get(helpers, :prandtl, get(physics_params, :Pr, 0.71))
+        # Standard scaling: ν = U_ref * L_ref / sqrt(Ra/Pr), α = ν/Pr,
+        #                   gβΔT = Ra * ν * α / L_ref^3
+        # Using U_ref = sqrt(gβΔT L) gives ν = sqrt(Pr/Ra) * U_ref * L
+        ν_ra = sqrt(Pr / Ra) * U_ref * L_ref
+        α_ra = ν_ra / Pr
+        gβΔT = Ra * ν_ra * α_ra / L_ref^3
+        if haskey(physics_params, :nu)
+            throw(ArgumentError(
+                "Setup rayleigh conflicts with Physics nu (both specified)."))
+        end
+        physics_params[:nu] = ν_ra
+        physics_params[:alpha] = α_ra
+        physics_params[:gbeta_DT] = gβΔT
+        physics_params[:Ra] = Ra
+        physics_params[:Pr] = Pr
+    end
+
+    return
+end
+
+"""Scan boundary conditions for a velocity BC and return its magnitude, or 0.1."""
+function _probe_U_ref(boundaries::Vector{BoundarySetup})
+    for b in boundaries
+        if b.type == :velocity
+            ux = 0.0; uy = 0.0
+            if haskey(b.values, :ux)
+                try; ux = Float64(evaluate(b.values[:ux])); catch; end
+            end
+            if haskey(b.values, :uy)
+                try; uy = Float64(evaluate(b.values[:uy])); catch; end
+            end
+            mag = sqrt(ux^2 + uy^2)
+            mag > 0 && return mag
+        end
+    end
+    return 0.1
+end
+
+"""
+    sanity_check(setup::SimulationSetup) -> Nothing
+
+Validate LBM stability parameters (tau, Mach) for a parsed setup.
+Emits `@warn` for soft issues and throws `ErrorException` for tau < 0.5.
+Messages include actionable suggestions.
+"""
+function sanity_check(setup::SimulationSetup)
+    ν = get(setup.physics.params, :nu, NaN)
+    if !isnan(ν)
+        τ = 3ν + 0.5
+        if τ < 0.5
+            error("Sanity check failed: tau = $τ < 0.5 (unstable). " *
+                  "To fix: increase ν (current $ν), or use Setup reynolds with " *
+                  "a larger L_ref / smaller Re.")
+        elseif τ < 0.51
+            @warn "tau = $τ is very close to 0.5 (marginally stable). " *
+                  "To fix: increase ν from $ν, or reduce Re / increase grid N " *
+                  "from $(setup.domain.Nx)."
+        end
+    end
+
+    U_ref = _probe_U_ref(setup.boundaries)
+    cs = 1.0 / sqrt(3.0)
+    Ma = U_ref / cs
+    if Ma > 0.1
+        @warn "Mach number Ma = $Ma exceeds 0.1 (compressibility errors). " *
+              "To fix: decrease U_ref from $U_ref to ≤ $(0.1*cs), " *
+              "or increase grid N to reduce lattice velocity."
+    end
+    if U_ref > 0.3
+        @warn "Lattice velocity U_ref = $U_ref > 0.3 (CFL risk). " *
+              "To fix: decrease U_ref, or increase N from $(setup.domain.Nx)."
+    end
+    return nothing
+end
+
+"""
+    _parse_sweep(line) -> Pair{Symbol, Vector{Float64}}
+
+Parse `Sweep param = [a, b, c]` into a (name, values) pair.
+"""
+function _parse_sweep(line::String)
+    m = match(r"^Sweep\s+(\w+)\s*=\s*\[([^\]]+)\]", line)
+    m === nothing && throw(ArgumentError("Cannot parse Sweep: $line"))
+    key = Symbol(m.captures[1])
+    vals = Float64[]
+    for s in split(m.captures[2], ",")
+        t = strip(s)
+        isempty(t) && continue
+        push!(vals, parse(Float64, t))
+    end
+    return key => vals
+end
+
+"""
+    _expand_preset(line) -> Vector{String}
+
+Expand a `Preset <name>` directive into a list of .krk lines.
+Known presets: `cavity_2d`, `poiseuille_2d`, `couette_2d`,
+`taylor_green_2d`, `rayleigh_benard_2d`.
+"""
+function _expand_preset(line::String)
+    tokens = split(line)
+    length(tokens) >= 2 || throw(ArgumentError("Preset needs a name: $line"))
+    name = tokens[2]
+    known = ("cavity_2d", "poiseuille_2d", "couette_2d",
+             "taylor_green_2d", "rayleigh_benard_2d")
+    if name ∉ known
+        sug = _suggest_name(name, known)
+        msg = "Unknown Preset '$name'"
+        sug !== nothing && (msg *= " (did you mean: $sug?)")
+        throw(ArgumentError(msg))
+    end
+    return _preset_lines(name)
+end
+
+function _preset_lines(name::AbstractString)
+    if name == "cavity_2d"
+        return [
+            "Simulation cavity_2d D2Q9",
+            "Domain L = 1.0 x 1.0  N = 128 x 128",
+            "Physics nu = 0.01",
+            "Boundary north velocity(ux = 0.1, uy = 0)",
+            "Boundary south wall",
+            "Boundary east wall",
+            "Boundary west wall",
+            "Run 10000 steps",
+        ]
+    elseif name == "poiseuille_2d"
+        return [
+            "Simulation poiseuille_2d D2Q9",
+            "Domain L = 4.0 x 1.0  N = 64 x 32",
+            "Physics nu = 0.1 Fx = 1e-5",
+            "Boundary x periodic",
+            "Boundary south wall",
+            "Boundary north wall",
+            "Run 10000 steps",
+        ]
+    elseif name == "couette_2d"
+        return [
+            "Simulation couette_2d D2Q9",
+            "Domain L = 1.0 x 1.0  N = 32 x 64",
+            "Physics nu = 0.1",
+            "Boundary x periodic",
+            "Boundary south wall",
+            "Boundary north velocity(ux = 0.05, uy = 0)",
+            "Run 5000 steps",
+        ]
+    elseif name == "taylor_green_2d"
+        return [
+            "Simulation taylor_green_2d D2Q9",
+            "Domain L = 1.0 x 1.0  N = 64 x 64",
+            "Physics nu = 0.01",
+            "Boundary x periodic",
+            "Boundary y periodic",
+            "Initial { ux = 0.05*sin(2*pi*x)*cos(2*pi*y) uy = -0.05*cos(2*pi*x)*sin(2*pi*y) }",
+            "Run 5000 steps",
+        ]
+    elseif name == "rayleigh_benard_2d"
+        return [
+            "Simulation rayleigh_benard_2d D2Q9",
+            "Domain L = 2.0 x 1.0  N = 128 x 64",
+            "Physics nu = 0.02 Pr = 0.71 Ra = 1e5",
+            "Module thermal",
+            "Boundary x periodic",
+            "Boundary south wall T = 1.0",
+            "Boundary north wall T = 0.0",
+            "Run 20000 steps",
+        ]
+    end
+    return String[]
+end
+
