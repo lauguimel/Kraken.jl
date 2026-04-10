@@ -1,35 +1,50 @@
 #!/bin/bash -l
 #PBS -N kraken_perf_h100
-#PBS -l select=1:ncpus=4:mem=32GB:ngpus=1:gpu_id=H100
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=H100
 #PBS -l walltime=02:00:00
 #PBS -j oe
-#PBS -m abe
-#PBS -M maitreje@aqua.qut.edu.au
+#PBS -V
 
-# Kraken.jl GPU MLUPS benchmark on H100
-# Expected runtime: ~30-60 min at full sweep (N = 64..1024)
-# Output: benchmarks/results/*.csv
+# --- Kraken.jl MLUPS performance benchmark on H100 ---
+# Runs the full perf_mlups.jl sweep (CPU + CUDA, N = 64..1024)
+# Output CSV: benchmarks/results/perf_mlups_aqua_h100_<timestamp>.csv
 
-cd $PBS_O_WORKDIR
+WORKDIR=$HOME/Kraken.jl
+cd $WORKDIR
 
-# --- Pre-flight GPU check ---
-nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
-echo "--- GPU check passed ---"
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+echo "========================================"
+echo "Job: $PBS_JOBID"
+echo "Node: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "Start: $(date)"
+echo "========================================"
 
-# --- Julia environment ---
-export PATH="$HOME/.juliaup/bin:$PATH"
+export PATH=$HOME/.juliaup/bin:$PATH
 export JULIA_CUDA_USE_COMPAT=false
-julia --version
 
-echo "--- Instantiating Julia environment ---"
-julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+nvidia-smi
 
-# --- Run MLUPS benchmark ---
+julia --project -e '
+    using Pkg
+    Pkg.instantiate()
+    using CUDA
+    CUDA.versioninfo()
+' 2>&1
+
 mkdir -p benchmarks/results
-echo "--- Running MLUPS benchmark ---"
-julia --project benchmarks/perf_mlups.jl --gpu 2>&1 | tee benchmarks/results/perf_h100_${PBS_JOBID}.log
 
-echo "--- Done ---"
-ls -la benchmarks/results/
+julia --project benchmarks/run_all.jl --gpu --hardware-id=aqua_h100 2>&1
 
+EXIT_CODE=$?
+
+echo "========================================"
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "Completed successfully"
+    ls -la benchmarks/results/
+else
+    echo "Failed (exit code: $EXIT_CODE)"
+fi
+echo "End: $(date)"
+echo "========================================"
+
+exit $EXIT_CODE
