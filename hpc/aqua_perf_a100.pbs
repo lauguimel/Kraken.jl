@@ -1,0 +1,50 @@
+#!/bin/bash -l
+#PBS -N kraken_perf_a100
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=A100
+#PBS -l walltime=03:00:00
+#PBS -j oe
+#PBS -V
+
+# --- Kraken.jl MLUPS performance benchmark on A100 ---
+# Runs the full perf_mlups.jl sweep (CPU + CUDA, N = 64..1024)
+# Output CSV: benchmarks/results/perf_mlups_aqua_a100_<timestamp>.csv
+
+WORKDIR=$HOME/Kraken.jl
+cd $WORKDIR
+
+echo "========================================"
+echo "Job: $PBS_JOBID"
+echo "Node: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "Start: $(date)"
+echo "========================================"
+
+export PATH=$HOME/.juliaup/bin:$PATH
+export JULIA_CUDA_USE_COMPAT=false
+
+nvidia-smi
+
+julia --project -e '
+    using Pkg
+    Pkg.instantiate()
+    using CUDA
+    CUDA.versioninfo()
+' 2>&1
+
+mkdir -p benchmarks/results
+
+julia --project benchmarks/run_all.jl --gpu --hardware-id=aqua_a100 2>&1
+
+EXIT_CODE=$?
+
+echo "========================================"
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "Completed successfully"
+    ls -la benchmarks/results/
+else
+    echo "Failed (exit code: $EXIT_CODE)"
+fi
+echo "End: $(date)"
+echo "========================================"
+
+exit $EXIT_CODE

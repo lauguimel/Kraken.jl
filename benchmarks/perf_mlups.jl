@@ -21,7 +21,7 @@ catch
 end
 
 function run_mlups_benchmark(; gpu=false)
-    Ns = [64, 128, 256, 512, 1024]
+    Ns = [64, 128, 256, 512, 1024, 2048, 4096]
     steps = 200
 
     println("\n=== MLUPS Performance Scaling ===")
@@ -48,7 +48,7 @@ function run_mlups_benchmark(; gpu=false)
         end
 
         if !isnothing(gpu_backend)
-            gpu_Ns = [64, 128, 256, 512, 1024]
+            gpu_Ns = [64, 128, 256, 512, 1024, 2048, 4096]
             @printf("  %5s   %10s   %8s\n", "N", "MLUPS", "Speedup")
             @printf("  %5s   %10s   %8s\n", "-----", "--------", "-------")
 

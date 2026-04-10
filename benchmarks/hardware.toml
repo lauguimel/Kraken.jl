@@ -3,14 +3,16 @@
 # the sections below. When you run on a new machine, add a new section
 # and pass `--hardware-id=<key>` to run_all.jl.
 
-[apple_m2]
-kind      = "cpu"
-model     = "Apple M2"
-cores     = 8
-ram_gb    = 16
-os        = "macOS 14"
+[apple_m3max]
+kind      = "cpu+gpu"
+model     = "Apple M3 Max"
+cores     = 16
+gpu_cores = 40
+ram_gb    = 48
+os        = "macOS 15"
 julia     = "1.11"
-notes     = "Guillaume's laptop, single-thread measurements unless --threads=N"
+gpu_backend = "Metal.jl"
+notes     = "Guillaume's laptop — CPU + Metal GPU benchmarks"
 
 [aqua_h100]
 kind       = "gpu"

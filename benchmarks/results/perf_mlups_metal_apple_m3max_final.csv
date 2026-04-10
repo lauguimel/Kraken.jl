@@ -1,0 +1,8 @@
+case,N,backend,precision,mlups,hardware_id
+bgk_2d,64,metal_m3max,f32,6.8,apple_m3max
+bgk_2d,128,metal_m3max,f32,20.7,apple_m3max
+bgk_2d,256,metal_m3max,f32,81.8,apple_m3max
+bgk_2d,512,metal_m3max,f32,257.3,apple_m3max
+bgk_2d,1024,metal_m3max,f32,572.7,apple_m3max
+bgk_2d,2048,metal_m3max,f32,838.4,apple_m3max
+bgk_2d,4096,metal_m3max,f32,920.5,apple_m3max
