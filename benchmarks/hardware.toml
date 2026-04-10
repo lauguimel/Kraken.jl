@@ -1,0 +1,36 @@
+# Hardware used to produce the benchmark results in benchmarks/results/.
+# Every row in a result CSV must carry a hardware_id that matches one of
+# the sections below. When you run on a new machine, add a new section
+# and pass `--hardware-id=<key>` to run_all.jl.
+
+[apple_m2]
+kind      = "cpu"
+model     = "Apple M2"
+cores     = 8
+ram_gb    = 16
+os        = "macOS 14"
+julia     = "1.11"
+notes     = "Guillaume's laptop, single-thread measurements unless --threads=N"
+
+[aqua_h100]
+kind       = "gpu"
+model      = "NVIDIA H100 80GB PCIe"
+host       = "aqua.qut.edu.au"
+user       = "maitreje"
+scheduler  = "PBS Pro"
+cuda       = "12.x"
+driver     = "550+"
+julia      = "1.11"
+submit_via = "hpc/aqua_perf_h100.pbs"
+notes      = "QUT Aqua cluster, requested via gpu_id=H100"
+
+[aqua_a100]
+kind       = "gpu"
+model      = "NVIDIA A100 40GB"
+host       = "aqua.qut.edu.au"
+user       = "maitreje"
+scheduler  = "PBS Pro"
+cuda       = "12.x"
+julia      = "1.11"
+submit_via = "hpc/aqua_perf_a100.pbs"
+notes      = "QUT Aqua cluster, requested via gpu_id=A100"
