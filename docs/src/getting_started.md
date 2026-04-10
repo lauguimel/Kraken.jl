@@ -76,30 +76,10 @@ The `.krk` file has an `Output` block that writes VTK snapshots to
 in [ParaView](https://www.paraview.org). Good first fields to look at
 are velocity magnitude and pressure.
 
-### Option B — KrakenView, interactive
-
-KrakenView is a small companion package that lives under `view/` in the
-repository. It shows the domain, boundary conditions, and any STL
-overlays *before* the simulation starts, then updates live as the solver
-steps.
-
-```julia
-# From the repository root, in a fresh Julia session
-using Pkg; Pkg.activate("view"); Pkg.instantiate()
-using KrakenView
-
-scene = view_krk("examples/cavity.krk")
-display(scene.figure)
-```
-
-See the [KrakenView guide](view_guide.md) for a walkthrough of the
-interactive features and the batch figure-generation API.
-
 ![Cavity centerline profiles](assets/figures/cavity_centerlines.png)
 
 The figure above compares Kraken.jl's centerline velocity profiles
-against the reference data of Ghia et al. — this is one of the images
-produced by KrakenView's batch pipeline.
+against the reference data of Ghia et al. (1982).
 
 ## 4. What just happened?
 

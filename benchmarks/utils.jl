@@ -3,7 +3,7 @@
 # Every benchmark script produces a Vector{NamedTuple} with a stable
 # schema and writes it to a timestamped CSV file in benchmarks/results/.
 # The same CSVs are consumed by the documentation pipeline
-# (view/generate_doc_figures.jl and docs/src/benchmarks/*.md) so that
+# (docs/src/benchmarks/*.md and the publication figures) so that
 # figures stay in sync with the numbers reported in the paper.
 
 using Dates

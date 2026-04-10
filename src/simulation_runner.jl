@@ -93,7 +93,7 @@ Run an LBM simulation from a parsed `SimulationSetup`.
 
 If `callback` is provided, it is called every `callback_every` steps as
 `callback(step, state)` where `state` is a NamedTuple `(; rho, ux, uy)` of
-CPU arrays. Used by KrakenView to drive live visualization.
+CPU arrays. Useful for live monitoring or custom post-processing.
 """
 function run_simulation(setup::SimulationSetup;
                         backend=KernelAbstractions.CPU(), T=Float64,

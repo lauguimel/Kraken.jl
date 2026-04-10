@@ -162,7 +162,6 @@ makedocs(;
             "examples/10_krk_config.md",
             "examples/20_grid_refinement_cavity.md",
         ],
-        "KrakenView" => "view_guide.md",
         "Benchmarks" => [
             "benchmarks/performance.md",
             "benchmarks/accuracy.md",

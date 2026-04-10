@@ -3,7 +3,7 @@
 # Runs the v0.1.0 in-scope benchmarks (single-phase + thermal + grid
 # refinement) and writes structured CSV results to benchmarks/results/.
 # Figures for the documentation are generated separately by
-# view/generate_doc_figures.jl from the same CSVs.
+# the documentation pipeline reads CSVs from here to build figures.
 #
 # Usage:
 #     julia --project benchmarks/run_all.jl [flags]
