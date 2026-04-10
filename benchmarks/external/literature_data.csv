@@ -21,8 +21,7 @@ waLBerla,ldc_3d,256,A100,f64,MLUPS,4700,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BG
 waLBerla,ldc_3d,256,V100,f64,MLUPS,2800,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK Table 3 (Bauer 2021)
 waLBerla,ldc_3d,256,Xeon 8280 (28c),f64,MLUPS,420,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK MPI 28 cores
 waLBerla,ldc_3d,256,A100,f64,bandwidth_efficiency,75,%,10.1016/j.cpc.2020.107746,of peak device bandwidth
-OpenLB,bgk_3d,1000,4x A100,f32,GLUPS,24.8,GLUPS,,D3Q19 BGK lid-driven cavity 1000^3; openlb.net/performance
-OpenLB,bgk_3d,1000,A100 (per GPU),f32,MLUPS,6200,MLUPS,,implicit: 24.8 GLUPS / 4 GPUs
+OpenLB,bgk_3d,1000,1x A100,f32,GLUPS,24.8,GLUPS,,D3Q19 BGK lid-driven cavity 1000^3; openlb.net/performance (=24800 MLUPS)
 OpenLB,bgk_3d,,512x A100 (HoreKa),f32,TLUPS,1.33,TLUPS,,weak scaling; openlb.net HoreKa benchmarks
 OpenLB,bgk_3d,128,Xeon (1 core),f64,MLUPS,4.2,MLUPS,10.1016/j.camwa.2020.04.033,single-core D3Q19 BGK (Krause 2021)
 OpenLB,bgk_3d,128,Xeon (24c),f64,MLUPS,65,MLUPS,10.1016/j.camwa.2020.04.033,24-core MPI D3Q19 BGK (Krause 2021)

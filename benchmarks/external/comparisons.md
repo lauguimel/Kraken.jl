@@ -12,7 +12,7 @@ All Kraken.jl numbers are from the AQUA H100 80 GB PCIe unless noted.
 | FluidX3D | C++/OpenCL | A100 SXM | D3Q19 | f32 | 10,228 | [GitHub README](https://github.com/ProjectPhysX/FluidX3D) |
 | Palabos | C++ stdpar | A100 SXM4 | D3Q19 | f32 | 9,481 | [GPU port, arXiv 2506.09242](https://arxiv.org/abs/2506.09242) |
 | Palabos | C++ stdpar | A100 SXM4 | D3Q19 | f64 | 4,921 | [GPU port, arXiv 2506.09242](https://arxiv.org/abs/2506.09242) |
-| OpenLB | C++ | A100 (per GPU) | D3Q19 | f32 | 6,200 | [openlb.net/performance](https://www.openlb.net/performance/) |
+| OpenLB | C++ | 1× A100 | D3Q19 | f32 | 24,800 | [openlb.net/performance](https://www.openlb.net/performance/) |
 | waLBerla | C++ | A100 | D3Q19 | f64 | 4,700 | [Bauer 2021](https://doi.org/10.1016/j.cpc.2020.107746) |
 | waLBerla | C++ | V100 | D3Q19 | f64 | 2,800 | [Bauer 2021](https://doi.org/10.1016/j.cpc.2020.107746) |
 | FluidX3D | C++/OpenCL | V100 SXM | D3Q19 | f32 | 4,471 | [GitHub README](https://github.com/ProjectPhysX/FluidX3D) |
