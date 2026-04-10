@@ -1,0 +1,4 @@
+case,N,backend,precision,mlups,hardware_id
+bgk_2d,64,cpu,f64,31.896,apple_m2
+bgk_2d,128,cpu,f64,31.8544,apple_m2
+bgk_2d,256,cpu,f64,26.5422,apple_m2

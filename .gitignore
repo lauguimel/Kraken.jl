@@ -8,4 +8,6 @@ docs/build/
 
 # Local outputs and intermediate results
 output/
-results/
+# results/ at root only (top-level), NOT benchmarks/results/ which is
+# a versioned sync point for the doc figures.
+/results/

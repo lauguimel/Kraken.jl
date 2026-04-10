@@ -1,0 +1,5 @@
+case,N,error_L2,observed_order,hardware_id
+poiseuille,16,0.00149767,NaN,apple_m2
+poiseuille,32,0.00037442,1.99999,apple_m2
+poiseuille,64,9.36049e-05,2,apple_m2
+poiseuille,128,2.34012e-05,2,apple_m2

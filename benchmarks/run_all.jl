@@ -77,7 +77,20 @@ println("\n[2/3] Performance (MLUPS)")
 
 include("perf_mlups.jl")
 try
-    run_mlups_benchmark(; gpu=opts.gpu)
+    cpu_results = benchmark_mlups(; Ns=opts.quick ? [64, 128, 256] : [64, 128, 256, 512, 1024],
+                                    steps=200)
+    perf_rows = [
+        (; case="bgk_2d", N=N, backend="cpu", precision="f64",
+           mlups=mlups, hardware_id=opts.hardware_id)
+        for (N, mlups) in cpu_results
+    ]
+    write_csv(joinpath(opts.output_dir, "perf_mlups_cpu_$(opts.hardware_id)_$(timestamp()).csv"), perf_rows)
+    @info "CPU MLUPS sweep written" entries=length(perf_rows)
+
+    if opts.gpu
+        # Run via the perf_mlups.jl driver which handles backend selection
+        run_mlups_benchmark(; gpu=true)
+    end
 catch e
     @warn "MLUPS benchmark failed" exception=(e, catch_backtrace())
 end
@@ -88,6 +101,20 @@ if !opts.quick && opts.gpu
         run_physics_benchmark(; gpu=true)
     catch e
         @warn "GPU physics benchmark failed" exception=(e, catch_backtrace())
+    end
+
+    include("perf_optimizations.jl")
+    try
+        run_optimization_benchmark(; gpu=true)
+    catch e
+        @warn "GPU optimizations benchmark failed" exception=(e, catch_backtrace())
+    end
+
+    include("perf_quick_wins.jl")
+    try
+        run_quick_wins(; gpu=true)
+    catch e
+        @warn "GPU quick-wins benchmark failed" exception=(e, catch_backtrace())
     end
 end
 
