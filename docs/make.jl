@@ -164,9 +164,10 @@ makedocs(;
         ],
         "KrakenView" => "view_guide.md",
         "Benchmarks" => [
-            "benchmarks/mlups_cpu_gpu.md",
-            "benchmarks/mesh_convergence.md",
-            "benchmarks/comparison_openfoam.md",
+            "benchmarks/performance.md",
+            "benchmarks/accuracy.md",
+            "benchmarks/external.md",
+            "benchmarks/hardware.md",
         ],
         ".krk DSL reference" => [
             "krk/overview.md",

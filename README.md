@@ -93,7 +93,7 @@ If you use Kraken.jl in academic work, please cite:
 
 ```bibtex
 @software{kraken_jl,
-  author  = {Maitre, Guillaume},
+  author  = {Maitrejean, Guillaume},
   title   = {Kraken.jl: a GPU-portable Lattice Boltzmann framework in Julia},
   year    = {2026},
   url     = {https://github.com/lauguimel/Kraken.jl},

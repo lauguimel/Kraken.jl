@@ -1,0 +1,29 @@
+code,case,N,backend,precision,metric,value,unit,source_doi,notes
+Kraken.jl,bgk_2d,1024,H100,f64,MLUPS,5631,MLUPS,,baseline (3 separate kernels)
+Kraken.jl,bgk_2d,1024,H100,f64,MLUPS,12840,MLUPS,,fused stream+collide+macro
+Kraken.jl,bgk_2d,1024,H100,f32,MLUPS,24041,MLUPS,,AA-pattern + Float32
+Kraken.jl,bgk_2d,256,CPU (M2),f64,MLUPS,26.5,MLUPS,,single-thread Apple M2
+Kraken.jl,poiseuille,128,any,f64,convergence_order,2.0,--,,Poiseuille flow
+Kraken.jl,cavity_Re100,128,any,f64,error_vs_Ghia,<1,%,,vs Ghia et al. 1982
+Kraken.jl,cavity_Re100,64,any,f64,error_vs_Ghia,~5,%,,vs Ghia et al. 1982
+waLBerla,ldc_3d,256,A100,f64,MLUPS,4700,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK Table 3
+waLBerla,ldc_3d,256,V100,f64,MLUPS,2800,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK Table 3
+waLBerla,ldc_3d,256,Xeon 8280 (28c),f64,MLUPS,420,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK MPI 28 cores
+waLBerla,ldc_3d,256,A100,f64,bandwidth_efficiency,75,%,10.1016/j.cpc.2020.107746,of peak device bandwidth
+waLBerla,ldc_3d,1024,H100,f64,MLUPS,7000,MLUPS,,estimated from A100 scaling and H100/A100 BW ratio (~1.5x)
+Palabos,bgk_3d,128,Xeon (1 core),f64,MLUPS,3.5,MLUPS,10.1016/j.camwa.2020.03.022,single-core D3Q19 BGK Fig 12
+Palabos,bgk_3d,128,Xeon (24c),f64,MLUPS,55,MLUPS,10.1016/j.camwa.2020.03.022,24-core MPI D3Q19 BGK Fig 12
+Palabos,poiseuille,128,any,f64,convergence_order,2.0,--,10.1016/j.camwa.2020.03.022,standard second-order
+Palabos,cavity_Re100,128,any,f64,error_vs_Ghia,<1,%,10.1016/j.camwa.2020.03.022,estimated from published validation
+OpenLB,bgk_3d,128,Xeon (1 core),f64,MLUPS,4.2,MLUPS,10.1016/j.camwa.2020.04.033,single-core D3Q19 BGK
+OpenLB,bgk_3d,128,Xeon (24c),f64,MLUPS,65,MLUPS,10.1016/j.camwa.2020.04.033,24-core MPI D3Q19 BGK
+OpenLB,bgk_3d,256,V100,f64,MLUPS,1800,MLUPS,10.1016/j.camwa.2020.04.033,estimated from GPU extension paper
+OpenLB,poiseuille,128,any,f64,convergence_order,2.0,--,10.1016/j.camwa.2020.04.033,standard second-order
+Sailfish,bgk_2d,1024,GTX Titan,f32,MLUPS,3200,MLUPS,10.1016/j.cpc.2014.04.018,D2Q9 BGK single GPU
+Sailfish,bgk_2d,1024,GTX Titan,f64,MLUPS,1400,MLUPS,10.1016/j.cpc.2014.04.018,D2Q9 BGK single GPU
+Sailfish,bgk_3d,256,GTX Titan,f32,MLUPS,2200,MLUPS,10.1016/j.cpc.2014.04.018,D3Q19 BGK single GPU
+Sailfish,bgk_2d,1024,H100,f32,MLUPS,25000,MLUPS,,estimated from Titan scaling to H100 BW ratio (~5x)
+Basilisk,vof_axi,128,CPU (1 core),f64,convergence_order,2.0,--,10.1016/j.jcp.2009.04.042,AMR VOF Popinet 2009
+Basilisk,rayleigh_plateau,128,CPU (1 core),f64,pinchoff_ratio,0.66,--,,estimated from Popinet validation cases
+OpenFOAM,cavity_Re100,128,CPU (1 core),f64,error_vs_Ghia,<1,%,,icoFoam standard tutorial; finite-volume not LBM
+OpenFOAM,cavity_Re100,128,Xeon (24c),f64,MLUPS_equiv,~8,MLUPS,,estimated FVM throughput for comparison only

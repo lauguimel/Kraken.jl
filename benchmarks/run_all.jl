@@ -56,6 +56,20 @@ catch e
     @warn "Taylor-Green convergence failed" exception=(e, catch_backtrace())
 end
 
+include("convergence_hagen_poiseuille.jl")
+try
+    Nrs_hp, errs_hp = run_hagen_poiseuille_convergence()
+    rows_hp = [
+        (; case="hagen_poiseuille", N=Nr, error_L2=errs_hp[i],
+           observed_order = i > 1 ? log2(errs_hp[i-1] / errs_hp[i]) : NaN,
+           hardware_id = opts.hardware_id)
+        for (i, Nr) in enumerate(Nrs_hp)
+    ]
+    write_csv(joinpath(opts.output_dir, "convergence_hagen_poiseuille_$(opts.hardware_id)_$(timestamp()).csv"), rows_hp)
+catch e
+    @warn "Hagen-Poiseuille convergence failed" exception=(e, catch_backtrace())
+end
+
 if !opts.quick
     include("convergence_thermal.jl")
     try
