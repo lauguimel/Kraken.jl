@@ -168,6 +168,7 @@ export run_advection_2d
 export write_vtk, create_pvd, write_vtk_to_pvd
 export setup_output_dir, write_snapshot_2d!, write_snapshot_3d!
 export write_vtk_multiblock, write_snapshot_refined_2d!
+export open_paraview
 export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
 
 # .krk config system

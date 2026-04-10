@@ -93,6 +93,64 @@ function setup_output_dir(path::String)
 end
 
 """
+    open_paraview(output_dir::String; name::String="")
+
+Open ParaView on the `.pvd` time-series file found in `output_dir`.
+
+If `name` is given, looks for `<name>.pvd`; otherwise picks the first `.pvd`
+file in the directory.  Falls back to opening the directory itself if no `.pvd`
+is found (ParaView can browse `.vtr` files manually).
+
+Requires `paraview` to be on `PATH`.
+
+# Examples
+```julia
+# After running a simulation with VTK output:
+open_paraview("output/")
+
+# Specific PVD file:
+open_paraview("output/", name="cavity")
+
+# Remote HPC: rsync then view locally
+# rsync -avz aqua:~/runs/cavity/output/ output/
+# open_paraview("output/")
+```
+"""
+function open_paraview(output_dir::String; name::String="")
+    dir = abspath(output_dir)
+    if !isdir(dir)
+        error("Output directory not found: $dir")
+    end
+
+    # Find .pvd file
+    if !isempty(name)
+        pvd = joinpath(dir, name * ".pvd")
+    else
+        pvds = filter(f -> endswith(f, ".pvd"), readdir(dir))
+        pvd = isempty(pvds) ? "" : joinpath(dir, first(pvds))
+    end
+
+    target = isempty(pvd) || !isfile(pvd) ? dir : pvd
+
+    # Detect ParaView executable
+    exe = if Sys.isapple()
+        # Try common macOS app locations (newest first)
+        candidates = [
+            "/Applications/ParaView-6.0.0-RC1.app/Contents/MacOS/paraview",
+            "/Applications/ParaView-5.13.3.app/Contents/MacOS/paraview",
+        ]
+        idx = findfirst(isfile, candidates)
+        idx !== nothing ? candidates[idx] : "paraview"
+    else
+        "paraview"
+    end
+
+    @info "Opening ParaView on $target"
+    run(`$exe $target`; wait=false)
+    return target
+end
+
+"""
     write_snapshot_2d!(output_dir, step, Nx, Ny, dx, fields; pvd=nothing, time=0.0)
 
 Write a 2D VTK snapshot with a zero-padded filename `snapshot_NNNNNNN`.

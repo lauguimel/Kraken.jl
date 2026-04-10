@@ -1,130 +1,149 @@
-# KrakenView guide
+# Visualization guide
 
-`KrakenView` is the visualization companion to Kraken.jl. It has two
-roles:
+Kraken.jl writes standard **VTK** files (`.vtr` rectilinear grids) and
+**PVD** time-series collections via
+[WriteVTK.jl](https://github.com/jipolanco/WriteVTK.jl). The recommended
+viewer is [ParaView](https://www.paraview.org/) — the same tool used by
+OpenFOAM, Basilisk, SU2, and most CFD solvers.
 
-1. **Interactive viewing** of a `.krk` case — you see the domain,
-   boundary conditions, mesh, and any STL overlays *before* the solver
-   runs, then watch the fields evolve as the simulation steps.
-2. **Batch figure generation** for the documentation, reports, and the
-   benchmark pipeline — one declarative `spec` in, a folder of PNGs
-   out.
+For programmatic figure generation (docs, papers, benchmarks), see the
+[`KrakenView`](#batch-figures-with-krakenview) section below.
 
-It lives under `view/` in the repository as a separate sub-package.
-This is deliberate: the main `Kraken` package has no Makie dependency,
-so users who only want the solver get a light install.
-
-## Install KrakenView
-
-From the repository root:
+## Quick start
 
 ```julia
-using Pkg
-Pkg.activate("view")
-Pkg.instantiate()
-using KrakenView
+using Kraken
+
+# Run a case with VTK output
+setup = load_kraken("examples/cavity.krk")
+run_simulation(setup)
+
+# Open the results in ParaView
+open_paraview("output/")
 ```
 
-KrakenView pulls in Makie and a rendering backend. The documentation
-build and CI smoke tests use **CairoMakie** (offscreen, headless). For
-an interactive on-screen window, swap in **GLMakie** — this path is
-supported experimentally in v0.1.0 and will become the default user
-backend in v0.2.0.
+The `Output` directive in the `.krk` file controls what gets written:
 
-## Interactive viewing of a `.krk` file
+```
+Output vtk every 1000 [rho, ux, uy]
+```
 
-The simplest entry point is `view_krk`, which takes a `.krk` path and
-returns a `KrakenScene` containing the Figure and its Observables:
+This writes a `.vtr` snapshot every 1000 steps, and a `.pvd` file that
+ParaView uses to play back the time series.
+
+## `open_paraview` helper
 
 ```julia
-using KrakenView
-scene = view_krk("examples/cavity.krk")
-display(scene.figure)
+open_paraview("output/")               # picks the first .pvd found
+open_paraview("output/", name="cavity") # opens output/cavity.pvd
 ```
 
-Before the run starts, the scene already shows:
+On macOS, the helper auto-detects ParaView in `/Applications/`. On
+Linux/HPC, `paraview` must be on `PATH`.
 
-- the domain bounding box,
-- color-coded boundary-condition overlays (walls, inlets, outlets,
-  moving lids),
-- any refinement patches declared in the `.krk` file, and
-- bounding-box outlines for STL silhouette regions.
+## What ParaView gives you
 
-To drive the actual simulation with live updates, use `run_view`, which
-wires a callback into `Kraken.run_simulation` that pushes new field
-snapshots into the Observable behind the heatmap. You can choose which
-field to display via the `field` keyword: `:ux`, `:uy`, `:umag`, `:rho`,
-or `:T` (thermal cases).
+| Feature | How |
+|---------|-----|
+| Scalar heatmaps (ρ, T, C, φ) | Color by field in the pipeline |
+| Velocity vectors | Glyph filter |
+| Streamlines | Stream Tracer filter |
+| Iso-surfaces (VOF interface) | Contour filter on C = 0.5 |
+| 2D / 3D slices | Slice or Clip filter |
+| Time animation | Play button on the PVD time-series |
+| Derived quantities (vorticity, ∇p) | Calculator or Python filter |
+| Multi-block (grid refinement) | Native `.vtm` support |
+| Export images / videos | File → Save Screenshot / Save Animation |
 
-## Generating figures for documentation and reports
+## Following an HPC run (Aqua)
 
-For non-interactive use — building the docs, regenerating a benchmark
-figure, producing a batch of report images — KrakenView exposes
-`generate_figures`. You pass a vector of specs (one per figure) and it
-runs whatever simulations are needed, then saves every figure to disk.
+Typical workflow when running on the QUT Aqua cluster:
+
+### 1. Submit the job
+
+```bash
+ssh aqua
+cd ~/runs/cavity_fine
+qsub run.pbs
+```
+
+### 2. Monitor output remotely
+
+```bash
+# On your local machine — sync the VTK output periodically
+rsync -avz --include='*.pvd' --include='*.vtr' --include='*.vtm' \
+      --exclude='*' \
+      aqua:~/runs/cavity_fine/output/ ./output_cavity/
+
+# Or watch it live with a loop
+watch -n 30 'rsync -avz aqua:~/runs/cavity_fine/output/ ./output_cavity/'
+```
+
+### 3. View locally in ParaView
 
 ```julia
-using KrakenView
-
-spec = [
-    (case         = "cavity Re=100",
-     figure_type  = :heatmap,
-     output       = "cavity_umag.png",
-     options      = (colormap=:viridis, title="|u|"),
-     krk          = "examples/cavity.krk"),
-
-    (case         = "taylor-green convergence",
-     figure_type  = :convergence,
-     output       = "taylor_green_order.png",
-     options      = (theoretical_order=2.0,),
-     data         = (; N_values=[32, 64, 128, 256],
-                       errors=[1e-2, 2.5e-3, 6.25e-4, 1.56e-4])),
-]
-
-paths = generate_figures(spec; output_dir="docs/src/assets/figures")
+using Kraken
+open_paraview("output_cavity/")
 ```
 
-Each spec entry is a `NamedTuple` with:
+ParaView can reload the PVD as new snapshots arrive — use
+**File → Reload Files** or enable auto-reload via the Properties panel.
 
-- `case` — human-readable name, used in titles.
-- `figure_type` — one of `:heatmap`, `:profile`, `:convergence`,
-  `:streamlines`.
-- `output` — filename, relative to `output_dir`.
-- `options` — kwargs forwarded to the figure builder.
-- `krk` *or* `data` — either a `.krk` file to run, or precomputed data.
+### 4. Rsync workflow (recommended)
 
-## Supported figure types
+For large runs, add this to your PBS script to sync results periodically:
 
-| `figure_type`    | What it draws                            | Data required            |
-|------------------|------------------------------------------|--------------------------|
-| `:heatmap`       | 2D scalar field                          | `(; field)`              |
-| `:profile`       | Line profile (horizontal or vertical)    | `(; field, line)`        |
-| `:convergence`   | Log–log error vs. resolution             | `(; N_values, errors)`   |
-| `:streamlines`   | Streamlines over a velocity field        | `(; ux, uy)`             |
+```bash
+# In run.pbs — sync every 10 minutes while the job runs
+while kill -0 $JULIA_PID 2>/dev/null; do
+    rsync -avz output/ $LOCAL:~/results/$(basename $PWD)/output/
+    sleep 600
+done &
+```
 
-All figures are saved through `save_figure`, which picks the format
-from the filename extension (PNG and SVG are supported).
+Or use the post-job rsync pattern from the Kraken HPC workflow:
 
-## Headless mode
+```bash
+# After job completes
+rsync -avz aqua:~/runs/$CASE/output/ output/
+julia -e 'using Kraken; open_paraview("output/")'
+```
 
-For CI, documentation builds, and batch figure generation, activate
-CairoMakie before importing KrakenView so the figures render
-offscreen:
+## VTK output API
+
+| Function | Purpose |
+|----------|---------|
+| `write_vtk(file, Nx, Ny, dx, fields)` | Single 2D snapshot |
+| `write_snapshot_2d!(dir, step, ...)` | Numbered 2D snapshot |
+| `write_snapshot_3d!(dir, step, ...)` | Numbered 3D snapshot |
+| `create_pvd(file)` | Start a PVD time-series |
+| `write_vtk_to_pvd(pvd, ...)` | Add snapshot to PVD |
+| `write_vtk_multiblock(file, blocks)` | Multi-block for grid refinement |
+| `write_snapshot_refined_2d!(...)` | Refined domain snapshot |
+| `open_paraview(dir; name="")` | Launch ParaView on output |
+
+## Batch figures with KrakenView
+
+For non-interactive, programmatic figures (documentation, papers,
+benchmarks), the `view/` sub-package provides Makie-based figure
+generators. This is separate from ParaView — it produces PNGs/SVGs
+directly from Julia.
 
 ```julia
 using Pkg; Pkg.activate("view")
-using CairoMakie          # headless backend
+using CairoMakie   # headless backend
 using KrakenView
+
+spec = [
+    (case        = "cavity Re=100",
+     figure_type = :heatmap,
+     output      = "cavity_umag.png",
+     options     = (colormap=:viridis, title="|u|"),
+     krk         = "examples/cavity.krk"),
+]
+
+generate_figures(spec; output_dir="figures/")
 ```
 
-The main documentation site (the one you are reading) is built this way.
-
-## Limitations in v0.1.0
-
-- **2D only** for the interactive scene: `view_krk` of a `D3Q19`
-  setup raises a clear error. The 3D viewer is on the v0.2.0 roadmap.
-- **GLMakie experimental**: the default interactive backend will
-  become GLMakie in v0.2.0; for now, expect a few rough edges if you
-  use it instead of CairoMakie.
-- **STL regions** are rendered as bounding-box outlines rather than
-  true silhouettes. Accurate STL overlays are also v0.2.0.
+Supported figure types: `:heatmap`, `:profile`, `:convergence`,
+`:streamlines`. See the KrakenView API docs for details.
