@@ -1,29 +1,42 @@
 code,case,N,backend,precision,metric,value,unit,source_doi,notes
-Kraken.jl,bgk_2d,1024,H100,f64,MLUPS,5631,MLUPS,,baseline (3 separate kernels)
-Kraken.jl,bgk_2d,1024,H100,f64,MLUPS,12840,MLUPS,,fused stream+collide+macro
-Kraken.jl,bgk_2d,1024,H100,f32,MLUPS,24041,MLUPS,,AA-pattern + Float32
+Kraken.jl,bgk_2d,1024,H100 PCIe,f64,MLUPS,5631,MLUPS,,baseline (3 separate kernels)
+Kraken.jl,bgk_2d,1024,H100 PCIe,f64,MLUPS,12840,MLUPS,,fused stream+collide+macro
+Kraken.jl,bgk_2d,1024,H100 PCIe,f32,MLUPS,24041,MLUPS,,AA-pattern + Float32
 Kraken.jl,bgk_2d,256,CPU (M2),f64,MLUPS,26.5,MLUPS,,single-thread Apple M2
 Kraken.jl,poiseuille,128,any,f64,convergence_order,2.0,--,,Poiseuille flow
 Kraken.jl,cavity_Re100,128,any,f64,error_vs_Ghia,<1,%,,vs Ghia et al. 1982
 Kraken.jl,cavity_Re100,64,any,f64,error_vs_Ghia,~5,%,,vs Ghia et al. 1982
-waLBerla,ldc_3d,256,A100,f64,MLUPS,4700,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK Table 3
-waLBerla,ldc_3d,256,V100,f64,MLUPS,2800,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK Table 3
+FluidX3D,bgk_3d,256,H100 SXM,f32,MLUPS,17602,MLUPS,,D3Q19 SRT empty box; github.com/ProjectPhysX/FluidX3D
+FluidX3D,bgk_3d,256,H100 SXM,f16s,MLUPS,29561,MLUPS,,D3Q19 SRT FP32 compute + FP16 storage
+FluidX3D,bgk_3d,256,H200 SXM,f32,MLUPS,23056,MLUPS,,D3Q19 SRT
+FluidX3D,bgk_3d,256,H200 SXM,f16s,MLUPS,36610,MLUPS,,D3Q19 SRT FP32 compute + FP16 storage
+FluidX3D,bgk_3d,256,A100 SXM,f32,MLUPS,10228,MLUPS,,D3Q19 SRT
+FluidX3D,bgk_3d,256,A100 SXM,f16s,MLUPS,18448,MLUPS,,D3Q19 SRT FP32 compute + FP16 storage
+FluidX3D,bgk_3d,256,V100 SXM,f32,MLUPS,4471,MLUPS,,D3Q19 SRT
+FluidX3D,bgk_3d,256,RTX 4090,f32,MLUPS,5624,MLUPS,,D3Q19 SRT
+FluidX3D,bgk_3d,256,RTX 4090,f16s,MLUPS,11091,MLUPS,,D3Q19 SRT FP32 compute + FP16 storage
+FluidX3D,bgk_3d,256,RTX 3090,f32,MLUPS,5418,MLUPS,,D3Q19 SRT
+FluidX3D,bgk_3d,256,MI300X,f32,MLUPS,22867,MLUPS,,D3Q19 SRT OpenCL
+waLBerla,ldc_3d,256,A100,f64,MLUPS,4700,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK Table 3 (Bauer 2021)
+waLBerla,ldc_3d,256,V100,f64,MLUPS,2800,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK Table 3 (Bauer 2021)
 waLBerla,ldc_3d,256,Xeon 8280 (28c),f64,MLUPS,420,MLUPS,10.1016/j.cpc.2020.107746,D3Q19 BGK MPI 28 cores
 waLBerla,ldc_3d,256,A100,f64,bandwidth_efficiency,75,%,10.1016/j.cpc.2020.107746,of peak device bandwidth
-waLBerla,ldc_3d,1024,H100,f64,MLUPS,7000,MLUPS,,estimated from A100 scaling and H100/A100 BW ratio (~1.5x)
-Palabos,bgk_3d,128,Xeon (1 core),f64,MLUPS,3.5,MLUPS,10.1016/j.camwa.2020.03.022,single-core D3Q19 BGK Fig 12
-Palabos,bgk_3d,128,Xeon (24c),f64,MLUPS,55,MLUPS,10.1016/j.camwa.2020.03.022,24-core MPI D3Q19 BGK Fig 12
+OpenLB,bgk_3d,1000,4x A100,f32,GLUPS,24.8,GLUPS,,D3Q19 BGK lid-driven cavity 1000^3; openlb.net/performance
+OpenLB,bgk_3d,1000,A100 (per GPU),f32,MLUPS,6200,MLUPS,,implicit: 24.8 GLUPS / 4 GPUs
+OpenLB,bgk_3d,,512x A100 (HoreKa),f32,TLUPS,1.33,TLUPS,,weak scaling; openlb.net HoreKa benchmarks
+OpenLB,bgk_3d,128,Xeon (1 core),f64,MLUPS,4.2,MLUPS,10.1016/j.camwa.2020.04.033,single-core D3Q19 BGK (Krause 2021)
+OpenLB,bgk_3d,128,Xeon (24c),f64,MLUPS,65,MLUPS,10.1016/j.camwa.2020.04.033,24-core MPI D3Q19 BGK (Krause 2021)
+OpenLB,poiseuille,128,any,f64,convergence_order,2.0,--,10.1016/j.camwa.2020.04.033,standard second-order
+Palabos,bgk_3d,128,Xeon (1 core),f64,MLUPS,3.5,MLUPS,10.1016/j.camwa.2020.03.022,single-core D3Q19 BGK (Latt 2021)
+Palabos,bgk_3d,128,Xeon (24c),f64,MLUPS,55,MLUPS,10.1016/j.camwa.2020.03.022,24-core MPI D3Q19 BGK (Latt 2021)
+Palabos,bgk_3d,,A100 SXM4,f32,MLUPS,9481,MLUPS,,GPU port C++ stdpar; arxiv 2506.09242
+Palabos,bgk_3d,,A100 SXM4,f64,MLUPS,4921,MLUPS,,GPU port C++ stdpar; arxiv 2506.09242
+Palabos,bgk_3d,,A100 SXM4,f32,bandwidth_efficiency,73,%,,of peak device bandwidth; arxiv 2506.09242
+XLB,bgk_3d,,8x A100 DGX,f32,MLUPS,11448,MLUPS,,JAX differentiable LBM; arxiv 2311.16080 (8-GPU total)
 Palabos,poiseuille,128,any,f64,convergence_order,2.0,--,10.1016/j.camwa.2020.03.022,standard second-order
 Palabos,cavity_Re100,128,any,f64,error_vs_Ghia,<1,%,10.1016/j.camwa.2020.03.022,estimated from published validation
-OpenLB,bgk_3d,128,Xeon (1 core),f64,MLUPS,4.2,MLUPS,10.1016/j.camwa.2020.04.033,single-core D3Q19 BGK
-OpenLB,bgk_3d,128,Xeon (24c),f64,MLUPS,65,MLUPS,10.1016/j.camwa.2020.04.033,24-core MPI D3Q19 BGK
-OpenLB,bgk_3d,256,V100,f64,MLUPS,1800,MLUPS,10.1016/j.camwa.2020.04.033,estimated from GPU extension paper
-OpenLB,poiseuille,128,any,f64,convergence_order,2.0,--,10.1016/j.camwa.2020.04.033,standard second-order
-Sailfish,bgk_2d,1024,GTX Titan,f32,MLUPS,3200,MLUPS,10.1016/j.cpc.2014.04.018,D2Q9 BGK single GPU
-Sailfish,bgk_2d,1024,GTX Titan,f64,MLUPS,1400,MLUPS,10.1016/j.cpc.2014.04.018,D2Q9 BGK single GPU
-Sailfish,bgk_3d,256,GTX Titan,f32,MLUPS,2200,MLUPS,10.1016/j.cpc.2014.04.018,D3Q19 BGK single GPU
-Sailfish,bgk_2d,1024,H100,f32,MLUPS,25000,MLUPS,,estimated from Titan scaling to H100 BW ratio (~5x)
-Basilisk,vof_axi,128,CPU (1 core),f64,convergence_order,2.0,--,10.1016/j.jcp.2009.04.042,AMR VOF Popinet 2009
-Basilisk,rayleigh_plateau,128,CPU (1 core),f64,pinchoff_ratio,0.66,--,,estimated from Popinet validation cases
-OpenFOAM,cavity_Re100,128,CPU (1 core),f64,error_vs_Ghia,<1,%,,icoFoam standard tutorial; finite-volume not LBM
-OpenFOAM,cavity_Re100,128,Xeon (24c),f64,MLUPS_equiv,~8,MLUPS,,estimated FVM throughput for comparison only
+Sailfish,bgk_2d,1024,GTX Titan,f32,MLUPS,3200,MLUPS,10.1016/j.cpc.2014.04.018,D2Q9 BGK single GPU (Januszewski 2014)
+Sailfish,bgk_2d,1024,GTX Titan,f64,MLUPS,1400,MLUPS,10.1016/j.cpc.2014.04.018,D2Q9 BGK single GPU (Januszewski 2014)
+Sailfish,bgk_3d,256,GTX Titan,f32,MLUPS,2200,MLUPS,10.1016/j.cpc.2014.04.018,D3Q19 BGK single GPU (Januszewski 2014)
+Basilisk,vof_axi,128,CPU (1 core),f64,convergence_order,2.0,--,10.1016/j.jcp.2009.04.042,AMR VOF (Popinet 2009)
+OpenFOAM,cavity_Re100,128,CPU (1 core),f64,error_vs_Ghia,<1,%,,icoFoam standard tutorial; FVM not LBM
