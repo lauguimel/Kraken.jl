@@ -17,10 +17,14 @@ function run_taylor_green_convergence()
         k = 2π / N
         decay = exp(-2 * ν * k^2 * max_steps)
 
-        # Analytical ux field at final time
+        # Analytical ux field at final time.
+        # Coordinates follow the driver: x = i - 1, y = j - 1 (0-based,
+        # consistent with initialize_taylor_green_2d).
         ux_analytical = zeros(N, N)
         for j in 1:N, i in 1:N
-            ux_analytical[i, j] = -u0 * cos(k * (i - 0.5)) * sin(k * (j - 0.5)) * decay
+            x = i - 1
+            y = j - 1
+            ux_analytical[i, j] = -u0 * cos(k * x) * sin(k * y) * decay
         end
 
         # L2 relative error
