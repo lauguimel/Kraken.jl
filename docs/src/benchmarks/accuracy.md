@@ -28,6 +28,8 @@ Measured convergence order: **2.00** (least-squares fit over Ny = 16–128).
 
 ![Poiseuille error convergence](../assets/figures/poiseuille_error.png)
 
+![Poiseuille convergence log-log](../assets/figures/convergence_poiseuille.png)
+
 ### Reproduce
 
 ```bash
@@ -53,6 +55,8 @@ u_x(x,y,t) = -u_0\,\cos(kx)\,\sin(ky)\,e^{-2\nu k^2 t}
 Measured convergence order: **2.00**.
 
 ![Taylor-Green convergence](../assets/figures/taylor_green_convergence.png)
+
+![Taylor-Green convergence log-log](../assets/figures/convergence_taylor_green.png)
 
 ### Reproduce
 
