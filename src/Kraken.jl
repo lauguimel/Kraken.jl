@@ -8,6 +8,10 @@ acceleration via KernelAbstractions.jl.
 """
 module Kraken
 
+# PNG/GIF output hooks — populated by KrakenMakieExt when CairoMakie is loaded
+const _png_saver = Ref{Any}(nothing)
+const _gif_saver = Ref{Any}(nothing)
+
 # --- Lattice definitions ---
 include("lattice/lattice.jl")
 include("lattice/d2q9.jl")

@@ -32,11 +32,11 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         @test faces[:west].type == :wall
 
         # Output
-        @test setup.output !== nothing
-        @test setup.output.format == :vtk
-        @test setup.output.interval == 10000
-        @test :rho in setup.output.fields
-        @test :ux in setup.output.fields
+        @test !isempty(setup.outputs)
+        @test setup.outputs[1].format == :vtk
+        @test setup.outputs[1].interval == 10000
+        @test :rho in setup.outputs[1].fields
+        @test :ux in setup.outputs[1].fields
 
         # No obstacles, no modules
         @test isempty(setup.regions)
@@ -614,5 +614,61 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         faces = Set(b.face for b in setup.boundaries)
         @test :west in faces && :east in faces
         @test :north in faces && :south in faces
+    end
+
+    @testset "Output png parses" begin
+        setup = parse_kraken("""
+            Simulation test_png D2Q9
+            Domain L = 1.0 x 1.0  N = 16 x 16
+            Physics nu = 0.1
+            Boundary north velocity ux = 0.1
+            Boundary south wall
+            Boundary east wall
+            Boundary west wall
+            Run 100 steps
+            Output png every 1000 [|u|]
+        """)
+        @test length(setup.outputs) == 1
+        @test setup.outputs[1].format == :png
+        @test setup.outputs[1].interval == 1000
+        @test Symbol("|u|") in setup.outputs[1].fields
+        @test setup.outputs[1].fps == 10  # default
+    end
+
+    @testset "Output gif with fps parses" begin
+        setup = parse_kraken("""
+            Simulation test_gif D2Q9
+            Domain L = 1.0 x 1.0  N = 16 x 16
+            Physics nu = 0.1
+            Boundary north velocity ux = 0.1
+            Boundary south wall
+            Boundary east wall
+            Boundary west wall
+            Run 100 steps
+            Output gif every 100 [|u|] fps=15
+        """)
+        @test length(setup.outputs) == 1
+        @test setup.outputs[1].format == :gif
+        @test setup.outputs[1].interval == 100
+        @test setup.outputs[1].fps == 15
+    end
+
+    @testset "Multiple Output directives (vtk + png)" begin
+        setup = parse_kraken("""
+            Simulation test_multi D2Q9
+            Domain L = 1.0 x 1.0  N = 16 x 16
+            Physics nu = 0.1
+            Boundary north velocity ux = 0.1
+            Boundary south wall
+            Boundary east wall
+            Boundary west wall
+            Run 100 steps
+            Output vtk every 10000 [rho, ux, uy]
+            Output png every 1000 [|u|]
+        """)
+        @test length(setup.outputs) == 2
+        fmts = Set(o.format for o in setup.outputs)
+        @test :vtk in fmts
+        @test :png in fmts
     end
 end

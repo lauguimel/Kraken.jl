@@ -81,7 +81,12 @@ struct OutputSetup
     interval::Int
     fields::Vector{Symbol}
     directory::String
+    fps::Int             # frames per second (used by :gif format, default 10)
 end
+
+# Convenience constructor without fps (backward compat)
+OutputSetup(format, interval, fields, directory) =
+    OutputSetup(format, interval, fields, directory, 10)
 
 """
     DiagnosticsSetup
@@ -135,7 +140,7 @@ struct SimulationSetup
     initial::Union{InitialSetup, Nothing}
     modules::Vector{Symbol}
     max_steps::Int
-    output::Union{OutputSetup, Nothing}
+    outputs::Vector{OutputSetup}
     diagnostics::Union{DiagnosticsSetup, Nothing}
     refinements::Vector{RefineSetup}
     velocity_field::Union{InitialSetup, Nothing}  # prescribed velocity expressions (ux, uy)
@@ -343,7 +348,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     end
     is_axisym = :axisymmetric in modules
     max_steps = 0
-    output = nothing
+    outputs = OutputSetup[]
     diagnostics = nothing
     refinements = RefineSetup[]
     rheology_setups = RheologySetup[]
@@ -378,7 +383,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
         elseif keyword == "Run"
             max_steps = _parse_run(line)
         elseif keyword == "Output"
-            output = _parse_output(line)
+            push!(outputs, _parse_output(line))
         elseif keyword == "Diagnostics"
             diagnostics = _parse_diagnostics(line)
         elseif keyword == "Rheology"
@@ -444,7 +449,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
 
     setup = SimulationSetup(name, lattice, domain, physics, user_vars,
                             regions, boundaries, initial, modules,
-                            max_steps, output, diagnostics, refinements,
+                            max_steps, outputs, diagnostics, refinements,
                             velocity_field, rheology_setups)
 
     # --- Validate face names against lattice dimensionality ---
@@ -923,12 +928,14 @@ function _parse_run(line::String)
     return parse(Int, m.captures[1])
 end
 
-"""Parse: Output <format> every <N> [field1, field2, ...]"""
+"""Parse: Output <format> every <N> [field1, field2, ...] [fps=<N>]"""
 function _parse_output(line::String)
     # Format
     fmt_m = match(r"^Output\s+(\w+)", line)
     fmt_m === nothing && throw(ArgumentError("Cannot parse Output format: $line"))
     format = Symbol(fmt_m.captures[1])
+    format in (:vtk, :png, :gif) || throw(ArgumentError(
+        "Unknown Output format '$format'. Use vtk, png, or gif."))
 
     # Interval
     int_m = match(r"every\s+(\d+)", line)
@@ -945,13 +952,17 @@ function _parse_output(line::String)
         end
     end
 
+    # fps parameter (optional, for gif format)
+    fps = 10
+    fps_m = match(r"fps\s*=\s*(\d+)", line)
+    if fps_m !== nothing
+        fps = parse(Int, fps_m.captures[1])
+    end
+
     # Directory (optional, default "output/")
-    dir_m = match(r"\[([^\]]*)\].*\[([^\]]*)\]", line)
-    # Try: Output vtk every 1000 [/path/to/dir] [fields]
-    # Or simpler: directory is just "output/" by default
     directory = "output/"
 
-    return OutputSetup(format, interval, fields, directory)
+    return OutputSetup(format, interval, fields, directory, fps)
 end
 
 """Parse: Diagnostics every <N> [col1, col2, ...]"""

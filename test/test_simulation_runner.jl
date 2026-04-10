@@ -194,7 +194,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
             setup.name, setup.lattice, setup.domain, setup.physics,
             setup.user_vars, setup.regions, setup.boundaries, setup.initial,
             setup.modules, setup.max_steps,
-            OutputSetup(:vtk, 100, [:rho, :ux, :uy], outdir),
+            [OutputSetup(:vtk, 100, [:rho, :ux, :uy], outdir)],
             setup.diagnostics, setup.refinements, setup.velocity_field,
             setup.rheology)
 
@@ -247,7 +247,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
             "cavity_3d", :D3Q19, dom3, setup_2d.physics,
             setup_2d.user_vars, setup_2d.regions, setup_2d.boundaries,
             setup_2d.initial, setup_2d.modules, 10,
-            setup_2d.output, setup_2d.diagnostics, setup_2d.refinements,
+            setup_2d.outputs, setup_2d.diagnostics, setup_2d.refinements,
             setup_2d.velocity_field, setup_2d.rheology)
         result = run_simulation(setup_3d)
         @test !any(isnan, result.ρ)
@@ -275,7 +275,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
             "hagen_poiseuille", :D2Q9, setup_base.domain, physics_axi,
             setup_base.user_vars, setup_base.regions, setup_base.boundaries,
             setup_base.initial, [:axisymmetric], 50,
-            setup_base.output, setup_base.diagnostics, setup_base.refinements,
+            setup_base.outputs, setup_base.diagnostics, setup_base.refinements,
             setup_base.velocity_field, setup_base.rheology)
         result = run_simulation(setup_axi)
         @test !any(isnan, result.ρ)
@@ -286,6 +286,23 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         setup = load_kraken(path)
         @test :axisymmetric in setup.modules
         result = run_simulation(path; max_steps=100)
+        @test !any(isnan, result.ρ)
+    end
+
+    @testset "PNG output without CairoMakie emits warning" begin
+        setup = parse_kraken("""
+            Simulation png_warn D2Q9
+            Domain L = 1.0 x 1.0  N = 16 x 16
+            Physics nu = 0.1
+            Boundary north velocity ux = 0.1
+            Boundary south wall
+            Boundary east wall
+            Boundary west wall
+            Run 50 steps
+            Output png every 10 [|u|]
+        """)
+        # Should warn (CairoMakie not loaded) but not error
+        result = @test_logs (:warn, r"CairoMakie") run_simulation(setup)
         @test !any(isnan, result.ρ)
     end
 end

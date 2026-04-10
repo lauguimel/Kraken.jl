@@ -75,13 +75,19 @@ function run_simulation(filename::String;
                           callback=callback, callback_every=callback_every)
 end
 
+"""Find the first output spec with format `fmt`, or nothing."""
+function _find_output(setup::SimulationSetup, fmt::Symbol)
+    idx = findfirst(o -> o.format == fmt, setup.outputs)
+    return idx === nothing ? nothing : setup.outputs[idx]
+end
+
 """Return a copy of `setup` with `max_steps` overridden."""
 function _override_max_steps(setup::SimulationSetup, new_max::Int)
     return SimulationSetup(
         setup.name, setup.lattice, setup.domain, setup.physics,
         setup.user_vars, setup.regions, setup.boundaries, setup.initial,
         setup.modules, new_max,
-        setup.output, setup.diagnostics, setup.refinements,
+        setup.outputs, setup.diagnostics, setup.refinements,
         setup.velocity_field, setup.rheology)
 end
 
@@ -177,12 +183,19 @@ function run_simulation(setup::SimulationSetup;
     bc_handlers = _build_boundary_handlers(setup, dx, dy, Nx, Ny, T, backend)
 
     # --- Setup output ---
+    vtk_out = _find_output(setup, :vtk)
     pvd = nothing
     output_dir = ""
-    if setup.output !== nothing
-        output_dir = setup_output_dir(setup.output.directory)
+    if vtk_out !== nothing
+        output_dir = setup_output_dir(vtk_out.directory)
         pvd = create_pvd(joinpath(output_dir, setup.name))
     end
+
+    # PNG/GIF output setup
+    png_out = _find_output(setup, :png)
+    gif_out = _find_output(setup, :gif)
+    gif_frames = _init_gif_frames(gif_out)
+    _check_image_backend(png_out, gif_out)
 
     # --- Time loop ---
     for step in 1:setup.max_steps
@@ -214,10 +227,14 @@ function run_simulation(setup::SimulationSetup;
         # 5. Swap
         f_in, f_out = f_out, f_in
 
-        # 6. Output
-        if setup.output !== nothing && step % setup.output.interval == 0
-            _write_output(ρ, ux, uy, setup, pvd, output_dir, dx, step)
+        # 6. VTK Output
+        if vtk_out !== nothing && step % vtk_out.interval == 0
+            _write_output(ρ, ux, uy, setup, vtk_out, pvd, output_dir, dx, step)
         end
+
+        # 6b. PNG/GIF snapshots
+        _maybe_save_png(png_out, ρ, ux, uy, setup, output_dir, step)
+        _maybe_collect_gif(gif_out, gif_frames, ρ, ux, uy, step)
 
         # 7. Callback (live visualization / probes)
         if callback !== nothing && step % callback_every == 0
@@ -229,6 +246,9 @@ function run_simulation(setup::SimulationSetup;
     if pvd !== nothing
         vtk_save(pvd)
     end
+
+    # Finalize GIF
+    _maybe_save_gif(gif_out, gif_frames, setup, output_dir)
 
     # Return on CPU
     result = (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), setup=setup)
@@ -482,10 +502,11 @@ function _apply_initial_conditions!(f_in, f_out, setup::SimulationSetup,
 end
 
 """Write VTK output."""
-function _write_output(ρ, ux, uy, setup::SimulationSetup, pvd, output_dir, dx, step;
+function _write_output(ρ, ux, uy, setup::SimulationSetup, out::OutputSetup,
+                       pvd, output_dir, dx, step;
                        extra_fields=Dict{String,Any}())
     fields_dict = Dict{String, Matrix{Float64}}()
-    field_set = Set(setup.output.fields)
+    field_set = Set(out.fields)
 
     if :rho in field_set
         fields_dict["rho"] = Array(ρ)
@@ -507,6 +528,82 @@ function _write_output(ρ, ux, uy, setup::SimulationSetup, pvd, output_dir, dx, 
     Nx, Ny = setup.domain.Nx, setup.domain.Ny
     fname = joinpath(output_dir, "$(setup.name)_$(lpad(step, 8, '0'))")
     write_vtk_to_pvd(pvd, fname, Nx, Ny, dx, fields_dict, Float64(step))
+end
+
+# --- PNG/GIF output helpers ---
+
+"""Compute a requested field from macroscopic arrays."""
+function _compute_field(field::Symbol, ρ, ux, uy)
+    if field == Symbol("|u|")
+        return sqrt.(Array(ux).^2 .+ Array(uy).^2)
+    elseif field == :rho
+        return Array(ρ)
+    elseif field == :ux
+        return Array(ux)
+    elseif field == :uy
+        return Array(uy)
+    else
+        return Array(ρ)  # fallback
+    end
+end
+
+"""Emit a warning if png/gif output is requested but CairoMakie is not loaded."""
+function _check_image_backend(png_out, gif_out)
+    need = png_out !== nothing || gif_out !== nothing
+    if need && _png_saver[] === nothing
+        @warn "Output png/gif requested but CairoMakie is not loaded. " *
+              "Add `using CairoMakie` before `using Kraken` to enable PNG/GIF output."
+    end
+end
+
+"""Initialize GIF frame storage."""
+function _init_gif_frames(gif_out)
+    gif_out === nothing && return Dict{Symbol, Vector{Matrix{Float64}}}()
+    frames = Dict{Symbol, Vector{Matrix{Float64}}}()
+    for f in gif_out.fields
+        frames[f] = Matrix{Float64}[]
+    end
+    return frames
+end
+
+"""Save a PNG snapshot if it's time and the backend is loaded."""
+function _maybe_save_png(png_out, ρ, ux, uy, setup, output_dir, step)
+    png_out === nothing && return
+    _png_saver[] === nothing && return
+    step % png_out.interval != 0 && return
+
+    dir = isempty(output_dir) ? setup_output_dir(png_out.directory) : output_dir
+    for field_name in png_out.fields
+        data = _compute_field(field_name, ρ, ux, uy)
+        fname = joinpath(dir, "$(setup.name)_$(field_name)_$(lpad(step, 8, '0')).png")
+        _png_saver[](fname, data, string(field_name))
+    end
+end
+
+"""Collect a GIF frame if it's time."""
+function _maybe_collect_gif(gif_out, gif_frames, ρ, ux, uy, step)
+    gif_out === nothing && return
+    _gif_saver[] === nothing && return
+    step % gif_out.interval != 0 && return
+
+    for field_name in gif_out.fields
+        data = _compute_field(field_name, ρ, ux, uy)
+        push!(gif_frames[field_name], copy(data))
+    end
+end
+
+"""Assemble and save GIF after simulation completes."""
+function _maybe_save_gif(gif_out, gif_frames, setup, output_dir)
+    gif_out === nothing && return
+    _gif_saver[] === nothing && return
+
+    dir = isempty(output_dir) ? setup_output_dir(gif_out.directory) : output_dir
+    for field_name in gif_out.fields
+        frames = gif_frames[field_name]
+        isempty(frames) && continue
+        fname = joinpath(dir, "$(setup.name)_$(field_name).gif")
+        _gif_saver[](fname, frames, string(field_name); fps=gif_out.fps)
+    end
 end
 
 # ===========================================================================
@@ -552,8 +649,9 @@ function _run_advection_only(setup::SimulationSetup;
         return evaluate(C_expr; kw...)
     end
 
-    output_interval = setup.output !== nothing ? setup.output.interval : 0
-    output_dir = setup.output !== nothing ? setup.output.directory : ""
+    _adv_vtk = _find_output(setup, :vtk)
+    output_interval = _adv_vtk !== nothing ? _adv_vtk.interval : 0
+    output_dir = _adv_vtk !== nothing ? _adv_vtk.directory : ""
 
     adv_result = run_advection_2d(; Nx=Nx, Ny=Ny, max_steps=setup.max_steps,
                                    velocity_fn=velocity_fn,
@@ -659,8 +757,9 @@ function _run_twophase_vof(setup::SimulationSetup;
     # --- Setup output ---
     pvd = nothing
     output_dir = ""
-    if setup.output !== nothing
-        output_dir = setup_output_dir(setup.output.directory)
+    _vof_vtk = _find_output(setup, :vtk)
+    if _vof_vtk !== nothing
+        output_dir = setup_output_dir(_vof_vtk.directory)
         pvd = create_pvd(joinpath(output_dir, setup.name))
     end
 
@@ -696,8 +795,8 @@ function _run_twophase_vof(setup::SimulationSetup;
         f_in, f_out = f_out, f_in
 
         # 7. Output
-        if setup.output !== nothing && step % setup.output.interval == 0
-            _write_output(ρ, ux, uy, setup, pvd, output_dir, Float64(dx), step;
+        if _vof_vtk !== nothing && step % _vof_vtk.interval == 0
+            _write_output(ρ, ux, uy, setup, _vof_vtk, pvd, output_dir, Float64(dx), step;
                           extra_fields=Dict("C" => Array(C), "kappa" => Array(κ)))
         end
     end

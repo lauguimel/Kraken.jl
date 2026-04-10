@@ -1,5 +1,7 @@
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DocumenterCitations = "daee34ce-89f3-4625-b898-19384cb65244"
 JuliaSyntax = "70703baa-626e-46a2-a12c-08ffd08c73b4"
@@ -14,7 +16,7 @@ WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
 Kraken = {path = ".."}
 
 [compat]
-CairoMakie = "0.12, 0.13"
+CairoMakie = "0.12, 0.13, 0.14, 0.15"
 Documenter = "1"
 DocumenterCitations = "1"
 JuliaSyntax = "1"
