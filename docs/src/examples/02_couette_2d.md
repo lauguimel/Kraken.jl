@@ -10,7 +10,7 @@ EditURL = "02_couette_2d.jl"
 **Validates against:** analytical linear profile
 ``u_x(y) = u_\text{wall}\, y / L_y``
 
-**Download:** [`couette.krk`](../assets/couette.krk)
+**Download:** [`couette.krk`](../assets/krk/couette.krk)
 
 **Hardware:** Apple M2, ~10s wall-clock at N = 4×32
 

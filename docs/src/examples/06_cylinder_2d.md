@@ -10,7 +10,7 @@ immersed solid via inline geometry predicate
 **Validates against:** Schäfer & Turek (1996) benchmark 2D-1
 [`10.1007/978-3-322-89849-4_39`](https://doi.org/10.1007/978-3-322-89849-4_39)
 
-**Download:** [`cylinder.krk`](../assets/cylinder.krk)
+**Download:** [`cylinder.krk`](../assets/krk/cylinder.krk)
 
 **Hardware:** Apple M2, ~45s wall-clock at 200×50
 

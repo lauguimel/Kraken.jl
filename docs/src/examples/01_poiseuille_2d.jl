@@ -8,7 +8,7 @@
 # **Validates against:** analytical parabolic profile
 # ``u_x(y) = \frac{F_x}{2\nu}\, y\,(L_y - y)``
 #
-# **Download:** [`poiseuille.krk`](../assets/poiseuille.krk)
+# **Download:** [`poiseuille.krk`](../assets/krk/poiseuille.krk)
 #
 # **Hardware:** Apple M2, ~10s wall-clock at N = 4×32
 #

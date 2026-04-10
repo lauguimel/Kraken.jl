@@ -10,7 +10,7 @@ EditURL = "09_hagen_poiseuille.jl"
 **Validates against:** analytical parabolic profile
 ``u_z(r) = \frac{F_z R^2}{4\nu}\left(1 - (r/R)^2\right)``
 
-**Download:** [`hagen_poiseuille.krk`](../assets/hagen_poiseuille.krk)
+**Download:** [`hagen_poiseuille.krk`](../assets/krk/hagen_poiseuille.krk)
 
 **Hardware:** Apple M2, ~10s wall-clock at Nz = 4, Nr = 32
 

@@ -7,7 +7,7 @@
 # **Validates against:** Ghia, Ghia, Shin (1982)
 # [`10.1016/0021-9991(82)90058-4`](https://doi.org/10.1016/0021-9991(82)90058-4)
 #
-# **Download:** [`cavity.krk`](../assets/cavity.krk)
+# **Download:** [`cavity.krk`](../assets/krk/cavity.krk)
 #
 # **Hardware:** Apple M2, ~30s wall-clock at N = 128×128
 #

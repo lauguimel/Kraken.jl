@@ -7,10 +7,10 @@ EditURL = "08_rayleigh_benard.jl"
 **Concepts:** [Thermal DDF](../theory/08_thermal_ddf.md) ·
 Boussinesq coupling
 
-**Validates against:** De Vahl Davis (1983) — Nusselt number vs Rayleigh.
-TODO Phase 4.6: add DOI to `refs.bib` (`devahldavis1983`).
+**Validates against:** De Vahl Davis (1983) — Nusselt number vs Rayleigh
+[`10.1002/fld.1650030305`](https://doi.org/10.1002/fld.1650030305)
 
-**Download:** [`rayleigh_benard.krk`](../assets/rayleigh_benard.krk)
+**Download:** [`rayleigh_benard.krk`](../assets/krk/rayleigh_benard.krk)
 
 **Hardware:** Apple M2, ~90s wall-clock at 128×64 (Ra = 10⁵)
 
@@ -52,7 +52,7 @@ where:
 **Below** the critical value ``\mathrm{Ra}_c \approx 1708`` (for no-slip
 walls), viscosity and thermal diffusion win: the fluid remains still and
 heat transfer is purely conductive.  This is what we tested in the
-[heat conduction example](@ref).
+[heat conduction example](07_heat_conduction.md).
 
 **Above** ``\mathrm{Ra}_c``, buoyancy wins: the conductive state becomes
 unstable and **convection rolls** appear spontaneously.  Hot fluid rises in
@@ -74,7 +74,7 @@ for Rayleigh--Bénard convection.
 
 In Kraken's LBM implementation, the Boussinesq force is incorporated via the
 [Guo forcing scheme](@cite guo2002boussinesq), which ensures second-order
-accuracy.  The DDF thermal solver (see [heat conduction](@ref)) provides the
+accuracy.  The DDF thermal solver (see [heat conduction](07_heat_conduction.md)) provides the
 temperature field at each time step.
 
 
@@ -190,7 +190,7 @@ thermal boundary layers; in the bulk, the profile is nearly flat.
 
 This example confirms that Kraken correctly couples the thermal and flow
 solvers.  The next step in complexity is
-[Hagen--Poiseuille flow](@ref), which introduces axisymmetric geometry.
+[Hagen--Poiseuille flow](09_hagen_poiseuille.md), which introduces axisymmetric geometry.
 
 
 ## References

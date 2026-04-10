@@ -6,7 +6,7 @@
 # **Validates against:** analytical exponential decay
 # ``u(t) = u_0\,\exp(-2\nu k^2 t)``
 #
-# **Download:** [`taylor_green.krk`](../assets/taylor_green.krk)
+# **Download:** [`taylor_green.krk`](../assets/krk/taylor_green.krk)
 #
 # **Hardware:** Apple M2, ~5s wall-clock at N = 64×64
 #

@@ -35,7 +35,7 @@ result = run_cavity_2d(config)
 - **Theory** — from kinetic theory to lattice Boltzmann (10 progressive chapters)
 - **Examples** — validated simulations with plots and convergence studies
 - **Benchmarks** — performance and accuracy measurements
-- **[API Reference](@ref)** — complete function reference
+- **[API Reference](api/config.md)** — complete function reference
 
 ## Physics Capabilities
 

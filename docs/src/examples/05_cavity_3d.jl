@@ -3,10 +3,10 @@
 # **Concepts:** [From 2D to 3D](../theory/06_from_2d_to_3d.md) ·
 # [Boundary conditions](../theory/05_boundary_conditions.md)
 #
-# **Validates against:** Ku, Hirsh & Taylor (1987) — centerline profiles.
-# TODO Phase 4.6: add DOI to `refs.bib` (`kuhirshtaylor1987`).
+# **Validates against:** Ku, Hirsh & Taylor (1987) — centerline profiles
+# [`10.1016/0021-9991(87)90193-8`](https://doi.org/10.1016/0021-9991(87)90193-8)
 #
-# **Download:** [`cavity_3d.krk`](../assets/cavity_3d.krk)
+# **Download:** [`cavity_3d.krk`](../assets/krk/cavity_3d.krk)
 #
 # **Hardware:** Apple M2, ~5 min wall-clock at N = 64³ (CPU) /
 # NVIDIA H100, ~30s at N = 64³

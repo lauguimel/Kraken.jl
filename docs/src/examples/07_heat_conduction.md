@@ -10,7 +10,7 @@ EditURL = "07_heat_conduction.jl"
 **Validates against:** analytical 1D steady-state profile
 ``T(x) = 1 - x/L``
 
-**Download:** [`heat_conduction.krk`](../assets/heat_conduction.krk)
+**Download:** [`heat_conduction.krk`](../assets/krk/heat_conduction.krk)
 
 **Hardware:** Apple M2, ~15s wall-clock at 128×32
 
@@ -172,7 +172,7 @@ D2Q9 equilibrium is exact for linear fields.
 | Absence of spurious convection at low Ra | yes |
 
 With pure conduction confirmed, we can move on to
-[Rayleigh--Bénard convection](@ref) where buoyancy drives actual fluid motion.
+[Rayleigh--Bénard convection](08_rayleigh_benard.md) where buoyancy drives actual fluid motion.
 
 
 ## References

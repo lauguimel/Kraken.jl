@@ -6,7 +6,7 @@
 # **Validates against:** tutorial example — no quantitative validation target.
 # Each .krk in this tutorial is a working case covered by other example pages.
 #
-# **Download:** [`cavity.krk`](../assets/cavity.krk) (and the other .krk files
+# **Download:** [`cavity.krk`](../assets/krk/cavity.krk) (and the other .krk files
 # linked from their respective example pages)
 #
 # **Hardware:** n/a (tutorial, cases run from other pages)
