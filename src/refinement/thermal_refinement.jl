@@ -223,10 +223,15 @@ function _fill_thermal_ghost_temporal!(g_fine, g_coarse, g_prev,
     # g_prev local origin: coarse index i_lo maps to g_prev[1,:]
     i_lo = max(i_offset - 1, 1)
     j_lo = max(j_offset - 1, 1)
+    # Actual filled size (patches at domain edges have shorter margins)
+    i_c_end = i_offset + Nx_inner ÷ ratio - 1
+    j_c_end = j_offset + Ny_inner ÷ ratio - 1
+    Ni_prev = min(i_c_end + 1, Nx_c) - i_lo + 1
+    Nj_prev = min(j_c_end + 1, Ny_c) - j_lo + 1
     kernel! = _fill_thermal_ghost_temporal_kernel!(backend)
     kernel!(g_fine, g_coarse, g_prev, ratio, Nx_inner, Ny_inner, n_ghost,
             i_offset, j_offset, Nx_c, Ny_c, t_frac,
-            i_lo, j_lo, Int(size(g_prev, 1)), Int(size(g_prev, 2));
+            i_lo, j_lo, Ni_prev, Nj_prev;
             ndrange=(Nx_f, Ny_f))
     KernelAbstractions.synchronize(backend)
 end
@@ -497,11 +502,11 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
             # Collide thermal
             collide_thermal_2d!(thermal.g_out, patch.ux, patch.uy, thermal.omega_T)
             # Collide flow with Boussinesq.
-            # Body force scales with the local lattice spacing: in fine units
-            # the acceleration must be multiplied by `ratio` so it produces
-            # the same physical acceleration as on the coarse grid.
+            # Body force scales with the local lattice spacing: acoustic scaling
+            # gives a_fine = a_phys·dt_f²/dx_f = a_coarse/ratio, so the lattice
+            # acceleration must be divided (not multiplied) by the ratio.
             collide_boussinesq_2d!(patch.f_out, thermal.Temp, patch.is_solid,
-                                    patch.omega, T(β_g) * T(patch.ratio),
+                                    patch.omega, T(β_g) / T(patch.ratio),
                                     T(T_ref_buoy))
 
             # Swap for next sub-step

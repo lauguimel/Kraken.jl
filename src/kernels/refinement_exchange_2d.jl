@@ -352,12 +352,19 @@ function prolongate_f_rescaled_temporal_2d!(
     Ny_f = Ny_inner + 2 * n_ghost
     i_lo = max(i_c_start - 1, 1)
     j_lo = max(j_c_start - 1, 1)
+    # Compute actual filled size (matching save_coarse_state! logic).
+    # Patches at domain boundaries have a shorter margin, so the filled
+    # region can be smaller than the allocated buffer.
+    i_c_end = i_c_start + Nx_inner ÷ ratio - 1
+    j_c_end = j_c_start + Ny_inner ÷ ratio - 1
+    Ni_prev = min(i_c_end + 1, Nx_c) - i_lo + 1
+    Nj_prev = min(j_c_end + 1, Ny_c) - j_lo + 1
     kernel! = prolongate_f_rescaled_temporal_2d_kernel!(backend)
     kernel!(f_fine, f_curr, rho_curr, ux_curr, uy_curr,
             f_prev, rho_prev, ux_prev, uy_prev,
             ratio, Nx_inner, Ny_inner, n_ghost,
             i_c_start, j_c_start, Nx_c, Ny_c, alpha, T(t_frac),
-            i_lo, j_lo, Int(size(f_prev, 1)), Int(size(f_prev, 2));
+            i_lo, j_lo, Ni_prev, Nj_prev;
             ndrange=(Nx_f, Ny_f))
     KernelAbstractions.synchronize(backend)
 end
