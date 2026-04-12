@@ -66,6 +66,8 @@ include("refinement/refinement.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
+include("kernels/refinement_exchange_3d.jl")
+include("refinement/refinement_3d.jl")
 
 # --- I/O ---
 include("io/vtk_writer.jl")
@@ -197,6 +199,10 @@ export rescaling_factor_c2f, rescaling_factor_f2c
 export prolongate_f_rescaled_2d!, restrict_f_rescaled_2d!
 export temporal_interpolate_2d!, copy_macroscopic_overlap_2d!
 export advance_refined_step!
+export RefinementPatch3D, RefinedDomain3D
+export create_patch_3d, create_refined_domain_3d, advance_refined_step_3d!
+export prolongate_f_rescaled_3d!, prolongate_f_rescaled_full_3d!
+export prolongate_f_rescaled_temporal_3d!, restrict_f_rescaled_3d!
 export TwophaseRefinedArrays, create_twophase_patch_arrays, advance_twophase_refined_step!
 
 # STL geometry
