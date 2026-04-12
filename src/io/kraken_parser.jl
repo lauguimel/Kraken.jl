@@ -455,8 +455,8 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     # --- Validate face names against lattice dimensionality ---
     _validate_faces_vs_lattice(setup)
 
-    # --- Run sanity checks (warnings only) ---
-    sanity_check(setup)
+    # --- Run sanity checks (no summary at parse time — printed at run time) ---
+    sanity_check(setup; verbose=false)
 
     return [setup]
 end
@@ -1196,56 +1196,622 @@ function _probe_U_ref(boundaries::Vector{BoundarySetup})
     return 0.1
 end
 
+# ══════════════════════════════════════════════════════════════════════
+#  LBM parameter calculator / advisor
+# ══════════════════════════════════════════════════════════════════════
+
 """
-    sanity_check(setup::SimulationSetup) -> Nothing
+    LBMParams
 
-Validate LBM stability parameters for a parsed setup.
-Emits `@warn` for soft issues and throws `ErrorException` for tau < 0.5.
-
-Checks:
-- `tau < 0.5`  → error (unstable)
-- `tau < 0.51` → warn (marginally stable)
-- `U_ref > 0.1` → warn (compressibility; standard LBM bound)
-- `U_ref > 0.3` → warn (CFL risk)
-
-Note: the compressibility bound is expressed on `U_ref` (lattice units)
-rather than on `Ma = U_ref / cs`, because the textbook bound U_ref ≤ 0.1
-maps to Ma ≤ 0.1*sqrt(3) ≈ 0.173, not Ma ≤ 0.1.
+Computed lattice-Boltzmann parameters with feasibility assessment.
+Returned by [`lbm_params`](@ref).
 """
-function sanity_check(setup::SimulationSetup)
+struct LBMParams
+    # --- Inputs (lattice units) ---
+    Re::Float64
+    N::Int
+    U_ref::Float64
+    # --- Derived ---
+    nu::Float64       # lattice viscosity
+    tau::Float64      # relaxation time
+    omega::Float64    # relaxation rate
+    Ma::Float64       # Mach number
+    # --- Quality assessment ---
+    feasible::Bool           # all hard constraints satisfied
+    regime::Symbol           # :optimal, :acceptable, :marginal, :diffusive, :infeasible
+    warnings::Vector{String} # human-readable diagnostics
+    # --- Recommendations ---
+    recommended_N::Int           # best N for this Re at default U_ref
+    recommended_U_ref::Float64   # best U_ref for this Re and N
+end
+
+function Base.show(io::IO, p::LBMParams)
+    status = p.feasible ? "✓ feasible" : "✗ INFEASIBLE"
+    println(io, "LBMParams ($status, regime = $(p.regime))")
+    println(io, "  Re = $(p.Re), N = $(p.N), U_ref = $(round(p.U_ref, digits=6))")
+    println(io, "  ν  = $(round(p.nu, digits=6)), τ = $(round(p.tau, digits=4)), ω = $(round(p.omega, digits=6))")
+    println(io, "  Ma = $(round(p.Ma, digits=4))")
+    if !isempty(p.warnings)
+        println(io, "  Diagnostics:")
+        for w in p.warnings
+            println(io, "    ⚠ ", w)
+        end
+    end
+    if !p.feasible || p.regime in (:diffusive, :marginal)
+        # Compute τ for each recommendation
+        τ_rec_N = 3.0 * 0.01 * p.recommended_N / p.Re + 0.5
+        τ_rec_U = 3.0 * p.recommended_U_ref * p.N / p.Re + 0.5
+        println(io, "  Recommendations:")
+        println(io, "    → N = $(p.recommended_N) at U_ref = 0.01 → τ = $(round(τ_rec_N, digits=3))")
+        println(io, "    → U_ref = $(round(p.recommended_U_ref, digits=6)) at N = $(p.N) → τ = $(round(τ_rec_U, digits=3))")
+        # Low-Re advisory
+        if p.Re < 0.1
+            println(io, "  Note: Re = $(p.Re) < 0.1 — Stokes regime.")
+            println(io, "    LBM is poorly suited for very low Re (τ grows as 1/Re).")
+            println(io, "    Best achievable τ at N=10: $(round(3.0 * 0.058 * 10 / p.Re + 0.5, digits=1))")
+        end
+    end
+end
+
+# τ regime thresholds
+const _TAU_UNSTABLE   = 0.5
+const _TAU_MARGINAL   = 0.51
+const _TAU_OPTIMAL_HI = 2.0
+const _TAU_ACCEPT_HI  = 10.0
+const _TAU_ABSURD     = 100.0
+
+# Target τ values for recommendations (best → fallback)
+const _TAU_TARGETS = [1.0, 1.5, 2.0, 5.0, 10.0]
+
+"""Recommend best N for given (Re, U_ref), trying τ targets from ideal to fallback."""
+function _recommend_N(Re, U_ref, N_min)
+    for τ_t in _TAU_TARGETS
+        N_rec = ceil(Int, Re * (τ_t - 0.5) / (3.0 * U_ref))
+        N_rec >= N_min && return N_rec
+    end
+    return N_min  # best effort
+end
+
+"""Recommend best U_ref for given (Re, N), trying τ targets from ideal to fallback."""
+function _recommend_U(Re, N, U_min, U_max)
+    for τ_t in _TAU_TARGETS
+        U_rec = Re * (τ_t - 0.5) / (3.0 * N)
+        U_min ≤ U_rec ≤ U_max && return U_rec
+    end
+    # If all targets give U outside bounds, clamp to nearest feasible
+    U_for_tau10 = Re * (_TAU_TARGETS[end] - 0.5) / (3.0 * N)
+    return clamp(U_for_tau10, U_min, U_max)
+end
+
+"""
+    lbm_params(; Re, N, U_ref=0.01, L_ref=N)
+
+Compute all LBM lattice parameters from physical inputs and assess feasibility.
+
+Returns an [`LBMParams`](@ref) with derived quantities, regime classification,
+diagnostics, and concrete recommendations.
+
+# Regimes (based on τ = 3ν + 0.5, where ν = U_ref × L_ref / Re)
+
+| Regime       | τ range       | Meaning                                    |
+|:-------------|:--------------|:-------------------------------------------|
+| `:optimal`   | 0.51 – 2.0    | BGK accurate, best precision               |
+| `:acceptable`| 2.0 – 10.0    | OK with MRT, some numerical diffusion       |
+| `:marginal`  | 0.5 – 0.51    | Nearly unstable, MRT mandatory              |
+| `:diffusive` | 10.0 – 100.0  | Collision quasi-inactive, MRT mandatory     |
+| `:infeasible`| < 0.5 or > 100| Cannot run — parameters must change         |
+
+# Additional constraints checked
+- **Mach number**: Ma = U_ref × √3 ≤ 0.17 (compressibility)
+- **CFL**: U_ref ≤ 0.3
+- **Float32 precision**: U_ref ≥ 1e-5
+- **Resolution**: N ≥ 10
+
+# Examples
+```julia
+julia> lbm_params(Re=100, N=128)         # standard case
+julia> lbm_params(Re=0.01, N=64)         # your problematic case
+julia> lbm_params(Re=0.01, N=64, U_ref=0.001)  # with adjusted velocity
+```
+"""
+function lbm_params(; Re::Real, N::Integer, U_ref::Real=0.01, L_ref::Real=N)
+    Re = Float64(Re)
+    N = Int(N)
+    U_ref = Float64(U_ref)
+    L_ref = Float64(L_ref)
+
+    # --- Derived quantities ---
+    ν   = U_ref * L_ref / Re
+    τ   = 3ν + 0.5
+    ω   = 1.0 / τ
+    cs  = 1.0 / sqrt(3.0)
+    Ma  = U_ref / cs
+
+    warnings = String[]
+    feasible = true
+
+    # --- Regime classification ---
+    regime = if τ < _TAU_UNSTABLE
+        feasible = false
+        push!(warnings, "τ = $(round(τ, digits=4)) < 0.5 — UNSTABLE (negative effective viscosity)")
+        :infeasible
+    elseif τ < _TAU_MARGINAL
+        push!(warnings, "τ = $(round(τ, digits=4)) ≈ 0.5 — marginally stable, MRT mandatory")
+        :marginal
+    elseif τ ≤ _TAU_OPTIMAL_HI
+        :optimal
+    elseif τ ≤ _TAU_ACCEPT_HI
+        push!(warnings, "τ = $(round(τ, digits=2)) — numerical diffusion significant, MRT recommended")
+        :acceptable
+    elseif τ ≤ _TAU_ABSURD
+        push!(warnings, "τ = $(round(τ, digits=1)) — collision quasi-inactive (ω = $(round(ω, digits=5))), " *
+                        "only $(round(ω*100, digits=1))% relaxation per step")
+        :diffusive
+    else
+        feasible = false
+        push!(warnings, "τ = $(round(τ, digits=0)) — absurd, advective physics dead " *
+                        "(ω = $(round(ω, digits=6)))")
+        :infeasible
+    end
+
+    # --- Mach / compressibility ---
+    if Ma > 0.3 * sqrt(3.0)
+        feasible = false
+        push!(warnings, "Ma = $(round(Ma, digits=3)) > 0.52 — CFL violation, will diverge")
+    elseif Ma > 0.1 * sqrt(3.0)
+        push!(warnings, "Ma = $(round(Ma, digits=3)) > 0.17 — compressibility errors > 1%")
+    end
+
+    # --- Float32 precision ---
+    if U_ref < 1e-5 && U_ref > 0
+        push!(warnings, "U_ref = $(U_ref) — round-off dominates in Float32 " *
+                        "(relative precision ~ $(round(eps(Float32)/U_ref, digits=0)))")
+    elseif U_ref < 1e-3 && U_ref > 0
+        push!(warnings, "U_ref = $(U_ref) — use Float64 for best accuracy")
+    end
+
+    # --- Resolution ---
+    if N < 10
+        push!(warnings, "N = $N — insufficient spatial resolution")
+    end
+    if Re > 0 && N / Re < 1.0
+        push!(warnings, "N/Re = $(round(N/Re, digits=2)) < 1 — boundary layer under-resolved")
+    end
+
+    # --- Recommendations ---
+    # Goal: find (U_ref, N) that gives τ in optimal range [0.55, 2.0]
+    # Constraints: Ma ≤ 0.1 (U ≤ 0.058), U ≥ 1e-5, N ≥ 10
+    #
+    # τ = 3·U·N/Re + 0.5  ⟹  U·N = Re·(τ-0.5)/3
+    #
+    # Strategy: target τ = 1.0 (ideal). If that requires U < 1e-5 or N < 10,
+    # relax τ target upward until feasible, capping at τ = 10 (MRT acceptable).
+    U_max = 0.058  # Ma ≈ 0.1
+    U_min = 1e-5
+    N_min_rec = 10
+
+    # For recommended_N: fix U = min(0.01, U_max) and solve N
+    rec_U_fixed = min(0.01, U_max)
+    rec_N = _recommend_N(Re, rec_U_fixed, N_min_rec)
+
+    # For recommended_U: fix N and solve U
+    rec_U_for_N = _recommend_U(Re, N, U_min, U_max)
+
+    return LBMParams(Re, N, U_ref, ν, τ, ω, Ma, feasible, regime,
+                     warnings, rec_N, rec_U_for_N)
+end
+
+"""
+    lbm_params(setup::SimulationSetup)
+
+Extract parameters from a parsed `.krk` setup and compute [`LBMParams`](@ref).
+"""
+function lbm_params(setup::SimulationSetup)
+    params = setup.physics.params
+    ν = get(params, :nu, NaN)
+    isnan(ν) && error("No viscosity (nu) in setup — cannot compute LBM parameters.")
+    Re = get(params, :Re, NaN)
+    N = min(setup.domain.Nx, setup.domain.Ny)
+    U_ref = _probe_U_ref(setup.boundaries)
+
+    # If Re not stored, recompute from ν
+    if isnan(Re) && U_ref > 0
+        Re = U_ref * N / ν
+    end
+
+    return lbm_params(; Re=Re, N=N, U_ref=U_ref, L_ref=N)
+end
+
+"""
+    lbm_params_table(; Re, N_range, U_ref=0.01)
+
+Print a comparison table for multiple grid sizes at a given Re.
+
+# Example
+```julia
+lbm_params_table(Re=0.01, N_range=[8, 16, 32, 64, 128])
+```
+"""
+function lbm_params_table(; Re::Real, N_range, U_ref::Real=0.01)
+    Re = Float64(Re)
+    U_ref = Float64(U_ref)
+    cs = 1.0 / sqrt(3.0)
+    Ma = U_ref / cs
+
+    println("LBM parameter space for Re = $Re, U_ref = $U_ref (Ma = $(round(Ma, digits=4)))")
+    println("─"^78)
+    println(rpad("N", 6), rpad("ν", 12), rpad("τ", 10), rpad("ω", 12),
+            rpad("regime", 14), "status")
+    println("─"^78)
+
+    for N in N_range
+        p = lbm_params(; Re=Re, N=Int(N), U_ref=U_ref)
+        status = p.feasible ? "✓" : "✗"
+        nw = length(p.warnings)
+        extra = nw > 0 && p.feasible ? " ($(nw) warning$(nw>1 ? "s" : ""))" : ""
+        println(rpad(N, 6),
+                rpad(round(p.nu, digits=6), 12),
+                rpad(round(p.tau, digits=4), 10),
+                rpad(round(p.omega, digits=6), 12),
+                rpad(p.regime, 14),
+                status, extra)
+    end
+
+    println("─"^78)
+    # Show best achievable configuration
+    rec = lbm_params(; Re=Re, N=64, U_ref=U_ref)
+    rec_τ = 3.0 * 0.01 * rec.recommended_N / Re + 0.5
+    rec_regime = rec_τ < 0.51 ? "marginal" : rec_τ ≤ 2.0 ? "optimal" :
+                 rec_τ ≤ 10.0 ? "acceptable" : rec_τ ≤ 100.0 ? "diffusive" : "infeasible"
+    println("Best config: N = $(rec.recommended_N), U_ref = 0.01 → τ = $(round(rec_τ, digits=3)) ($rec_regime)")
+    if Re < 0.1
+        # Show the physical limit
+        τ_min_possible = 3.0 * 0.058 * 10 / Re + 0.5  # N=10, Ma=0.1
+        println("Low-Re limit: Re = $Re < 0.1, best possible τ ≈ $(round(τ_min_possible, digits=1)) (N=10, Ma=0.1)")
+    end
+end
+
+"""
+    SanityIssue
+
+A single validation issue found by `sanity_check`.
+`level` is `:error`, `:warn`, or `:info`.
+"""
+struct SanityIssue
+    level::Symbol      # :error, :warn, :info
+    category::Symbol   # :relaxation, :compressibility, :resolution, :thermal, :twophase, :rheology, :refinement
+    message::String
+end
+
+function _push_issue!(issues, level, category, msg)
+    push!(issues, SanityIssue(level, category, msg))
+end
+
+# ── 1. Relaxation checks (τ, ω) ──────────────────────────────────────
+
+function _check_relaxation!(issues, setup)
     ν = get(setup.physics.params, :nu, NaN)
+    isnan(ν) && return
+    τ = 3ν + 0.5
+    ω = 1.0 / τ
+    if τ < 0.5
+        _push_issue!(issues, :error, :relaxation,
+            "tau = $(round(τ, digits=4)) < 0.5 (unstable, ν = $(round(ν, digits=6)) is negative or zero). " *
+            "Fix: increase ν, or use Setup reynolds with larger L_ref / smaller Re.")
+    elseif τ < 0.51
+        _push_issue!(issues, :warn, :relaxation,
+            "tau = $(round(τ, digits=4)) is very close to 0.5 (marginally stable). " *
+            "MRT collision recommended. Fix: increase ν from $(round(ν, digits=6)), " *
+            "or reduce Re / increase N from $(setup.domain.Nx).")
+    end
+    if τ > 100.0
+        _push_issue!(issues, :error, :relaxation,
+            "tau = $(round(τ, digits=1)) is absurdly large (ω = $(round(ω, digits=6))). " *
+            "Advective physics is dead — collision does almost nothing. " *
+            "Fix: decrease ν (=$(round(ν, digits=4))), e.g. increase Re or decrease N.")
+    elseif τ > 10.0
+        _push_issue!(issues, :warn, :relaxation,
+            "tau = $(round(τ, digits=2)) is very large (ω = $(round(ω, digits=4))). " *
+            "Collision relaxes only $(round(ω*100, digits=1))% per step — numerical diffusion dominates. " *
+            "Fix: decrease ν (=$(round(ν, digits=4))), e.g. increase Re or decrease N.")
+    end
+end
+
+# ── 2. Compressibility checks (Ma, U_ref) ────────────────────────────
+
+function _check_compressibility!(issues, setup)
+    U_ref = _probe_U_ref(setup.boundaries)
+    cs = 1.0 / sqrt(3.0)
+    if U_ref < 1e-6 && U_ref > 0.0
+        _push_issue!(issues, :warn, :compressibility,
+            "U_ref = $(U_ref) is near zero — round-off errors will dominate in Float32. " *
+            "Fix: increase U_ref or use Float64.")
+    end
+    # Textbook bound: U_ref ≤ 0.1 (Krüger et al. 2017)
+    if U_ref > 0.3
+        Ma = U_ref / cs
+        _push_issue!(issues, :error, :compressibility,
+            "U_ref = $(round(U_ref, digits=4)) > 0.3, Mach = $(round(Ma, digits=3)) (CFL-critical, will diverge). " *
+            "Fix: decrease U_ref or increase N from $(setup.domain.Nx).")
+    elseif U_ref > 0.1
+        Ma = U_ref / cs
+        _push_issue!(issues, :warn, :compressibility,
+            "U_ref = $(round(U_ref, digits=4)) > 0.1, Mach = $(round(Ma, digits=3)) (compressibility errors likely). " *
+            "Fix: decrease U_ref to ≤ 0.1 or increase grid N.")
+    end
+end
+
+# ── 3. Spatial resolution checks ─────────────────────────────────────
+
+function _check_resolution!(issues, setup)
+    N = min(setup.domain.Nx, setup.domain.Ny)
+    if N < 10
+        _push_issue!(issues, :warn, :resolution,
+            "N = $N is very coarse — insufficient for quantitative results.")
+    end
+    Re = get(setup.physics.params, :Re, NaN)
+    if !isnan(Re) && Re > 0 && N / Re < 1.0
+        _push_issue!(issues, :warn, :resolution,
+            "N/Re = $(round(N/Re, digits=2)) < 1 — boundary layer under-resolved. " *
+            "Fix: increase N (currently $N) or reduce Re (currently $(round(Re, digits=1))).")
+    end
+end
+
+# ── 4. Thermal checks (if :thermal module) ───────────────────────────
+
+function _check_thermal!(issues, setup)
+    :thermal in setup.modules || return
+    params = setup.physics.params
+    α = get(params, :alpha, NaN)
+    if isnan(α)
+        _push_issue!(issues, :warn, :thermal,
+            "Module thermal is active but no thermal diffusivity (alpha) found. " *
+            "It may be computed internally, but verify your setup.")
+        return
+    end
+    τ_α = 3α + 0.5
+    if τ_α < 0.5
+        _push_issue!(issues, :error, :thermal,
+            "Thermal tau = $(round(τ_α, digits=4)) < 0.5 (unstable). " *
+            "Fix: increase alpha (=$(round(α, digits=6))).")
+    elseif τ_α < 0.51
+        _push_issue!(issues, :warn, :thermal,
+            "Thermal tau = $(round(τ_α, digits=4)) is marginally stable.")
+    end
+    if τ_α > 10.0
+        _push_issue!(issues, :warn, :thermal,
+            "Thermal tau = $(round(τ_α, digits=2)) is very large — thermal diffusion too fast for this grid.")
+    end
+    Pr = get(params, :Pr, NaN)
+    if !isnan(Pr) && (Pr < 0.1 || Pr > 10.0)
+        _push_issue!(issues, :warn, :thermal,
+            "Pr = $(round(Pr, digits=3)) is extreme for SRT thermal LBM. " *
+            "MRT collision recommended for accuracy.")
+    end
+end
+
+# ── 5. Two-phase checks (if :twophase_vof module) ────────────────────
+
+function _check_twophase!(issues, setup)
+    :twophase_vof in setup.modules || return
+    params = setup.physics.params
+    ν   = get(params, :nu, NaN)
+    ν_l = get(params, :nu_l, ν)
+    ν_g = get(params, :nu_g, ν)
+    if !isnan(ν_l) && !isnan(ν_g) && ν_g > 0
+        ratio_ν = ν_l / ν_g
+        if ratio_ν > 100.0 || ratio_ν < 0.01
+            _push_issue!(issues, :warn, :twophase,
+                "Viscosity ratio ν_l/ν_g = $(round(ratio_ν, digits=1)) is extreme. " *
+                "MRT collision strongly recommended.")
+        end
+        τ_g = 3ν_g + 0.5
+        if τ_g < 0.51
+            _push_issue!(issues, :warn, :twophase,
+                "Gas-phase tau = $(round(τ_g, digits=4)) is marginally stable.")
+        end
+        if τ_g > 10.0
+            _push_issue!(issues, :warn, :twophase,
+                "Gas-phase tau = $(round(τ_g, digits=2)) is very large — over-diffusive gas phase.")
+        end
+    end
+    ρ_l = get(params, :rho_l, NaN)
+    ρ_g = get(params, :rho_g, NaN)
+    if !isnan(ρ_l) && !isnan(ρ_g) && ρ_g > 0
+        ratio_ρ = ρ_l / ρ_g
+        if ratio_ρ > 100.0
+            _push_issue!(issues, :warn, :twophase,
+                "Density ratio ρ_l/ρ_g = $(round(ratio_ρ, digits=0)) > 100. " *
+                "Pressure-based model (phase-field) recommended.")
+        end
+    end
+end
+
+# ── 6. Rheology checks ───────────────────────────────────────────────
+
+function _check_rheology!(issues, setup)
+    isempty(setup.rheology) && return
+    for rs in setup.rheology
+        # Estimate minimum viscosity from model bounds
+        ν_min = get(rs.params, :nu_min, NaN)
+        if !isnan(ν_min)
+            τ_min = 3ν_min + 0.5
+            if τ_min < 0.51
+                _push_issue!(issues, :warn, :rheology,
+                    "Rheology model $(rs.model) (phase=$(rs.phase)) has nu_min=$(round(ν_min, digits=6)) " *
+                    "→ tau_min=$(round(τ_min, digits=4)). Local instability possible. " *
+                    "Fix: increase nu_min or use MRT.")
+            end
+        end
+    end
+end
+
+# ── 7. Refinement checks ─────────────────────────────────────────────
+
+function _check_refinement!(issues, setup)
+    isempty(setup.refinements) && return
+    ν = get(setup.physics.params, :nu, NaN)
+    isnan(ν) && return
+    τ_base = 3ν + 0.5
+    for ref in setup.refinements
+        ratio = ref.ratio
+        τ_fine = ratio * (τ_base - 0.5) + 0.5
+        if τ_fine < 0.51
+            _push_issue!(issues, :warn, :refinement,
+                "Patch '$(ref.name)' (ratio=$ratio): fine-grid tau = $(round(τ_fine, digits=4)) " *
+                "is marginally stable after Filippova-Hanel rescaling.")
+        end
+        if τ_fine > 10.0
+            _push_issue!(issues, :warn, :refinement,
+                "Patch '$(ref.name)' (ratio=$ratio): fine-grid tau = $(round(τ_fine, digits=2)) " *
+                "is very large — over-diffusive fine grid.")
+        end
+    end
+end
+
+# ── Parameter summary ─────────────────────────────────────────────────
+
+function _print_parameter_summary(setup)
+    dom = setup.domain
+    params = setup.physics.params
+    ν = get(params, :nu, NaN)
+    τ = isnan(ν) ? NaN : 3ν + 0.5
+    ω = isnan(τ) ? NaN : 1.0 / τ
+    Re = get(params, :Re, NaN)
+    U_ref = _probe_U_ref(setup.boundaries)
+    cs = 1.0 / sqrt(3.0)
+    Ma = U_ref / cs
+
+    grid = dom.Nz > 1 ? "$(dom.Nx)×$(dom.Ny)×$(dom.Nz)" : "$(dom.Nx)×$(dom.Ny)"
+    mods = isempty(setup.modules) ? "none" : join(string.(setup.modules), ", ")
+
+    lines = String[]
+    push!(lines, "N = $grid, lattice = $(setup.lattice)")
     if !isnan(ν)
-        τ = 3ν + 0.5
-        if τ < 0.5
-            error("Sanity check failed: tau = $τ < 0.5 (unstable). " *
-                  "To fix: increase ν (current $ν), or use Setup reynolds with " *
-                  "a larger L_ref / smaller Re.")
-        elseif τ < 0.51
-            @warn "tau = $τ is very close to 0.5 (marginally stable). " *
-                  "To fix: increase ν from $ν, or reduce Re / increase grid N " *
-                  "from $(setup.domain.Nx)."
+        push!(lines, "ν = $(round(ν, digits=6)), τ = $(round(τ, digits=4)), ω = $(round(ω, digits=4))")
+    end
+    re_str = isnan(Re) ? "" : "Re = $(round(Re, digits=2)), "
+    push!(lines, "$(re_str)Ma = $(round(Ma, digits=4)), U_ref = $(round(U_ref, digits=4))")
+    push!(lines, "Modules: $mods")
+    push!(lines, "Steps: $(setup.max_steps)")
+
+    # Refinement patches
+    if !isempty(setup.refinements)
+        for ref in setup.refinements
+            τ_fine = isnan(ν) ? NaN : ref.ratio * (τ - 0.5) + 0.5
+            push!(lines, "  Refine '$(ref.name)': ratio=$(ref.ratio), τ_fine=$(round(τ_fine, digits=4))")
         end
     end
 
-    U_ref = _probe_U_ref(setup.boundaries)
-    # Standard LBM compressibility bound is U_ref ≤ 0.1 in lattice units
-    # (textbook, e.g. Krüger et al. 2017). In Mach-number space this is
-    # Ma = U_ref/cs ≤ 0.1*sqrt(3) ≈ 0.173 — NOT Ma ≤ 0.1. We therefore
-    # compare U_ref against 0.1 directly to avoid a false-positive that
-    # fired on every default case where U_ref fell back to 0.1 exactly.
-    if U_ref > 0.1
-        cs = 1.0 / sqrt(3.0)
-        Ma = U_ref / cs
-        @warn "Lattice velocity U_ref = $U_ref exceeds 0.1 " *
-              "(Mach number Ma = $Ma, compressibility errors likely). " *
-              "To fix: decrease U_ref to ≤ 0.1, " *
-              "or increase grid N to reduce lattice velocity."
+    @info "LBM parameters\n  " * join(lines, "\n  ")
+end
+
+# ── Issue emission ────────────────────────────────────────────────────
+
+function _emit_issues(issues)
+    errors = String[]
+    for issue in issues
+        if issue.level === :error
+            push!(errors, "[$(issue.category)] $(issue.message)")
+            @error "Sanity check [$(issue.category)]: $(issue.message)"
+        elseif issue.level === :warn
+            @warn "Sanity check [$(issue.category)]: $(issue.message)"
+        else
+            @info "Sanity check [$(issue.category)]: $(issue.message)"
+        end
     end
-    if U_ref > 0.3
-        @warn "Lattice velocity U_ref = $U_ref > 0.3 (CFL risk). " *
-              "To fix: decrease U_ref, or increase N from $(setup.domain.Nx)."
+    if !isempty(errors)
+        error("Sanity check failed with $(length(errors)) error(s):\n" *
+              join(["  • " * e for e in errors], "\n"))
     end
-    return nothing
+end
+
+# ── Main entry point ──────────────────────────────────────────────────
+
+"""
+    sanity_check(setup::SimulationSetup; verbose=true) -> Vector{SanityIssue}
+
+Validate LBM parameters for a parsed setup.
+
+Runs 7 families of checks:
+1. **Relaxation** — τ too low (unstable) or too high (diffusion-dominated)
+2. **Compressibility** — Mach number / CFL bounds
+3. **Resolution** — grid points vs Reynolds number
+4. **Thermal** — thermal τ and Prandtl range (if `:thermal` module)
+5. **Two-phase** — viscosity/density ratios (if `:twophase_vof` module)
+6. **Rheology** — local τ bounds from non-Newtonian models
+7. **Refinement** — fine-grid τ after Filippova-Hanel rescaling
+
+Returns a `Vector{SanityIssue}` for programmatic inspection.
+Emits `@warn` for soft issues, throws `ErrorException` for critical ones,
+and prints a parameter summary when `verbose=true`.
+"""
+function sanity_check(setup::SimulationSetup; verbose::Bool=true)
+    issues = SanityIssue[]
+
+    _check_relaxation!(issues, setup)
+    _check_compressibility!(issues, setup)
+    _check_resolution!(issues, setup)
+    _check_thermal!(issues, setup)
+    _check_twophase!(issues, setup)
+    _check_rheology!(issues, setup)
+    _check_refinement!(issues, setup)
+
+    verbose && _print_parameter_summary(setup)
+    _emit_issues(issues)
+
+    return issues
+end
+
+"""
+    sanity_check_sweep(setups::Vector{SimulationSetup}; verbose=true) -> Vector{Vector{SanityIssue}}
+
+Validate all setups in a sweep. Prints a compact summary table and returns
+per-setup issues. Does NOT throw on :error — instead marks them so the caller
+can decide whether to skip or abort.
+"""
+function sanity_check_sweep(setups::Vector{SimulationSetup}; verbose::Bool=true)
+    all_issues = Vector{SanityIssue}[]
+    rows = String[]
+
+    for (i, setup) in enumerate(setups)
+        issues = SanityIssue[]
+        _check_relaxation!(issues, setup)
+        _check_compressibility!(issues, setup)
+        _check_resolution!(issues, setup)
+        _check_thermal!(issues, setup)
+        _check_twophase!(issues, setup)
+        _check_rheology!(issues, setup)
+        _check_refinement!(issues, setup)
+        push!(all_issues, issues)
+
+        # Build compact row
+        params = setup.physics.params
+        ν = get(params, :nu, NaN)
+        τ = isnan(ν) ? NaN : 3ν + 0.5
+        Re = get(params, :Re, NaN)
+        U_ref = _probe_U_ref(setup.boundaries)
+        n_err = count(i -> i.level == :error, issues)
+        n_warn = count(i -> i.level == :warn, issues)
+        status = n_err > 0 ? "✗" : n_warn > 0 ? "⚠" : "✓"
+        re_str = isnan(Re) ? "—" : string(round(Re, digits=2))
+        push!(rows, "$status  #$i  Re=$re_str  τ=$(round(τ, digits=3))  U=$(round(U_ref, digits=4))  " *
+                     "err=$n_err warn=$n_warn")
+    end
+
+    if verbose
+        @info "Sweep sanity check ($(length(setups)) cases)\n  " * join(rows, "\n  ")
+        # Emit warnings for problematic cases
+        for (i, issues) in enumerate(all_issues)
+            for issue in issues
+                if issue.level == :error
+                    @warn "Case #$i [$(issue.category)]: $(issue.message)"
+                end
+            end
+        end
+    end
+
+    return all_issues
 end
 
 """

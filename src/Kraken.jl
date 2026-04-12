@@ -178,9 +178,10 @@ export DiagnosticsLogger, open_diagnostics, log_diagnostics!, close_diagnostics!
 # .krk config system
 export KrakenExpr, parse_kraken_expr, evaluate, has_variable, is_time_dependent, is_spatial
 export SimulationSetup, DomainSetup, PhysicsSetup, GeometryRegion, BoundarySetup, RheologySetup
-export InitialSetup, OutputSetup, DiagnosticsSetup, STLSource, RefineSetup
+export InitialSetup, OutputSetup, DiagnosticsSetup, STLSource, RefineSetup, SanityIssue
 export load_kraken, parse_kraken, build_rheology_model,
-       parse_kraken_sweep, load_kraken_sweep, sanity_check
+       parse_kraken_sweep, load_kraken_sweep, sanity_check, sanity_check_sweep
+export LBMParams, lbm_params, lbm_params_table
 export run_simulation
 
 # Grid refinement

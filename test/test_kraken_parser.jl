@@ -375,8 +375,28 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
     end
 
     @testset "Sanity check Mach warning" begin
+        # U_ref = 0.15 triggers compressibility warn (> 0.1) but NOT error (< 0.3)
         text = """
         Simulation fast D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 0.1
+        Boundary north velocity(ux = 0.15, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        io = IOBuffer()
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+            parse_kraken(text)
+        end
+        out = String(take!(io))
+        @test occursin("Mach", out)
+    end
+
+    @testset "Sanity check CFL error (U_ref > 0.3)" begin
+        text = """
+        Simulation cfl D2Q9
         Domain L = 1 x 1 N = 64 x 64
         Physics nu = 0.1
         Boundary north velocity(ux = 0.5, uy = 0)
@@ -385,18 +405,110 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Boundary west wall
         Run 100 steps
         """
-        msgs = String[]
-        logger = Base.CoreLogging.SimpleLogger(IOBuffer())
-        setup = Base.CoreLogging.with_logger(logger) do
+        err = try
             parse_kraken(text)
+            nothing
+        catch e
+            e
         end
-        # Capture: easier — just redirect stderr
+        @test err isa ErrorException
+        @test occursin("CFL", err.msg)
+    end
+
+    @testset "Sanity check high tau (diffusion-dominated)" begin
+        # Re=0.01, N=64, U=0.1 → ν = 0.1*64/0.01 = 640 → τ = 1920.5
+        text = """
+        Simulation slow D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Setup reynolds = 0.01 L_ref = 64 U_ref = 0.1
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        err = try
+            parse_kraken(text)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
+        @test occursin("absurdly large", err.msg)
+    end
+
+    @testset "Sanity check moderate high tau (warning)" begin
+        # τ ~ 15 → warning but not error
+        # ν = 5 → τ = 15.5
+        text = """
+        Simulation diffusive D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 5.0
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
         io = IOBuffer()
         Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
-        @test occursin("Mach", out)
+        @test occursin("diffusion dominates", out) || occursin("very large", out)
+    end
+
+    @testset "Sanity check returns SanityIssue vector" begin
+        text = """
+        Simulation ok D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Physics nu = 0.01
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 100 steps
+        """
+        setup = parse_kraken(text)
+        issues = sanity_check(setup; verbose=false)
+        @test issues isa Vector{SanityIssue}
+        # ν=0.01, τ=0.53, U=0.1, Ma=0.17 — should be clean
+        @test isempty(issues)
+    end
+
+    @testset "Sanity check resolution warning" begin
+        # N=5 → should warn about coarse grid
+        text = """
+        Simulation tiny D2Q9
+        Domain L = 1 x 1 N = 5 x 5
+        Physics nu = 0.1
+        Boundary north wall
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Run 10 steps
+        """
+        setup = parse_kraken(text)
+        issues = sanity_check(setup; verbose=false)
+        @test any(i -> i.category == :resolution && i.level == :warn, issues)
+    end
+
+    @testset "Sanity check sweep" begin
+        text = """
+        Simulation sweep_sc D2Q9
+        Domain L = 1 x 1 N = 64 x 64
+        Setup reynolds = Re L_ref = 64 U_ref = 0.1
+        Boundary north velocity(ux = 0.1, uy = 0)
+        Boundary south wall
+        Boundary east wall
+        Boundary west wall
+        Sweep Re = [1, 100, 1000]
+        Run 100 steps
+        """
+        setups = parse_kraken_sweep(text)
+        all_issues = sanity_check_sweep(setups; verbose=false)
+        @test length(all_issues) == 3
+        @test all(isa.(all_issues, Vector{SanityIssue}))
     end
 
     @testset "Sweep directive" begin
