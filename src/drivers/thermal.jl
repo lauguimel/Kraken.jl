@@ -342,13 +342,23 @@ function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
     compute_macroscopic_2d!(ρ, ux, uy, f_in)
     compute_temperature_2d!(Temp, g_in)
 
-    # Nusselt at hot wall
+    # Nusselt at hot wall — compute from the fine-grid west patch for accuracy.
+    # The coarse grid (after restriction) has block-averaged temperatures that
+    # smooth the wall gradient, giving ~20% error. The fine patch resolves it.
     T_cpu = Array(Temp)
-    Nu_local = zeros(FT, Ny)
-    for j in 2:Ny-1
-        Nu_local[j] = -H * (-3*T_cpu[1,j] + 4*T_cpu[2,j] - T_cpu[3,j]) / (2*dx) / FT(ΔT)
+    T_fine = Array(thermals[1].Temp)
+    ng = domain.patches[1].n_ghost
+    Ny_fine = domain.patches[1].Ny_inner
+    dx_f = FT(domain.patches[1].dx)
+
+    Nu_fine = zeros(FT, Ny_fine)
+    for jf in 1:Ny_fine
+        j = jf + ng
+        i1, i2, i3 = ng + 1, ng + 2, ng + 3
+        dTdx = (-3 * T_fine[i1, j] + 4 * T_fine[i2, j] - T_fine[i3, j]) / (2 * dx_f)
+        Nu_fine[jf] = -H * dTdx / FT(ΔT)
     end
-    Nu = sum(Nu_local[2:end-1]) / (Ny - 2)
+    Nu = sum(Nu_fine[2:end-1]) / (Ny_fine - 2)
 
     return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=T_cpu,
             Nu=Nu, config=config, Ra=Ra, Pr=Pr, Rc=Rc, ν=Float64(ν), α=Float64(α_thermal),
