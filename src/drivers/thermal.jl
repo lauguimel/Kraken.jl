@@ -364,3 +364,98 @@ function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
             Nu=Nu, config=config, Ra=Ra, Pr=Pr, Rc=Rc, ν=Float64(ν), α=Float64(α_thermal),
             domain=domain, thermals=thermals)
 end
+
+# --- Natural convection 3D (differentially heated cube) ---
+
+"""
+    run_natural_convection_3d(; N=32, Ra=1e3, Pr=0.71,
+                                T_hot=1.0, T_cold=0.0, max_steps=10000,
+                                backend, FT)
+
+Natural convection in a cube: hot west wall (x=0), cold east wall (x=N),
+adiabatic on all other faces. D3Q19 lattice with Boussinesq forcing in the
+y-direction (gravity pointing -y).
+
+Reference: Fusegi et al. (1991) — Ra=1e3 → Nu≈1.085, Ra=1e4 → Nu≈2.10.
+"""
+function run_natural_convection_3d(; N=32, Ra=1e3, Pr=0.71,
+                                     T_hot=1.0, T_cold=0.0, max_steps=10000,
+                                     backend=KernelAbstractions.CPU(), FT=Float64)
+    Nx, Ny, Nz = N, N, N
+    ΔT = T_hot - T_cold
+    H = FT(N)
+
+    ν = FT(0.05)
+    α_thermal = ν / FT(Pr)
+    β_g = FT(Ra) * ν * α_thermal / (FT(ΔT) * H^3)
+
+    ω_f = FT(1.0 / (3.0 * ν + 0.5))
+    ω_T = FT(1.0 / (3.0 * α_thermal + 0.5))
+    T_ref = FT((T_hot + T_cold) / 2)
+
+    # --- Initialize flow ---
+    config = LBMConfig(D3Q19(); Nx=Nx, Ny=Ny, Nz=Nz, ν=Float64(ν),
+                       u_lid=0.0, max_steps=max_steps)
+    state = initialize_3d(config, FT; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy, uz = state.ρ, state.ux, state.uy, state.uz
+    is_solid = state.is_solid
+
+    # --- Initialize thermal ---
+    g_in  = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz, 19)
+    g_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz, 19)
+    Temp  = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+
+    w = weights(D3Q19())
+    g_cpu = zeros(FT, Nx, Ny, Nz, 19)
+    for k in 1:Nz, j in 1:Ny, i in 1:Nx
+        T_init = FT(T_hot - ΔT * (i - 1) / (Nx - 1))
+        for q in 1:19
+            g_cpu[i, j, k, q] = FT(w[q]) * T_init
+        end
+    end
+    copyto!(g_in, g_cpu)
+    copyto!(g_out, g_cpu)
+
+    # --- Time loop ---
+    for step in 1:max_steps
+        # Stream both
+        stream_3d!(f_out, f_in, Nx, Ny, Nz)
+        stream_3d!(g_out, g_in, Nx, Ny, Nz)
+
+        # Thermal BCs: Dirichlet west/east, adiabatic (bounce-back) elsewhere
+        apply_fixed_temp_west_3d!(g_out, T_hot, Ny, Nz)
+        apply_fixed_temp_east_3d!(g_out, T_cold, Nx, Ny, Nz)
+
+        # Recover temperature and macroscopic
+        compute_temperature_3d!(Temp, g_out)
+        compute_macroscopic_3d!(ρ, ux, uy, uz, f_out)
+
+        # Collide thermal (BGK)
+        collide_thermal_3d!(g_out, ux, uy, uz, ω_T)
+
+        # Collide flow (Boussinesq, gravity in y)
+        collide_boussinesq_3d!(f_out, Temp, is_solid, ω_f, β_g, T_ref)
+
+        # Swap
+        f_in, f_out = f_out, f_in
+        g_in, g_out = g_out, g_in
+    end
+
+    compute_macroscopic_3d!(ρ, ux, uy, uz, f_in)
+    compute_temperature_3d!(Temp, g_in)
+
+    # Nusselt at hot wall (x=0): Nu = -H * dT/dx / ΔT (2nd-order FD)
+    T_cpu = Array(Temp)
+    Nu_arr = zeros(FT, Ny, Nz)
+    for k in 1:Nz, j in 1:Ny
+        dTdx = (-3*T_cpu[1,j,k] + 4*T_cpu[2,j,k] - T_cpu[3,j,k]) / FT(2)
+        Nu_arr[j, k] = -H * dTdx / FT(ΔT)
+    end
+    # Average excluding edge rows
+    Nu = sum(Nu_arr[2:end-1, 2:end-1]) / max((Ny-2)*(Nz-2), 1)
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), uz=Array(uz),
+            Temp=T_cpu, Nu=Nu, config=config, Ra=Ra, Pr=Pr,
+            ν=Float64(ν), α=Float64(α_thermal))
+end

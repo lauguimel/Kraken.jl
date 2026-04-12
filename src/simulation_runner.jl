@@ -885,25 +885,7 @@ function _run_refined(setup::SimulationSetup;
                       backend=KernelAbstractions.CPU(), T=Float64,
                       callback::Union{Nothing,Function}=nothing,
                       callback_every::Int=100)
-    # Thermal refined: delegate to specialized driver for natural convection,
-    # generic thermal refined path for other cases (TODO).
-    if :thermal in setup.modules
-        if occursin("natural_convection", lowercase(setup.name))
-            params = setup.physics.params
-            N  = setup.domain.Nx
-            Ra = Float64(get(params, :Ra, 1e4))
-            Pr = Float64(get(params, :Pr, 0.71))
-            Rc = Float64(get(params, :Rc, 1.0))
-            result = run_natural_convection_refined_2d(; N=N, Ra=Ra, Pr=Pr, Rc=Rc,
-                                                        max_steps=setup.max_steps,
-                                                        backend=backend, FT=T)
-            return merge(result, (setup=setup,))
-        else
-            throw(ArgumentError(
-                "refined thermal dispatch: only natural_convection is supported " *
-                "(got: $(setup.name)). Other thermal cases require Julia API."))
-        end
-    end
+    is_thermal = :thermal in setup.modules
 
     # --- Generic isothermal refined path ---
     dom = setup.domain
@@ -965,6 +947,81 @@ function _run_refined(setup::SimulationSetup;
         compute_macroscopic_2d!(patch.rho, patch.ux, patch.uy, patch.f_in)
     end
 
+    # --- Thermal refined setup (if :thermal module) ---
+    g_in = nothing; g_out = nothing; Temp = nothing
+    thermals = nothing
+    ω_T = T(0); β_g_val = T(0); T_ref_buoy = T(0)
+    bc_thermal_patch_fns = nothing
+    thermal_bc_face_fns = Function[]
+
+    if is_thermal
+        params = setup.physics.params
+        Pr = T(get(params, :Pr, 0.71))
+        Ra = T(get(params, :Ra, 1e4))
+        α_thermal = ν / Pr
+        ω_T = T(1.0 / (3.0 * Float64(α_thermal) + 0.5))
+
+        # Detect temperature BCs from boundaries
+        thermal_face_bcs = Dict{Symbol, T}()
+        for bc in setup.boundaries
+            if haskey(bc.values, :T)
+                T_val = T(evaluate(bc.values[:T]))
+                thermal_face_bcs[bc.face] = T_val
+            end
+        end
+        T_hot = isempty(thermal_face_bcs) ? T(1) : maximum(values(thermal_face_bcs))
+        T_cold = isempty(thermal_face_bcs) ? T(0) : minimum(values(thermal_face_bcs))
+        ΔT = T_hot - T_cold
+        if abs(ΔT) < eps(T)
+            ΔT = T(1)
+        end
+        H = T(max(Nx, Ny))
+        β_g_val = Ra * ν * α_thermal / (ΔT * H^3)
+        T_ref_buoy = (T_hot + T_cold) / T(2)
+
+        # Allocate thermal arrays on base grid
+        g_in  = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+        g_out = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+        Temp  = KernelAbstractions.zeros(backend, T, Nx, Ny)
+
+        # Initialize g to mid-range temperature equilibrium
+        w_lat = weights(D2Q9())
+        T_mid = (T_hot + T_cold) / T(2)
+        g_cpu = zeros(T, Nx, Ny, 9)
+        for q in 1:9
+            g_cpu[:, :, q] .= T(w_lat[q]) * T_mid
+        end
+        copyto!(g_in, g_cpu)
+        copyto!(g_out, g_cpu)
+
+        # Create thermal patch arrays
+        thermals = ThermalPatchArrays{T}[
+            create_thermal_patch_arrays(p, Float64(ω_T);
+                T_init=Float64(T_mid), backend=backend) for p in patches]
+
+        # Initialize patch thermal from coarse
+        compute_temperature_2d!(Temp, g_in)
+        for (pidx, patch) in enumerate(patches)
+            fill_thermal_full!(patch, thermals[pidx], g_in, Nx, Ny)
+        end
+
+        # Build thermal patch BCs (fixed-T on faces touching domain walls)
+        bc_thermal_patch_fns = _build_patch_thermal_bcs(patches, setup, T)
+
+        # Build coarse thermal BC closures
+        for (face, T_val) in thermal_face_bcs
+            if face == :south
+                push!(thermal_bc_face_fns, (g, nx, ny) -> apply_fixed_temp_south_2d!(g, T_val, nx))
+            elseif face == :north
+                push!(thermal_bc_face_fns, (g, nx, ny) -> apply_fixed_temp_north_2d!(g, T_val, nx, ny))
+            elseif face == :west
+                push!(thermal_bc_face_fns, (g, nx, ny) -> apply_fixed_temp_west_2d!(g, T_val, ny))
+            elseif face == :east
+                push!(thermal_bc_face_fns, (g, nx, ny) -> apply_fixed_temp_east_2d!(g, T_val, nx, ny))
+            end
+        end
+    end
+
     # Auto-detect patch BCs
     bc_patch_fns = _build_patch_flow_bcs(patches, setup)
 
@@ -1002,6 +1059,47 @@ function _run_refined(setup::SimulationSetup;
                                                                          Fx_val, Fy_val)
     end
 
+    # --- Thermal fused step and coarse BC closures ---
+    thermal_fused_step_fn = nothing
+    thermal_bc_coarse_fn = nothing
+    if is_thermal
+        # Collect wall faces for explicit bounce-back after restriction
+        wall_faces = Symbol[bc.face for bc in setup.boundaries if bc.type == :wall]
+
+        let sfn=stream_fn!, bch=bc_handlers, d_=dom, dx_=dx, dy_=dy,
+            ρ_=ρ, ux_=ux, uy_=uy, is_s=is_solid, ω_=ω, ωT_=ω_T,
+            βg_=β_g_val, Tref_=T_ref_buoy, tbcfns=thermal_bc_face_fns, T_=T,
+            wf=wall_faces, Nx_=Nx, Ny_=Ny
+
+            thermal_fused_step_fn = (f_o, f_i, g_o, g_i, Te, nx, ny) -> begin
+                sfn(f_o, f_i, nx, ny)
+                sfn(g_o, g_i, nx, ny)
+                _apply_boundary_conditions!(f_o, bch, 0, nx, ny,
+                    Float64(dx_), Float64(dy_), d_, T_)
+                for bfn in tbcfns
+                    bfn(g_o, nx, ny)
+                end
+                compute_temperature_2d!(Te, g_o)
+                compute_macroscopic_2d!(ρ_, ux_, uy_, f_o)
+                collide_thermal_2d!(g_o, ux_, uy_, ωT_)
+                collide_boussinesq_2d!(f_o, Te, is_s, ω_, βg_, Tref_)
+            end
+
+            thermal_bc_coarse_fn = (f, g, Te, nx, ny) -> begin
+                # Explicit bounce-back on wall faces (stream_2d! handles it during
+                # the fused step, but restriction overwrites wall cells)
+                for face in wf
+                    apply_bounce_back_wall_2d!(f, Nx_, Ny_, face)
+                end
+                _apply_boundary_conditions!(f, bch, 0, nx, ny,
+                    Float64(dx_), Float64(dy_), d_, T_)
+                for bfn in tbcfns
+                    bfn(g, nx, ny)
+                end
+            end
+        end
+    end
+
     # Output setup
     vtk_out = _find_output(setup, :vtk)
     pvd = nothing
@@ -1017,15 +1115,34 @@ function _run_refined(setup::SimulationSetup;
 
     # --- Time loop ---
     for step in 1:setup.max_steps
-        f_in, f_out = advance_refined_step!(domain, f_in, f_out, ρ, ux, uy, is_solid;
-            stream_fn=stream_fn!, collide_fn=collide_fn, macro_fn=macro_fn,
-            bc_base_fn=bc_base_fn, bc_patch_fns=bc_patch_fns,
-            patch_collide_fns=patch_collide_fns, patch_macro_fn=patch_macro_fn)
+        if is_thermal
+            f_in, f_out, g_in, g_out = advance_thermal_refined_step!(
+                domain, thermals,
+                f_in, f_out, g_in, g_out, ρ, ux, uy, Temp, is_solid;
+                fused_step_fn=thermal_fused_step_fn,
+                omega_T_coarse=Float64(ω_T),
+                β_g=Float64(β_g_val),
+                T_ref_buoy=Float64(T_ref_buoy),
+                bc_thermal_patch_fns=bc_thermal_patch_fns,
+                bc_flow_patch_fns=bc_patch_fns,
+                bc_coarse_fn=thermal_bc_coarse_fn)
+        else
+            f_in, f_out = advance_refined_step!(domain, f_in, f_out, ρ, ux, uy, is_solid;
+                stream_fn=stream_fn!, collide_fn=collide_fn, macro_fn=macro_fn,
+                bc_base_fn=bc_base_fn, bc_patch_fns=bc_patch_fns,
+                patch_collide_fns=patch_collide_fns, patch_macro_fn=patch_macro_fn)
+        end
 
         # Re-apply coarse BCs after restriction (patches may overwrite wall cells)
         _apply_boundary_conditions!(f_in, bc_handlers, step, Nx, Ny,
                                     Float64(dx), Float64(dy), dom, T)
         compute_macroscopic_2d!(ρ, ux, uy, f_in)
+        if is_thermal
+            for bfn in thermal_bc_face_fns
+                bfn(g_in, Nx, Ny)
+            end
+            compute_temperature_2d!(Temp, g_in)
+        end
 
         # VTK output
         if vtk_out !== nothing && step % vtk_out.interval == 0
@@ -1038,7 +1155,10 @@ function _run_refined(setup::SimulationSetup;
 
         # Callback
         if callback !== nothing && step % callback_every == 0
-            callback(step, (; rho=Array(ρ), ux=Array(ux), uy=Array(uy)))
+            cb_state = is_thermal ?
+                (; rho=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=Array(Temp)) :
+                (; rho=Array(ρ), ux=Array(ux), uy=Array(uy))
+            callback(step, cb_state)
         end
     end
 
@@ -1046,6 +1166,12 @@ function _run_refined(setup::SimulationSetup;
     pvd !== nothing && vtk_save(pvd)
     _maybe_save_gif(gif_out, gif_frames, setup, output_dir)
 
+    if is_thermal
+        # Compute Nusselt from the finest patch touching a heated wall
+        Nu = _compute_nusselt_from_patches(domain, thermals, Temp, setup, T)
+        return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=Array(Temp),
+                Nu=Nu, setup=setup)
+    end
     return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), setup=setup)
 end
 
@@ -1140,6 +1266,166 @@ function _make_patch_face_bc(face::Symbol, bc::BoundarySetup, ::Type{T}) where T
         # velocity / pressure / periodic: handled by ghost fill from coarse grid
         return nothing
     end
+end
+
+"""Auto-detect which patch faces touch domain walls with thermal BCs."""
+function _build_patch_thermal_bcs(patches::Vector{RefinementPatch{T}},
+                                   setup::SimulationSetup, ::Type{T}) where T
+    Lx, Ly = setup.domain.Lx, setup.domain.Ly
+    tol = Lx / setup.domain.Nx * 0.01
+
+    # Collect faces with fixed temperature
+    thermal_face_bcs = Dict{Symbol, T}()
+    for bc in setup.boundaries
+        if haskey(bc.values, :T)
+            thermal_face_bcs[bc.face] = T(evaluate(bc.values[:T]))
+        end
+    end
+
+    patch_bcs = Dict{Int, Function}()
+    for (pidx, patch) in enumerate(patches)
+        closures = Function[]
+
+        for (face, condition) in [
+            (:west,  Float64(patch.x_min) <= tol),
+            (:east,  Float64(patch.x_max) >= Lx - tol),
+            (:south, Float64(patch.y_min) <= tol),
+            (:north, Float64(patch.y_max) >= Ly - tol),
+        ]
+            condition || continue
+            T_val = get(thermal_face_bcs, face, nothing)
+            T_val === nothing && continue
+            cl = _make_patch_thermal_bc(face, T_val)
+            push!(closures, cl)
+        end
+
+        if !isempty(closures)
+            let cls = closures
+                patch_bcs[pidx] = (g, Nx_p, Ny_p) -> begin
+                    for cl in cls
+                        cl(g, Nx_p, Ny_p)
+                    end
+                end
+            end
+        end
+    end
+    return patch_bcs
+end
+
+"""Create a thermal BC closure for one face of a patch (anti-bounce-back Dirichlet)."""
+function _make_patch_thermal_bc(face::Symbol, T_val)
+    if face == :south
+        return (g, Nx_p, Ny_p) -> apply_fixed_temp_south_2d!(g, T_val, Nx_p)
+    elseif face == :north
+        return (g, Nx_p, Ny_p) -> apply_fixed_temp_north_2d!(g, T_val, Nx_p, Ny_p)
+    elseif face == :west
+        return (g, Nx_p, Ny_p) -> apply_fixed_temp_west_2d!(g, T_val, Ny_p)
+    elseif face == :east
+        return (g, Nx_p, Ny_p) -> apply_fixed_temp_east_2d!(g, T_val, Nx_p, Ny_p)
+    end
+end
+
+"""Compute Nusselt number from the finest patch touching a heated wall."""
+function _compute_nusselt_from_patches(domain::RefinedDomain{T},
+                                        thermals::Vector{ThermalPatchArrays{T}},
+                                        Temp_coarse, setup, ::Type{T}) where T
+    # Find temperature extremes from boundary BCs
+    T_hot = T(-Inf); T_cold = T(Inf)
+    hot_face = :west
+    for bc in setup.boundaries
+        if haskey(bc.values, :T)
+            T_val = T(evaluate(bc.values[:T]))
+            if T_val > T_hot
+                T_hot = T_val
+                hot_face = bc.face
+            end
+            if T_val < T_cold
+                T_cold = T_val
+            end
+        end
+    end
+    ΔT = T_hot - T_cold
+    if abs(ΔT) < eps(T) || isinf(T_hot)
+        return T(NaN)
+    end
+
+    # Use physical domain size for consistent units with patch.dx
+    H = T(max(setup.domain.Lx, setup.domain.Ly))
+
+    # Find the patch that touches the hot wall (for fine-grid gradient)
+    Lx, Ly = setup.domain.Lx, setup.domain.Ly
+    tol = Lx / setup.domain.Nx * 0.01
+
+    for (pidx, patch) in enumerate(domain.patches)
+        touches_hot = (hot_face == :west  && Float64(patch.x_min) <= tol) ||
+                      (hot_face == :east  && Float64(patch.x_max) >= Lx - tol) ||
+                      (hot_face == :south && Float64(patch.y_min) <= tol) ||
+                      (hot_face == :north && Float64(patch.y_max) >= Ly - tol)
+        touches_hot || continue
+
+        T_fine = Array(thermals[pidx].Temp)
+        ng = patch.n_ghost
+        dx_f = T(patch.dx)
+
+        # Compute wall-normal gradient via 2nd-order one-sided FD
+        if hot_face == :west
+            Ny_fine = patch.Ny_inner
+            Nu_arr = zeros(T, Ny_fine)
+            for jf in 1:Ny_fine
+                j = jf + ng
+                i1, i2, i3 = ng + 1, ng + 2, ng + 3
+                dTdn = (-3 * T_fine[i1, j] + 4 * T_fine[i2, j] - T_fine[i3, j]) / (2 * dx_f)
+                Nu_arr[jf] = -H * dTdn / ΔT
+            end
+            return sum(Nu_arr[2:end-1]) / max(Ny_fine - 2, 1)
+        elseif hot_face == :east
+            Ny_fine = patch.Ny_inner
+            Nu_arr = zeros(T, Ny_fine)
+            Nx_p = patch.Nx
+            for jf in 1:Ny_fine
+                j = jf + ng
+                i1, i2, i3 = Nx_p - ng, Nx_p - ng - 1, Nx_p - ng - 2
+                dTdn = (3 * T_fine[i1, j] - 4 * T_fine[i2, j] + T_fine[i3, j]) / (2 * dx_f)
+                Nu_arr[jf] = H * dTdn / ΔT
+            end
+            return sum(Nu_arr[2:end-1]) / max(Ny_fine - 2, 1)
+        elseif hot_face == :south
+            Nx_fine = patch.Nx_inner
+            Nu_arr = zeros(T, Nx_fine)
+            for if_ in 1:Nx_fine
+                i = if_ + ng
+                j1, j2, j3 = ng + 1, ng + 2, ng + 3
+                dTdn = (-3 * T_fine[i, j1] + 4 * T_fine[i, j2] - T_fine[i, j3]) / (2 * dx_f)
+                Nu_arr[if_] = -H * dTdn / ΔT
+            end
+            return sum(Nu_arr[2:end-1]) / max(Nx_fine - 2, 1)
+        elseif hot_face == :north
+            Nx_fine = patch.Nx_inner
+            Nu_arr = zeros(T, Nx_fine)
+            Ny_p = patch.Ny
+            for if_ in 1:Nx_fine
+                i = if_ + ng
+                j1, j2, j3 = Ny_p - ng, Ny_p - ng - 1, Ny_p - ng - 2
+                dTdn = (3 * T_fine[i, j1] - 4 * T_fine[i, j2] + T_fine[i, j3]) / (2 * dx_f)
+                Nu_arr[if_] = H * dTdn / ΔT
+            end
+            return sum(Nu_arr[2:end-1]) / max(Nx_fine - 2, 1)
+        end
+    end
+
+    # No patch on the hot wall: fall back to coarse-grid Nusselt
+    T_cpu = Array(Temp_coarse)
+    dx_c = T(setup.domain.Lx / setup.domain.Nx)
+    if hot_face == :west
+        Ny_c = setup.domain.Ny
+        Nu_arr = zeros(T, Ny_c)
+        for j in 1:Ny_c
+            dTdn = (-3*T_cpu[1,j] + 4*T_cpu[2,j] - T_cpu[3,j]) / (2*dx_c)
+            Nu_arr[j] = -H * dTdn / ΔT
+        end
+        return sum(Nu_arr[2:end-1]) / max(Ny_c - 2, 1)
+    end
+    return T(NaN)
 end
 
 """Dispatch thermal cases (non-refined) to the appropriate thermal driver."""
