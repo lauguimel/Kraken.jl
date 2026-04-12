@@ -92,6 +92,47 @@ function save_thermal_coarse_state!(patch::RefinementPatch{T},
 end
 
 """
+    _restore_coarse_overlap!(f_coarse, g_coarse, patch, thermal)
+
+Copy saved f_prev and g_prev back into the coarse arrays for the patch overlap
+region. Undoes the fused coarse step in the patch-covered cells so that only
+the patch sub-cycling + restriction determines these values.
+"""
+function _restore_coarse_overlap!(f_coarse, g_coarse,
+                                   patch::RefinementPatch{T},
+                                   thermal::ThermalPatchArrays{T}) where T
+    i_range = patch.parent_i_range
+    j_range = patch.parent_j_range
+    i_lo = max(first(i_range) - 1, 1)
+    j_lo = max(first(j_range) - 1, 1)
+    Ni = length(i_range)
+    Nj = length(j_range)
+    i_off = first(i_range)
+    j_off = first(j_range)
+
+    backend = KernelAbstractions.get_backend(f_coarse)
+    kernel! = _restore_overlap_kernel!(backend)
+    kernel!(f_coarse, g_coarse, patch.f_prev, thermal.g_prev,
+            i_off, j_off, i_lo, j_lo; ndrange=(Ni, Nj))
+    KernelAbstractions.synchronize(backend)
+end
+
+@kernel function _restore_overlap_kernel!(f_c, g_c, @Const(f_prev), @Const(g_prev),
+                                           i_off, j_off, i_lo, j_lo)
+    li, lj = @index(Global, NTuple)
+    @inbounds begin
+        i = li + i_off - 1
+        j = lj + j_off - 1
+        ip = i - i_lo + 1
+        jp = j - j_lo + 1
+        for q in 1:9
+            f_c[i, j, q] = f_prev[ip, jp, q]
+            g_c[i, j, q] = g_prev[ip, jp, q]
+        end
+    end
+end
+
+"""
     fill_thermal_ghost!(patch, thermal, g_coarse, Nx_c, Ny_c; t_frac=0)
 
 Fill fine-grid thermal ghost cells using bilinear interpolation of coarse g.
@@ -384,7 +425,8 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
                                         β_g::Real=zero(T),
                                         T_ref_buoy::Real=zero(T),
                                         bc_thermal_patch_fns=nothing,
-                                        bc_flow_patch_fns=nothing) where T
+                                        bc_flow_patch_fns=nothing,
+                                        bc_coarse_fn=nothing) where T
     Nx = domain.base_Nx
     Ny = domain.base_Ny
 
@@ -398,6 +440,16 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
     fused_step_fn(f_out, f_in, g_out, g_in, Temp, Nx, Ny)
     f_in, f_out = f_out, f_in
     g_in, g_out = g_out, g_in
+
+    # Restore patch-covered cells from saved state (the coarse step
+    # should not modify these — only the patch sub-cycling + restriction
+    # should update them). Without this, the fused step pollutes the
+    # overlap zone and the restriction sees inconsistent populations.
+    for (pidx, patch) in enumerate(domain.patches)
+        thermal = thermals[pidx]
+        _restore_coarse_overlap!(f_in, g_in, patch, thermal)
+    end
+
     # Recover macroscopic on coarse for ghost fill
     compute_macroscopic_2d!(rho, ux, uy, f_in)
     compute_temperature_2d!(Temp, g_in)
@@ -465,6 +517,13 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
                            Float64(domain.base_omega))
         restrict_thermal_to_coarse!(patch, thermal, g_in, Temp)
     end
+
+    # 5. Re-apply coarse BCs (restriction may overwrite wall values)
+    if bc_coarse_fn !== nothing
+        bc_coarse_fn(f_in, g_in, Temp, Nx, Ny)
+    end
+    compute_macroscopic_2d!(rho, ux, uy, f_in)
+    compute_temperature_2d!(Temp, g_in)
 
     return f_in, f_out, g_in, g_out
 end

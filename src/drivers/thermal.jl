@@ -288,7 +288,19 @@ function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
         fill_thermal_full!(patch, thermals[pidx], g_in, Nx, Ny)
     end
 
-    # Fused step closure for base grid
+    # Build collision mask: is_solid OR patch-covered
+    # collide_boussinesq_2d! already skips is_solid cells, so we OR in patch cells
+    is_skip = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+    is_skip_cpu = Array(is_solid)
+    for patch in domain.patches
+        for j in patch.parent_j_range, i in patch.parent_i_range
+            is_skip_cpu[i, j] = true
+        end
+    end
+    copyto!(is_skip, is_skip_cpu)
+
+    # Use the original fused kernel for coarse step (full domain).
+    # The restriction will overwrite patch-covered cells afterward.
     fused_step = if Rc ≈ 1.0
         (fo, fi, go, gi, Te, nx, ny) -> fused_natconv_step!(
             fo, fi, go, gi, Te, nx, ny,
@@ -298,6 +310,18 @@ function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
             fo, fi, go, gi, Te, nx, ny,
             ν, T0_visc, α_visc, ω_T, β_g, T_ref_buoy,
             FT(T_hot), FT(T_cold))
+    end
+
+    # Coarse BC re-application after restriction (patches overwrite wall cells)
+    bc_coarse = (f, g, Te, nx, ny) -> begin
+        # Thermal: Dirichlet at hot/cold walls
+        apply_fixed_temp_west_2d!(g, T_hot, ny)
+        apply_fixed_temp_east_2d!(g, T_cold, nx, ny)
+        # Flow: bounce-back all walls
+        apply_bounce_back_wall_2d!(f, nx, ny, :south)
+        apply_bounce_back_wall_2d!(f, nx, ny, :north)
+        apply_bounce_back_wall_2d!(f, nx, ny, :west)
+        apply_bounce_back_wall_2d!(f, nx, ny, :east)
     end
 
     # --- Time loop ---
@@ -310,7 +334,8 @@ function run_natural_convection_refined_2d(; N=128, Ra=1e4, Pr=0.71, Rc=1.0,
             β_g=Float64(β_g),
             T_ref_buoy=Float64(T_ref_buoy),
             bc_thermal_patch_fns=bc_thermal_patch_fns,
-            bc_flow_patch_fns=bc_flow_patch_fns
+            bc_flow_patch_fns=bc_flow_patch_fns,
+            bc_coarse_fn=bc_coarse
         )
     end
 

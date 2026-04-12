@@ -69,6 +69,35 @@ function collide_thermal_2d!(g, ux, uy, ω_T)
     KernelAbstractions.synchronize(backend)
 end
 
+@kernel function collide_thermal_masked_2d_kernel!(g, @Const(ux), @Const(uy), ω_T, @Const(is_skip))
+    i, j = @index(Global, NTuple)
+    @inbounds if !is_skip[i, j]
+        T = eltype(g)
+        u_x = T(ux[i, j]); u_y = T(uy[i, j])
+        Temp = g[i,j,1] + g[i,j,2] + g[i,j,3] + g[i,j,4] +
+               g[i,j,5] + g[i,j,6] + g[i,j,7] + g[i,j,8] + g[i,j,9]
+        t3 = T(3)
+
+        for q in 1:9
+            w_q = ifelse(q == 1, T(4)/T(9), ifelse(q <= 5, T(1)/T(9), T(1)/T(36)))
+            cx = ifelse(q==1,T(0), ifelse(q==2,T(1), ifelse(q==3,T(0), ifelse(q==4,T(-1),
+                 ifelse(q==5,T(0), ifelse(q==6,T(1), ifelse(q==7,T(-1), ifelse(q==8,T(-1), T(1)))))))))
+            cy = ifelse(q==1,T(0), ifelse(q==2,T(0), ifelse(q==3,T(1), ifelse(q==4,T(0),
+                 ifelse(q==5,T(-1), ifelse(q==6,T(1), ifelse(q==7,T(1), ifelse(q==8,T(-1), T(-1)))))))))
+            geq = w_q * Temp * (one(T) + t3 * (cx * u_x + cy * u_y))
+            g[i, j, q] -= ω_T * (g[i, j, q] - geq)
+        end
+    end
+end
+
+function collide_thermal_masked_2d!(g, ux, uy, ω_T, is_skip)
+    backend = KernelAbstractions.get_backend(g)
+    Nx, Ny = size(g, 1), size(g, 2)
+    kernel! = collide_thermal_masked_2d_kernel!(backend)
+    kernel!(g, ux, uy, ω_T, is_skip; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
 # --- Compute temperature from thermal populations ---
 
 @kernel function compute_temperature_2d_kernel!(Temp, @Const(g))
