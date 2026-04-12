@@ -156,15 +156,22 @@ end
 """
     advance_refined_step!(domain, f_in, f_out, rho, ux, uy, is_solid;
                           stream_fn, collide_fn, macro_fn, bc_base_fn,
-                          bc_patch_fns)
+                          bc_patch_fns, patch_collide_fns, patch_macro_fn)
 
 Advance the full refined domain by one coarse timestep with sub-cycling.
 
 # Algorithm
-1. Save coarse state at time n for each patch
+1. Save coarse state at time n for all patches
 2. Advance coarse grid one step
 3. For each patch, sub-cycle `ratio` fine steps with temporal interpolation
 4. Restrict fine results back to coarse overlap
+
+# Keywords
+- `patch_collide_fns`: optional `Dict{Int, Function}` mapping patch index to a
+  custom `(f, is_solid) -> ...` collision closure. Useful for body-force scaling
+  (`F/ratio` on fine grids). When absent, defaults to `collide_2d!(f, is_s, patch.omega)`.
+- `patch_macro_fn`: optional macroscopic function for patches (e.g.
+  `compute_macroscopic_forced_2d!`). Defaults to `compute_macroscopic_2d!`.
 
 Returns updated (f_in, f_out) for the base grid (swapped).
 """
@@ -174,7 +181,9 @@ function advance_refined_step!(domain::RefinedDomain{T},
                                collide_fn,
                                macro_fn,
                                bc_base_fn=nothing,
-                               bc_patch_fns=nothing) where T
+                               bc_patch_fns=nothing,
+                               patch_collide_fns=nothing,
+                               patch_macro_fn=nothing) where T
     Nx = domain.base_Nx
     Ny = domain.base_Ny
 
@@ -207,10 +216,12 @@ function advance_refined_step!(domain::RefinedDomain{T},
 
             # Advance patch one fine step
             bc_fn = bc_patch_fns !== nothing ? get(bc_patch_fns, pidx, nothing) : nothing
+            pcf = patch_collide_fns !== nothing ? get(patch_collide_fns, pidx, nothing) : nothing
+            pmf = patch_macro_fn !== nothing ? patch_macro_fn : compute_macroscopic_2d!
             advance_patch!(patch;
                           stream_fn=stream_fn,
-                          collide_fn=(f, is_s) -> collide_2d!(f, is_s, patch.omega),
-                          macro_fn=compute_macroscopic_2d!,
+                          collide_fn=pcf !== nothing ? pcf : (f, is_s) -> collide_2d!(f, is_s, patch.omega),
+                          macro_fn=pmf,
                           bc_fn=bc_fn)
 
             # Copy f_out -> f_in for next sub-step

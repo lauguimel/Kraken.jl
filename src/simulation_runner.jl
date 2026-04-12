@@ -116,7 +116,8 @@ function run_simulation(setup::SimulationSetup;
     elseif :axisymmetric in setup.modules
         return _run_axisymmetric(setup; backend=backend, T=T)
     elseif !isempty(setup.refinements)
-        return _run_refined(setup; backend=backend, T=T)
+        return _run_refined(setup; backend=backend, T=T,
+                            callback=callback, callback_every=callback_every)
     elseif :thermal in setup.modules
         return _run_thermal(setup; backend=backend, T=T)
     elseif setup.lattice === :D3Q19
@@ -881,24 +882,263 @@ runs; other refined configurations (cavity, two-phase, ...) still require
 manual patch construction via `create_refined_domain` / the Julia API.
 """
 function _run_refined(setup::SimulationSetup;
-                      backend=KernelAbstractions.CPU(), T=Float64)
-    if :thermal in setup.modules && occursin("natural_convection", lowercase(setup.name))
-        params = setup.physics.params
-        N  = setup.domain.Nx
-        Ra = Float64(get(params, :Ra, 1e4))
-        Pr = Float64(get(params, :Pr, 0.71))
-        Rc = Float64(get(params, :Rc, 1.0))
-        result = run_natural_convection_refined_2d(; N=N, Ra=Ra, Pr=Pr, Rc=Rc,
-                                                    max_steps=setup.max_steps,
-                                                    backend=backend, FT=T)
-        return merge(result, (setup=setup,))
+                      backend=KernelAbstractions.CPU(), T=Float64,
+                      callback::Union{Nothing,Function}=nothing,
+                      callback_every::Int=100)
+    # Thermal refined: delegate to specialized driver for natural convection,
+    # generic thermal refined path for other cases (TODO).
+    if :thermal in setup.modules
+        if occursin("natural_convection", lowercase(setup.name))
+            params = setup.physics.params
+            N  = setup.domain.Nx
+            Ra = Float64(get(params, :Ra, 1e4))
+            Pr = Float64(get(params, :Pr, 0.71))
+            Rc = Float64(get(params, :Rc, 1.0))
+            result = run_natural_convection_refined_2d(; N=N, Ra=Ra, Pr=Pr, Rc=Rc,
+                                                        max_steps=setup.max_steps,
+                                                        backend=backend, FT=T)
+            return merge(result, (setup=setup,))
+        else
+            throw(ArgumentError(
+                "refined thermal dispatch: only natural_convection is supported " *
+                "(got: $(setup.name)). Other thermal cases require Julia API."))
+        end
+    end
+
+    # --- Generic isothermal refined path ---
+    dom = setup.domain
+    Nx, Ny = dom.Nx, dom.Ny
+    dx = T(dom.Lx / Nx)
+    dy = T(dom.Ly / Ny)
+    ν = T(setup.physics.params[:nu])
+    ω = T(1.0 / (3.0 * ν + 0.5))
+
+    # Initialize base grid
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(ν), u_lid=0.0,
+                       max_steps=setup.max_steps, output_interval=1000)
+    state = initialize_2d(config, T; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    _apply_geometry!(is_solid, setup, Float64(dx), Float64(dy))
+
+    if setup.initial !== nothing
+        _apply_initial_conditions!(f_in, f_out, setup, Float64(dx), Float64(dy), T)
+    end
+
+    # Body force (Guo)
+    has_body_force = !isempty(setup.physics.body_force)
+    Fx_val = T(0); Fy_val = T(0)
+    if has_body_force
+        Fx_val = haskey(setup.physics.body_force, :Fx) ?
+            T(evaluate(setup.physics.body_force[:Fx])) : T(0)
+        Fy_val = haskey(setup.physics.body_force, :Fy) ?
+            T(evaluate(setup.physics.body_force[:Fy])) : T(0)
+    end
+
+    # Create patches from Refine blocks
+    patches = RefinementPatch{T}[]
+    for rs in setup.refinements
+        patch = create_patch(rs.name, 1, rs.ratio,
+            (Float64(rs.region[1]), Float64(rs.region[2]),
+             Float64(rs.region[3]), Float64(rs.region[4])),
+            Nx, Ny, Float64(dx), Float64(ω), T; backend=backend)
+        push!(patches, patch)
+    end
+    domain = create_refined_domain(Nx, Ny, Float64(dx), Float64(ω), patches)
+
+    # Apply geometry on fine patches (re-evaluate at fine resolution)
+    for patch in patches
+        _apply_patch_geometry!(patch, setup)
+    end
+
+    # Initialize patch interiors from coarse state
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+    for patch in patches
+        prolongate_f_rescaled_full_2d!(
+            patch.f_in, f_in, ρ, ux, uy,
+            patch.ratio, patch.Nx_inner, patch.Ny_inner,
+            patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
+            Nx, Ny, Float64(ω), Float64(patch.omega))
+        copyto!(patch.f_out, patch.f_in)
+        compute_macroscopic_2d!(patch.rho, patch.ux, patch.uy, patch.f_in)
+    end
+
+    # Auto-detect patch BCs
+    bc_patch_fns = _build_patch_flow_bcs(patches, setup)
+
+    # Build closures
+    stream_fn! = _select_streaming_kernel(setup)
+    bc_handlers = _build_boundary_handlers(setup, Float64(dx), Float64(dy), Nx, Ny, T, backend)
+
+    collide_fn = if has_body_force
+        (f, is_s) -> collide_guo_2d!(f, is_s, ω, Fx_val, Fy_val)
     else
-        throw(ArgumentError(
-            "refined .krk dispatch: only refined thermal natural-convection " *
-            "is supported in v0.1.0 (got case name: $(setup.name)). " *
-            "Refined cases require manual patch construction via the Julia API " *
-            "(`create_refined_domain` / `create_thermal_patch_arrays`); .krk " *
-            "runner support for generic refined cases is deferred to v0.2.0."))
+        (f, is_s) -> collide_2d!(f, is_s, ω)
+    end
+
+    macro_fn = if has_body_force
+        (r, u, v, f) -> compute_macroscopic_forced_2d!(r, u, v, f, Fx_val, Fy_val)
+    else
+        compute_macroscopic_2d!
+    end
+
+    bc_base_fn = (f) -> _apply_boundary_conditions!(f, bc_handlers, 0, Nx, Ny,
+                                                     Float64(dx), Float64(dy), dom, T)
+
+    # Patch collide with force scaling (F/ratio)
+    patch_collide_fns = nothing
+    patch_macro_fn = nothing
+    if has_body_force
+        patch_collide_fns = Dict{Int, Function}()
+        for (pidx, patch) in enumerate(patches)
+            Fx_f = Fx_val / T(patch.ratio)
+            Fy_f = Fy_val / T(patch.ratio)
+            ω_f = patch.omega
+            patch_collide_fns[pidx] = (f, is_s) -> collide_guo_2d!(f, is_s, ω_f, Fx_f, Fy_f)
+        end
+        patch_macro_fn = (r, u, v, f) -> compute_macroscopic_forced_2d!(r, u, v, f,
+                                                                         Fx_val, Fy_val)
+    end
+
+    # Output setup
+    vtk_out = _find_output(setup, :vtk)
+    pvd = nothing
+    output_dir = ""
+    if vtk_out !== nothing
+        output_dir = setup_output_dir(vtk_out.directory)
+        pvd = create_pvd(joinpath(output_dir, setup.name))
+    end
+    png_out = _find_output(setup, :png)
+    gif_out = _find_output(setup, :gif)
+    gif_frames = _init_gif_frames(gif_out)
+    _check_image_backend(png_out, gif_out)
+
+    # --- Time loop ---
+    for step in 1:setup.max_steps
+        f_in, f_out = advance_refined_step!(domain, f_in, f_out, ρ, ux, uy, is_solid;
+            stream_fn=stream_fn!, collide_fn=collide_fn, macro_fn=macro_fn,
+            bc_base_fn=bc_base_fn, bc_patch_fns=bc_patch_fns,
+            patch_collide_fns=patch_collide_fns, patch_macro_fn=patch_macro_fn)
+
+        # Re-apply coarse BCs after restriction (patches may overwrite wall cells)
+        _apply_boundary_conditions!(f_in, bc_handlers, step, Nx, Ny,
+                                    Float64(dx), Float64(dy), dom, T)
+        compute_macroscopic_2d!(ρ, ux, uy, f_in)
+
+        # VTK output
+        if vtk_out !== nothing && step % vtk_out.interval == 0
+            _write_output(ρ, ux, uy, setup, vtk_out, pvd, output_dir, Float64(dx), step)
+        end
+
+        # PNG/GIF
+        _maybe_save_png(png_out, ρ, ux, uy, setup, output_dir, step)
+        _maybe_collect_gif(gif_out, gif_frames, ρ, ux, uy, step)
+
+        # Callback
+        if callback !== nothing && step % callback_every == 0
+            callback(step, (; rho=Array(ρ), ux=Array(ux), uy=Array(uy)))
+        end
+    end
+
+    # Finalize outputs
+    pvd !== nothing && vtk_save(pvd)
+    _maybe_save_gif(gif_out, gif_frames, setup, output_dir)
+
+    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), setup=setup)
+end
+
+# --- Refinement helpers ---
+
+"""Evaluate obstacle geometry on a fine-grid patch at its native resolution."""
+function _apply_patch_geometry!(patch::RefinementPatch{T},
+                                setup::SimulationSetup) where T
+    Nx_p, Ny_p = patch.Nx, patch.Ny
+    ng = patch.n_ghost
+    dx_f = Float64(patch.dx)
+    Lx, Ly = setup.domain.Lx, setup.domain.Ly
+
+    isempty(setup.regions) && return
+
+    has_fluid_region = any(r -> r.kind == :fluid, setup.regions)
+    solid_cpu = has_fluid_region ? ones(Bool, Nx_p, Ny_p) : zeros(Bool, Nx_p, Ny_p)
+
+    for region in setup.regions
+        region.stl !== nothing && continue  # TODO: STL voxelization on patches
+        region.condition === nothing && continue
+        for jf in 1:Ny_p, if_ in 1:Nx_p
+            x = Float64(patch.x_min) + (if_ - ng - 0.5) * dx_f
+            y = Float64(patch.y_min) + (jf - ng - 0.5) * dx_f
+            result = evaluate(region.condition; x=x, y=y, z=0.0,
+                             Lx=Lx, Ly=Ly, dx=dx_f, dy=dx_f)
+            if region.kind == :fluid && result
+                solid_cpu[if_, jf] = false
+            elseif region.kind == :obstacle && result
+                solid_cpu[if_, jf] = true
+            end
+        end
+    end
+    copyto!(patch.is_solid, solid_cpu)
+end
+
+"""Auto-detect which patch faces touch domain walls and build BC closures."""
+function _build_patch_flow_bcs(patches::Vector{RefinementPatch{T}},
+                                setup::SimulationSetup) where T
+    Lx, Ly = setup.domain.Lx, setup.domain.Ly
+    tol = Lx / setup.domain.Nx * 0.01
+
+    bc_map = Dict{Symbol, BoundarySetup}()
+    for bc in setup.boundaries
+        bc.type == :periodic && continue
+        bc_map[bc.face] = bc
+    end
+
+    patch_bcs = Dict{Int, Function}()
+    for (pidx, patch) in enumerate(patches)
+        closures = Function[]
+
+        for (face, condition) in [
+            (:west,  Float64(patch.x_min) <= tol),
+            (:east,  Float64(patch.x_max) >= Lx - tol),
+            (:south, Float64(patch.y_min) <= tol),
+            (:north, Float64(patch.y_max) >= Ly - tol),
+        ]
+            condition || continue
+            bc = get(bc_map, face, nothing)
+            bc === nothing && continue
+            cl = _make_patch_face_bc(face, bc, T)
+            cl !== nothing && push!(closures, cl)
+        end
+
+        if !isempty(closures)
+            # Capture closures in a local let-block to avoid closure issues
+            let cls = closures
+                patch_bcs[pidx] = (f, Nx_p, Ny_p) -> begin
+                    for cl in cls
+                        cl(f, Nx_p, Ny_p)
+                    end
+                end
+            end
+        end
+    end
+    return patch_bcs
+end
+
+"""Create a BC closure for one face of a patch.
+
+Only wall (bounce-back) BCs are applied directly on patches. Velocity and
+pressure BCs are handled implicitly through the ghost-fill prolongation from
+the coarse grid, which already has these BCs applied. Applying Zou-He or
+pressure BCs directly on the patch would target ghost rows (outside the
+physical domain), producing incorrect results.
+"""
+function _make_patch_face_bc(face::Symbol, bc::BoundarySetup, ::Type{T}) where T
+    if bc.type == :wall
+        return (f, Nx_p, Ny_p) -> apply_bounce_back_wall_2d!(f, Nx_p, Ny_p, face)
+    else
+        # velocity / pressure / periodic: handled by ghost fill from coarse grid
+        return nothing
     end
 end
 
