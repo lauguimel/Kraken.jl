@@ -109,6 +109,30 @@ function fill_ghost_from_coarse!(patch::RefinementPatch{T},
 end
 
 """
+    fill_ghost_temporal!(patch, f_curr, rho_curr, ux_curr, uy_curr,
+                         omega_coarse, Nx_c, Ny_c, t_frac)
+
+Fill ghost cells with temporally interpolated coarse data + FH rescaling.
+At t_frac=0, reads from `patch.*_prev` (saved at time n).
+At t_frac>0, blends between `*_prev` (time n) and `*_curr` (time n+1).
+
+This replaces the old split path that incorrectly read `f_curr` at t_frac=0.
+"""
+function fill_ghost_temporal!(patch::RefinementPatch{T},
+                              f_curr, rho_curr, ux_curr, uy_curr,
+                              omega_coarse::Real,
+                              Nx_c::Int, Ny_c::Int,
+                              t_frac::Real) where T
+    prolongate_f_rescaled_temporal_2d!(
+        patch.f_in, f_curr, rho_curr, ux_curr, uy_curr,
+        patch.f_prev, patch.rho_prev, patch.ux_prev, patch.uy_prev,
+        patch.ratio, patch.Nx_inner, patch.Ny_inner,
+        patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
+        Nx_c, Ny_c, omega_coarse, Float64(patch.omega), Float64(t_frac)
+    )
+end
+
+"""
     restrict_to_coarse!(patch, f_coarse, rho_c, ux_c, uy_c, omega_coarse)
 
 Restrict fine-grid interior back to coarse overlap region with inverse
@@ -176,15 +200,10 @@ function advance_refined_step!(domain::RefinedDomain{T},
             # Temporal interpolation: sub_step=1 -> t_frac=0, sub_step=ratio -> (ratio-1)/ratio
             t_frac = T((sub_step - 1) / ratio)
 
-            if t_frac > zero(T)
-                _fill_ghost_interpolated!(patch, f_in, rho, ux, uy,
-                                         Float64(domain.base_omega),
-                                         Nx, Ny, t_frac)
-            else
-                # First sub-step: use coarse state at time n
-                fill_ghost_from_coarse!(patch, f_in, rho, ux, uy,
-                                        Float64(domain.base_omega), Nx, Ny)
-            end
+            # Temporal ghost fill: at t_frac=0 reads from *_prev (time n),
+            # at t_frac>0 blends toward current f_in (time n+1).
+            fill_ghost_temporal!(patch, f_in, rho, ux, uy,
+                                Float64(domain.base_omega), Nx, Ny, t_frac)
 
             # Advance patch one fine step
             bc_fn = bc_patch_fns !== nothing ? get(bc_patch_fns, pidx, nothing) : nothing

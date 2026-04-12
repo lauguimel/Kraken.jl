@@ -410,15 +410,9 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
         for sub_step in 1:ratio
             t_frac = T((sub_step - 1) / ratio)
 
-            # Flow ghost fill (with temporal interpolation for sub-steps)
-            if t_frac > zero(T)
-                _fill_ghost_interpolated!(patch, f_in, rho, ux, uy,
-                                          Float64(domain.base_omega),
-                                          Nx, Ny, t_frac)
-            else
-                fill_ghost_from_coarse!(patch, f_in, rho, ux, uy,
-                                         Float64(domain.base_omega), Nx, Ny)
-            end
+            # Flow ghost fill: temporal interpolation between *_prev (n) and f_in (n+1)
+            fill_ghost_temporal!(patch, f_in, rho, ux, uy,
+                                Float64(domain.base_omega), Nx, Ny, t_frac)
             # Thermal ghost: bilinear with temporal interpolation
             fill_thermal_ghost!(patch, thermal, g_in, Nx, Ny;
                                 t_frac=t_frac)

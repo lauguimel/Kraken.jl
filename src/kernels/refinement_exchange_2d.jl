@@ -228,6 +228,140 @@ function prolongate_f_rescaled_full_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c,
     KernelAbstractions.synchronize(backend)
 end
 
+# --- Temporal prolongation: ghost fill with time-interpolated coarse state ---
+
+"""
+Kernel: fill fine-grid ghost cells from temporally interpolated coarse data.
+Blends between `f_prev` (local buffer, saved at time n) and `f_curr` (global,
+at time n+1) using weight `t_frac`. Then applies bilinear spatial interpolation
+and Filippova-Hanel non-equilibrium rescaling.
+
+At t_frac=0, reads purely from f_prev (correct state at time n).
+At t_frac>0, blends toward current state f_curr.
+"""
+@kernel function prolongate_f_rescaled_temporal_2d_kernel!(
+        f_fine, @Const(f_curr), @Const(rho_curr), @Const(ux_curr), @Const(uy_curr),
+        @Const(f_prev), @Const(rho_prev), @Const(ux_prev), @Const(uy_prev),
+        ratio, Nx_inner, Ny_inner, n_ghost,
+        i_c_start, j_c_start, Nx_c, Ny_c, alpha_c2f, t_frac,
+        i_lo, j_lo, Ni_prev, Nj_prev)
+
+    i_f, j_f = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(f_fine)
+        Nx_f = Nx_inner + 2 * n_ghost
+        Ny_f = Ny_inner + 2 * n_ghost
+
+        is_ghost = (i_f <= n_ghost) || (i_f > n_ghost + Nx_inner) ||
+                   (j_f <= n_ghost) || (j_f > n_ghost + Ny_inner)
+
+        if is_ghost
+            t = T(t_frac)
+            omt = one(T) - t  # weight for prev state
+
+            xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_c_start) + T(0.5) / T(ratio)
+            yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_c_start) + T(0.5) / T(ratio)
+
+            i0_raw = trunc(Int, xc)
+            j0_raw = trunc(Int, yc)
+            tx = xc - T(i0_raw)
+            ty = yc - T(j0_raw)
+
+            i0 = clamp(i0_raw, 1, Nx_c)
+            i1 = clamp(i0_raw + 1, 1, Nx_c)
+            j0 = clamp(j0_raw, 1, Ny_c)
+            j1 = clamp(j0_raw + 1, 1, Ny_c)
+            tx = clamp(tx, zero(T), one(T))
+            ty = clamp(ty, zero(T), one(T))
+
+            w00 = (one(T) - tx) * (one(T) - ty)
+            w10 = tx * (one(T) - ty)
+            w01 = (one(T) - tx) * ty
+            w11 = tx * ty
+
+            # Local indices into prev buffers
+            ip0 = clamp(i0 - i_lo + 1, 1, Ni_prev)
+            ip1 = clamp(i1 - i_lo + 1, 1, Ni_prev)
+            jp0 = clamp(j0 - j_lo + 1, 1, Nj_prev)
+            jp1 = clamp(j1 - j_lo + 1, 1, Nj_prev)
+
+            # Temporally blend macroscopic fields at stencil points
+            rho00 = omt * rho_prev[ip0, jp0] + t * rho_curr[i0, j0]
+            rho10 = omt * rho_prev[ip1, jp0] + t * rho_curr[i1, j0]
+            rho01 = omt * rho_prev[ip0, jp1] + t * rho_curr[i0, j1]
+            rho11 = omt * rho_prev[ip1, jp1] + t * rho_curr[i1, j1]
+
+            ux00 = omt * ux_prev[ip0, jp0] + t * ux_curr[i0, j0]
+            ux10 = omt * ux_prev[ip1, jp0] + t * ux_curr[i1, j0]
+            ux01 = omt * ux_prev[ip0, jp1] + t * ux_curr[i0, j1]
+            ux11 = omt * ux_prev[ip1, jp1] + t * ux_curr[i1, j1]
+
+            uy00 = omt * uy_prev[ip0, jp0] + t * uy_curr[i0, j0]
+            uy10 = omt * uy_prev[ip1, jp0] + t * uy_curr[i1, j0]
+            uy01 = omt * uy_prev[ip0, jp1] + t * uy_curr[i0, j1]
+            uy11 = omt * uy_prev[ip1, jp1] + t * uy_curr[i1, j1]
+
+            # Spatial bilinear interpolation of macroscopic
+            rho_f = w00 * rho00 + w10 * rho10 + w01 * rho01 + w11 * rho11
+            ux_f  = w00 * ux00  + w10 * ux10  + w01 * ux01  + w11 * ux11
+            uy_f  = w00 * uy00  + w10 * uy10  + w01 * uy01  + w11 * uy11
+
+            for q in 1:9
+                feq_f = _feq_d2q9(q, rho_f, ux_f, uy_f)
+
+                # Temporal blend of f at stencil points, then compute f_neq
+                f00 = omt * f_prev[ip0, jp0, q] + t * f_curr[i0, j0, q]
+                f10 = omt * f_prev[ip1, jp0, q] + t * f_curr[i1, j0, q]
+                f01 = omt * f_prev[ip0, jp1, q] + t * f_curr[i0, j1, q]
+                f11 = omt * f_prev[ip1, jp1, q] + t * f_curr[i1, j1, q]
+
+                fneq_00 = f00 - _feq_d2q9(q, rho00, ux00, uy00)
+                fneq_10 = f10 - _feq_d2q9(q, rho10, ux10, uy10)
+                fneq_01 = f01 - _feq_d2q9(q, rho01, ux01, uy01)
+                fneq_11 = f11 - _feq_d2q9(q, rho11, ux11, uy11)
+
+                fneq_interp = w00 * fneq_00 + w10 * fneq_10 +
+                              w01 * fneq_01 + w11 * fneq_11
+
+                f_fine[i_f, j_f, q] = feq_f + T(alpha_c2f) * fneq_interp
+            end
+        end
+    end
+end
+
+"""
+    prolongate_f_rescaled_temporal_2d!(f_fine, f_curr, rho_curr, ux_curr, uy_curr,
+                                       f_prev, rho_prev, ux_prev, uy_prev, ...)
+
+Fill ghost cells with temporally interpolated Filippova-Hanel rescaling.
+At t_frac=0, reads from `*_prev` buffers (time n). At t_frac>0, blends
+toward current state `*_curr` (time n+1).
+"""
+function prolongate_f_rescaled_temporal_2d!(
+        f_fine, f_curr, rho_curr, ux_curr, uy_curr,
+        f_prev, rho_prev, ux_prev, uy_prev,
+        ratio::Int, Nx_inner::Int, Ny_inner::Int,
+        n_ghost::Int, i_c_start::Int, j_c_start::Int,
+        Nx_c::Int, Ny_c::Int,
+        omega_coarse::Real, omega_fine::Real, t_frac::Real)
+    backend = KernelAbstractions.get_backend(f_fine)
+    T = eltype(f_fine)
+    alpha = T(rescaling_factor_c2f(omega_coarse, omega_fine, ratio))
+    Nx_f = Nx_inner + 2 * n_ghost
+    Ny_f = Ny_inner + 2 * n_ghost
+    i_lo = max(i_c_start - 1, 1)
+    j_lo = max(j_c_start - 1, 1)
+    kernel! = prolongate_f_rescaled_temporal_2d_kernel!(backend)
+    kernel!(f_fine, f_curr, rho_curr, ux_curr, uy_curr,
+            f_prev, rho_prev, ux_prev, uy_prev,
+            ratio, Nx_inner, Ny_inner, n_ghost,
+            i_c_start, j_c_start, Nx_c, Ny_c, alpha, T(t_frac),
+            i_lo, j_lo, Int(size(f_prev, 1)), Int(size(f_prev, 2));
+            ndrange=(Nx_f, Ny_f))
+    KernelAbstractions.synchronize(backend)
+end
+
 # --- Restriction: fine → coarse with inverse rescaling ---
 
 """
