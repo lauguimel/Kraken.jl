@@ -1,12 +1,13 @@
 using KernelAbstractions
 
 # --- Zou-He spatial velocity BC on north wall (j = Ny) ---
+# Corner nodes (i=1, i=Nx) are skipped — handled by wall bounce-back in streaming.
 
-@kernel function zou_he_velocity_north_spatial_2d_kernel!(f, @Const(ux_arr), @Const(uy_arr), Ny)
+@kernel function zou_he_velocity_north_spatial_2d_kernel!(f, @Const(ux_arr), @Const(uy_arr), Ny, Nx)
     i = @index(Global)
     j = Ny
 
-    @inbounds begin
+    @inbounds if i > 1 && i < Nx
         T = eltype(f)
         u_x = T(ux_arr[i])
         u_y = T(uy_arr[i])
@@ -30,17 +31,17 @@ Zou-He velocity BC on north wall with per-node velocity arrays.
 function apply_zou_he_north_spatial_2d!(f, ux_arr, uy_arr, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_north_spatial_2d_kernel!(backend)
-    kernel!(f, ux_arr, uy_arr, Ny; ndrange=(Nx,))
+    kernel!(f, ux_arr, uy_arr, Ny, Nx; ndrange=(Nx,))
     KernelAbstractions.synchronize(backend)
 end
 
 # --- Zou-He spatial velocity BC on south wall (j = 1) ---
 
-@kernel function zou_he_velocity_south_spatial_2d_kernel!(f, @Const(ux_arr), @Const(uy_arr))
+@kernel function zou_he_velocity_south_spatial_2d_kernel!(f, @Const(ux_arr), @Const(uy_arr), Nx)
     i = @index(Global)
     j = 1
 
-    @inbounds begin
+    @inbounds if i > 1 && i < Nx
         T = eltype(f)
         u_x = T(ux_arr[i])
         u_y = T(uy_arr[i])
@@ -64,7 +65,7 @@ Zou-He velocity BC on south wall with per-node velocity arrays.
 function apply_zou_he_south_spatial_2d!(f, ux_arr, uy_arr, Nx)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_south_spatial_2d_kernel!(backend)
-    kernel!(f, ux_arr, uy_arr; ndrange=(Nx,))
+    kernel!(f, ux_arr, uy_arr, Nx; ndrange=(Nx,))
     KernelAbstractions.synchronize(backend)
 end
 
@@ -73,7 +74,7 @@ end
 @kernel function zou_he_velocity_west_spatial_2d_kernel!(f, @Const(ux_arr), @Const(uy_arr), Ny)
     j = @index(Global)
 
-    @inbounds begin
+    @inbounds if j > 1 && j < Ny
         T = eltype(f)
         u_x = T(ux_arr[j])
         u_y = T(uy_arr[j])
@@ -103,10 +104,10 @@ end
 
 # --- Zou-He spatial pressure BC on east wall (i = Nx) ---
 
-@kernel function zou_he_pressure_east_spatial_2d_kernel!(f, Nx, @Const(ρ_arr))
+@kernel function zou_he_pressure_east_spatial_2d_kernel!(f, Nx, @Const(ρ_arr), Ny)
     j = @index(Global)
 
-    @inbounds begin
+    @inbounds if j > 1 && j < Ny
         T = eltype(f)
         ρ_out = T(ρ_arr[j])
 
@@ -129,6 +130,6 @@ Zou-He pressure BC on east wall with per-node density array.
 function apply_zou_he_pressure_east_spatial_2d!(f, rho_arr, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_pressure_east_spatial_2d_kernel!(backend)
-    kernel!(f, Nx, rho_arr; ndrange=(Ny,))
+    kernel!(f, Nx, rho_arr, Ny; ndrange=(Ny,))
     KernelAbstractions.synchronize(backend)
 end
