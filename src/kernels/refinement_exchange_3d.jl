@@ -2,13 +2,22 @@ using KernelAbstractions
 
 # --- 3D Refinement exchange kernels (D3Q19, trilinear + Filippova-Hanel) ---
 
-# Inline D3Q19 equilibrium for GPU kernels
+# Inline D3Q19 equilibrium for GPU kernels (Metal-compatible, no Float64 constants)
 @inline function _feq_3d(q::Int, ρ, ux, uy, uz)
     TT = typeof(ρ)
-    w  = TT(_D3Q19_W[q])
-    cx = TT(_D3Q19_CX[q])
-    cy = TT(_D3Q19_CY[q])
-    cz = TT(_D3Q19_CZ[q])
+    # D3Q19 weights: rest=1/3, axis(2-7)=1/18, edge(8-19)=1/36
+    w = ifelse(q == 1, one(TT) / TT(3),
+        ifelse(q <= 7, one(TT) / TT(18), one(TT) / TT(36)))
+    # D3Q19 velocities (cx, cy, cz) — avoid Float64 lookup
+    cx = TT(ifelse(q==2, 1, ifelse(q==3, -1,
+         ifelse(q==8, 1, ifelse(q==9, -1, ifelse(q==10, 1, ifelse(q==11, -1,
+         ifelse(q==12, 1, ifelse(q==13, -1, ifelse(q==14, 1, ifelse(q==15, -1, 0)))))))))))
+    cy = TT(ifelse(q==4, 1, ifelse(q==5, -1,
+         ifelse(q==8, 1, ifelse(q==9, 1, ifelse(q==10, -1, ifelse(q==11, -1,
+         ifelse(q==16, 1, ifelse(q==17, -1, ifelse(q==18, 1, ifelse(q==19, -1, 0)))))))))))
+    cz = TT(ifelse(q==6, 1, ifelse(q==7, -1,
+         ifelse(q==12, 1, ifelse(q==13, 1, ifelse(q==14, -1, ifelse(q==15, -1,
+         ifelse(q==16, 1, ifelse(q==17, 1, ifelse(q==18, -1, ifelse(q==19, -1, 0)))))))))))
     cu = cx * ux + cy * uy + cz * uz
     usq = ux * ux + uy * uy + uz * uz
     return w * ρ * (one(TT) + TT(3) * cu + TT(4.5) * cu * cu - TT(1.5) * usq)
@@ -40,7 +49,7 @@ end
             zc = T(k_f - n_ghost - 1) / T(ratio) + T(k_c_start) + T(0.5) / T(ratio)
 
             # Trilinear stencil
-            i0r = trunc(Int, xc); j0r = trunc(Int, yc); k0r = trunc(Int, zc)
+            i0r = unsafe_trunc(Int, xc); j0r = unsafe_trunc(Int, yc); k0r = unsafe_trunc(Int, zc)
             tx = xc - T(i0r); ty = yc - T(j0r); tz = zc - T(k0r)
             i0 = clamp(i0r, 1, Nx_c); i1 = clamp(i0r+1, 1, Nx_c)
             j0 = clamp(j0r, 1, Ny_c); j1 = clamp(j0r+1, 1, Ny_c)
@@ -97,10 +106,11 @@ function prolongate_f_rescaled_3d!(f_fine, f_coarse, rho_c, ux_c, uy_c, uz_c,
     Ny_f = Ny_inner + 2 * n_ghost
     Nz_f = Nz_inner + 2 * n_ghost
     kernel! = prolongate_f_rescaled_3d_kernel!(backend)
+    FT = eltype(f_fine)
     kernel!(f_fine, f_coarse, rho_c, ux_c, uy_c, uz_c,
             ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
             i_c_start, j_c_start, k_c_start,
-            Nx_c, Ny_c, Nz_c, omega_c, omega_f;
+            Nx_c, Ny_c, Nz_c, FT(omega_c), FT(omega_f);
             ndrange=(Nx_f, Ny_f, Nz_f))
     KernelAbstractions.synchronize(backend)
 end
@@ -125,7 +135,7 @@ end
         yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_c_start) + T(0.5) / T(ratio)
         zc = T(k_f - n_ghost - 1) / T(ratio) + T(k_c_start) + T(0.5) / T(ratio)
 
-        i0r = trunc(Int, xc); j0r = trunc(Int, yc); k0r = trunc(Int, zc)
+        i0r = unsafe_trunc(Int, xc); j0r = unsafe_trunc(Int, yc); k0r = unsafe_trunc(Int, zc)
         tx = clamp(xc - T(i0r), zero(T), one(T))
         ty = clamp(yc - T(j0r), zero(T), one(T))
         tz = clamp(zc - T(k0r), zero(T), one(T))
@@ -171,10 +181,11 @@ function prolongate_f_rescaled_full_3d!(f_fine, f_coarse, rho_c, ux_c, uy_c, uz_
     Ny_f = Ny_inner + 2 * n_ghost
     Nz_f = Nz_inner + 2 * n_ghost
     kernel! = prolongate_f_rescaled_full_3d_kernel!(backend)
+    FT = eltype(f_fine)
     kernel!(f_fine, f_coarse, rho_c, ux_c, uy_c, uz_c,
             ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
             i_c_start, j_c_start, k_c_start,
-            Nx_c, Ny_c, Nz_c, omega_c, omega_f;
+            Nx_c, Ny_c, Nz_c, FT(omega_c), FT(omega_f);
             ndrange=(Nx_f, Ny_f, Nz_f))
     KernelAbstractions.synchronize(backend)
 end
@@ -208,7 +219,7 @@ end
             yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_c_start) + T(0.5) / T(ratio)
             zc = T(k_f - n_ghost - 1) / T(ratio) + T(k_c_start) + T(0.5) / T(ratio)
 
-            i0r = trunc(Int, xc); j0r = trunc(Int, yc); k0r = trunc(Int, zc)
+            i0r = unsafe_trunc(Int, xc); j0r = unsafe_trunc(Int, yc); k0r = unsafe_trunc(Int, zc)
             tx = clamp(xc - T(i0r), zero(T), one(T))
             ty = clamp(yc - T(j0r), zero(T), one(T))
             tz = clamp(zc - T(k0r), zero(T), one(T))
@@ -293,8 +304,8 @@ function prolongate_f_rescaled_temporal_3d!(f_fine,
             f_prev, rho_prev, ux_prev, uy_prev, uz_prev,
             ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
             i_c_start, j_c_start, k_c_start,
-            Nx_c, Ny_c, Nz_c, omega_c, omega_f, eltype(f_fine)(t_frac),
-            Ni_prev, Nj_prev, Nk_prev;
+            Nx_c, Ny_c, Nz_c, eltype(f_fine)(omega_c), eltype(f_fine)(omega_f),
+            eltype(f_fine)(t_frac), Ni_prev, Nj_prev, Nk_prev;
             ndrange=(Nx_f, Ny_f, Nz_f))
     KernelAbstractions.synchronize(backend)
 end
@@ -363,10 +374,11 @@ function restrict_f_rescaled_3d!(f_coarse, rho_c, ux_c, uy_c, uz_c,
                                   omega_c, omega_f)
     backend = KernelAbstractions.get_backend(f_coarse)
     kernel! = restrict_f_rescaled_3d_kernel!(backend)
+    FT = eltype(f_coarse)
     kernel!(f_coarse, rho_c, ux_c, uy_c, uz_c,
             f_fine, rho_f, ux_f, uy_f, uz_f,
             ratio, n_ghost, i_c_start, j_c_start, k_c_start,
-            omega_c, omega_f;
+            FT(omega_c), FT(omega_f);
             ndrange=(Nx_overlap, Ny_overlap, Nz_overlap))
     KernelAbstractions.synchronize(backend)
 end
@@ -399,7 +411,7 @@ end
             yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_offset) + T(0.5) / T(ratio)
             zc = T(k_f - n_ghost - 1) / T(ratio) + T(k_offset) + T(0.5) / T(ratio)
 
-            i0r = trunc(Int, xc); j0r = trunc(Int, yc); k0r = trunc(Int, zc)
+            i0r = unsafe_trunc(Int, xc); j0r = unsafe_trunc(Int, yc); k0r = unsafe_trunc(Int, zc)
             tx = clamp(xc - T(i0r), zero(T), one(T))
             ty = clamp(yc - T(j0r), zero(T), one(T))
             tz = clamp(zc - T(k0r), zero(T), one(T))
@@ -482,7 +494,7 @@ end
         yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_offset) + T(0.5) / T(ratio)
         zc = T(k_f - n_ghost - 1) / T(ratio) + T(k_offset) + T(0.5) / T(ratio)
 
-        i0r = trunc(Int, xc); j0r = trunc(Int, yc); k0r = trunc(Int, zc)
+        i0r = unsafe_trunc(Int, xc); j0r = unsafe_trunc(Int, yc); k0r = unsafe_trunc(Int, zc)
         tx = clamp(xc - T(i0r), zero(T), one(T))
         ty = clamp(yc - T(j0r), zero(T), one(T))
         tz = clamp(zc - T(k0r), zero(T), one(T))
