@@ -84,8 +84,8 @@ Arguments:
             yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_c_start) + T(0.5) / T(ratio)
 
             # Bilinear stencil: floor indices
-            i0_raw = trunc(Int, xc)
-            j0_raw = trunc(Int, yc)
+            i0_raw = unsafe_trunc(Int, xc)
+            j0_raw = unsafe_trunc(Int, yc)
             tx = xc - T(i0_raw)
             ty = yc - T(j0_raw)
 
@@ -168,8 +168,8 @@ end
         xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_c_start) + T(0.5) / T(ratio)
         yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_c_start) + T(0.5) / T(ratio)
 
-        i0_raw = trunc(Int, xc)
-        j0_raw = trunc(Int, yc)
+        i0_raw = unsafe_trunc(Int, xc)
+        j0_raw = unsafe_trunc(Int, yc)
         tx = xc - T(i0_raw)
         ty = yc - T(j0_raw)
 
@@ -263,8 +263,8 @@ At t_frac>0, blends toward current state f_curr.
             xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_c_start) + T(0.5) / T(ratio)
             yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_c_start) + T(0.5) / T(ratio)
 
-            i0_raw = trunc(Int, xc)
-            j0_raw = trunc(Int, yc)
+            i0_raw = unsafe_trunc(Int, xc)
+            j0_raw = unsafe_trunc(Int, yc)
             tx = xc - T(i0_raw)
             ty = yc - T(j0_raw)
 

@@ -27,8 +27,8 @@ using KernelAbstractions
         yc = (T(j_f) - T(0.5)) / T(r) + T(0.5)
 
         # Bracketing coarse indices (trunc = floor for positive values)
-        i0_raw = trunc(Int, xc)
-        j0_raw = trunc(Int, yc)
+        i0_raw = unsafe_trunc(Int, xc)
+        j0_raw = unsafe_trunc(Int, yc)
 
         # Bilinear weights (before clamping)
         tx = xc - T(i0_raw)
