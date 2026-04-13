@@ -205,6 +205,8 @@ export prolongate_f_rescaled_3d!, prolongate_f_rescaled_full_3d!
 export prolongate_f_rescaled_temporal_3d!, restrict_f_rescaled_3d!
 export ThermalPatchArrays3D, create_thermal_patch_arrays_3d
 export advance_thermal_refined_step_3d!, build_patch_thermal_bcs_3d
+export fill_thermal_full_3d!, fill_thermal_ghost_3d!, restrict_thermal_to_coarse_3d!
+export build_patch_flow_bcs_3d
 export TwophaseRefinedArrays, create_twophase_patch_arrays, advance_twophase_refined_step!
 
 # STL geometry

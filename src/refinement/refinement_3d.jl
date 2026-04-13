@@ -517,14 +517,17 @@ function build_patch_thermal_bcs_3d(patches::Vector{RefinementPatch3D{T}},
                                      temp_bcs::Dict{Symbol, <:Real}) where T
     tol = Lx / Nx * 0.01
 
-    # Map face symbol to (apply function, condition check)
+    # Map face symbol to apply function — each BC has a different signature:
+    #   west:   (g, T_wall, Ny, Nz)        east:   (g, T_wall, Nx, Ny, Nz)
+    #   south:  (g, T_wall, Nx, Nz)        north:  (g, T_wall, Nx, Ny, Nz)
+    #   bottom: (g, T_wall, Nx, Ny)        top:    (g, T_wall, Nx, Ny, Nz)
     face_fns = Dict{Symbol, Function}(
-        :west   => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_west_3d!(g, Nx_p, Ny_p, Nz_p, Tw),
-        :east   => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_east_3d!(g, Nx_p, Ny_p, Nz_p, Tw),
-        :south  => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_south_3d!(g, Nx_p, Ny_p, Nz_p, Tw),
-        :north  => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_north_3d!(g, Nx_p, Ny_p, Nz_p, Tw),
-        :bottom => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_bottom_3d!(g, Nx_p, Ny_p, Nz_p, Tw),
-        :top    => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_top_3d!(g, Nx_p, Ny_p, Nz_p, Tw),
+        :west   => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_west_3d!(g, Tw, Ny_p, Nz_p),
+        :east   => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_east_3d!(g, Tw, Nx_p, Ny_p, Nz_p),
+        :south  => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_south_3d!(g, Tw, Nx_p, Nz_p),
+        :north  => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_north_3d!(g, Tw, Nx_p, Ny_p, Nz_p),
+        :bottom => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_bottom_3d!(g, Tw, Nx_p, Ny_p),
+        :top    => (g, Nx_p, Ny_p, Nz_p, Tw) -> apply_fixed_temp_top_3d!(g, Tw, Nx_p, Ny_p, Nz_p),
     )
 
     face_checks = [
