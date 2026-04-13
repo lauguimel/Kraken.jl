@@ -238,4 +238,173 @@ using Kraken
 
         @info "Sub-cycling: uniform flow stable after 10 coarse steps"
     end
+
+    # ================================================================
+    # 3D refinement tests
+    # ================================================================
+
+    @testset "3D: Create patch" begin
+        Nx, Ny, Nz = 16, 16, 16
+        dx = 1.0 / Nx
+        ω = 1.0
+        region = (0.25, 0.25, 0.25, 0.75, 0.75, 0.75)
+
+        patch = create_patch_3d("center", 1, 2, region,
+                                Nx, Ny, Nz, dx, ω, Float64)
+
+        @test patch.Nx_inner == 16   # 8 coarse cells × ratio 2
+        @test patch.Ny_inner == 16
+        @test patch.Nz_inner == 16
+        @test patch.Nx == patch.Nx_inner + 2 * patch.n_ghost
+        @test patch.dx ≈ dx / 2
+        @test patch.omega ≈ rescaled_omega(ω, 2)
+
+        @info "3D patch created: $(patch.Nx)×$(patch.Ny)×$(patch.Nz)"
+    end
+
+    @testset "3D: Sub-cycling (uniform flow)" begin
+        Nx, Ny, Nz = 16, 16, 16
+        dx = 1.0 / Nx
+        ν = 0.1
+        ω = Float64(1.0 / (3.0 * ν + 0.5))
+
+        f_in  = zeros(Float64, Nx, Ny, Nz, 19)
+        f_out = zeros(Float64, Nx, Ny, Nz, 19)
+        ρ  = ones(Float64, Nx, Ny, Nz)
+        ux = zeros(Float64, Nx, Ny, Nz)
+        uy = zeros(Float64, Nx, Ny, Nz)
+        uz = zeros(Float64, Nx, Ny, Nz)
+        is_solid = zeros(Bool, Nx, Ny, Nz)
+
+        w = weights(D3Q19())
+        for q in 1:19
+            f_in[:, :, :, q] .= w[q]
+        end
+        copyto!(f_out, f_in)
+
+        patch = create_patch_3d("center", 1, 2,
+                                (0.2, 0.2, 0.2, 0.8, 0.8, 0.8),
+                                Nx, Ny, Nz, dx, ω, Float64)
+        domain = create_refined_domain_3d(Nx, Ny, Nz, dx, ω, [patch])
+
+        for step in 1:5
+            f_in, f_out = advance_refined_step_3d!(
+                domain, f_in, f_out, ρ, ux, uy, uz, is_solid;
+                stream_fn=stream_3d!,
+                collide_fn=(f, is_s) -> collide_3d!(f, is_s, ω),
+                macro_fn=compute_macroscopic_3d!)
+        end
+
+        @test maximum(abs.(ux)) < 1e-10
+        @test maximum(abs.(uy)) < 1e-10
+        @test maximum(abs.(uz)) < 1e-10
+        @test maximum(abs.(ρ .- 1.0)) < 1e-10
+
+        @info "3D sub-cycling: uniform flow stable after 5 coarse steps"
+    end
+
+    @testset ".krk Refine 3D parsing" begin
+        setup = parse_kraken("""
+            Simulation test3d D3Q19
+            Domain L = 1.0 x 1.0 x 1.0  N = 16 x 16 x 16
+            Physics nu = 0.1
+            Boundary west wall
+            Boundary east wall
+            Boundary south wall
+            Boundary north wall
+            Boundary bottom wall
+            Boundary top wall
+            Refine center { region = [0.2, 0.2, 0.2, 0.8, 0.8, 0.8], ratio = 2 }
+            Run 10 steps
+        """)
+        @test length(setup.refinements) == 1
+        @test setup.refinements[1].is_3d
+        @test setup.refinements[1].region_3d == (0.2, 0.2, 0.2, 0.8, 0.8, 0.8)
+        @test setup.refinements[1].ratio == 2
+
+        @info "3D Refine parsing: OK"
+    end
+
+    @testset ".krk 2D refined run (isothermal)" begin
+        result = run_simulation(parse_kraken("""
+            Simulation cavity_ref D2Q9
+            Domain L = 1.0 x 1.0  N = 32 x 32
+            Physics nu = 0.05
+            Boundary north velocity(ux = 0.1, uy = 0)
+            Boundary south wall
+            Boundary east wall
+            Boundary west wall
+            Refine corner { region = [0.5, 0.5, 1.0, 1.0], ratio = 2 }
+            Run 50 steps
+        """))
+        @test !any(isnan, result.ρ)
+        @test haskey(result, :ux)
+
+        @info ".krk 2D refined isothermal: OK"
+    end
+
+    @testset ".krk 3D refined run (isothermal)" begin
+        result = run_simulation(parse_kraken("""
+            Simulation cavity3d_ref D3Q19
+            Domain L = 1.0 x 1.0 x 1.0  N = 12 x 12 x 12
+            Physics nu = 0.1
+            Boundary west wall
+            Boundary east wall
+            Boundary south wall
+            Boundary north wall
+            Boundary bottom wall
+            Boundary top wall
+            Refine center { region = [0.25, 0.25, 0.25, 0.75, 0.75, 0.75], ratio = 2 }
+            Run 20 steps
+        """))
+        @test !any(isnan, result.ρ)
+        @test haskey(result, :uz)
+        @test size(result.ρ) == (12, 12, 12)
+
+        @info ".krk 3D refined isothermal: OK"
+    end
+
+    @testset ".krk 2D refined thermal run" begin
+        result = run_simulation(parse_kraken("""
+            Simulation natconv_ref D2Q9
+            Domain L = 1.0 x 1.0  N = 16 x 16
+            Physics nu = 0.1  Pr = 0.71  Ra = 100
+            Module thermal
+            Boundary west  wall(T = 1.0)
+            Boundary east  wall(T = 0.0)
+            Boundary south wall
+            Boundary north wall
+            Refine hot { region = [0.0, 0.0, 0.4, 1.0], ratio = 2 }
+            Run 50 steps
+        """))
+        @test !any(isnan, result.ρ)
+        @test haskey(result, :Temp)
+        @test !any(isnan, result.Temp)
+
+        @info ".krk 2D refined thermal: OK"
+    end
+
+    @testset "Sanity check: refined thermal tau" begin
+        setup = parse_kraken("""
+            Simulation sanity_test D2Q9
+            Domain L = 1.0 x 1.0  N = 32 x 32
+            Physics nu = 0.01  Pr = 0.71  Ra = 1000
+            Module thermal
+            Boundary west wall(T = 1.0)
+            Boundary east wall(T = 0.0)
+            Boundary south wall
+            Boundary north wall
+            Refine near_wall { region = [0.0, 0.0, 0.3, 1.0], ratio = 4 }
+            Run 100 steps
+        """)
+        issues = Kraken.sanity_check(setup; verbose=false)
+        # ratio=4 with nu=0.01 → tau_base = 0.53, tau_fine = 4*(0.03)+0.5 = 0.62
+        # thermal: alpha = 0.01/0.71 ≈ 0.0141, tau_T = 3*0.0141+0.5 = 0.5423
+        # tau_T_fine = 4*(0.0423)+0.5 = 0.669 — both should be fine
+        @test !isempty(setup.refinements)
+        # No errors expected for this configuration
+        @test !any(i -> i.level === :error, issues)
+
+        @info "Sanity check refined thermal: OK"
+    end
 end
