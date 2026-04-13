@@ -1664,19 +1664,71 @@ function _check_refinement!(issues, setup)
     ν = get(setup.physics.params, :nu, NaN)
     isnan(ν) && return
     τ_base = 3ν + 0.5
+
+    # Probe reference velocity for Ma check on fine grid
+    U_ref = _probe_U_ref(setup.boundaries)
+    cs = 1.0 / sqrt(3.0)
+
+    # Base grid resolution
+    dom = setup.domain
+    N_base = max(dom.Nx, dom.Ny, dom.Nz > 1 ? dom.Nz : 0)
+
+    # Thermal parameters (if thermal module active)
+    is_thermal = :thermal in setup.modules
+    params = setup.physics.params
+    α_thermal = NaN
+    τ_T_base = NaN
+    if is_thermal
+        Pr = get(params, :Pr, 0.71)
+        α_thermal = haskey(params, :alpha) ? params[:alpha] : ν / Pr
+        τ_T_base = 3 * α_thermal + 0.5
+    end
+
     for ref in setup.refinements
         ratio = ref.ratio
+        name = ref.name
+
+        # --- Flow τ on fine grid ---
         τ_fine = ratio * (τ_base - 0.5) + 0.5
         if τ_fine < 0.51
             _push_issue!(issues, :warn, :refinement,
-                "Patch '$(ref.name)' (ratio=$ratio): fine-grid tau = $(round(τ_fine, digits=4)) " *
+                "Patch '$name' (ratio=$ratio): fine-grid τ = $(round(τ_fine, digits=4)) " *
                 "is marginally stable after Filippova-Hanel rescaling.")
         end
         if τ_fine > 10.0
             _push_issue!(issues, :warn, :refinement,
-                "Patch '$(ref.name)' (ratio=$ratio): fine-grid tau = $(round(τ_fine, digits=2)) " *
+                "Patch '$name' (ratio=$ratio): fine-grid τ = $(round(τ_fine, digits=2)) " *
                 "is very large — over-diffusive fine grid.")
         end
+
+        # --- Thermal τ on fine grid ---
+        if is_thermal && !isnan(τ_T_base)
+            τ_T_fine = ratio * (τ_T_base - 0.5) + 0.5
+            if τ_T_fine < 0.51
+                _push_issue!(issues, :warn, :refinement,
+                    "Patch '$name' (ratio=$ratio): fine-grid thermal τ_α = $(round(τ_T_fine, digits=4)) " *
+                    "is marginally stable.")
+            end
+            if τ_T_fine > 10.0
+                _push_issue!(issues, :warn, :refinement,
+                    "Patch '$name' (ratio=$ratio): fine-grid thermal τ_α = $(round(τ_T_fine, digits=2)) " *
+                    "is very large — over-diffusive thermal fine grid.")
+            end
+        end
+
+        # --- Fine-grid resolution check ---
+        N_fine = N_base * ratio
+        Re = get(params, :Re, NaN)
+        if !isnan(Re) && Re > 0 && N_fine / Re < 1.0
+            _push_issue!(issues, :warn, :refinement,
+                "Patch '$name' (ratio=$ratio): fine-grid N/Re = $(round(N_fine/Re, digits=2)) < 1 " *
+                "— boundary layer may be under-resolved even on fine grid.")
+        end
+
+        # --- Compressibility on fine grid (Ma is preserved, dt_fine = dt/ratio) ---
+        # Ma is invariant across refinement levels (same U_ref in lattice units)
+        # but U_ref on fine grid = U_ref_coarse (acoustic scaling)
+        # No additional check needed — Ma is already validated at coarse level
     end
 end
 
@@ -1708,9 +1760,23 @@ function _print_parameter_summary(setup)
 
     # Refinement patches
     if !isempty(setup.refinements)
+        is_thermal = :thermal in setup.modules
+        α_thermal = NaN
+        if is_thermal && !isnan(ν)
+            Pr = get(params, :Pr, 0.71)
+            α_thermal = haskey(params, :alpha) ? params[:alpha] : ν / Pr
+        end
         for ref in setup.refinements
             τ_fine = isnan(ν) ? NaN : ref.ratio * (τ - 0.5) + 0.5
-            push!(lines, "  Refine '$(ref.name)': ratio=$(ref.ratio), τ_fine=$(round(τ_fine, digits=4))")
+            info = "  Refine '$(ref.name)': ratio=$(ref.ratio), τ_fine=$(round(τ_fine, digits=4))"
+            if is_thermal && !isnan(α_thermal)
+                τ_T_base = 3 * α_thermal + 0.5
+                τ_T_fine = ref.ratio * (τ_T_base - 0.5) + 0.5
+                info *= ", τ_T_fine=$(round(τ_T_fine, digits=4))"
+            end
+            dim = ref.is_3d ? "3D" : "2D"
+            info *= " [$dim]"
+            push!(lines, info)
         end
     end
 
