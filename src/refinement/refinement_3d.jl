@@ -148,12 +148,7 @@ end
 
 function fill_ghost_temporal_3d!(patch::RefinementPatch3D{T},
                                   f_coarse, rho_c, ux_c, uy_c, uz_c,
-                                  omega_c, Nx_c, Ny_c, Nz_c, t_frac;
-                                  equilibrium_ghost::Bool=false) where T
-    # equilibrium_ghost=true: set omega_f=omega_c so alpha=1 → f_eq + 1*f_neq
-    # Actually, for pure equilibrium (alpha=0), pass omega_f → 0.5 so
-    # alpha = (0.5 - 0.5)/(omega_c - 0.5) = 0. Use 0.5 + eps for safety.
-    omega_f = equilibrium_ghost ? 0.5 + 1e-10 : Float64(patch.omega)
+                                  omega_c, Nx_c, Ny_c, Nz_c, t_frac) where T
     prolongate_f_rescaled_temporal_3d!(
         patch.f_in,
         f_coarse, rho_c, ux_c, uy_c, uz_c,
@@ -161,7 +156,7 @@ function fill_ghost_temporal_3d!(patch::RefinementPatch3D{T},
         patch.ratio, patch.Nx_inner, patch.Ny_inner, patch.Nz_inner,
         patch.n_ghost,
         first(patch.parent_i_range), first(patch.parent_j_range), first(patch.parent_k_range),
-        Nx_c, Ny_c, Nz_c, omega_c, omega_f, t_frac)
+        Nx_c, Ny_c, Nz_c, omega_c, Float64(patch.omega), t_frac)
 end
 
 # --- Restrict fine → coarse ---
@@ -414,8 +409,7 @@ function advance_thermal_refined_step_3d!(domain::RefinedDomain3D{T},
                                             T_ref_buoy::Real=zero(T),
                                             bc_thermal_patch_fns=nothing,
                                             bc_flow_patch_fns=nothing,
-                                            bc_coarse_fn=nothing,
-                                            equilibrium_flow_ghost::Bool=false) where T
+                                            bc_coarse_fn=nothing) where T
     Nx = domain.base_Nx; Ny = domain.base_Ny; Nz = domain.base_Nz
 
     # 1. Save coarse state at time n (flow + thermal)
@@ -446,12 +440,9 @@ function advance_thermal_refined_step_3d!(domain::RefinedDomain3D{T},
         for sub_step in 1:ratio
             t_frac = T((sub_step - 1) / ratio)
 
-            # Flow ghost fill: temporal interpolation
-            # equilibrium_flow_ghost=true uses alpha≈0 (equilibrium ghost cells)
-            # which avoids FH f_neq feedback instability with Boussinesq
+            # Flow ghost fill: temporal interpolation with FH rescaling
             fill_ghost_temporal_3d!(patch, f_in, rho, ux, uy, uz,
-                                    domain.base_omega, Nx, Ny, Nz, t_frac;
-                                    equilibrium_ghost=equilibrium_flow_ghost)
+                                    domain.base_omega, Nx, Ny, Nz, t_frac)
             # Thermal ghost fill: trilinear temporal (no FH)
             fill_thermal_ghost_3d!(patch, thermal, g_in, Nx, Ny, Nz;
                                     t_frac=t_frac)
