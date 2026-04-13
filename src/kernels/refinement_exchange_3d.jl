@@ -189,7 +189,8 @@ end
         @Const(f_prev), @Const(rho_prev), @Const(ux_prev), @Const(uy_prev), @Const(uz_prev),
         ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
         i_c_start, j_c_start, k_c_start,
-        Nx_c, Ny_c, Nz_c, omega_c, omega_f, t_frac)
+        Nx_c, Ny_c, Nz_c, omega_c, omega_f, t_frac,
+        Ni_prev, Nj_prev, Nk_prev)
 
     i_f, j_f, k_f = @index(Global, NTuple)
 
@@ -218,13 +219,13 @@ end
             kc0 = clamp(k0r, 1, Nz_c); kc1 = clamp(k0r+1, 1, Nz_c)
 
             # Prev buffer indices (local, offset from i_lo = max(i_c_start-1, 1))
+            # Clamp to Ni_prev (actual saved data size), NOT buffer size
             i_lo = max(i_c_start - 1, 1)
             j_lo = max(j_c_start - 1, 1)
             k_lo = max(k_c_start - 1, 1)
-            Ni_p = size(rho_prev, 1); Nj_p = size(rho_prev, 2); Nk_p = size(rho_prev, 3)
-            ip0 = clamp(i0r - i_lo + 1, 1, Ni_p); ip1 = clamp(i0r+1 - i_lo + 1, 1, Ni_p)
-            jp0 = clamp(j0r - j_lo + 1, 1, Nj_p); jp1 = clamp(j0r+1 - j_lo + 1, 1, Nj_p)
-            kp0 = clamp(k0r - k_lo + 1, 1, Nk_p); kp1 = clamp(k0r+1 - k_lo + 1, 1, Nk_p)
+            ip0 = clamp(i0r - i_lo + 1, 1, Ni_prev); ip1 = clamp(i0r+1 - i_lo + 1, 1, Ni_prev)
+            jp0 = clamp(j0r - j_lo + 1, 1, Nj_prev); jp1 = clamp(j0r+1 - j_lo + 1, 1, Nj_prev)
+            kp0 = clamp(k0r - k_lo + 1, 1, Nk_prev); kp1 = clamp(k0r+1 - k_lo + 1, 1, Nk_prev)
 
             w000=(one(T)-tx)*(one(T)-ty)*(one(T)-tz); w100=tx*(one(T)-ty)*(one(T)-tz)
             w010=(one(T)-tx)*ty*(one(T)-tz);           w110=tx*ty*(one(T)-tz)
@@ -279,13 +280,21 @@ function prolongate_f_rescaled_temporal_3d!(f_fine,
     Nx_f = Nx_inner + 2 * n_ghost
     Ny_f = Ny_inner + 2 * n_ghost
     Nz_f = Nz_inner + 2 * n_ghost
+    # Compute actual saved data size in prev buffers (matches save_coarse_state_3d!)
+    i_lo = max(i_c_start - 1, 1)
+    j_lo = max(j_c_start - 1, 1)
+    k_lo = max(k_c_start - 1, 1)
+    Ni_prev = min(i_c_start + Nx_inner ÷ ratio, Nx_c) - i_lo + 1
+    Nj_prev = min(j_c_start + Ny_inner ÷ ratio, Ny_c) - j_lo + 1
+    Nk_prev = min(k_c_start + Nz_inner ÷ ratio, Nz_c) - k_lo + 1
     kernel! = prolongate_f_rescaled_temporal_3d_kernel!(backend)
     kernel!(f_fine,
             f_curr, rho_curr, ux_curr, uy_curr, uz_curr,
             f_prev, rho_prev, ux_prev, uy_prev, uz_prev,
             ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
             i_c_start, j_c_start, k_c_start,
-            Nx_c, Ny_c, Nz_c, omega_c, omega_f, eltype(f_fine)(t_frac);
+            Nx_c, Ny_c, Nz_c, omega_c, omega_f, eltype(f_fine)(t_frac),
+            Ni_prev, Nj_prev, Nk_prev;
             ndrange=(Nx_f, Ny_f, Nz_f))
     KernelAbstractions.synchronize(backend)
 end

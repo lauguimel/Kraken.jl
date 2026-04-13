@@ -231,15 +231,11 @@ function validate_refinement_3d(; N=16, max_steps=500)
 end
 
 # ==========================================================================
-# Part E — 3D Thermal Refinement: stability with center patch
-#
-# Note: wall patches have a known FH artifact causing mass drift in 3D
-# (same issue in isothermal advance_refined_step_3d!). Center patches
-# are stable and validate the thermal sub-cycling pipeline.
+# Part E — 3D Thermal Refinement: conduction + natural convection
 # ==========================================================================
 
 function validate_thermal_refinement_3d(; N=16, max_steps=3000)
-    header("PART E — 3D THERMAL REFINEMENT  (center patch, ratio=2)")
+    header("PART E — 3D THERMAL REFINEMENT  (wall patches, ratio=2)")
 
     FT = Float64
     ν = FT(0.05); Pr = FT(0.71)
@@ -255,8 +251,8 @@ function validate_thermal_refinement_3d(; N=16, max_steps=3000)
     config = LBMConfig(D3Q19(); Nx=Nx, Ny=Ny, Nz=Nz, ν=Float64(ν),
                        u_lid=0.0, max_steps=max_steps)
 
-    # --- E.1 Pure conduction + center patch: T profile preserved ---
-    println("\n  E.1 Pure conduction 3D + center Refine (β_g=0, stability)")
+    # --- E.1 Pure conduction + west wall patch: T profile preserved ---
+    println("\n  E.1 Pure conduction 3D + wall Refine (β_g=0, stability)")
 
     state = initialize_3d(config, FT)
     f_in, f_out = state.f_in, state.f_out
@@ -272,15 +268,20 @@ function validate_thermal_refinement_3d(; N=16, max_steps=3000)
         for q in 1:19; g_in[i,j,k,q] = FT(w[q]) * T_init; end
     end; copyto!(g_out, g_in)
 
-    # Center patch (away from walls — no wall FH artifacts)
-    margin = Float64(L) * 0.25
-    patch = create_patch_3d("center", 1, 2,
-        (margin, margin, margin, Float64(L)-margin, Float64(L)-margin, Float64(L)-margin),
+    # West wall patch
+    wall_frac = 0.25
+    patch = create_patch_3d("west", 1, 2,
+        (0.0, 0.0, 0.0, Float64(wall_frac * L), Float64(L), Float64(L)),
         Nx, Ny, Nz, Float64(dx), Float64(ω_f), FT)
     domain = create_refined_domain_3d(Nx, Ny, Nz, Float64(dx), Float64(ω_f), [patch])
 
     th = create_thermal_patch_arrays_3d(patch, Float64(ω_T); T_init=Float64(T_ref))
     thermals = ThermalPatchArrays3D{FT}[th]
+
+    bc_th = build_patch_thermal_bcs_3d(domain.patches, Float64(L), Float64(L), Float64(L), Nx,
+        Dict(:west => Float64(T_hot), :east => Float64(T_cold)))
+    bc_flow = build_patch_flow_bcs_3d(domain.patches, Float64(L), Float64(L), Float64(L), Nx;
+        wall_faces=[:west, :east, :south, :north, :bottom, :top])
 
     # Init patch from coarse
     compute_macroscopic_3d!(ρ, ux, uy, uz, f_in)
@@ -317,7 +318,7 @@ function validate_thermal_refinement_3d(; N=16, max_steps=3000)
             fused_step_fn=fused_step,
             omega_T_coarse=Float64(ω_T),
             β_g=0.0, T_ref_buoy=Float64(T_ref),
-            bc_thermal_patch_fns=nothing, bc_flow_patch_fns=nothing,
+            bc_thermal_patch_fns=bc_th, bc_flow_patch_fns=bc_flow,
             bc_coarse_fn=bc_coarse)
     end
 
@@ -333,8 +334,8 @@ function validate_thermal_refinement_3d(; N=16, max_steps=3000)
     pass_cond = !any(isnan, T_cpu) && ux_max < 1e-10
     @printf("  → %s (zero velocity, T bounded)\n", pass_cond ? "PASSED" : "FAILED")
 
-    # --- E.2 NatConv 3D + center patch: stability + T bounded ---
-    println("\n  E.2 Natural convection 3D + center Refine (Ra=1e3)")
+    # --- E.2 NatConv 3D + wall patches: stability + Nu ---
+    println("\n  E.2 Natural convection 3D + wall Refine (Ra=1e3)")
 
     state2 = initialize_3d(config, FT)
     f_in2, f_out2 = state2.f_in, state2.f_out
@@ -349,24 +350,36 @@ function validate_thermal_refinement_3d(; N=16, max_steps=3000)
         for q in 1:19; g_in2[i,j,k,q] = FT(w[q]) * T_init; end
     end; copyto!(g_out2, g_in2)
 
-    p2 = create_patch_3d("center", 1, 2,
-        (margin, margin, margin, Float64(L)-margin, Float64(L)-margin, Float64(L)-margin),
+    # West + east wall patches
+    p_west = create_patch_3d("west", 1, 2,
+        (0.0, 0.0, 0.0, Float64(wall_frac * L), Float64(L), Float64(L)),
         Nx, Ny, Nz, Float64(dx), Float64(ω_f), FT)
-    domain2 = create_refined_domain_3d(Nx, Ny, Nz, Float64(dx), Float64(ω_f), [p2])
+    p_east = create_patch_3d("east", 1, 2,
+        (Float64((1 - wall_frac) * L), 0.0, 0.0, Float64(L), Float64(L), Float64(L)),
+        Nx, Ny, Nz, Float64(dx), Float64(ω_f), FT)
+    domain2 = create_refined_domain_3d(Nx, Ny, Nz, Float64(dx), Float64(ω_f), [p_west, p_east])
 
-    th2 = create_thermal_patch_arrays_3d(p2, Float64(ω_T); T_init=Float64(T_ref))
-    thermals2 = ThermalPatchArrays3D{FT}[th2]
+    th_w = create_thermal_patch_arrays_3d(p_west, Float64(ω_T); T_init=Float64(T_ref))
+    th_e = create_thermal_patch_arrays_3d(p_east, Float64(ω_T); T_init=Float64(T_ref))
+    thermals2 = ThermalPatchArrays3D{FT}[th_w, th_e]
+
+    bc_th2 = build_patch_thermal_bcs_3d(domain2.patches, Float64(L), Float64(L), Float64(L), Nx,
+        Dict(:west => Float64(T_hot), :east => Float64(T_cold)))
+    bc_flow2 = build_patch_flow_bcs_3d(domain2.patches, Float64(L), Float64(L), Float64(L), Nx;
+        wall_faces=[:west, :east, :south, :north, :bottom, :top])
 
     compute_macroscopic_3d!(ρ2, ux2, uy2, uz2, f_in2)
     compute_temperature_3d!(Temp2, g_in2)
-    prolongate_f_rescaled_full_3d!(
-        p2.f_in, f_in2, ρ2, ux2, uy2, uz2,
-        p2.ratio, p2.Nx_inner, p2.Ny_inner, p2.Nz_inner, p2.n_ghost,
-        first(p2.parent_i_range), first(p2.parent_j_range), first(p2.parent_k_range),
-        Nx, Ny, Nz, Float64(ω_f), Float64(p2.omega))
-    copyto!(p2.f_out, p2.f_in)
-    compute_macroscopic_3d!(p2.rho, p2.ux, p2.uy, p2.uz, p2.f_in)
-    fill_thermal_full_3d!(p2, th2, g_in2, Nx, Ny, Nz)
+    for (pidx, patch) in enumerate(domain2.patches)
+        prolongate_f_rescaled_full_3d!(
+            patch.f_in, f_in2, ρ2, ux2, uy2, uz2,
+            patch.ratio, patch.Nx_inner, patch.Ny_inner, patch.Nz_inner, patch.n_ghost,
+            first(patch.parent_i_range), first(patch.parent_j_range), first(patch.parent_k_range),
+            Nx, Ny, Nz, Float64(ω_f), Float64(patch.omega))
+        copyto!(patch.f_out, patch.f_in)
+        compute_macroscopic_3d!(patch.rho, patch.ux, patch.uy, patch.uz, patch.f_in)
+        fill_thermal_full_3d!(patch, thermals2[pidx], g_in2, Nx, Ny, Nz)
+    end
 
     fused_step2 = (fo, fi, go, gi, Te, nx, ny, nz) -> begin
         stream_3d!(fo, fi, nx, ny, nz)
@@ -393,7 +406,7 @@ function validate_thermal_refinement_3d(; N=16, max_steps=3000)
             fused_step_fn=fused_step2,
             omega_T_coarse=Float64(ω_T),
             β_g=Float64(β_g), T_ref_buoy=Float64(T_ref),
-            bc_thermal_patch_fns=nothing, bc_flow_patch_fns=nothing,
+            bc_thermal_patch_fns=bc_th2, bc_flow_patch_fns=bc_flow2,
             bc_coarse_fn=bc_coarse2)
 
         if step % (max_steps ÷ 5) == 0 || step == 1
@@ -409,16 +422,22 @@ function validate_thermal_refinement_3d(; N=16, max_steps=3000)
         end
     end
 
-    # Nusselt from coarse grid
-    T_coarse = Array(Temp2)
-    Nu_arr = zeros(FT, Ny, Nz)
-    for k in 1:Nz, j in 1:Ny
-        dTdx = (-3*T_coarse[1,j,k] + 4*T_coarse[2,j,k] - T_coarse[3,j,k]) / FT(2)
-        Nu_arr[j, k] = -L * dTdx / ΔT
+    # Nusselt from fine west patch (better wall gradient resolution)
+    T_fine = Array(thermals2[1].Temp)
+    ng = domain2.patches[1].n_ghost
+    Ny_fine = domain2.patches[1].Ny_inner
+    Nz_fine = domain2.patches[1].Nz_inner
+    dx_f = FT(domain2.patches[1].dx)
+    Nu_arr = zeros(FT, Ny_fine, Nz_fine)
+    for kf in 1:Nz_fine, jf in 1:Ny_fine
+        j = jf + ng; k = kf + ng
+        i1, i2, i3 = ng + 1, ng + 2, ng + 3
+        dTdx = (-3 * T_fine[i1,j,k] + 4 * T_fine[i2,j,k] - T_fine[i3,j,k]) / (2 * dx_f)
+        Nu_arr[jf, kf] = -L * dTdx / ΔT
     end
-    Nu = sum(Nu_arr[2:end-1, 2:end-1]) / max((Ny-2)*(Nz-2), 1)
+    Nu = sum(Nu_arr[2:end-1, 2:end-1]) / max((Ny_fine-2)*(Nz_fine-2), 1)
     err = abs(Nu - NU_REF_3D) / NU_REF_3D * 100
-    @printf("\n  Nu (coarse grid): %8.4f  (err %.2f%% vs Fusegi %.3f)\n", Nu, err, NU_REF_3D)
+    @printf("\n  Nu (fine patch):  %8.4f  (err %.2f%% vs Fusegi %.3f)\n", Nu, err, NU_REF_3D)
     @printf("  → %d steps stable\n", max_steps)
     return true
 end
