@@ -58,6 +58,12 @@ end
             ty = clamp(ty, zero(T), one(T))
             tz = clamp(tz, zero(T), one(T))
 
+            # If stencil is clamped at domain boundary, use equilibrium (alpha=0)
+            stencil_clamped = (i0r < 1) | (i0r + 1 > Nx_c) |
+                              (j0r < 1) | (j0r + 1 > Ny_c) |
+                              (k0r < 1) | (k0r + 1 > Nz_c)
+            alpha_eff = ifelse(stencil_clamped, zero(T), alpha)
+
             w000=(one(T)-tx)*(one(T)-ty)*(one(T)-tz)
             w100=tx*(one(T)-ty)*(one(T)-tz)
             w010=(one(T)-tx)*ty*(one(T)-tz)
@@ -78,10 +84,8 @@ end
                    w001*uz_c[i0,j0,k1]+w101*uz_c[i1,j0,k1]+w011*uz_c[i0,j1,k1]+w111*uz_c[i1,j1,k1]
 
             for q in 1:19
-                # Equilibrium at interpolated fine state
                 feq_fine = _feq_3d(q, rho_f, ux_f, uy_f, uz_f)
 
-                # Interpolated f_neq from 8 stencil nodes
                 fneq = w000*(f_coarse[i0,j0,k0,q]-_feq_3d(q,rho_c[i0,j0,k0],ux_c[i0,j0,k0],uy_c[i0,j0,k0],uz_c[i0,j0,k0]))+
                        w100*(f_coarse[i1,j0,k0,q]-_feq_3d(q,rho_c[i1,j0,k0],ux_c[i1,j0,k0],uy_c[i1,j0,k0],uz_c[i1,j0,k0]))+
                        w010*(f_coarse[i0,j1,k0,q]-_feq_3d(q,rho_c[i0,j1,k0],ux_c[i0,j1,k0],uy_c[i0,j1,k0],uz_c[i0,j1,k0]))+
@@ -91,7 +95,7 @@ end
                        w011*(f_coarse[i0,j1,k1,q]-_feq_3d(q,rho_c[i0,j1,k1],ux_c[i0,j1,k1],uy_c[i0,j1,k1],uz_c[i0,j1,k1]))+
                        w111*(f_coarse[i1,j1,k1,q]-_feq_3d(q,rho_c[i1,j1,k1],ux_c[i1,j1,k1],uy_c[i1,j1,k1],uz_c[i1,j1,k1]))
 
-                f_fine[i_f, j_f, k_f, q] = feq_fine + alpha * fneq
+                f_fine[i_f, j_f, k_f, q] = feq_fine + alpha_eff * fneq
             end
         end
     end
@@ -143,6 +147,12 @@ end
         j0 = clamp(j0r, 1, Ny_c); j1 = clamp(j0r+1, 1, Ny_c)
         k0 = clamp(k0r, 1, Nz_c); k1 = clamp(k0r+1, 1, Nz_c)
 
+        # If stencil is clamped at domain boundary, use equilibrium (alpha=0)
+        stencil_clamped = (i0r < 1) | (i0r + 1 > Nx_c) |
+                          (j0r < 1) | (j0r + 1 > Ny_c) |
+                          (k0r < 1) | (k0r + 1 > Nz_c)
+        alpha_eff = ifelse(stencil_clamped, zero(T), alpha)
+
         w000=(one(T)-tx)*(one(T)-ty)*(one(T)-tz); w100=tx*(one(T)-ty)*(one(T)-tz)
         w010=(one(T)-tx)*ty*(one(T)-tz);           w110=tx*ty*(one(T)-tz)
         w001=(one(T)-tx)*(one(T)-ty)*tz;           w101=tx*(one(T)-ty)*tz
@@ -167,7 +177,7 @@ end
                    w101*(f_coarse[i1,j0,k1,q]-_feq_3d(q,rho_c[i1,j0,k1],ux_c[i1,j0,k1],uy_c[i1,j0,k1],uz_c[i1,j0,k1]))+
                    w011*(f_coarse[i0,j1,k1,q]-_feq_3d(q,rho_c[i0,j1,k1],ux_c[i0,j1,k1],uy_c[i0,j1,k1],uz_c[i0,j1,k1]))+
                    w111*(f_coarse[i1,j1,k1,q]-_feq_3d(q,rho_c[i1,j1,k1],ux_c[i1,j1,k1],uy_c[i1,j1,k1],uz_c[i1,j1,k1]))
-            f_fine[i_f, j_f, k_f, q] = feq_fine + alpha * fneq
+            f_fine[i_f, j_f, k_f, q] = feq_fine + alpha_eff * fneq
         end
     end
 end
@@ -229,6 +239,13 @@ end
             jc0 = clamp(j0r, 1, Ny_c); jc1 = clamp(j0r+1, 1, Ny_c)
             kc0 = clamp(k0r, 1, Nz_c); kc1 = clamp(k0r+1, 1, Nz_c)
 
+            # If stencil is clamped at domain boundary, use equilibrium (alpha=0)
+            # to avoid FH f_neq artifacts that cause instability with body forces
+            stencil_clamped = (i0r < 1) | (i0r + 1 > Nx_c) |
+                              (j0r < 1) | (j0r + 1 > Ny_c) |
+                              (k0r < 1) | (k0r + 1 > Nz_c)
+            alpha_eff = ifelse(stencil_clamped, zero(T), alpha)
+
             # Prev buffer indices (local, offset from i_lo = max(i_c_start-1, 1))
             # Clamp to Ni_prev (actual saved data size), NOT buffer size
             i_lo = max(i_c_start - 1, 1)
@@ -244,7 +261,6 @@ end
             w011=(one(T)-tx)*ty*tz;                     w111=tx*ty*tz
 
             # Temporally interpolated macroscopic at each stencil node, then spatial interp
-            # For efficiency, blend the 8 stencil nodes after temporal interp
             rho_f = zero(T); uxf = zero(T); uyf = zero(T); uzf = zero(T)
             for (ws, ic, jc, kc, ipp, jpp, kpp) in (
                 (w000, ic0, jc0, kc0, ip0, jp0, kp0), (w100, ic1, jc0, kc0, ip1, jp0, kp0),
@@ -275,7 +291,7 @@ end
                     fneq += ws * (f_interp - _feq_3d(q, r, u, v, ww))
                 end
 
-                f_fine[i_f, j_f, k_f, q] = feq_fine + alpha * fneq
+                f_fine[i_f, j_f, k_f, q] = feq_fine + alpha_eff * fneq
             end
         end
     end
