@@ -27,8 +27,8 @@ function run_validation(; N, backend, FT=Float32)
     nsteps = max(5000, round(Int, 12 * N^2))
     wall_frac = 0.25
 
-    # --- E.1 Conduction + wall patch ---
-    println("\nE.1 Pure conduction + west wall patch")
+    # --- E.1 Conduction + full-domain wall patch ---
+    println("\nE.1 Pure conduction + west wall patch (full-domain)")
     config = LBMConfig(D3Q19(); Nx=N, Ny=N, Nz=N, ν=Float64(ν), u_lid=0.0, max_steps=nsteps)
     state = initialize_3d(config, FT; backend=backend)
     f_in, f_out = state.f_in, state.f_out
@@ -46,9 +46,9 @@ function run_validation(; N, backend, FT=Float32)
     end
     copyto!(g_in, g_cpu); copyto!(g_out, g_cpu)
 
-    margin_yz = Float64(2 * dx)
+    # Full-domain patch (no margin) — stencil_clamped removed in 21ae88b
     patch = create_patch_3d("west", 1, 2,
-        (0.0, margin_yz, margin_yz, Float64(wall_frac*L), Float64(L)-margin_yz, Float64(L)-margin_yz),
+        (0.0, 0.0, 0.0, Float64(wall_frac*L), Float64(L), Float64(L)),
         Nx, Ny, Nz, Float64(dx), Float64(ω_f), FT; backend=backend)
     domain = create_refined_domain_3d(Nx, Ny, Nz, Float64(dx), Float64(ω_f), [patch])
 
@@ -123,14 +123,12 @@ function run_validation(; N, backend, FT=Float32)
     end
     copyto!(g2i, g_cpu2); copyto!(g2o, g_cpu2)
 
-    # Patches touch only west/east thermal walls, with 2-cell margin from
-    # other walls to avoid FH ghost fill instability at domain boundaries
-    margin_yz = Float64(2 * dx)
+    # Full-domain wall patches (no margin) — stencil_clamped removed in 21ae88b
     pw = create_patch_3d("west", 1, 2,
-        (0.0, margin_yz, margin_yz, Float64(wall_frac*L), Float64(L)-margin_yz, Float64(L)-margin_yz),
+        (0.0, 0.0, 0.0, Float64(wall_frac*L), Float64(L), Float64(L)),
         Nx, Ny, Nz, Float64(dx), Float64(ω_f), FT; backend=backend)
     pe = create_patch_3d("east", 1, 2,
-        (Float64((1-wall_frac)*L), margin_yz, margin_yz, Float64(L), Float64(L)-margin_yz, Float64(L)-margin_yz),
+        (Float64((1-wall_frac)*L), 0.0, 0.0, Float64(L), Float64(L), Float64(L)),
         Nx, Ny, Nz, Float64(dx), Float64(ω_f), FT; backend=backend)
     dom2 = create_refined_domain_3d(Nx, Ny, Nz, Float64(dx), Float64(ω_f), [pw, pe])
 
@@ -219,7 +217,52 @@ function run_validation(; N, backend, FT=Float32)
     println(stable ? "\n  → STABLE" : "\n  → UNSTABLE (NaN)")
 end
 
+function run_krk_validation(; N, nsteps, backend)
+    println("\n", "="^60)
+    @printf("E.3 KRK dispatch: NatConv 3D refined, N=%d, %d steps\n", N, nsteps)
+    println("="^60)
+    L = Float64(N)
+    wf = 0.25
+
+    krk = """
+        Simulation natconv_ref_3d D3Q19
+        Domain L = $L x $L x $L  N = $N x $N x $N
+        Physics nu = 0.05  Pr = 0.71  Ra = 1000
+        Module thermal
+        Boundary west  wall(T = 1.0)
+        Boundary east  wall(T = 0.0)
+        Boundary south wall
+        Boundary north wall
+        Boundary bottom wall
+        Boundary top wall
+        Refine west_wall { region = [0.0, 0.0, 0.0, $(wf*L), $L, $L], ratio = 2 }
+        Refine east_wall { region = [$((1-wf)*L), 0.0, 0.0, $L, $L, $L], ratio = 2 }
+        Run $nsteps steps
+    """
+
+    t0 = time()
+    result = run_simulation(parse_kraken(krk); backend=backend, T=Float32)
+    dt = time() - t0
+    @printf("  %d steps in %.1fs\n", nsteps, dt)
+
+    T_cpu = result.Temp
+    ok = !any(isnan, T_cpu)
+    @printf("  NaN: %s, max|u|=%.4f\n", ok ? "no" : "YES", maximum(sqrt.(result.ux.^2 .+ result.uy.^2)))
+
+    # Coarse-grid Nu (rough estimate)
+    H = Float32(N)
+    Nu_arr = zeros(Float32, N, N)
+    for k in 1:N, j in 1:N
+        dTdx = (-3*T_cpu[1,j,k] + 4*T_cpu[2,j,k] - T_cpu[3,j,k]) / 2f0
+        Nu_arr[j, k] = -H * dTdx
+    end
+    Nu = sum(Nu_arr[2:end-1, 2:end-1]) / max((N-2)*(N-2), 1)
+    @printf("  Nu (coarse) = %.4f  ref=1.085 (Fusegi)\n", Nu)
+    println(ok ? "  → PASSED" : "  → FAILED")
+end
+
 # Run for N=24 and N=32
 backend = CUDABackend()
 run_validation(; N=24, backend=backend)
 run_validation(; N=32, backend=backend)
+run_krk_validation(; N=32, nsteps=max(5000, 12*32^2), backend=backend)
