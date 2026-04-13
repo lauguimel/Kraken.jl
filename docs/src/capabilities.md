@@ -82,7 +82,7 @@ minimal — use with caution.
 | Ghost-layer bilinear/trilinear prolongation | ✓ | ✓ | ✓ | ✓ | — | [refinement](api/refinement.md) |
 | Block-average restriction (ratio²/ratio³) | ✓ | ✓ | ✓ | ✓ | — | [refinement](api/refinement.md) |
 | Automatic τ rescaling on fine grid | ✓ | ✓ | ✓ | ✓ | — | sanity check reports τ_fine |
-| Full-domain wall patches | ✓ | ~ | ~ | ✓ | ✓ | AQUA H100 validation pending |
+| Full-domain wall patches | ✓ | ✗ (natconv) | ✓ (conduction) | ✓ | ✓ | 3D natconv unstable, see note |
 | Unified .krk dispatch (no driver) | ✓ | ✓ | ✓ | ✓ | ✓ | [Refine block](krk/directives.md) |
 | Multi-level (patch inside patch) | ✓ | ✓ | ~ | ~ | ✓ | parser supports, partially tested |
 | Geometry on fine patches | ✓ | ✓ | — | ✓ | ✓ | `_apply_patch_geometry!` |
@@ -92,10 +92,25 @@ in any .krk file routes automatically to `_run_refined` (2D) or
 `_run_refined_3d` (3D), which in turn dispatch the thermal branch when
 `Module thermal` is active.
 
-**Limitations:** 3D thermal full-domain wall patches are under AQUA
-validation (the `stencil_clamped` guard was removed in 21ae88b because it
-forced α=0 at domain edges — which gave stable but wrong Nu values in 3D).
-2D full-domain works fine.
+**Limitations (3D natconv refined — known issue):**
+
+AQUA H100 validation (2026-04-14, Ra=1e3, N=24 and N=32) shows:
+- **Pure conduction with full-domain wall patch: PASSES** (T error ≈ 0.012).
+- **Boussinesq natconv with full-domain wall patches: DIVERGES** to NaN
+  after ~2500–3500 sub-cycled steps on both N=24 and N=32.
+- **.krk dispatch (full-domain patches)**: stable but Nu ≈ 1.87 vs
+  Fusegi reference 1.085 (~72% over-prediction).
+
+Root cause: the FH f_neq interaction with Boussinesq coupling at the
+domain-boundary rows of 3D patches creates a feedback loop that 2D does
+not exhibit (D2Q9 has only 9 pops and 4-point bilinear stencil, while
+D3Q19 has 19 pops and 8-point trilinear stencil with 5 boundary faces).
+
+Workaround for v0.1.0: use **partial-domain 3D thermal patches**
+(2–3-cell margin from non-thermal walls). Ongoing investigation tracked
+as a v0.2.0 follow-up.
+
+2D full-domain wall patches work without issue (Nu err ~1.4%).
 
 ## 5. Geometry and obstacles
 

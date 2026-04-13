@@ -22,6 +22,10 @@ spatial boundary conditions — all behind a small, hackable API.
 Multiphase flows, non-Newtonian rheology, and viscoelastic models are
 present in the source tree but are not part of the v0.1.0 public API.
 
+For a complete, up-to-date feature matrix — with status (✓/~/✗), links to
+theory pages, examples, and API — see the
+[**Capabilities matrix**](docs/src/capabilities.md).
+
 ## Installation
 
 Kraken.jl is not yet registered. Install from GitHub:

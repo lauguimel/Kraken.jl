@@ -1599,6 +1599,26 @@ function _check_thermal!(issues, setup)
             "Pr = $(round(Pr, digits=3)) is extreme for SRT thermal LBM. " *
             "MRT collision recommended for accuracy.")
     end
+
+    # --- Thermal boundary layer resolution check ---
+    # For natural convection, δ_T ~ L / Ra^(1/4) (Pr ~ 1).
+    # We want ≥ 3 cells across the BL → N ≥ 3 · Ra^(1/4).
+    Ra = get(params, :Ra, NaN)
+    if !isnan(Ra) && Ra > 0
+        dom = setup.domain
+        N_min = min(dom.Nx, dom.Ny, dom.Nz > 1 ? dom.Nz : typemax(Int))
+        N_req = 3 * Ra^(0.25)
+        # Account for refinement near walls: if a patch touches a thermal wall,
+        # its effective N is N_base * max_ratio.
+        max_ratio = isempty(setup.refinements) ? 1 : maximum(r.ratio for r in setup.refinements)
+        N_eff = N_min * max_ratio
+        if N_eff < N_req
+            _push_issue!(issues, :warn, :thermal,
+                "Thermal BL under-resolved: N_eff = $N_eff < 3·Ra^(1/4) = " *
+                "$(round(N_req, digits=1)) for Ra = $(round(Ra, sigdigits=3)). " *
+                "Fix: increase N, or add Refine near thermal walls.")
+        end
+    end
 end
 
 # ── 5. Two-phase checks (if :twophase_vof module) ────────────────────

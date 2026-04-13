@@ -3,7 +3,33 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.1.0] — 2026-04-10
+## [0.1.0] — 2026-04-14
+
+### Added (since audit, 2026-04-13/14)
+- **Unified .krk dispatch for refinement** (2D + 3D, isothermal + thermal)
+  via `_run_refined` / `_run_refined_3d` — no dedicated driver needed.
+- **Fine-grid sanity checks**: `τ_T_fine` (thermal refinement) and `N/Re`
+  on refined patches, with `[2D]/[3D]` tag in the parameter summary.
+- **Thermal BL resolution check**: warns when `N_eff < 3·Ra^(1/4)`,
+  accounting for refinement ratios near thermal walls.
+- **Capabilities matrix page** (`docs/src/capabilities.md`) listing every
+  feature with status, links to theory/examples/API.
+- **CLI wrapper** (`bin/krk`), VSCode `.krk` syntax highlighting, ASCII
+  kwargs aliases (nu/rho/sigma/tau/…).
+
+### Fixed (since audit)
+- **Metal GPU refinement crash**: `trunc(Int,...)` replaced by
+  `unsafe_trunc(Int,...)` in all 2D refinement, thermal-refinement, and
+  dual-grid kernels (previously allocated on GPU → InvalidIRError).
+- **3D FH kernels**: `stencil_clamped` guard removed — it forced α=0 at
+  domain boundaries, which inflated Nu ~70% for 3D natconv refined.
+  Root cause (prev buffer size) was already fixed in 534bb62.
+- **test/Project.toml**: declares `KernelAbstractions` (was missing,
+  causing `Pkg.test()` to error on Poiseuille 3D / thermal / species).
+- **CI test suite**: `test_rheology.jl` and `test_viscoelastic.jl` added
+  to `runtests.jl` (were present but not wired in).
+
+## [0.1.0-dev] — 2026-04-10
 
 ### Added
 - **Core LBM solver**: D2Q9 and D3Q19 lattices, BGK and MRT collision,
