@@ -1,0 +1,154 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Kraken Simulation",
+  "scopeName": "source.krk",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#keyword" },
+    { "include": "#lattice" },
+    { "include": "#boundary-type" },
+    { "include": "#module-name" },
+    { "include": "#preset-name" },
+    { "include": "#output-format" },
+    { "include": "#rheology-model" },
+    { "include": "#parameter" },
+    { "include": "#number" },
+    { "include": "#string" },
+    { "include": "#block" },
+    { "include": "#boundary-face" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.krk",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.krk",
+          "match": "^\\s*(Simulation|Domain|Physics|Define|Obstacle|Fluid|Boundary|Refine|Initial|Velocity|Module|Run|Output|Diagnostics|Rheology|Setup|Preset|Sweep)\\b"
+        }
+      ]
+    },
+    "lattice": {
+      "patterns": [
+        {
+          "name": "entity.name.type.krk",
+          "match": "\\b(D2Q9|D3Q19)\\b"
+        }
+      ]
+    },
+    "boundary-type": {
+      "patterns": [
+        {
+          "name": "entity.name.function.krk",
+          "match": "\\b(wall|velocity|pressure|periodic)\\b"
+        }
+      ]
+    },
+    "boundary-face": {
+      "patterns": [
+        {
+          "name": "constant.language.krk",
+          "match": "\\b(north|south|east|west|top|bottom)\\b"
+        }
+      ]
+    },
+    "module-name": {
+      "patterns": [
+        {
+          "name": "support.function.krk",
+          "match": "\\b(thermal|axisymmetric|twophase_vof|advection_only)\\b"
+        }
+      ]
+    },
+    "preset-name": {
+      "patterns": [
+        {
+          "name": "support.function.krk",
+          "match": "\\b(cavity_2d|poiseuille_2d|couette_2d|taylor_green_2d|rayleigh_benard_2d)\\b"
+        }
+      ]
+    },
+    "output-format": {
+      "patterns": [
+        {
+          "name": "support.function.krk",
+          "match": "\\b(vtk|png|gif)\\b"
+        }
+      ]
+    },
+    "rheology-model": {
+      "patterns": [
+        {
+          "name": "support.function.krk",
+          "match": "\\b(power_law|carreau|cross|bingham|herschel_bulkley)\\b"
+        }
+      ]
+    },
+    "parameter": {
+      "patterns": [
+        {
+          "name": "variable.parameter.krk",
+          "match": "\\b(nu|alpha|Pr|Ra|Fx|Fy|Fz|sigma|rho_l|rho_g|beta_g|g_y|g_x|g_z|ux|uy|uz|rho|L|N|L_ref|u_ref|Re|T|steps|every|level|x1|y1|z1|x2|y2|z2|n|k|tau_y|mu_0|mu_inf|lambda|a)\\b"
+        }
+      ]
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.scientific.krk",
+          "match": "\\b[0-9]+\\.?[0-9]*[eE][+-]?[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.krk",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.krk",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.krk",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.krk",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "block": {
+      "patterns": [
+        {
+          "name": "punctuation.section.block.begin.krk",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.block.end.krk",
+          "match": "\\}"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.krk",
+          "match": "(=|<|>|\\+|-|\\*|/|\\^|x(?=\\s*\\d))"
+        }
+      ]
+    }
+  }
+}

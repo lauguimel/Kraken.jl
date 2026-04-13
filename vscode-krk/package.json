@@ -1,0 +1,57 @@
+{
+  "name": "krk-language",
+  "displayName": "Kraken Simulation (.krk)",
+  "description": "Language support for Kraken LBM simulation configuration files (.krk)",
+  "version": "0.1.0",
+  "publisher": "kraken-lbm",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:krk"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "krk",
+        "aliases": [
+          "Kraken Simulation",
+          "krk"
+        ],
+        "extensions": [
+          ".krk"
+        ],
+        "configuration": "./language-configuration/language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "krk",
+        "scopeName": "source.krk",
+        "path": "./syntaxes/krk.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "krk",
+        "path": "./snippets/krk.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
+  }
+}

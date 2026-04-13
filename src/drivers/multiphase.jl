@@ -7,8 +7,9 @@ Spinodal decomposition: a random density field phase-separates into two phases.
 G controls attraction strength (G < -4 for phase separation in D2Q9).
 Fully periodic domain.
 """
-function run_spinodal_2d(; N=128, ν=0.1, G=-5.5, ρ0=1.0, max_steps=5000,
+function run_spinodal_2d(; N=128, nu=nothing, ν=0.1, G=-5.5, ρ0=1.0, max_steps=5000,
                           backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(nu) && (ν = nu)
     Nx, Ny = N, N
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
     ω = FT(omega(config))
@@ -109,9 +110,14 @@ end
 Static circular droplet in a periodic box. Validates Laplace pressure:
 Δp = σ/R. Measures spurious currents.
 """
-function run_static_droplet_2d(; N=128, R=20, σ=0.01, ν=0.1,
-                                ρ_l=1.0, ρ_g=0.001, max_steps=5000,
+function run_static_droplet_2d(; N=128, R=20, sigma=nothing, σ=0.01, nu=nothing, ν=0.1,
+                                rho_l=nothing, ρ_l=1.0, rho_g=nothing, ρ_g=0.001,
+                                max_steps=5000,
                                 backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(sigma) && (σ = sigma)
+    !isnothing(nu)    && (ν = nu)
+    !isnothing(rho_l) && (ρ_l = rho_l)
+    !isnothing(rho_g) && (ρ_g = rho_g)
     Nx, Ny = N, N
     cx, cy = N ÷ 2, N ÷ 2
 
@@ -216,10 +222,19 @@ Setup (cf. Popinet 2009, Gerris plateau example):
 
 Returns snapshots of C and r_min (minimum bridge radius) vs time.
 """
-function run_plateau_pinch_2d(; Nx=256, Ny=64, R0=20, λ_ratio=4.5, ε=0.05,
-                               σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.01,
+function run_plateau_pinch_2d(; Nx=256, Ny=64, R0=20,
+                               lambda_ratio=nothing, λ_ratio=4.5,
+                               epsilon=nothing, ε=0.05,
+                               sigma=nothing, σ=0.01, nu=nothing, ν=0.05,
+                               rho_l=nothing, ρ_l=1.0, rho_g=nothing, ρ_g=0.01,
                                max_steps=10000, output_interval=500,
                                backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(lambda_ratio) && (λ_ratio = lambda_ratio)
+    !isnothing(epsilon) && (ε = epsilon)
+    !isnothing(sigma)   && (σ = sigma)
+    !isnothing(nu)      && (ν = nu)
+    !isnothing(rho_l)   && (ρ_l = rho_l)
+    !isnothing(rho_g)   && (ρ_g = rho_g)
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, FT; backend=backend)
     f_in, f_out = state.f_in, state.f_out
@@ -322,10 +337,16 @@ The fine grid resolves the interface with `refine` times more cells, giving
 sharper curvature and reduced spurious currents without the cost of a full
 fine-grid LBM solve.
 """
-function run_static_droplet_dualgrid_2d(; N=64, R=15, σ=0.01, ν=0.1,
-                                          ρ_l=1.0, ρ_g=0.001, max_steps=5000,
-                                          refine=2,
+function run_static_droplet_dualgrid_2d(; N=64, R=15, sigma=nothing, σ=0.01,
+                                          nu=nothing, ν=0.1,
+                                          rho_l=nothing, ρ_l=1.0,
+                                          rho_g=nothing, ρ_g=0.001,
+                                          max_steps=5000, refine=2,
                                           backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(sigma) && (σ = sigma)
+    !isnothing(nu)    && (ν = nu)
+    !isnothing(rho_l) && (ρ_l = rho_l)
+    !isnothing(rho_g) && (ρ_g = rho_g)
     r = refine
     Nx_c, Ny_c = N, N
     Nx_f, Ny_f = r * N, r * N

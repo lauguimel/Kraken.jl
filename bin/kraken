@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+#
+# CLI entry point for Kraken LBM simulations.
+#
+# Usage:
+#   kraken run <file.krk> [--key=value ...]
+#   kraken run examples/cavity.krk --nu=0.05 --max_steps=50000
+#   kraken info <file.krk>
+#
+# Install: symlink this script to a directory in your PATH, e.g.
+#   ln -s "$(pwd)/bin/kraken" ~/.local/bin/kraken
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+usage() {
+    cat <<'EOF'
+Kraken LBM — GPU-native Lattice Boltzmann solver
+
+Usage:
+  kraken run <file.krk> [--key=value ...]    Run a simulation
+  kraken info <file.krk>                     Parse and display setup info
+  kraken help                                Show this message
+
+Options (passed as keyword overrides):
+  --nu=0.05          Override kinematic viscosity
+  --max_steps=10000  Override number of time steps
+  --Nx=256           Override grid resolution (x)
+  --Ny=128           Override grid resolution (y)
+  --backend=gpu      Use GPU backend (default: gpu if CUDA available, else cpu)
+
+Examples:
+  kraken run examples/cavity.krk
+  kraken run examples/cavity.krk --nu=0.05 --max_steps=50000
+  kraken run examples/rayleigh_benard.krk --Ra=1e6
+
+EOF
+}
+
+# --- Parse arguments ---
+if [[ $# -lt 1 ]]; then
+    usage
+    exit 1
+fi
+
+CMD="$1"
+shift
+
+case "$CMD" in
+    run)
+        if [[ $# -lt 1 ]]; then
+            echo "Error: missing .krk file argument" >&2
+            echo "Usage: kraken run <file.krk> [--key=value ...]" >&2
+            exit 1
+        fi
+        KRK_FILE="$1"
+        shift
+
+        # Build Julia kwargs from --key=value arguments
+        KWARGS=""
+        BACKEND_ARG=""
+        for arg in "$@"; do
+            if [[ "$arg" =~ ^--backend=(.+)$ ]]; then
+                BACKEND_ARG="${BASH_REMATCH[1]}"
+            elif [[ "$arg" =~ ^--([a-zA-Z_]+)=(.+)$ ]]; then
+                KEY="${BASH_REMATCH[1]}"
+                VAL="${BASH_REMATCH[2]}"
+                if [[ -n "$KWARGS" ]]; then
+                    KWARGS="$KWARGS, "
+                fi
+                KWARGS="${KWARGS}${KEY}=${VAL}"
+            else
+                echo "Warning: ignoring unrecognized argument: $arg" >&2
+            fi
+        done
+
+        # Select backend
+        if [[ "$BACKEND_ARG" == "cpu" ]]; then
+            BACKEND_EXPR="KernelAbstractions.CPU()"
+        else
+            # Default: try CUDA, fall back to CPU
+            BACKEND_EXPR='try; using CUDA; CUDABackend(); catch; KernelAbstractions.CPU(); end'
+        fi
+
+        # Build Julia command
+        JULIA_CMD="using Kraken; result = run_simulation(\"${KRK_FILE}\"; backend=${BACKEND_EXPR}"
+        if [[ -n "$KWARGS" ]]; then
+            JULIA_CMD="${JULIA_CMD}, ${KWARGS}"
+        fi
+        JULIA_CMD="${JULIA_CMD})"
+
+        exec julia --project="$PROJECT_DIR" -e "$JULIA_CMD"
+        ;;
+
+    info)
+        if [[ $# -lt 1 ]]; then
+            echo "Error: missing .krk file argument" >&2
+            exit 1
+        fi
+        KRK_FILE="$1"
+        exec julia --project="$PROJECT_DIR" -e "
+            using Kraken
+            setups = Kraken.parse_krk(\"${KRK_FILE}\")
+            for s in setups
+                Kraken.sanity_check(s; verbose=true)
+            end
+        "
+        ;;
+
+    help|--help|-h)
+        usage
+        exit 0
+        ;;
+
+    *)
+        echo "Unknown command: $CMD" >&2
+        echo "Run 'kraken help' for usage." >&2
+        exit 1
+        ;;
+esac

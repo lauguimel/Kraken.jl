@@ -255,8 +255,9 @@ end
 Hagen-Poiseuille pipe flow (axisymmetric). Validates axisymmetric LBM.
 Analytical: u_z(r) = Fz/(4ν) * (R² - r²) where R = Nr - 0.5.
 """
-function run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000,
+function run_hagen_poiseuille_2d(; Nz=4, Nr=32, nu=nothing, ν=0.1, Fz=1e-5, max_steps=10000,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(nu) && (ν = nu)
     Nx, Ny = Nz, Nr
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, FT; backend=backend)
@@ -333,10 +334,19 @@ A liquid jet of radius R0 with sinusoidal perturbation R(z) = R0(1-ε·cos(2πz/
 
 The azimuthal curvature κ₂ = n_r/r drives the instability (absent in 2D planar).
 """
-function run_rp_axisym_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
-                           σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.01,
+function run_rp_axisym_2d(; Nz=256, Nr=40, R0=15,
+                           lambda_ratio=nothing, λ_ratio=7.0,
+                           epsilon=nothing, ε=0.05,
+                           sigma=nothing, σ=0.01, nu=nothing, ν=0.05,
+                           rho_l=nothing, ρ_l=1.0, rho_g=nothing, ρ_g=0.01,
                            max_steps=10000, output_interval=500,
                            backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(lambda_ratio) && (λ_ratio = lambda_ratio)
+    !isnothing(epsilon) && (ε = epsilon)
+    !isnothing(sigma)   && (σ = sigma)
+    !isnothing(nu)      && (ν = nu)
+    !isnothing(rho_l)   && (ρ_l = rho_l)
+    !isnothing(rho_g)   && (ρ_g = rho_g)
     Nx, Ny = Nz, Nr
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, FT; backend=backend)
@@ -717,10 +727,19 @@ density ratio → stable at ρ_l/ρ_g up to 1000.
 
 Coordinates: x=z (axial, periodic), y=r (radial, axis at j=1, wall at j=Nr).
 """
-function run_rp_pressure_vof_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
-                                  σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.001,
+function run_rp_pressure_vof_2d(; Nz=256, Nr=40, R0=15,
+                                  lambda_ratio=nothing, λ_ratio=7.0,
+                                  epsilon=nothing, ε=0.05,
+                                  sigma=nothing, σ=0.01, nu=nothing, ν=0.05,
+                                  rho_l=nothing, ρ_l=1.0, rho_g=nothing, ρ_g=0.001,
                                   max_steps=10000, output_interval=500,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(lambda_ratio) && (λ_ratio = lambda_ratio)
+    !isnothing(epsilon) && (ε = epsilon)
+    !isnothing(sigma)   && (σ = sigma)
+    !isnothing(nu)      && (ν = nu)
+    !isnothing(rho_l)   && (ρ_l = rho_l)
+    !isnothing(rho_g)   && (ρ_g = rho_g)
     Nx, Ny = Nz, Nr
     λ = FT(λ_ratio * R0)
     ν_l = FT(ν); ν_g = FT(ν)
@@ -832,16 +851,26 @@ Rayleigh-Plateau instability using the hybrid PLIC/smooth approach:
 Single distribution f_q, no Allen-Cahn, no phase-field.
 Stable at ρ_ratio up to 1000 with exact mass conservation.
 """
-function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15, λ_ratio=7.0, ε=0.05,
-                            σ=0.01, ν=0.05, ρ_l=1.0, ρ_g=0.001,
+function run_rp_hybrid_2d(; Nz=256, Nr=40, R0=15,
+                            lambda_ratio=nothing, λ_ratio=7.0,
+                            epsilon=nothing, ε=0.05,
+                            sigma=nothing, σ=0.01, nu=nothing, ν=0.05,
+                            rho_l=nothing, ρ_l=1.0, rho_g=nothing, ρ_g=0.001,
                             gas_model::Symbol=:smooth,
                             n_smooth=3,
                             n_ghost_layers=3, C_ghost_threshold=0.5,
                             ghost_reset_feq::Bool=true, ghost_extrap::Bool=true,
                             mass_correction::Bool=true,
-                            W_pf=4.0, τ_g=0.7,
+                            W_pf=4.0, tau_g=nothing, τ_g=0.7,
                             max_steps=10000, output_interval=500,
                             backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(lambda_ratio) && (λ_ratio = lambda_ratio)
+    !isnothing(epsilon) && (ε = epsilon)
+    !isnothing(sigma)   && (σ = sigma)
+    !isnothing(nu)      && (ν = nu)
+    !isnothing(rho_l)   && (ρ_l = rho_l)
+    !isnothing(rho_g)   && (ρ_g = rho_g)
+    !isnothing(tau_g)   && (τ_g = tau_g)
     gas_model in (:smooth, :ghost, :phasefield) ||
         error("gas_model must be :smooth, :ghost, or :phasefield (got :$gas_model)")
 
@@ -1076,18 +1105,23 @@ CIJ jet breakup with selectable gas model:
 All models use pressure-based MRT collision and axisymmetric geometry.
 """
 function run_cij_jet_hybrid_2d(;
-        Re=200, We=600, δ=0.02,
+        Re=200, We=600, delta=nothing, δ=0.02,
         R0=40, u_lb=0.04,
         domain_ratio=80, nr_ratio=3,
-        ρ_ratio=1000.0, μ_ratio=10.0,
+        rho_ratio=nothing, ρ_ratio=1000.0,
+        mu_ratio=nothing, μ_ratio=10.0,
         gas_model::Symbol=:smooth,
         n_smooth=3,
         n_ghost_layers=5, C_ghost_threshold=0.5,
-        W_pf=4.0, τ_ac=0.7,
+        W_pf=4.0, tau_ac=nothing, τ_ac=0.7,
         init_length=4, max_steps=200_000,
         output_interval=2000,
         output_dir="cij_jet_hybrid",
         backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(delta)     && (δ = delta)
+    !isnothing(rho_ratio) && (ρ_ratio = rho_ratio)
+    !isnothing(mu_ratio)  && (μ_ratio = mu_ratio)
+    !isnothing(tau_ac)    && (τ_ac = tau_ac)
 
     gas_model in (:smooth, :ghost, :phasefield) ||
         error("gas_model must be :smooth, :ghost, or :phasefield (got :$gas_model)")

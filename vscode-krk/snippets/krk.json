@@ -1,0 +1,141 @@
+{
+  "Cavity Flow": {
+    "prefix": "sim:cavity",
+    "body": [
+      "# Lid-driven cavity flow",
+      "Simulation ${1:cavity} D2Q9",
+      "Domain  L = ${2:1.0} x ${3:1.0}  N = ${4:128} x ${5:128}",
+      "Physics nu = ${6:0.01}",
+      "",
+      "Boundary north velocity(ux = ${7:0.1}, uy = 0)",
+      "Boundary south wall",
+      "Boundary east  wall",
+      "Boundary west  wall",
+      "",
+      "Run ${8:60000} steps",
+      "Output vtk every ${9:10000} [rho, ux, uy]"
+    ],
+    "description": "Lid-driven cavity flow simulation"
+  },
+  "Poiseuille Flow": {
+    "prefix": "sim:poiseuille",
+    "body": [
+      "# Poiseuille channel flow",
+      "Simulation ${1:poiseuille} D2Q9",
+      "Domain  L = ${2:4.0} x ${3:1.0}  N = ${4:256} x ${5:64}",
+      "Physics nu = ${6:0.01} Fx = ${7:1e-5}",
+      "",
+      "Boundary north wall",
+      "Boundary south wall",
+      "Boundary east  periodic",
+      "Boundary west  periodic",
+      "",
+      "Run ${8:50000} steps",
+      "Output vtk every ${9:10000} [rho, ux, uy]"
+    ],
+    "description": "Poiseuille channel flow with body force"
+  },
+  "Couette Flow": {
+    "prefix": "sim:couette",
+    "body": [
+      "# Couette flow",
+      "Simulation ${1:couette} D2Q9",
+      "Domain  L = ${2:2.0} x ${3:1.0}  N = ${4:128} x ${5:64}",
+      "Physics nu = ${6:0.01}",
+      "",
+      "Boundary north velocity(ux = ${7:0.1}, uy = 0)",
+      "Boundary south wall",
+      "Boundary east  periodic",
+      "Boundary west  periodic",
+      "",
+      "Run ${8:30000} steps",
+      "Output vtk every ${9:5000} [rho, ux, uy]"
+    ],
+    "description": "Couette flow between moving plates"
+  },
+  "Taylor-Green Vortex": {
+    "prefix": "sim:taylor-green",
+    "body": [
+      "# Taylor-Green vortex decay",
+      "Simulation ${1:taylor_green} D2Q9",
+      "Domain  L = ${2:1.0} x ${3:1.0}  N = ${4:128} x ${5:128}",
+      "Physics nu = ${6:0.01}",
+      "",
+      "Boundary north periodic",
+      "Boundary south periodic",
+      "Boundary east  periodic",
+      "Boundary west  periodic",
+      "",
+      "Initial {",
+      "  ux = ${7:0.05}*sin(2*pi*x)*cos(2*pi*y)",
+      "  uy = -${7:0.05}*cos(2*pi*x)*sin(2*pi*y)",
+      "}",
+      "",
+      "Run ${8:20000} steps",
+      "Output vtk every ${9:2000} [rho, ux, uy]"
+    ],
+    "description": "Taylor-Green vortex decay simulation"
+  },
+  "Rayleigh-Benard": {
+    "prefix": "sim:rayleigh-benard",
+    "body": [
+      "# Rayleigh-Benard convection",
+      "Simulation ${1:rayleigh_benard} D2Q9",
+      "Domain  L = ${2:4.0} x ${3:1.0}  N = ${4:256} x ${5:64}",
+      "Module thermal",
+      "Physics nu = ${6:0.01} Pr = ${7:0.71} Ra = ${8:10000} beta_g = ${9:0.001} g_y = ${10:-1.0}",
+      "",
+      "Boundary north wall",
+      "Boundary south wall",
+      "Boundary east  periodic",
+      "Boundary west  periodic",
+      "",
+      "Run ${11:50000} steps",
+      "Output vtk every ${12:5000} [rho, ux, uy, T]"
+    ],
+    "description": "Rayleigh-Benard thermal convection"
+  },
+  "Static Droplet": {
+    "prefix": "sim:droplet",
+    "body": [
+      "# Static droplet (Laplace test)",
+      "Simulation ${1:droplet} D2Q9",
+      "Domain  L = ${2:1.0} x ${3:1.0}  N = ${4:128} x ${5:128}",
+      "Module twophase_vof",
+      "Physics nu = ${6:0.01} sigma = ${7:0.001} rho_l = ${8:1.0} rho_g = ${9:0.001}",
+      "",
+      "Boundary north periodic",
+      "Boundary south periodic",
+      "Boundary east  periodic",
+      "Boundary west  periodic",
+      "",
+      "Obstacle droplet { (x - 0.5)^2 + (y - 0.5)^2 < ${10:0.2}^2 }",
+      "",
+      "Run ${11:20000} steps",
+      "Output vtk every ${12:5000} [rho, ux, uy]"
+    ],
+    "description": "Static droplet with surface tension (Laplace test)"
+  },
+  "Flow Around Cylinder": {
+    "prefix": "sim:cylinder",
+    "body": [
+      "# Flow around a cylinder",
+      "Simulation ${1:cylinder} D2Q9",
+      "Domain  L = ${2:10.0} x ${3:4.0}  N = ${4:500} x ${5:200}",
+      "Physics nu = ${6:0.01}",
+      "",
+      "Boundary north wall",
+      "Boundary south wall",
+      "Boundary east  pressure(rho = 1.0)",
+      "Boundary west  velocity(ux = ${7:0.05}, uy = 0)",
+      "",
+      "Obstacle cylinder { (x - ${8:2.0})^2 + (y - ${9:2.0})^2 < ${10:0.5}^2 }",
+      "",
+      "Setup reynolds Re = ${11:100} L_ref = ${12:50} u_ref = ${7:0.05}",
+      "",
+      "Run ${13:100000} steps",
+      "Output vtk every ${14:5000} [rho, ux, uy]"
+    ],
+    "description": "Flow around a cylinder with obstacle"
+  }
+}

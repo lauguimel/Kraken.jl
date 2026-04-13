@@ -10,10 +10,16 @@ Uses Allen-Cahn for interface tracking and pressure-based MRT for momentum.
 Fully periodic boundary conditions.
 """
 function run_static_droplet_phasefield_2d(;
-        N=100, R=25, W_pf=4.0, σ=0.01,
-        ρ_l=1.0, ρ_g=0.001, ν=0.1,
-        τ_g=0.7, max_steps=5000,
+        N=100, R=25, W_pf=4.0, sigma=nothing, σ=0.01,
+        rho_l=nothing, ρ_l=1.0, rho_g=nothing, ρ_g=0.001,
+        nu=nothing, ν=0.1,
+        tau_g=nothing, τ_g=0.7, max_steps=5000,
         backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(sigma) && (σ = sigma)
+    !isnothing(rho_l) && (ρ_l = rho_l)
+    !isnothing(rho_g) && (ρ_g = rho_g)
+    !isnothing(nu)    && (ν = nu)
+    !isnothing(tau_g) && (τ_g = tau_g)
 
     Nx, Ny = N, N
     β, κ = phasefield_params(σ, W_pf)
@@ -136,15 +142,20 @@ Supports density ratios up to 1000:1 (vs ρ_ratio ≈ 10 for VOF-based driver).
 Two D2Q9 distributions: f (pressure/velocity), g (Allen-Cahn order parameter φ).
 """
 function run_cij_jet_phasefield_2d(;
-        Re=200, We=600, δ=0.02,
+        Re=200, We=600, delta=nothing, δ=0.02,
         R0=40, u_lb=0.04,
         domain_ratio=80, nr_ratio=3,
-        ρ_ratio=1000.0, μ_ratio=10.0,
-        W_pf=4.0, τ_g=0.7,
+        rho_ratio=nothing, ρ_ratio=1000.0,
+        mu_ratio=nothing, μ_ratio=10.0,
+        W_pf=4.0, tau_g=nothing, τ_g=0.7,
         init_length=4, max_steps=200_000,
         output_interval=2000,
         output_dir="cij_jet_pf",
         backend=KernelAbstractions.CPU(), FT=Float64)
+    !isnothing(delta)     && (δ = delta)
+    !isnothing(rho_ratio) && (ρ_ratio = rho_ratio)
+    !isnothing(mu_ratio)  && (μ_ratio = mu_ratio)
+    !isnothing(tau_g)     && (τ_g = tau_g)
 
     # --- Derive LBM parameters ---
     ρ_l = FT(1.0)

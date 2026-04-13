@@ -182,8 +182,9 @@ end
 
 Channel flow driven by body force Fx. Periodic in x, walls at j=1 and j=Ny.
 """
-function run_poiseuille_2d(; Nx=4, Ny=32, ν=0.1, Fx=1e-5, max_steps=10000,
+function run_poiseuille_2d(; Nx=4, Ny=32, nu=nothing, ν=0.1, Fx=1e-5, max_steps=10000,
                             backend=KernelAbstractions.CPU(), T=Float64)
+    !isnothing(nu) && (ν = nu)
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, T; backend=backend)
     f_in, f_out = state.f_in, state.f_out
@@ -209,8 +210,9 @@ end
 Couette flow: bottom wall (j=1) moves at u_wall, top wall (j=Ny) stationary.
 Periodic in x.
 """
-function run_couette_2d(; Nx=4, Ny=32, ν=0.1, u_wall=0.05, max_steps=10000,
+function run_couette_2d(; Nx=4, Ny=32, nu=nothing, ν=0.1, u_wall=0.05, max_steps=10000,
                          backend=KernelAbstractions.CPU(), T=Float64)
+    !isnothing(nu) && (ν = nu)
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, T; backend=backend)
     f_in, f_out = state.f_in, state.f_out
@@ -237,8 +239,9 @@ end
 
 Initialize populations to equilibrium with Taylor-Green velocity field.
 """
-function initialize_taylor_green_2d(; N=64, ν=0.01, u0=0.01,
+function initialize_taylor_green_2d(; N=64, nu=nothing, ν=0.01, u0=0.01,
                                      backend=KernelAbstractions.CPU(), T=Float64)
+    !isnothing(nu) && (ν = nu)
     config = LBMConfig(D2Q9(); Nx=N, Ny=N, ν=ν, u_lid=0.0, max_steps=0)
     Nx, Ny = N, N
     k = T(2π / N)
@@ -275,8 +278,9 @@ end
 Taylor-Green vortex decay in a fully periodic domain.
 Returns final macroscopic fields.
 """
-function run_taylor_green_2d(; N=64, ν=0.01, u0=0.01, max_steps=1000,
+function run_taylor_green_2d(; N=64, nu=nothing, ν=0.01, u0=0.01, max_steps=1000,
                               backend=KernelAbstractions.CPU(), T=Float64)
+    !isnothing(nu) && (ν = nu)
     state = initialize_taylor_green_2d(; N=N, ν=ν, u0=u0, backend=backend, T=T)
     f_in, f_out = state.f_in, state.f_out
     ρ, ux, uy = state.ρ, state.ux, state.uy
@@ -303,8 +307,9 @@ end
 Initialize a channel with a circular cylinder obstacle.
 """
 function initialize_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
-                                 u_in=0.05, ν=0.05,
+                                 u_in=0.05, nu=nothing, ν=0.05,
                                  backend=KernelAbstractions.CPU(), T=Float64)
+    !isnothing(nu) && (ν = nu)
     cx = isnothing(cx) ? Nx ÷ 4 : cx
     cy = isnothing(cy) ? Ny ÷ 2 : cy
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0, max_steps=0)
@@ -382,8 +387,9 @@ Drag computed via momentum exchange on post-stream populations, averaged
 over last `avg_window` steps.
 """
 function run_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
-                          u_in=0.05, ν=0.05, max_steps=20000, avg_window=1000,
+                          u_in=0.05, nu=nothing, ν=0.05, max_steps=20000, avg_window=1000,
                           backend=KernelAbstractions.CPU(), T=Float64)
+    !isnothing(nu) && (ν = nu)
     state, config = initialize_cylinder_2d(; Nx=Nx, Ny=Ny, cx=cx, cy=cy,
                                             radius=radius, u_in=u_in, ν=ν,
                                             backend=backend, T=T)
