@@ -1,0 +1,12 @@
+# 3D thermal refined natconv validation — H100
+job_name: kraken_thermal_ref_3d
+ncpus: 4
+ngpus: 1
+gpu_id: H100
+mem: 32GB
+walltime: "00:15:00"
+julia:
+  project: "."
+  cuda_compat: false
+  cuda_check: true
+command: julia --project=. hpc/validate_thermal_ref_3d.jl

@@ -1,0 +1,27 @@
+#!/bin/bash -l
+#PBS -N kraken_thermal_ref_3d
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=00:15:00
+#PBS -j oe
+
+cd $PBS_O_WORKDIR
+
+# --- Julia setup ---
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+
+# --- Pre-flight checks ---
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+
+julia --project=. -e '
+using Pkg; Pkg.instantiate()
+using CUDA
+if !CUDA.functional()
+    error("CUDA is not functional")
+end
+println("GPU: ", CUDA.name(CUDA.device()))
+println("VRAM: ", round(CUDA.totalmem(CUDA.device()) / 1e9, digits=1), " GB")
+'
+
+# --- Run validation ---
+julia --project=. hpc/validate_thermal_ref_3d.jl 2>&1 | tee hpc/validate_thermal_ref_3d.log
