@@ -957,8 +957,7 @@ function _run_refined(setup::SimulationSetup;
     if is_thermal
         params = setup.physics.params
         Pr = T(get(params, :Pr, 0.71))
-        Ra = T(get(params, :Ra, 1e4))
-        α_thermal = ν / Pr
+        α_thermal = haskey(params, :alpha) ? T(params[:alpha]) : ν / Pr
         ω_T = T(1.0 / (3.0 * Float64(α_thermal) + 0.5))
 
         # Detect temperature BCs from boundaries
@@ -975,8 +974,16 @@ function _run_refined(setup::SimulationSetup;
         if abs(ΔT) < eps(T)
             ΔT = T(1)
         end
-        H = T(max(Nx, Ny))
-        β_g_val = Ra * ν * α_thermal / (ΔT * H^3)
+
+        # Use pre-computed gbeta_DT from Setup helper when available;
+        # gbeta_DT = β·g·ΔT already in lattice units (consistent with ν, α, L_ref).
+        if haskey(params, :gbeta_DT)
+            β_g_val = T(params[:gbeta_DT]) / ΔT
+        else
+            H = T(max(Nx, Ny))
+            Ra = T(get(params, :Ra, 1e4))
+            β_g_val = Ra * ν * α_thermal / (ΔT * H^3)
+        end
         T_ref_buoy = (T_hot + T_cold) / T(2)
 
         # Allocate thermal arrays on base grid
@@ -984,12 +991,27 @@ function _run_refined(setup::SimulationSetup;
         g_out = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
         Temp  = KernelAbstractions.zeros(backend, T, Nx, Ny)
 
-        # Initialize g to mid-range temperature equilibrium
+        # Initialize g to linear temperature profile between hot/cold walls
         w_lat = weights(D2Q9())
         T_mid = (T_hot + T_cold) / T(2)
         g_cpu = zeros(T, Nx, Ny, 9)
-        for q in 1:9
-            g_cpu[:, :, q] .= T(w_lat[q]) * T_mid
+        # Detect gradient direction from thermal BCs
+        hot_face = :west
+        for (face, tv) in thermal_face_bcs
+            tv ≈ T_hot && (hot_face = face)
+        end
+        for j in 1:Ny, i in 1:Nx
+            t_frac = if hot_face in (:west, :east)
+                T(hot_face == :west ? (i - 1) / max(Nx - 1, 1) :
+                                      (Nx - i) / max(Nx - 1, 1))
+            else  # south/north
+                T(hot_face == :south ? (j - 1) / max(Ny - 1, 1) :
+                                       (Ny - j) / max(Ny - 1, 1))
+            end
+            T_init = T_hot - (T_hot - T_cold) * t_frac
+            for q in 1:9
+                g_cpu[i, j, q] = T(w_lat[q]) * T_init
+            end
         end
         copyto!(g_in, g_cpu)
         copyto!(g_out, g_cpu)

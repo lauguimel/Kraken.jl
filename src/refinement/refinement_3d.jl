@@ -179,7 +179,9 @@ function advance_refined_step_3d!(domain::RefinedDomain3D{T},
                                     f_in, f_out, rho, ux, uy, uz, is_solid;
                                     stream_fn, collide_fn, macro_fn,
                                     bc_base_fn=nothing,
-                                    bc_patch_fns=nothing) where T
+                                    bc_patch_fns=nothing,
+                                    bc_coarse_fn=nothing,
+                                    patch_collide_fns=nothing) where T
     Nx = domain.base_Nx; Ny = domain.base_Ny; Nz = domain.base_Nz
 
     # 1. Save coarse state at time n
@@ -197,24 +199,27 @@ function advance_refined_step_3d!(domain::RefinedDomain3D{T},
     # 3. Sub-cycle each patch
     for (pidx, patch) in enumerate(domain.patches)
         ratio = patch.ratio
+        coll_fn = patch_collide_fns !== nothing ?
+            get(patch_collide_fns, pidx, nothing) : nothing
+
         for sub_step in 1:ratio
             t_frac = T((sub_step - 1) / ratio)
 
-            # Ghost fill with temporal interpolation
             fill_ghost_temporal_3d!(patch, f_in, rho, ux, uy, uz,
                                     domain.base_omega, Nx, Ny, Nz, t_frac)
 
-            # Stream on patch
             stream_3d!(patch.f_out, patch.f_in, patch.Nx, patch.Ny, patch.Nz)
 
-            # Patch BCs (if patch touches domain wall)
             if bc_patch_fns !== nothing
                 bc_fn = get(bc_patch_fns, pidx, nothing)
                 bc_fn !== nothing && bc_fn(patch.f_out, patch.Nx, patch.Ny, patch.Nz)
             end
 
-            # Collide + macro on patch
-            collide_3d!(patch.f_out, patch.is_solid, patch.omega)
+            if coll_fn !== nothing
+                coll_fn(patch.f_out, patch.is_solid)
+            else
+                collide_3d!(patch.f_out, patch.is_solid, patch.omega)
+            end
             compute_macroscopic_3d!(patch.rho, patch.ux, patch.uy, patch.uz, patch.f_out)
 
             copyto!(patch.f_in, patch.f_out)
@@ -226,5 +231,57 @@ function advance_refined_step_3d!(domain::RefinedDomain3D{T},
         restrict_to_coarse_3d!(patch, f_in, rho, ux, uy, uz, domain.base_omega)
     end
 
+    # 5. Re-apply coarse BCs (restriction may overwrite wall cells)
+    if bc_coarse_fn !== nothing
+        bc_coarse_fn(f_in, Nx, Ny, Nz)
+    end
+    compute_macroscopic_3d!(rho, ux, uy, uz, f_in)
+
     return f_in, f_out
+end
+
+# --- Auto-detect 3D patch faces touching domain walls ---
+
+"""
+    build_patch_flow_bcs_3d(patches, Lx, Ly, Lz, Nx; wall_faces=[:west,:east,:south,:north,:bottom,:top])
+
+Build BC closures for 3D patch faces that touch domain walls.
+Returns Dict{Int, Function} mapping patch index → BC closure `(f, Nx_p, Ny_p, Nz_p) -> ...`.
+"""
+function build_patch_flow_bcs_3d(patches::Vector{RefinementPatch3D{T}},
+                                  Lx, Ly, Lz, Nx;
+                                  wall_faces=Symbol[]) where T
+    tol = Lx / Nx * 0.01
+
+    patch_bcs = Dict{Int, Function}()
+    for (pidx, patch) in enumerate(patches)
+        closures = Function[]
+
+        for (face, condition) in [
+            (:west,   Float64(patch.x_min) <= tol),
+            (:east,   Float64(patch.x_max) >= Lx - tol),
+            (:south,  Float64(patch.y_min) <= tol),
+            (:north,  Float64(patch.y_max) >= Ly - tol),
+            (:bottom, Float64(patch.z_min) <= tol),
+            (:top,    Float64(patch.z_max) >= Lz - tol),
+        ]
+            condition || continue
+            face in wall_faces || continue
+            let f_sym = face
+                push!(closures, (f, Nx_p, Ny_p, Nz_p) ->
+                    apply_bounce_back_wall_3d!(f, Nx_p, Ny_p, Nz_p, f_sym))
+            end
+        end
+
+        if !isempty(closures)
+            let cls = closures
+                patch_bcs[pidx] = (f, Nx_p, Ny_p, Nz_p) -> begin
+                    for cl in cls
+                        cl(f, Nx_p, Ny_p, Nz_p)
+                    end
+                end
+            end
+        end
+    end
+    return patch_bcs
 end

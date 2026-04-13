@@ -105,7 +105,7 @@ export apply_zou_he_top_3d!
 export apply_zou_he_bottom_3d!, apply_zou_he_west_3d!, apply_zou_he_east_3d!
 export apply_zou_he_south_3d!, apply_zou_he_north_3d!
 export apply_zou_he_pressure_east_3d!, apply_zou_he_pressure_top_3d!
-export apply_bounce_back_walls_3d!
+export apply_bounce_back_walls_3d!, apply_bounce_back_wall_3d!
 export apply_bounce_back_walls_2d!, apply_bounce_back_wall_2d!
 
 # Simulation

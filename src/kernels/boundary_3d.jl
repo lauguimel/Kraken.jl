@@ -480,3 +480,47 @@ function apply_bounce_back_walls_3d!(f, Nx, Ny, Nz)
 
     KernelAbstractions.synchronize(backend)
 end
+
+"""
+    apply_bounce_back_wall_3d!(f, Nx, Ny, Nz, face::Symbol)
+
+Apply bounce-back on a single face of the 3D domain.
+Faces: :west, :east, :south, :north, :bottom, :top.
+"""
+function apply_bounce_back_wall_3d!(f, Nx, Ny, Nz, face::Symbol)
+    backend = KernelAbstractions.get_backend(f)
+    if face === :bottom
+        kernel! = bounce_back_face_3d_kernel!(backend)
+        kernel!(f, Nx, Ny, Nx, Int32(1); ndrange=(Nx, Ny))
+    elseif face === :top
+        kernel! = _bounce_back_top_3d_kernel!(backend)
+        kernel!(f, Nx, Ny, Nz; ndrange=(Nx, Ny))
+    elseif face === :south
+        kernel! = bounce_back_face_3d_kernel!(backend)
+        kernel!(f, Ny, Nz, Nx, Int32(2); ndrange=(Nx, Nz))
+    elseif face === :north
+        kernel! = bounce_back_face_3d_kernel!(backend)
+        kernel!(f, Ny, Nz, Nx, Int32(3); ndrange=(Nx, Nz))
+    elseif face === :west
+        kernel! = bounce_back_face_3d_kernel!(backend)
+        kernel!(f, Ny, Nz, Nx, Int32(4); ndrange=(Ny, Nz))
+    elseif face === :east
+        kernel! = bounce_back_face_3d_kernel!(backend)
+        kernel!(f, Ny, Nz, Nx, Int32(5); ndrange=(Ny, Nz))
+    else
+        error("apply_bounce_back_wall_3d!: unknown face $face")
+    end
+    KernelAbstractions.synchronize(backend)
+end
+
+@kernel function _bounce_back_top_3d_kernel!(f, Nx, Ny, Nz)
+    i, j = @index(Global, NTuple)
+    k = Nz
+    @inbounds begin
+        f[i,j,k,7]  = f[i,j,k,6]    # -z <- +z
+        f[i,j,k,14] = f[i,j,k,13]   # +x,-z <- -x,+z
+        f[i,j,k,15] = f[i,j,k,12]   # -x,-z <- +x,+z
+        f[i,j,k,18] = f[i,j,k,17]   # +y,-z <- -y,+z
+        f[i,j,k,19] = f[i,j,k,16]   # -y,-z <- +y,+z
+    end
+end
