@@ -6,14 +6,9 @@
 # vortex develops. Filippova-Hanel rescaling guarantees second-order
 # accuracy across the coarse-fine interface.
 #
-# NOTE: as of v0.1.0 the .krk runner does not yet dispatch on the
-# refined driver. Run this case via the Julia API:
-#
-#   using Kraken
-#   patches = create_refined_domain(...)  # see test_refinement.jl
-#   result = run_natural_convection_refined_2d(...)  # adapt for cavity
-#
-# The .krk file documents the patch geometry in declarative form.
+# The .krk runner dispatches refined cases automatically via the
+# Refine block. Both 2D (D2Q9) and 3D (D3Q19) lattices are supported,
+# with isothermal and thermal modules.
 
 Simulation grid_refinement_cavity D2Q9
 Domain L = 1.0 x 1.0  N = 64 x 64

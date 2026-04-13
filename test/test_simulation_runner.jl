@@ -221,10 +221,11 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         @test haskey(result, :Temp)
     end
 
-    @testset "Dispatch: refined grid_refinement_cavity emits clear error" begin
+    @testset "Dispatch: refined grid_refinement_cavity runs" begin
         path = joinpath(EXAMPLES_DIR, "grid_refinement_cavity.krk")
-        # Refined non-thermal cavity is not wired to .krk in v0.1.0
-        @test_throws ArgumentError run_simulation(path; max_steps=100)
+        result = run_simulation(path; max_steps=100)
+        @test !any(isnan, result.ρ)
+        @test haskey(result, :ux)
     end
 
     @testset "Dispatch: D3Q19 cavity_3d (parser does not yet emit D3Q19 setups)" begin

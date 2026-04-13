@@ -105,9 +105,11 @@ Refinement patch specification from a .krk `Refine` block.
 """
 struct RefineSetup
     name::String
-    region::NTuple{4, Float64}   # (x_min, y_min, x_max, y_max)
+    region::NTuple{4, Float64}   # 2D: (x_min, y_min, x_max, y_max)
+    region_3d::NTuple{6, Float64}  # 3D: (x_min, y_min, z_min, x_max, y_max, z_max); zeros for 2D
     ratio::Int                   # refinement ratio (default 2)
     parent::String               # parent patch name ("" = base grid)
+    is_3d::Bool                  # true when 6 region coords provided
 end
 
 """
@@ -560,12 +562,21 @@ function _parse_refine(line::String, user_vars::Dict{Symbol,Float64})
     brace_m === nothing && throw(ArgumentError("Missing { ... } block in Refine: $line"))
     content = strip(String(brace_m.captures[1]))
 
-    # Parse region = [x0, y0, x1, y1]
+    # Parse region = [x0, y0, x1, y1] (2D) or [x0, y0, z0, x1, y1, z1] (3D)
     region_m = match(r"region\s*=\s*\[([^\]]+)\]", content)
-    region_m === nothing && throw(ArgumentError("Missing 'region = [x0, y0, x1, y1]' in Refine: $line"))
+    region_m === nothing && throw(ArgumentError("Missing 'region = [...]' in Refine: $line"))
     coords = [_eval_number(strip(s), user_vars) for s in split(region_m.captures[1], ",")]
-    length(coords) == 4 || throw(ArgumentError("Refine region must have 4 values: $line"))
-    region = (coords[1], coords[2], coords[3], coords[4])
+    if length(coords) == 4
+        region = (coords[1], coords[2], coords[3], coords[4])
+        region_3d = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        is_3d = false
+    elseif length(coords) == 6
+        region = (coords[1], coords[2], coords[4], coords[5])  # x/y projection
+        region_3d = (coords[1], coords[2], coords[3], coords[4], coords[5], coords[6])
+        is_3d = true
+    else
+        throw(ArgumentError("Refine region must have 4 (2D) or 6 (3D) values: $line"))
+    end
 
     # Parse ratio (default 2)
     ratio_m = match(r"ratio\s*=\s*(\d+)", content)
@@ -575,7 +586,7 @@ function _parse_refine(line::String, user_vars::Dict{Symbol,Float64})
     parent_m = match(r"parent\s*=\s*(\w+)", content)
     parent = parent_m !== nothing ? String(parent_m.captures[1]) : ""
 
-    return RefineSetup(name, region, ratio, parent)
+    return RefineSetup(name, region, region_3d, ratio, parent, is_3d)
 end
 
 """Evaluate a number string, substituting user variables."""
