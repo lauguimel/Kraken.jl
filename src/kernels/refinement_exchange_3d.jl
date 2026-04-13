@@ -361,3 +361,181 @@ function restrict_f_rescaled_3d!(f_coarse, rho_c, ux_c, uy_c, uz_c,
             ndrange=(Nx_overlap, Ny_overlap, Nz_overlap))
     KernelAbstractions.synchronize(backend)
 end
+
+# =====================================================================
+# Thermal prolongation: trilinear interpolation WITHOUT Filippova-Hanel
+# (g_eq is linear in T, so simple interpolation suffices)
+# =====================================================================
+
+"""Trilinear + temporal interpolation of coarse g into fine ghost cells (3D)."""
+@kernel function _fill_thermal_ghost_temporal_3d_kernel!(
+        g_fine, @Const(g_coarse), @Const(g_prev),
+        ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
+        i_offset, j_offset, k_offset,
+        Nx_c, Ny_c, Nz_c, t_frac,
+        i_lo, j_lo, k_lo, Ni_prev, Nj_prev, Nk_prev)
+
+    i_f, j_f, k_f = @index(Global, NTuple)
+
+    @inbounds begin
+        is_ghost = (i_f <= n_ghost) || (i_f > n_ghost + Nx_inner) ||
+                   (j_f <= n_ghost) || (j_f > n_ghost + Ny_inner) ||
+                   (k_f <= n_ghost) || (k_f > n_ghost + Nz_inner)
+        if is_ghost
+            T = eltype(g_fine)
+            t = T(t_frac)
+            omt = one(T) - t
+
+            xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_offset) + T(0.5) / T(ratio)
+            yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_offset) + T(0.5) / T(ratio)
+            zc = T(k_f - n_ghost - 1) / T(ratio) + T(k_offset) + T(0.5) / T(ratio)
+
+            i0r = trunc(Int, xc); j0r = trunc(Int, yc); k0r = trunc(Int, zc)
+            tx = clamp(xc - T(i0r), zero(T), one(T))
+            ty = clamp(yc - T(j0r), zero(T), one(T))
+            tz = clamp(zc - T(k0r), zero(T), one(T))
+
+            i0 = clamp(i0r, 1, Nx_c); i1 = clamp(i0r+1, 1, Nx_c)
+            j0 = clamp(j0r, 1, Ny_c); j1 = clamp(j0r+1, 1, Ny_c)
+            k0 = clamp(k0r, 1, Nz_c); k1 = clamp(k0r+1, 1, Nz_c)
+
+            w000=(one(T)-tx)*(one(T)-ty)*(one(T)-tz); w100=tx*(one(T)-ty)*(one(T)-tz)
+            w010=(one(T)-tx)*ty*(one(T)-tz);           w110=tx*ty*(one(T)-tz)
+            w001=(one(T)-tx)*(one(T)-ty)*tz;           w101=tx*(one(T)-ty)*tz
+            w011=(one(T)-tx)*ty*tz;                     w111=tx*ty*tz
+
+            # Local indices into g_prev buffer
+            ip0 = clamp(i0 - i_lo + 1, 1, Ni_prev)
+            ip1 = clamp(i1 - i_lo + 1, 1, Ni_prev)
+            jp0 = clamp(j0 - j_lo + 1, 1, Nj_prev)
+            jp1 = clamp(j1 - j_lo + 1, 1, Nj_prev)
+            kp0 = clamp(k0 - k_lo + 1, 1, Nk_prev)
+            kp1 = clamp(k1 - k_lo + 1, 1, Nk_prev)
+
+            for q in 1:19
+                # Temporal blend at each stencil point
+                g000 = omt * g_prev[ip0, jp0, kp0, q] + t * g_coarse[i0, j0, k0, q]
+                g100 = omt * g_prev[ip1, jp0, kp0, q] + t * g_coarse[i1, j0, k0, q]
+                g010 = omt * g_prev[ip0, jp1, kp0, q] + t * g_coarse[i0, j1, k0, q]
+                g110 = omt * g_prev[ip1, jp1, kp0, q] + t * g_coarse[i1, j1, k0, q]
+                g001 = omt * g_prev[ip0, jp0, kp1, q] + t * g_coarse[i0, j0, k1, q]
+                g101 = omt * g_prev[ip1, jp0, kp1, q] + t * g_coarse[i1, j0, k1, q]
+                g011 = omt * g_prev[ip0, jp1, kp1, q] + t * g_coarse[i0, j1, k1, q]
+                g111 = omt * g_prev[ip1, jp1, kp1, q] + t * g_coarse[i1, j1, k1, q]
+
+                # Spatial trilinear interpolation
+                g_fine[i_f, j_f, k_f, q] = w000*g000 + w100*g100 + w010*g010 + w110*g110 +
+                                             w001*g001 + w101*g101 + w011*g011 + w111*g111
+            end
+        end
+    end
+end
+
+function _fill_thermal_ghost_temporal_3d!(g_fine, g_coarse, g_prev,
+                                           ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
+                                           i_offset, j_offset, k_offset,
+                                           Nx_c, Ny_c, Nz_c, t_frac)
+    backend = KernelAbstractions.get_backend(g_fine)
+    Nx_f = Nx_inner + 2 * n_ghost
+    Ny_f = Ny_inner + 2 * n_ghost
+    Nz_f = Nz_inner + 2 * n_ghost
+    i_lo = max(i_offset - 1, 1)
+    j_lo = max(j_offset - 1, 1)
+    k_lo = max(k_offset - 1, 1)
+    i_c_end = i_offset + Nx_inner ÷ ratio - 1
+    j_c_end = j_offset + Ny_inner ÷ ratio - 1
+    k_c_end = k_offset + Nz_inner ÷ ratio - 1
+    Ni_prev = min(i_c_end + 1, Nx_c) - i_lo + 1
+    Nj_prev = min(j_c_end + 1, Ny_c) - j_lo + 1
+    Nk_prev = min(k_c_end + 1, Nz_c) - k_lo + 1
+    kernel! = _fill_thermal_ghost_temporal_3d_kernel!(backend)
+    kernel!(g_fine, g_coarse, g_prev, ratio, Nx_inner, Ny_inner, Nz_inner, n_ghost,
+            i_offset, j_offset, k_offset, Nx_c, Ny_c, Nz_c,
+            eltype(g_fine)(t_frac),
+            i_lo, j_lo, k_lo, Ni_prev, Nj_prev, Nk_prev;
+            ndrange=(Nx_f, Ny_f, Nz_f))
+    KernelAbstractions.synchronize(backend)
+end
+
+# =====================================================================
+# Full thermal prolongation (init time — all cells, no FH)
+# =====================================================================
+
+@kernel function _fill_thermal_full_3d_kernel!(g_fine, @Const(g_coarse),
+                                                ratio, n_ghost,
+                                                i_offset, j_offset, k_offset,
+                                                Nx_c, Ny_c, Nz_c)
+    i_f, j_f, k_f = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(g_fine)
+        xc = T(i_f - n_ghost - 1) / T(ratio) + T(i_offset) + T(0.5) / T(ratio)
+        yc = T(j_f - n_ghost - 1) / T(ratio) + T(j_offset) + T(0.5) / T(ratio)
+        zc = T(k_f - n_ghost - 1) / T(ratio) + T(k_offset) + T(0.5) / T(ratio)
+
+        i0r = trunc(Int, xc); j0r = trunc(Int, yc); k0r = trunc(Int, zc)
+        tx = clamp(xc - T(i0r), zero(T), one(T))
+        ty = clamp(yc - T(j0r), zero(T), one(T))
+        tz = clamp(zc - T(k0r), zero(T), one(T))
+        i0 = clamp(i0r, 1, Nx_c); i1 = clamp(i0r+1, 1, Nx_c)
+        j0 = clamp(j0r, 1, Ny_c); j1 = clamp(j0r+1, 1, Ny_c)
+        k0 = clamp(k0r, 1, Nz_c); k1 = clamp(k0r+1, 1, Nz_c)
+
+        w000=(one(T)-tx)*(one(T)-ty)*(one(T)-tz); w100=tx*(one(T)-ty)*(one(T)-tz)
+        w010=(one(T)-tx)*ty*(one(T)-tz);           w110=tx*ty*(one(T)-tz)
+        w001=(one(T)-tx)*(one(T)-ty)*tz;           w101=tx*(one(T)-ty)*tz
+        w011=(one(T)-tx)*ty*tz;                     w111=tx*ty*tz
+
+        for q in 1:19
+            g_fine[i_f, j_f, k_f, q] = w000 * g_coarse[i0,j0,k0,q] +
+                                         w100 * g_coarse[i1,j0,k0,q] +
+                                         w010 * g_coarse[i0,j1,k0,q] +
+                                         w110 * g_coarse[i1,j1,k0,q] +
+                                         w001 * g_coarse[i0,j0,k1,q] +
+                                         w101 * g_coarse[i1,j0,k1,q] +
+                                         w011 * g_coarse[i0,j1,k1,q] +
+                                         w111 * g_coarse[i1,j1,k1,q]
+        end
+    end
+end
+
+# =====================================================================
+# Thermal restriction: simple block-average over ratio³ cells (no FH)
+# =====================================================================
+
+@kernel function _restrict_thermal_simple_3d_kernel!(g_coarse, Temp_c,
+                                                      @Const(g_fine), @Const(Temp_f),
+                                                      ratio, n_ghost,
+                                                      i_offset, j_offset, k_offset)
+    ic, jc, kc = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(g_coarse)
+        i_c = ic + i_offset - 1
+        j_c = jc + j_offset - 1
+        k_c = kc + k_offset - 1
+        inv_r3 = one(T) / T(ratio * ratio * ratio)
+
+        # Block-average temperature
+        Temp_avg = zero(T)
+        for dk in 0:ratio-1, dj in 0:ratio-1, di in 0:ratio-1
+            i_f = n_ghost + (ic - 1) * ratio + di + 1
+            j_f = n_ghost + (jc - 1) * ratio + dj + 1
+            k_f = n_ghost + (kc - 1) * ratio + dk + 1
+            Temp_avg += Temp_f[i_f, j_f, k_f]
+        end
+        Temp_c[i_c, j_c, k_c] = Temp_avg * inv_r3
+
+        # Block-average g populations
+        for q in 1:19
+            g_avg = zero(T)
+            for dk in 0:ratio-1, dj in 0:ratio-1, di in 0:ratio-1
+                i_f = n_ghost + (ic - 1) * ratio + di + 1
+                j_f = n_ghost + (jc - 1) * ratio + dj + 1
+                k_f = n_ghost + (kc - 1) * ratio + dk + 1
+                g_avg += g_fine[i_f, j_f, k_f, q]
+            end
+            g_coarse[i_c, j_c, k_c, q] = g_avg * inv_r3
+        end
+    end
+end
