@@ -578,17 +578,10 @@ function advance_thermal_refined_step!(domain::RefinedDomain{T},
                 end
             end
 
-            # Recover temperature
             compute_temperature_2d!(thermal.Temp, thermal.g_out)
-            # Recover macroscopic flow
             compute_macroscopic_2d!(patch.rho, patch.ux, patch.uy, patch.f_out)
-
-            # Collide thermal
             collide_thermal_2d!(thermal.g_out, patch.ux, patch.uy, thermal.omega_T)
-            # Collide flow with Boussinesq.
-            # Body force scales with the local lattice spacing: acoustic scaling
-            # gives a_fine = a_phys·dt_f²/dx_f = a_coarse/ratio, so the lattice
-            # acceleration must be divided (not multiplied) by the ratio.
+            # Body force scales with local dx: a_fine = a_coarse/ratio (acoustic).
             collide_boussinesq_2d!(patch.f_out, thermal.Temp, patch.is_solid,
                                     patch.omega, T(β_g) / T(patch.ratio),
                                     T(T_ref_buoy))
