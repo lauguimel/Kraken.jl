@@ -323,6 +323,103 @@ end
     end
 end
 
+# ---------------------------------------------------------------------------
+# SLBM + BGK with moving-wall bounce-back.
+#
+# When `is_solid[i,j]` is true, populations are reflected and a
+# momentum correction is added so that the wall advects the fluid at
+# prescribed velocity `(uw_x[i,j], uw_y[i,j])` (Ladd 1994):
+#
+#   f_q*(wall) = f_{q'}(wall) + 6 · w_q · ρ_w · (c_q · u_wall)
+#
+# For stationary walls set `uw_x = uw_y = 0` and this reduces exactly
+# to `slbm_bgk_step!`. ρ_w is approximated as 1 (low-Mach limit); a
+# fluid-side extrapolation can be substituted later if needed.
+# ---------------------------------------------------------------------------
+
+@kernel function slbm_bgk_moving_step_kernel!(f_out, @Const(f_in),
+                                               ρ_out, ux_out, uy_out,
+                                               @Const(is_solid),
+                                               @Const(uw_x), @Const(uw_y),
+                                               @Const(i_dep), @Const(j_dep),
+                                               Nξ, Nη, ω,
+                                               periodic_ξ, periodic_η)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f_out)
+        fp1 = bilinear_f(f_in, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nξ, Nη, periodic_ξ, periodic_η)
+        fp2 = bilinear_f(f_in, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nξ, Nη, periodic_ξ, periodic_η)
+        fp3 = bilinear_f(f_in, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nξ, Nη, periodic_ξ, periodic_η)
+        fp4 = bilinear_f(f_in, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nξ, Nη, periodic_ξ, periodic_η)
+        fp5 = bilinear_f(f_in, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nξ, Nη, periodic_ξ, periodic_η)
+        fp6 = bilinear_f(f_in, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nξ, Nη, periodic_ξ, periodic_η)
+        fp7 = bilinear_f(f_in, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nξ, Nη, periodic_ξ, periodic_η)
+        fp8 = bilinear_f(f_in, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nξ, Nη, periodic_ξ, periodic_η)
+        fp9 = bilinear_f(f_in, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nξ, Nη, periodic_ξ, periodic_η)
+
+        if is_solid[i, j]
+            ρ_w = one(T)
+            uxw = uw_x[i, j]
+            uyw = uw_y[i, j]
+            # 6 · w_q · ρ · (c_q · u_w). Weights: axis 1/9, diagonals 1/36.
+            # So axial δ = (2/3)·ρ·(c_q · u_w), diagonal δ = (1/6)·ρ·(c_q · u_w).
+            δx = T(2/3) * ρ_w * uxw         # east-west axis
+            δy = T(2/3) * ρ_w * uyw         # north-south axis
+            δne = T(1/6) * ρ_w * ( uxw + uyw)
+            δnw = T(1/6) * ρ_w * (-uxw + uyw)
+            f_out[i, j, 1] = fp1
+            f_out[i, j, 2] = fp4 + δx
+            f_out[i, j, 4] = fp2 - δx
+            f_out[i, j, 3] = fp5 + δy
+            f_out[i, j, 5] = fp3 - δy
+            f_out[i, j, 6] = fp8 + δne
+            f_out[i, j, 8] = fp6 - δne
+            f_out[i, j, 7] = fp9 + δnw
+            f_out[i, j, 9] = fp7 - δnw
+            ρ_out[i, j] = ρ_w
+            ux_out[i, j] = uxw
+            uy_out[i, j] = uyw
+        else
+            ρ, ux, uy = moments_2d(fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9)
+            usq = ux * ux + uy * uy
+            f_out[i, j, 1] = fp1 - ω * (fp1 - feq_2d(Val(1), ρ, ux, uy, usq))
+            f_out[i, j, 2] = fp2 - ω * (fp2 - feq_2d(Val(2), ρ, ux, uy, usq))
+            f_out[i, j, 3] = fp3 - ω * (fp3 - feq_2d(Val(3), ρ, ux, uy, usq))
+            f_out[i, j, 4] = fp4 - ω * (fp4 - feq_2d(Val(4), ρ, ux, uy, usq))
+            f_out[i, j, 5] = fp5 - ω * (fp5 - feq_2d(Val(5), ρ, ux, uy, usq))
+            f_out[i, j, 6] = fp6 - ω * (fp6 - feq_2d(Val(6), ρ, ux, uy, usq))
+            f_out[i, j, 7] = fp7 - ω * (fp7 - feq_2d(Val(7), ρ, ux, uy, usq))
+            f_out[i, j, 8] = fp8 - ω * (fp8 - feq_2d(Val(8), ρ, ux, uy, usq))
+            f_out[i, j, 9] = fp9 - ω * (fp9 - feq_2d(Val(9), ρ, ux, uy, usq))
+            ρ_out[i, j] = ρ
+            ux_out[i, j] = ux
+            uy_out[i, j] = uy
+        end
+    end
+end
+
+"""
+    slbm_bgk_moving_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                          uw_x, uw_y, geom, ω)
+
+Fused SLBM + BGK step with Ladd (1994) moving-wall bounce-back.
+`uw_x`, `uw_y` are per-cell prescribed wall velocities (nonzero only on
+solid cells; ignored on fluid cells). Reduces to `slbm_bgk_step!` when
+both are zero everywhere.
+"""
+function slbm_bgk_moving_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                uw_x, uw_y, geom::SLBMGeometry, ω)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    kernel! = slbm_bgk_moving_step_kernel!(backend)
+    kernel!(f_out, f_in, ρ, ux, uy, is_solid,
+            uw_x, uw_y,
+            geom.i_dep, geom.j_dep,
+            geom.Nξ, geom.Nη, ET(ω),
+            geom.periodic_ξ, geom.periodic_η;
+            ndrange=(geom.Nξ, geom.Nη))
+end
+
 """
     slbm_mrt_step!(f_out, f_in, ρ, ux, uy, is_solid, geom, ν;
                    s_e=1.4, s_eps=1.4, s_q=1.2)
