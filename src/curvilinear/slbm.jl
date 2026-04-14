@@ -1,0 +1,347 @@
+using KernelAbstractions
+
+# ===========================================================================
+# Semi-Lagrangian LBM (SLBM) kernels for the curvilinear v0.2 path.
+#
+# Formulation (Krämer et al. 2017, Phys. Rev. E 95, 023305):
+#   After collision, f_q(P, t+Δt) ← f_q(P − c_q · dx_ref, t)
+# Since P − c_q · dx_ref is not a mesh node on a warped grid, we
+# interpolate f_q at the departure point from the surrounding nodes.
+#
+# Departure grid indices (i_dep, j_dep) are precomputed per (i, j, q) at
+# simulation start. The streaming step then consists of an interpolation
+# plus a standard collision, all fused in one GPU kernel.
+#
+# Bilinear interpolation is O(Δx²) on smooth fields. Biquadratic
+# (3×3 Lagrange) is O(Δx³) and recovers second-order accuracy on
+# distorted meshes (Wilde et al. 2020, Comput. Fluids 204, 104519).
+# ===========================================================================
+
+"""
+    SLBMGeometry{T, AT3, AT2}
+
+Precomputed departure grid indices for semi-Lagrangian streaming on a
+curvilinear mesh. Built once from a `CurvilinearMesh`; passed to the
+fused kernel at every timestep.
+
+# Fields
+- `i_dep, j_dep`: floating-point departure indices `[Nξ, Nη, 9]`. For
+  direction `q` at node `(i, j)`, the departure is
+  `(i_dep[i,j,q], j_dep[i,j,q])` in grid-index space.
+- `periodic_ξ, periodic_η`: mirror the parent mesh so the kernel can
+  wrap or clamp.
+- `Nξ, Nη`: logical grid extents.
+- `dx_ref`: physical distance per lattice unit (copied from mesh).
+
+For a uniform Cartesian mesh with isotropic spacing, `i_dep[i,j,q] =
+i − c_qx` and `j_dep[i,j,q] = j − c_qy` exactly — SLBM reduces to
+standard stream-collide.
+"""
+struct SLBMGeometry{T<:AbstractFloat, AT3<:AbstractArray{T, 3}}
+    i_dep::AT3
+    j_dep::AT3
+    Nξ::Int
+    Nη::Int
+    periodic_ξ::Bool
+    periodic_η::Bool
+    dx_ref::T
+end
+
+"""
+    build_slbm_geometry(mesh::CurvilinearMesh) -> SLBMGeometry
+
+Precompute the grid-index departure points for every node and every
+D2Q9 direction. Linearises the mapping locally via the stored metric:
+
+    Δi = −dx_ref · denom_ξ · (dξ/dX · c_qx + dξ/dY · c_qy)
+    Δj = −dx_ref · denom_η · (dη/dX · c_qx + dη/dY · c_qy)
+
+with the inverse Jacobian `dξ/dX = dY/dη / J`, etc.
+"""
+function build_slbm_geometry(mesh::CurvilinearMesh{T}) where {T}
+    Nξ, Nη = mesh.Nξ, mesh.Nη
+    cx = velocities_x(D2Q9())
+    cy = velocities_y(D2Q9())
+
+    denom_ξ = T(mesh.periodic_ξ ? Nξ : Nξ - 1)
+    denom_η = T(mesh.periodic_η ? Nη : Nη - 1)
+
+    i_dep = zeros(T, Nξ, Nη, 9)
+    j_dep = zeros(T, Nξ, Nη, 9)
+    dxr = mesh.dx_ref
+
+    @inbounds for j in 1:Nη, i in 1:Nξ
+        J = mesh.J[i, j]
+        dXdξ = mesh.dXdξ[i, j]
+        dXdη = mesh.dXdη[i, j]
+        dYdξ = mesh.dYdξ[i, j]
+        dYdη = mesh.dYdη[i, j]
+        # Inverse Jacobian rows
+        ξx =  dYdη / J
+        ξy = -dXdη / J
+        ηx = -dYdξ / J
+        ηy =  dXdξ / J
+        for q in 1:9
+            cqx = T(cx[q])
+            cqy = T(cy[q])
+            # Departure shift in (ξ, η) space then in grid-index space
+            Δi = -dxr * denom_ξ * (ξx * cqx + ξy * cqy)
+            Δj = -dxr * denom_η * (ηx * cqx + ηy * cqy)
+            i_dep[i, j, q] = T(i) + Δi
+            j_dep[i, j, q] = T(j) + Δj
+        end
+    end
+
+    return SLBMGeometry{T, Array{T, 3}}(i_dep, j_dep, Nξ, Nη,
+                                         mesh.periodic_ξ, mesh.periodic_η, dxr)
+end
+
+"""
+    transfer_slbm_geometry(geom::SLBMGeometry, backend) -> SLBMGeometry
+
+Move the precomputed departure arrays to the device backend
+(`KernelAbstractions.CPU()`, `CUDABackend()`, `MetalBackend()`).
+"""
+function transfer_slbm_geometry(geom::SLBMGeometry{T}, backend) where {T}
+    i_dep_dev = KernelAbstractions.allocate(backend, T, size(geom.i_dep))
+    j_dep_dev = KernelAbstractions.allocate(backend, T, size(geom.j_dep))
+    copyto!(i_dep_dev, geom.i_dep)
+    copyto!(j_dep_dev, geom.j_dep)
+    return SLBMGeometry{T, typeof(i_dep_dev)}(i_dep_dev, j_dep_dev,
+                                                geom.Nξ, geom.Nη,
+                                                geom.periodic_ξ, geom.periodic_η,
+                                                geom.dx_ref)
+end
+
+# ---------------------------------------------------------------------------
+# Interpolation helpers. All marked @inline so the kernel fuses the
+# index math without function-call overhead on GPU. No allocations.
+# ---------------------------------------------------------------------------
+
+@inline function _wrap_or_clamp(i::Int, N::Int, periodic::Bool)
+    if periodic
+        # mod1(i, N) returns a value in 1..N, wrapping both sides.
+        return ((i - 1) % N + N) % N + 1
+    else
+        return clamp(i, 1, N)
+    end
+end
+
+@inline function bilinear_f(f_in, ifloat::T, jfloat::T, q::Int,
+                             Nξ::Int, Nη::Int,
+                             periodic_ξ::Bool, periodic_η::Bool) where {T}
+    i0 = unsafe_trunc(Int, floor(ifloat))
+    j0 = unsafe_trunc(Int, floor(jfloat))
+    α = ifloat - T(i0)
+    β = jfloat - T(j0)
+    i0w = _wrap_or_clamp(i0,     Nξ, periodic_ξ)
+    i1w = _wrap_or_clamp(i0 + 1, Nξ, periodic_ξ)
+    j0w = _wrap_or_clamp(j0,     Nη, periodic_η)
+    j1w = _wrap_or_clamp(j0 + 1, Nη, periodic_η)
+    f00 = f_in[i0w, j0w, q]
+    f10 = f_in[i1w, j0w, q]
+    f01 = f_in[i0w, j1w, q]
+    f11 = f_in[i1w, j1w, q]
+    return (one(T) - α) * (one(T) - β) * f00 +
+           α           * (one(T) - β) * f10 +
+           (one(T) - α) * β           * f01 +
+           α           * β           * f11
+end
+
+# ---------------------------------------------------------------------------
+# Fused SLBM + BGK kernel. Single GPU dispatch per timestep.
+#
+# Steps per thread:
+#   1. For each of the 9 D2Q9 directions, interpolate f_in at the
+#      precomputed departure point.
+#   2. If solid, bounce-back (swap opposite pairs).
+#   3. Otherwise: compute moments (ρ, ux, uy), apply BGK relaxation,
+#      write both f_out and macroscopic fields.
+# ---------------------------------------------------------------------------
+
+@kernel function slbm_bgk_step_kernel!(f_out, @Const(f_in),
+                                        ρ_out, ux_out, uy_out,
+                                        @Const(is_solid),
+                                        @Const(i_dep), @Const(j_dep),
+                                        Nξ, Nη, ω,
+                                        periodic_ξ, periodic_η)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f_out)
+        # 1. Semi-Lagrangian pull for each direction
+        fp1 = bilinear_f(f_in, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nξ, Nη, periodic_ξ, periodic_η)
+        fp2 = bilinear_f(f_in, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nξ, Nη, periodic_ξ, periodic_η)
+        fp3 = bilinear_f(f_in, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nξ, Nη, periodic_ξ, periodic_η)
+        fp4 = bilinear_f(f_in, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nξ, Nη, periodic_ξ, periodic_η)
+        fp5 = bilinear_f(f_in, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nξ, Nη, periodic_ξ, periodic_η)
+        fp6 = bilinear_f(f_in, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nξ, Nη, periodic_ξ, periodic_η)
+        fp7 = bilinear_f(f_in, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nξ, Nη, periodic_ξ, periodic_η)
+        fp8 = bilinear_f(f_in, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nξ, Nη, periodic_ξ, periodic_η)
+        fp9 = bilinear_f(f_in, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nξ, Nη, periodic_ξ, periodic_η)
+
+        if is_solid[i, j]
+            # Halfway bounce-back
+            f_out[i, j, 1] = fp1
+            f_out[i, j, 2] = fp4; f_out[i, j, 4] = fp2
+            f_out[i, j, 3] = fp5; f_out[i, j, 5] = fp3
+            f_out[i, j, 6] = fp8; f_out[i, j, 8] = fp6
+            f_out[i, j, 7] = fp9; f_out[i, j, 9] = fp7
+            ρ_out[i, j] = one(T)
+            ux_out[i, j] = zero(T)
+            uy_out[i, j] = zero(T)
+        else
+            ρ, ux, uy = moments_2d(fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9)
+            usq = ux * ux + uy * uy
+            f_out[i, j, 1] = fp1 - ω * (fp1 - feq_2d(Val(1), ρ, ux, uy, usq))
+            f_out[i, j, 2] = fp2 - ω * (fp2 - feq_2d(Val(2), ρ, ux, uy, usq))
+            f_out[i, j, 3] = fp3 - ω * (fp3 - feq_2d(Val(3), ρ, ux, uy, usq))
+            f_out[i, j, 4] = fp4 - ω * (fp4 - feq_2d(Val(4), ρ, ux, uy, usq))
+            f_out[i, j, 5] = fp5 - ω * (fp5 - feq_2d(Val(5), ρ, ux, uy, usq))
+            f_out[i, j, 6] = fp6 - ω * (fp6 - feq_2d(Val(6), ρ, ux, uy, usq))
+            f_out[i, j, 7] = fp7 - ω * (fp7 - feq_2d(Val(7), ρ, ux, uy, usq))
+            f_out[i, j, 8] = fp8 - ω * (fp8 - feq_2d(Val(8), ρ, ux, uy, usq))
+            f_out[i, j, 9] = fp9 - ω * (fp9 - feq_2d(Val(9), ρ, ux, uy, usq))
+            ρ_out[i, j] = ρ
+            ux_out[i, j] = ux
+            uy_out[i, j] = uy
+        end
+    end
+end
+
+"""
+    slbm_bgk_step!(f_out, f_in, ρ, ux, uy, is_solid, geom, ω)
+
+Single fused kernel for semi-Lagrangian BGK on a curvilinear mesh:
+interpolated streaming + bounce-back + collision + macroscopic moments.
+
+Arguments match `fused_bgk_step!` plus an `SLBMGeometry` carrying the
+precomputed departure indices. `geom.i_dep`, `geom.j_dep` must live on
+the same backend as `f_in` (use `transfer_slbm_geometry` if needed).
+"""
+function slbm_bgk_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                        geom::SLBMGeometry, ω)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    kernel! = slbm_bgk_step_kernel!(backend)
+    kernel!(f_out, f_in, ρ, ux, uy, is_solid,
+            geom.i_dep, geom.j_dep,
+            geom.Nξ, geom.Nη, ET(ω),
+            geom.periodic_ξ, geom.periodic_η;
+            ndrange=(geom.Nξ, geom.Nη))
+end
+
+# ---------------------------------------------------------------------------
+# Fused SLBM + MRT kernel. Same SL streaming as the BGK variant, but
+# the collision relaxes in moment space with separate rates for
+# (e, ε, q, pxx, pxy) — more stable on distorted curvilinear meshes
+# (Lallemand & Luo 2000; Budinski 2014 for curvilinear applications).
+#
+# Conserved moments (ρ, jx, jy) pass through untouched. Kinematic
+# viscosity sets s_ν = 1/(3ν + 0.5). Other rates follow Kraken's
+# existing collide_mrt_2d! defaults (s_e = s_ε = 1.4, s_q = 1.2).
+# ---------------------------------------------------------------------------
+
+@kernel function slbm_mrt_step_kernel!(f_out, @Const(f_in),
+                                        ρ_out, ux_out, uy_out,
+                                        @Const(is_solid),
+                                        @Const(i_dep), @Const(j_dep),
+                                        Nξ, Nη,
+                                        s_e, s_eps, s_q, s_nu,
+                                        periodic_ξ, periodic_η)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f_out)
+        # 1. Semi-Lagrangian pull for each direction
+        f1 = bilinear_f(f_in, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nξ, Nη, periodic_ξ, periodic_η)
+        f2 = bilinear_f(f_in, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nξ, Nη, periodic_ξ, periodic_η)
+        f3 = bilinear_f(f_in, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nξ, Nη, periodic_ξ, periodic_η)
+        f4 = bilinear_f(f_in, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nξ, Nη, periodic_ξ, periodic_η)
+        f5 = bilinear_f(f_in, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nξ, Nη, periodic_ξ, periodic_η)
+        f6 = bilinear_f(f_in, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nξ, Nη, periodic_ξ, periodic_η)
+        f7 = bilinear_f(f_in, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nξ, Nη, periodic_ξ, periodic_η)
+        f8 = bilinear_f(f_in, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nξ, Nη, periodic_ξ, periodic_η)
+        f9 = bilinear_f(f_in, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nξ, Nη, periodic_ξ, periodic_η)
+
+        if is_solid[i, j]
+            f_out[i, j, 1] = f1
+            f_out[i, j, 2] = f4; f_out[i, j, 4] = f2
+            f_out[i, j, 3] = f5; f_out[i, j, 5] = f3
+            f_out[i, j, 6] = f8; f_out[i, j, 8] = f6
+            f_out[i, j, 7] = f9; f_out[i, j, 9] = f7
+            ρ_out[i, j] = one(T)
+            ux_out[i, j] = zero(T)
+            uy_out[i, j] = zero(T)
+        else
+            # Transform to moment space (M · f)
+            ρ   = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+            e   = -T(4)*f1 - f2 - f3 - f4 - f5 + T(2)*(f6 + f7 + f8 + f9)
+            eps =  T(4)*f1 - T(2)*(f2 + f3 + f4 + f5) + f6 + f7 + f8 + f9
+            jx  = f2 - f4 + f6 - f7 - f8 + f9
+            qx  = -T(2)*f2 + T(2)*f4 + f6 - f7 - f8 + f9
+            jy  = f3 - f5 + f6 + f7 - f8 - f9
+            qy  = -T(2)*f3 + T(2)*f5 + f6 + f7 - f8 - f9
+            pxx = f2 - f3 + f4 - f5
+            pxy = f6 - f7 + f8 - f9
+
+            inv_ρ = one(T) / ρ
+            ux = jx * inv_ρ
+            uy = jy * inv_ρ
+            usq = ux * ux + uy * uy
+
+            # Equilibrium moments
+            e_eq   = -T(2)*ρ + T(3)*ρ*usq
+            eps_eq = ρ - T(3)*ρ*usq
+            qx_eq  = -ρ*ux
+            qy_eq  = -ρ*uy
+            pxx_eq = ρ*(ux*ux - uy*uy)
+            pxy_eq = ρ*ux*uy
+
+            # Relax moments (ρ, jx, jy conserved)
+            es  = e   - s_e   * (e   - e_eq)
+            ep  = eps - s_eps * (eps - eps_eq)
+            qxs = qx  - s_q   * (qx  - qx_eq)
+            qys = qy  - s_q   * (qy  - qy_eq)
+            ps  = pxx - s_nu  * (pxx - pxx_eq)
+            pxys = pxy - s_nu * (pxy - pxy_eq)
+
+            # Transform back (M⁻¹ · m*)
+            r = ρ
+            f_out[i,j,1] = T(1/9)*r  - T(1/9)*es  + T(1/9)*ep
+            f_out[i,j,2] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep + T(1/6)*jx  - T(1/6)*qxs + T(1/4)*ps
+            f_out[i,j,3] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep + T(1/6)*jy  - T(1/6)*qys - T(1/4)*ps
+            f_out[i,j,4] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep - T(1/6)*jx  + T(1/6)*qxs + T(1/4)*ps
+            f_out[i,j,5] = T(1/9)*r  - T(1/36)*es - T(1/18)*ep - T(1/6)*jy  + T(1/6)*qys - T(1/4)*ps
+            f_out[i,j,6] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep + T(1/6)*jx  + T(1/12)*qxs + T(1/6)*jy  + T(1/12)*qys + T(1/4)*pxys
+            f_out[i,j,7] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep - T(1/6)*jx  - T(1/12)*qxs + T(1/6)*jy  + T(1/12)*qys - T(1/4)*pxys
+            f_out[i,j,8] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep - T(1/6)*jx  - T(1/12)*qxs - T(1/6)*jy  - T(1/12)*qys + T(1/4)*pxys
+            f_out[i,j,9] = T(1/9)*r  + T(1/18)*es + T(1/36)*ep + T(1/6)*jx  + T(1/12)*qxs - T(1/6)*jy  - T(1/12)*qys - T(1/4)*pxys
+
+            ρ_out[i, j] = ρ
+            ux_out[i, j] = ux
+            uy_out[i, j] = uy
+        end
+    end
+end
+
+"""
+    slbm_mrt_step!(f_out, f_in, ρ, ux, uy, is_solid, geom, ν;
+                   s_e=1.4, s_eps=1.4, s_q=1.2)
+
+Fused SLBM + MRT collision in one GPU dispatch. `ν` is the kinematic
+viscosity (lattice units); the stress rate is computed as
+`s_ν = 1/(3ν + 0.5)`.
+"""
+function slbm_mrt_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                        geom::SLBMGeometry, ν;
+                        s_e=1.4, s_eps=1.4, s_q=1.2)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_nu = ET(1.0 / (3.0 * ν + 0.5))
+    kernel! = slbm_mrt_step_kernel!(backend)
+    kernel!(f_out, f_in, ρ, ux, uy, is_solid,
+            geom.i_dep, geom.j_dep,
+            geom.Nξ, geom.Nη,
+            ET(s_e), ET(s_eps), ET(s_q), s_nu,
+            geom.periodic_ξ, geom.periodic_η;
+            ndrange=(geom.Nξ, geom.Nη))
+end

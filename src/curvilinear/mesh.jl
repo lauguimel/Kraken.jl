@@ -49,6 +49,12 @@ struct CurvilinearMesh{T<:AbstractFloat, AT<:AbstractMatrix{T}}
     dYdξ::AT
     dYdη::AT
     J::AT
+    # Physical distance that corresponds to one lattice unit. Used by
+    # the semi-Lagrangian streaming step: departure point in physical
+    # space is P − c_q · dx_ref. For a uniform Cartesian mesh with
+    # isotropic spacing this equals the grid spacing, so SLBM reduces
+    # to standard LBM (integer departures, zero interpolation error).
+    dx_ref::T
 end
 
 """
@@ -90,6 +96,7 @@ function build_mesh(mapping;
                     Nξ::Int, Nη::Int,
                     periodic_ξ::Bool=false, periodic_η::Bool=false,
                     type::Symbol=:custom,
+                    dx_ref::Union{Real, Nothing}=nothing,
                     FT::Type{<:AbstractFloat}=Float64)
     X = zeros(FT, Nξ, Nη)
     Y = zeros(FT, Nξ, Nη)
@@ -116,10 +123,31 @@ function build_mesh(mapping;
         J[i, j] = detJ
     end
 
+    dxr = dx_ref === nothing ? _default_dx_ref(J, Nξ, Nη, periodic_ξ, periodic_η) :
+                                FT(dx_ref)
+
     mesh = CurvilinearMesh{FT, Matrix{FT}}(type, Nξ, Nη, periodic_ξ, periodic_η,
-                                            X, Y, dXdξ, dXdη, dYdξ, dYdη, J)
+                                            X, Y, dXdξ, dXdη, dYdξ, dYdη, J, dxr)
     validate_mesh(mesh)
     return mesh
+end
+
+# Default physical reference spacing. Definition: average physical cell
+# area is mean(|J|) · Δξ · Δη, so the geometric-mean cell edge is
+# sqrt(mean(|J|) / (Nξ_eff · Nη_eff)). For a uniform Cartesian mesh
+# this reduces to sqrt(Δx · Δy), which equals the isotropic grid
+# spacing — so SLBM on a uniform mesh reproduces standard LBM exactly.
+function _default_dx_ref(J::AbstractMatrix{T}, Nξ, Nη,
+                         periodic_ξ, periodic_η) where {T}
+    Nξ_eff = periodic_ξ ? Nξ : Nξ - 1
+    Nη_eff = periodic_η ? Nη : Nη - 1
+    # mean(|J|) avoids sign issues for left-handed mappings (polar).
+    total_area = zero(T)
+    @inbounds for k in eachindex(J)
+        total_area += abs(J[k])
+    end
+    mean_abs_J = total_area / T(length(J))
+    return sqrt(mean_abs_J / (T(Nξ_eff) * T(Nη_eff)))
 end
 
 """
