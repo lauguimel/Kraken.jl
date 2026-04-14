@@ -23,6 +23,7 @@ using Kraken
     include("test_stl.jl")
     include("test_krk_examples.jl")
     include("test_refinement.jl")
+    include("test_curvilinear_mesh.jl")
     include("test_advection_prescribed.jl")
     include("test_krk_multiphase.jl")
     include("test_vtk_3d.jl")

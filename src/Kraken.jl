@@ -61,6 +61,10 @@ include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
 include("drivers/viscoelastic.jl")
 
+# --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
+include("curvilinear/mesh.jl")
+include("curvilinear/generators.jl")
+
 # --- Grid refinement ---
 include("refinement/refinement.jl")
 include("kernels/refinement_exchange_2d.jl")
@@ -191,6 +195,11 @@ export load_kraken, parse_kraken, build_rheology_model,
        parse_kraken_sweep, load_kraken_sweep, sanity_check, sanity_check_sweep
 export LBMParams, lbm_params, lbm_params_table
 export run_simulation
+
+# Curvilinear mesh (v0.2 SLBM path)
+export CurvilinearMesh, build_mesh, validate_mesh, compute_metric
+export polar_mesh, stretched_box_mesh, cartesian_mesh
+export cell_area, domain_extent
 
 # Grid refinement
 export RefinementPatch, RefinedDomain
