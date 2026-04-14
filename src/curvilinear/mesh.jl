@@ -123,8 +123,9 @@ function build_mesh(mapping;
         J[i, j] = detJ
     end
 
-    dxr = dx_ref === nothing ? _default_dx_ref(J, Nξ, Nη, periodic_ξ, periodic_η) :
-                                FT(dx_ref)
+    dxr = dx_ref === nothing ?
+          _default_dx_ref(dXdξ, dXdη, dYdξ, dYdη, Nξ, Nη, periodic_ξ, periodic_η, FT) :
+          FT(dx_ref)
 
     mesh = CurvilinearMesh{FT, Matrix{FT}}(type, Nξ, Nη, periodic_ξ, periodic_η,
                                             X, Y, dXdξ, dXdη, dYdξ, dYdη, J, dxr)
@@ -132,22 +133,26 @@ function build_mesh(mapping;
     return mesh
 end
 
-# Default physical reference spacing. Definition: average physical cell
-# area is mean(|J|) · Δξ · Δη, so the geometric-mean cell edge is
-# sqrt(mean(|J|) / (Nξ_eff · Nη_eff)). For a uniform Cartesian mesh
-# this reduces to sqrt(Δx · Δy), which equals the isotropic grid
-# spacing — so SLBM on a uniform mesh reproduces standard LBM exactly.
-function _default_dx_ref(J::AbstractMatrix{T}, Nξ, Nη,
-                         periodic_ξ, periodic_η) where {T}
-    Nξ_eff = periodic_ξ ? Nξ : Nξ - 1
-    Nη_eff = periodic_η ? Nη : Nη - 1
-    # mean(|J|) avoids sign issues for left-handed mappings (polar).
-    total_area = zero(T)
-    @inbounds for k in eachindex(J)
-        total_area += abs(J[k])
+# Default physical reference spacing. Definition: the smallest physical
+# edge length across the mesh. This guarantees CFL ≤ 1 locally for SLBM
+# streaming — the physical departure c_q · dx_ref cannot overshoot the
+# finest local cell, so the bilinear stencil stays adjacent. On a
+# uniform Cartesian mesh with isotropic spacing all edges are equal and
+# dx_ref reduces to the grid spacing Δx (1 when domain = N-1 × N-1 for
+# N×N nodes), so SLBM reproduces standard pull-stream exactly.
+function _default_dx_ref(mesh_dXdξ, mesh_dXdη, mesh_dYdξ, mesh_dYdη,
+                         Nξ, Nη, periodic_ξ, periodic_η, ::Type{T}) where {T}
+    denom_ξ = T(periodic_ξ ? Nξ : Nξ - 1)
+    denom_η = T(periodic_η ? Nη : Nη - 1)
+    Δξ = one(T) / denom_ξ
+    Δη = one(T) / denom_η
+    min_edge = T(Inf)
+    @inbounds for j in 1:Nη, i in 1:Nξ
+        lξ = sqrt(mesh_dXdξ[i, j]^2 + mesh_dYdξ[i, j]^2) * Δξ
+        lη = sqrt(mesh_dXdη[i, j]^2 + mesh_dYdη[i, j]^2) * Δη
+        min_edge = min(min_edge, lξ, lη)
     end
-    mean_abs_J = total_area / T(length(J))
-    return sqrt(mean_abs_J / (T(Nξ_eff) * T(Nη_eff)))
+    return min_edge
 end
 
 """
