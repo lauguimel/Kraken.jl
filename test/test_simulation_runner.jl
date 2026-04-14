@@ -1,4 +1,5 @@
 using Test
+using Logging
 using Kraken
 
 const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
@@ -302,8 +303,10 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
             Run 50 steps
             Output png every 10 [|u|]
         """)
-        # Should warn (CairoMakie not loaded) but not error
-        result = @test_logs (:warn, r"CairoMakie") run_simulation(setup)
+        # Should warn (CairoMakie not loaded) but not error.
+        # min_level=Warn filters the LBM-parameters Info log emitted by
+        # sanity_check so that only the CairoMakie warning is matched.
+        result = @test_logs (:warn, r"CairoMakie") min_level=Logging.Warn run_simulation(setup)
         @test !any(isnan, result.ρ)
     end
 end
