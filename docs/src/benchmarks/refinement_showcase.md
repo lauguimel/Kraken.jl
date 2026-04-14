@@ -103,21 +103,39 @@ still has many small launches, so the speedup is smaller but real.
    of `L²` for the bulk. The patch contribution dominates the 10 ×
    slowdown observed.
 
+## Design constraint (v0.1.0)
+
+Refinement is **generic**: it must work for any `.krk` setup, not be
+hand-coded per benchmark. The user's BCs reach the patch sub-step as
+`bc_*_patch_fns` closures, which cannot be marshalled into a GPU kernel.
+That is why the patch sub-step currently issues many small kernels
+(~8–10 per sub-step) instead of a single fused kernel: the closure
+pattern preserves genericity at the cost of launch overhead.
+
+A case-specific fused kernel (e.g. `fused_natconv_patch_step!`) was
+prototyped and measured on Metal M3 Max: it recovered ~1.2× over the
+unfused path for Ra = 10³ natconv, but locked the refinement code to a
+specific BC template. The prototype was rejected for v0.1.0 and the
+generic closure-based path kept.
+
 ## Where refinement should win (planned for v0.2.0)
 
-1. **Cylinder Cd with FH-rescaled MEA.** Momentum-exchange drag on a
+1. **Compile-time BC tags** instead of closures, so a single templated
+   kernel can fuse stream + BC + macro + collide while remaining generic.
+2. **FH-rescaled thermal populations.** The FH factor that works for
+   flow (α = ratio) *overshoots* for the passive scalar on De Vahl Davis
+   (measured Nu = 0.6 vs ref 1.118). The correct scaling for thermal
+   passive scalar remains open.
+3. **Cylinder Cd with FH-rescaled MEA.** Momentum-exchange drag on a
    refined patch around a cylinder requires rescaling the non-equilibrium
    populations before accumulating the boundary-link sum (Lagrava et
    al. 2012). Scaffolding is in
    [`benchmarks/convergence_cylinder_refinement.jl`](https://github.com/lauguimel/Kraken.jl/blob/main/benchmarks/convergence_cylinder_refinement.jl),
    with diagnostic hooks `patch_diag_fns` and `coarse_diag_fn` already
    added to `advance_refined_step!`.
-2. **FH-rescaled thermal populations.** Apply the same rescaling to
-   thermal f_neq as is used for flow f_neq; this should remove the
-   systematic Nu bias.
-3. **Localised-feature benchmarks** where the bulk is trivial:
+4. **Localised-feature benchmarks** where the bulk is trivial:
    impinging jet on a heated plate, shear layer, contraction.
-4. **Adaptive refinement** (wavelet error estimator) rather than
+5. **Adaptive refinement** (wavelet error estimator) rather than
    user-specified patches — the Basilisk-style approach that gives the
    large speed-ups observed in the AMR literature.
 
