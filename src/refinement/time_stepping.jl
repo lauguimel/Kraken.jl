@@ -71,7 +71,8 @@ function advance_patch!(patch::RefinementPatch{T};
                         stream_fn,
                         collide_fn,
                         macro_fn,
-                        bc_fn=nothing) where T
+                        bc_fn=nothing,
+                        diagnostic_fn=nothing) where T
     Nx, Ny = patch.Nx, patch.Ny
 
     # Stream
@@ -80,6 +81,13 @@ function advance_patch!(patch::RefinementPatch{T};
     # Boundary conditions (if patch edge coincides with domain boundary)
     if bc_fn !== nothing
         bc_fn(patch.f_out, Nx, Ny)
+    end
+
+    # Diagnostic between post-stream+BC and pre-collide.
+    # MEA drag is the canonical consumer: it needs f_pre (pre-stream) and
+    # f_post (post-stream+BC) to evaluate momentum exchange on fluid-solid links.
+    if diagnostic_fn !== nothing
+        diagnostic_fn(patch.f_in, patch.f_out, patch.is_solid, Nx, Ny)
     end
 
     # Collide
@@ -183,7 +191,9 @@ function advance_refined_step!(domain::RefinedDomain{T},
                                bc_base_fn=nothing,
                                bc_patch_fns=nothing,
                                patch_collide_fns=nothing,
-                               patch_macro_fn=nothing) where T
+                               patch_macro_fn=nothing,
+                               patch_diag_fns=nothing,
+                               coarse_diag_fn=nothing) where T
     Nx = domain.base_Nx
     Ny = domain.base_Ny
 
@@ -196,6 +206,13 @@ function advance_refined_step!(domain::RefinedDomain{T},
     stream_fn(f_out, f_in, Nx, Ny)
     if bc_base_fn !== nothing
         bc_base_fn(f_out)
+    end
+    # Coarse diagnostic between post-stream+BC and pre-collide.
+    # Restriction (step 4 of the previous call) has already pushed fine
+    # patch data back into f_in over the cylinder region, so a coarse
+    # MEA here reflects the refined physics without FH force rescaling.
+    if coarse_diag_fn !== nothing
+        coarse_diag_fn(f_in, f_out, is_solid, Nx, Ny)
     end
     collide_fn(f_out, is_solid)
     macro_fn(rho, ux, uy, f_out)
@@ -218,11 +235,13 @@ function advance_refined_step!(domain::RefinedDomain{T},
             bc_fn = bc_patch_fns !== nothing ? get(bc_patch_fns, pidx, nothing) : nothing
             pcf = patch_collide_fns !== nothing ? get(patch_collide_fns, pidx, nothing) : nothing
             pmf = patch_macro_fn !== nothing ? patch_macro_fn : compute_macroscopic_2d!
+            pdf = patch_diag_fns !== nothing ? get(patch_diag_fns, pidx, nothing) : nothing
             advance_patch!(patch;
                           stream_fn=stream_fn,
                           collide_fn=pcf !== nothing ? pcf : (f, is_s) -> collide_2d!(f, is_s, patch.omega),
                           macro_fn=pmf,
-                          bc_fn=bc_fn)
+                          bc_fn=bc_fn,
+                          diagnostic_fn=pdf)
 
             # Copy f_out -> f_in for next sub-step
             copyto!(patch.f_in, patch.f_out)

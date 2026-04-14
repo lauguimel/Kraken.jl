@@ -83,6 +83,7 @@ minimal — use with caution.
 | Block-average restriction (ratio²/ratio³) | ✓ | ✓ | ✓ | ✓ | — | [refinement](api/refinement.md) |
 | Automatic τ rescaling on fine grid | ✓ | ✓ | ✓ | ✓ | — | sanity check reports τ_fine |
 | Full-domain wall patches | ✓ | ✗ (natconv) | ✓ (conduction) | ✓ | ✓ | 3D natconv unstable, see note |
+| Cost-vs-accuracy win on integrated quantities (Nu, Cd) | ✗ | ✗ | ✗ | — | — | See [refinement showcase](benchmarks/refinement_showcase.md) — v0.2.0 |
 | Unified .krk dispatch (no driver) | ✓ | ✓ | ✓ | ✓ | ✓ | [Refine block](krk/directives.md) |
 | Multi-level (patch inside patch) | ✓ | ✓ | ~ | ~ | ✓ | parser supports, partially tested |
 | Geometry on fine patches | ✓ | ✓ | — | ✓ | ✓ | `_apply_patch_geometry!` |
