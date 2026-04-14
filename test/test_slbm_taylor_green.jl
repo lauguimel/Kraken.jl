@@ -171,4 +171,48 @@ end
         @test maximum(sqrt.(ux .^ 2 .+ uy .^ 2)) < 1.5 * u0
     end
 
+    @testset "Biquadratic beats bilinear on stretched periodic" begin
+        # Smooth flow without walls — the setting where biquadratic
+        # should deliver its O(Δx³) advantage over bilinear O(Δx²).
+        function l2_error(interp)
+            N = 64; ν = 0.02; u0 = 0.01; steps = 200
+            mesh = Kraken.build_mesh(
+                (ξ, η) -> (ξ * N,
+                           N * (tanh(0.3 * (2η - 1)) / tanh(0.3) + 1) / 2);
+                Nξ=N, Nη=N, periodic_ξ=true, periodic_η=true)
+            geom = build_slbm_geometry(mesh)
+            f_in = zeros(Float64, N, N, 9)
+            ρ = ones(N, N); ux = zeros(N, N); uy = zeros(N, N)
+            is_solid = zeros(Bool, N, N)
+            k = 2π / N
+            for j in 1:N, i in 1:N
+                x = mesh.X[i, j]; y = mesh.Y[i, j]
+                uxi = -u0 * cos(k * x) * sin(k * y)
+                uyi =  u0 * sin(k * x) * cos(k * y)
+                for q in 1:9
+                    f_in[i, j, q] = Kraken.equilibrium(D2Q9(), 1.0, uxi, uyi, q)
+                end
+            end
+            f_out = similar(f_in)
+            ω = 1.0 / (3ν + 0.5)
+            for _ in 1:steps
+                slbm_bgk_step!(f_out, f_in, ρ, ux, uy, is_solid, geom, ω;
+                               interp=interp)
+                f_in, f_out = f_out, f_in
+            end
+            decay = exp(-2 * ν * k^2 * steps)
+            ux_ana = [-u0 * cos(k * mesh.X[i, j]) * sin(k * mesh.Y[i, j]) * decay
+                       for i in 1:N, j in 1:N]
+            uy_ana = [ u0 * sin(k * mesh.X[i, j]) * cos(k * mesh.Y[i, j]) * decay
+                       for i in 1:N, j in 1:N]
+            nrm = sqrt(sum(ux_ana .^ 2 .+ uy_ana .^ 2))
+            return sqrt(sum((ux .- ux_ana) .^ 2 .+ (uy .- uy_ana) .^ 2)) / nrm
+        end
+        l2_bi = l2_error(:bilinear)
+        l2_bq = l2_error(:biquadratic)
+        @info "Taylor-Green stretched: bilinear L2=$(round(l2_bi, digits=5)) vs biquadratic L2=$(round(l2_bq, digits=5))"
+        @test l2_bq < l2_bi
+        @test l2_bq < 0.5 * l2_bi    # biquadratic ≥ 2× better than bilinear
+    end
+
 end

@@ -148,6 +148,52 @@ end
            α           * β           * f11
 end
 
+# Biquadratic (3×3 Lagrange) interpolation. Centered stencil: pick the
+# NEAREST node (i_c, j_c) to (ifloat, jfloat) and use the 3×3 block
+# around it. Local 1D weights for shift α ∈ [-0.5, 0.5]:
+#
+#     w_{-1}(α) = α(α − 1) / 2
+#     w_{0}(α)  = 1 − α²
+#     w_{+1}(α) = α(α + 1) / 2
+#
+# At integer departure (α = β = 0) this returns f[i_c, j_c] exactly —
+# so the kernel still reduces to pull-stream on a Cartesian mesh.
+# O(Δx³) on smooth fields (Wilde et al. 2020, Comput. Fluids 204).
+@inline function biquadratic_f(f_in, is_solid, ifloat::T, jfloat::T, q::Int,
+                                Nξ::Int, Nη::Int,
+                                periodic_ξ::Bool, periodic_η::Bool) where {T}
+    ic = unsafe_trunc(Int, floor(ifloat + T(0.5)))
+    jc = unsafe_trunc(Int, floor(jfloat + T(0.5)))
+    α = ifloat - T(ic)
+    β = jfloat - T(jc)
+    im = _wrap_or_clamp(ic - 1, Nξ, periodic_ξ)
+    i0 = _wrap_or_clamp(ic,     Nξ, periodic_ξ)
+    ip = _wrap_or_clamp(ic + 1, Nξ, periodic_ξ)
+    jm = _wrap_or_clamp(jc - 1, Nη, periodic_η)
+    j0 = _wrap_or_clamp(jc,     Nη, periodic_η)
+    jp = _wrap_or_clamp(jc + 1, Nη, periodic_η)
+    # If any of the 9 stencil cells is solid (bounced populations) the
+    # biquadratic Lagrange weights would amplify the near-wall
+    # discontinuity and destabilise the step. Fall back to bilinear,
+    # which has only non-negative weights.
+    near_wall = is_solid[im, jm] | is_solid[im, j0] | is_solid[im, jp] |
+                is_solid[i0, jm] | is_solid[i0, j0] | is_solid[i0, jp] |
+                is_solid[ip, jm] | is_solid[ip, j0] | is_solid[ip, jp]
+    if near_wall
+        return bilinear_f(f_in, ifloat, jfloat, q, Nξ, Nη, periodic_ξ, periodic_η)
+    end
+    half = T(0.5)
+    wα_m = α * (α - one(T)) * half
+    wα_0 = one(T) - α * α
+    wα_p = α * (α + one(T)) * half
+    wβ_m = β * (β - one(T)) * half
+    wβ_0 = one(T) - β * β
+    wβ_p = β * (β + one(T)) * half
+    return wα_m * (wβ_m * f_in[im, jm, q] + wβ_0 * f_in[im, j0, q] + wβ_p * f_in[im, jp, q]) +
+           wα_0 * (wβ_m * f_in[i0, jm, q] + wβ_0 * f_in[i0, j0, q] + wβ_p * f_in[i0, jp, q]) +
+           wα_p * (wβ_m * f_in[ip, jm, q] + wβ_0 * f_in[ip, j0, q] + wβ_p * f_in[ip, jp, q])
+end
+
 # ---------------------------------------------------------------------------
 # Fused SLBM + BGK kernel. Single GPU dispatch per timestep.
 #
@@ -208,21 +254,72 @@ end
     end
 end
 
+@kernel function slbm_bgk_biquad_step_kernel!(f_out, @Const(f_in),
+                                                ρ_out, ux_out, uy_out,
+                                                @Const(is_solid),
+                                                @Const(i_dep), @Const(j_dep),
+                                                Nξ, Nη, ω,
+                                                periodic_ξ, periodic_η)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f_out)
+        fp1 = biquadratic_f(f_in, is_solid, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nξ, Nη, periodic_ξ, periodic_η)
+        fp2 = biquadratic_f(f_in, is_solid, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nξ, Nη, periodic_ξ, periodic_η)
+        fp3 = biquadratic_f(f_in, is_solid, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nξ, Nη, periodic_ξ, periodic_η)
+        fp4 = biquadratic_f(f_in, is_solid, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nξ, Nη, periodic_ξ, periodic_η)
+        fp5 = biquadratic_f(f_in, is_solid, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nξ, Nη, periodic_ξ, periodic_η)
+        fp6 = biquadratic_f(f_in, is_solid, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nξ, Nη, periodic_ξ, periodic_η)
+        fp7 = biquadratic_f(f_in, is_solid, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nξ, Nη, periodic_ξ, periodic_η)
+        fp8 = biquadratic_f(f_in, is_solid, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nξ, Nη, periodic_ξ, periodic_η)
+        fp9 = biquadratic_f(f_in, is_solid, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nξ, Nη, periodic_ξ, periodic_η)
+        if is_solid[i, j]
+            f_out[i, j, 1] = fp1
+            f_out[i, j, 2] = fp4; f_out[i, j, 4] = fp2
+            f_out[i, j, 3] = fp5; f_out[i, j, 5] = fp3
+            f_out[i, j, 6] = fp8; f_out[i, j, 8] = fp6
+            f_out[i, j, 7] = fp9; f_out[i, j, 9] = fp7
+            ρ_out[i, j] = one(T); ux_out[i, j] = zero(T); uy_out[i, j] = zero(T)
+        else
+            ρ, ux, uy = moments_2d(fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9)
+            usq = ux * ux + uy * uy
+            f_out[i, j, 1] = fp1 - ω * (fp1 - feq_2d(Val(1), ρ, ux, uy, usq))
+            f_out[i, j, 2] = fp2 - ω * (fp2 - feq_2d(Val(2), ρ, ux, uy, usq))
+            f_out[i, j, 3] = fp3 - ω * (fp3 - feq_2d(Val(3), ρ, ux, uy, usq))
+            f_out[i, j, 4] = fp4 - ω * (fp4 - feq_2d(Val(4), ρ, ux, uy, usq))
+            f_out[i, j, 5] = fp5 - ω * (fp5 - feq_2d(Val(5), ρ, ux, uy, usq))
+            f_out[i, j, 6] = fp6 - ω * (fp6 - feq_2d(Val(6), ρ, ux, uy, usq))
+            f_out[i, j, 7] = fp7 - ω * (fp7 - feq_2d(Val(7), ρ, ux, uy, usq))
+            f_out[i, j, 8] = fp8 - ω * (fp8 - feq_2d(Val(8), ρ, ux, uy, usq))
+            f_out[i, j, 9] = fp9 - ω * (fp9 - feq_2d(Val(9), ρ, ux, uy, usq))
+            ρ_out[i, j] = ρ; ux_out[i, j] = ux; uy_out[i, j] = uy
+        end
+    end
+end
+
 """
-    slbm_bgk_step!(f_out, f_in, ρ, ux, uy, is_solid, geom, ω)
+    slbm_bgk_step!(f_out, f_in, ρ, ux, uy, is_solid, geom, ω;
+                   interp=:bilinear)
 
 Single fused kernel for semi-Lagrangian BGK on a curvilinear mesh:
 interpolated streaming + bounce-back + collision + macroscopic moments.
+
+`interp ∈ (:bilinear, :biquadratic)`. Bilinear is O(Δx²), biquadratic
+is O(Δx³) on smooth fields — recommended on distorted meshes (Wilde
+et al. 2020). Both reduce to pull-stream exactly on an isotropic
+Cartesian mesh.
 
 Arguments match `fused_bgk_step!` plus an `SLBMGeometry` carrying the
 precomputed departure indices. `geom.i_dep`, `geom.j_dep` must live on
 the same backend as `f_in` (use `transfer_slbm_geometry` if needed).
 """
 function slbm_bgk_step!(f_out, f_in, ρ, ux, uy, is_solid,
-                        geom::SLBMGeometry, ω)
+                        geom::SLBMGeometry, ω;
+                        interp::Symbol=:bilinear)
     backend = KernelAbstractions.get_backend(f_in)
     ET = eltype(f_in)
-    kernel! = slbm_bgk_step_kernel!(backend)
+    kernel! = interp === :biquadratic ?
+              slbm_bgk_biquad_step_kernel!(backend) :
+              slbm_bgk_step_kernel!(backend)
     kernel!(f_out, f_in, ρ, ux, uy, is_solid,
             geom.i_dep, geom.j_dep,
             geom.Nξ, geom.Nη, ET(ω),
@@ -398,20 +495,71 @@ end
     end
 end
 
+@kernel function slbm_bgk_moving_biquad_step_kernel!(f_out, @Const(f_in),
+                                                      ρ_out, ux_out, uy_out,
+                                                      @Const(is_solid),
+                                                      @Const(uw_x), @Const(uw_y),
+                                                      @Const(i_dep), @Const(j_dep),
+                                                      Nξ, Nη, ω,
+                                                      periodic_ξ, periodic_η)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f_out)
+        fp1 = biquadratic_f(f_in, is_solid, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nξ, Nη, periodic_ξ, periodic_η)
+        fp2 = biquadratic_f(f_in, is_solid, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nξ, Nη, periodic_ξ, periodic_η)
+        fp3 = biquadratic_f(f_in, is_solid, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nξ, Nη, periodic_ξ, periodic_η)
+        fp4 = biquadratic_f(f_in, is_solid, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nξ, Nη, periodic_ξ, periodic_η)
+        fp5 = biquadratic_f(f_in, is_solid, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nξ, Nη, periodic_ξ, periodic_η)
+        fp6 = biquadratic_f(f_in, is_solid, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nξ, Nη, periodic_ξ, periodic_η)
+        fp7 = biquadratic_f(f_in, is_solid, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nξ, Nη, periodic_ξ, periodic_η)
+        fp8 = biquadratic_f(f_in, is_solid, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nξ, Nη, periodic_ξ, periodic_η)
+        fp9 = biquadratic_f(f_in, is_solid, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nξ, Nη, periodic_ξ, periodic_η)
+        if is_solid[i, j]
+            ρ_w = one(T); uxw = uw_x[i, j]; uyw = uw_y[i, j]
+            δx  = T(2/3) * ρ_w * uxw
+            δy  = T(2/3) * ρ_w * uyw
+            δne = T(1/6) * ρ_w * ( uxw + uyw)
+            δnw = T(1/6) * ρ_w * (-uxw + uyw)
+            f_out[i, j, 1] = fp1
+            f_out[i, j, 2] = fp4 + δx; f_out[i, j, 4] = fp2 - δx
+            f_out[i, j, 3] = fp5 + δy; f_out[i, j, 5] = fp3 - δy
+            f_out[i, j, 6] = fp8 + δne; f_out[i, j, 8] = fp6 - δne
+            f_out[i, j, 7] = fp9 + δnw; f_out[i, j, 9] = fp7 - δnw
+            ρ_out[i, j] = ρ_w; ux_out[i, j] = uxw; uy_out[i, j] = uyw
+        else
+            ρ, ux, uy = moments_2d(fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9)
+            usq = ux * ux + uy * uy
+            f_out[i, j, 1] = fp1 - ω * (fp1 - feq_2d(Val(1), ρ, ux, uy, usq))
+            f_out[i, j, 2] = fp2 - ω * (fp2 - feq_2d(Val(2), ρ, ux, uy, usq))
+            f_out[i, j, 3] = fp3 - ω * (fp3 - feq_2d(Val(3), ρ, ux, uy, usq))
+            f_out[i, j, 4] = fp4 - ω * (fp4 - feq_2d(Val(4), ρ, ux, uy, usq))
+            f_out[i, j, 5] = fp5 - ω * (fp5 - feq_2d(Val(5), ρ, ux, uy, usq))
+            f_out[i, j, 6] = fp6 - ω * (fp6 - feq_2d(Val(6), ρ, ux, uy, usq))
+            f_out[i, j, 7] = fp7 - ω * (fp7 - feq_2d(Val(7), ρ, ux, uy, usq))
+            f_out[i, j, 8] = fp8 - ω * (fp8 - feq_2d(Val(8), ρ, ux, uy, usq))
+            f_out[i, j, 9] = fp9 - ω * (fp9 - feq_2d(Val(9), ρ, ux, uy, usq))
+            ρ_out[i, j] = ρ; ux_out[i, j] = ux; uy_out[i, j] = uy
+        end
+    end
+end
+
 """
     slbm_bgk_moving_step!(f_out, f_in, ρ, ux, uy, is_solid,
-                          uw_x, uw_y, geom, ω)
+                          uw_x, uw_y, geom, ω; interp=:bilinear)
 
 Fused SLBM + BGK step with Ladd (1994) moving-wall bounce-back.
 `uw_x`, `uw_y` are per-cell prescribed wall velocities (nonzero only on
-solid cells; ignored on fluid cells). Reduces to `slbm_bgk_step!` when
-both are zero everywhere.
+solid cells; ignored on fluid cells). `interp ∈ (:bilinear, :biquadratic)`.
+Reduces to `slbm_bgk_step!` when both wall velocities are zero.
 """
 function slbm_bgk_moving_step!(f_out, f_in, ρ, ux, uy, is_solid,
-                                uw_x, uw_y, geom::SLBMGeometry, ω)
+                                uw_x, uw_y, geom::SLBMGeometry, ω;
+                                interp::Symbol=:bilinear)
     backend = KernelAbstractions.get_backend(f_in)
     ET = eltype(f_in)
-    kernel! = slbm_bgk_moving_step_kernel!(backend)
+    kernel! = interp === :biquadratic ?
+              slbm_bgk_moving_biquad_step_kernel!(backend) :
+              slbm_bgk_moving_step_kernel!(backend)
     kernel!(f_out, f_in, ρ, ux, uy, is_solid,
             uw_x, uw_y,
             geom.i_dep, geom.j_dep,

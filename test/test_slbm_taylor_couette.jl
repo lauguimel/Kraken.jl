@@ -19,7 +19,8 @@ using Kraken
 function run_taylor_couette(; R_i::Float64=8.0, R_o::Float64=16.0,
                               n_theta::Int=64, n_r::Int=17,
                               ν::Float64=0.1, u_wall::Float64=0.01,
-                              steps::Int=5000)
+                              steps::Int=5000,
+                              interp::Symbol=:bilinear)
     mesh = polar_mesh(; cx=0.0, cy=0.0,
                         r_inner=R_i, r_outer=R_o,
                         n_theta=n_theta, n_r=n_r,
@@ -55,7 +56,7 @@ function run_taylor_couette(; R_i::Float64=8.0, R_o::Float64=16.0,
     ω = 1.0 / (3ν + 0.5)
     for _ in 1:steps
         slbm_bgk_moving_step!(f_out, f_in, ρ, ux, uy, is_solid,
-                               uw_x, uw_y, geom, ω)
+                               uw_x, uw_y, geom, ω; interp=interp)
         f_in, f_out = f_out, f_in
     end
 
@@ -119,6 +120,28 @@ end
             ut_num = (-Y * out.ux[1, j] + X * out.uy[1, j]) / r
             @test ut_num > 0
         end
+    end
+
+    @testset "Biquadratic stable with near-wall fallback" begin
+        # Biquadratic Lagrange weights are signed and can amplify
+        # near-wall discontinuities (bounce-back populations). The
+        # biquadratic_f helper falls back to bilinear when any of the
+        # 9 stencil cells is solid, which keeps the step stable.
+        # On Taylor-Couette biquadratic does NOT beat bilinear because
+        # the profile is smooth through the whole gap — the gain from
+        # higher-order interpolation applies in the bulk, where the
+        # field is nearly uniform in θ, so the benefit is small while
+        # the two near-wall rows still use bilinear. For problems with
+        # sharp features far from walls (shear layers, vortex cores)
+        # biquadratic helps measurably — see Taylor-Green stretched.
+        R_i, R_o = 8.0, 16.0
+        out = run_taylor_couette(; R_i=R_i, R_o=R_o,
+                                   n_theta=128, n_r=33,
+                                   ν=0.1, u_wall=0.01,
+                                   steps=10000, interp=:biquadratic)
+        @test all(isfinite.(out.ux))
+        @test all(isfinite.(out.uy))
+        @test maximum(sqrt.(out.ux .^ 2 .+ out.uy .^ 2)) < 0.02  # bounded
     end
 
     @testset "Zero rotation → zero flow (sanity)" begin
