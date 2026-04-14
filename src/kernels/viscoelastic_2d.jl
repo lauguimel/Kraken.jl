@@ -43,7 +43,6 @@ function compute_polymeric_force_2d!(Fx_p, Fy_p, tau_xx, tau_xy, tau_yy)
     Nx, Ny = size(Fx_p)
     kernel! = compute_polymeric_force_2d_kernel!(backend)
     kernel!(Fx_p, Fy_p, tau_xx, tau_xy, tau_yy, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ============================================================
@@ -146,7 +145,6 @@ function evolve_stress_2d!(tau_xx_new, tau_xy_new, tau_yy_new,
     kernel!(tau_xx_new, tau_xy_new, tau_yy_new,
             tau_xx, tau_xy, tau_yy,
             ux, uy, T(nu_p), T(lambda), Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ============================================================
@@ -268,7 +266,6 @@ function evolve_logconf_2d!(Theta_xx_new, Theta_xy_new, Theta_yy_new,
     kernel!(Theta_xx_new, Theta_xy_new, Theta_yy_new,
             Theta_xx, Theta_xy, Theta_yy,
             ux, uy, inv_lambda, L2, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ============================================================
@@ -306,7 +303,6 @@ function compute_stress_from_conf_2d!(tau_xx, tau_xy, tau_yy, Cxx, Cxy, Cyy;
     L2 = L_max > 0 ? FT(L_max * L_max) : FT(0)
     kernel! = stress_from_conf_2d_kernel!(backend)
     kernel!(tau_xx, tau_xy, tau_yy, Cxx, Cxy, Cyy, FT(G), L2; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 """
@@ -342,5 +338,4 @@ function compute_stress_from_logconf_2d!(tau_xx, tau_xy, tau_yy,
     kernel! = stress_from_logconf_2d_kernel!(backend)
     kernel!(tau_xx, tau_xy, tau_yy, Theta_xx, Theta_xy, Theta_yy,
             FT(G), L2; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

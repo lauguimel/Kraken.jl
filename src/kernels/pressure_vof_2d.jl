@@ -51,7 +51,6 @@ function compute_surface_tension_weighted_2d!(Fx, Fy, κ, C, σ, Nx, Ny;
     kernel! = compute_surface_tension_weighted_2d_kernel!(backend)
     kernel!(Fx, Fy, κ, C, T(σ), T(ρ_l), T(ρ_g), Int32(Nx), Int32(Ny);
             ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Pressure-based MRT collision with VOF field C ---
@@ -155,7 +154,6 @@ function collide_pressure_vof_mrt_2d!(f, C, Fx, Fy, is_solid;
     kernel!(f, C, Fx, Fy, is_solid,
             T(ρ_l), T(ρ_g), T(ν_l), T(ν_g), T(s_e), T(s_eps), T(s_q);
             ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Initialize pressure-based distributions from VOF ---
@@ -229,5 +227,4 @@ function add_axisym_viscous_weighted_2d!(Fz, uz, C, ν_l, ν_g, ρ_l, ρ_g, Ny)
     kernel! = axisym_viscous_weighted_2d_kernel!(backend)
     kernel!(Fz, uz, C, T(ν_l), T(ν_g), T(ρ_l), T(ρ_g), Int32(Ny);
             ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

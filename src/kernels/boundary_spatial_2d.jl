@@ -32,7 +32,6 @@ function apply_zou_he_north_spatial_2d!(f, ux_arr, uy_arr, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_north_spatial_2d_kernel!(backend)
     kernel!(f, ux_arr, uy_arr, Ny, Nx; ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Zou-He spatial velocity BC on south wall (j = 1) ---
@@ -66,7 +65,6 @@ function apply_zou_he_south_spatial_2d!(f, ux_arr, uy_arr, Nx)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_south_spatial_2d_kernel!(backend)
     kernel!(f, ux_arr, uy_arr, Nx; ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Zou-He spatial velocity BC on west wall (i = 1) ---
@@ -99,7 +97,6 @@ function apply_zou_he_west_spatial_2d!(f, ux_arr, uy_arr, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_west_spatial_2d_kernel!(backend)
     kernel!(f, ux_arr, uy_arr, Ny; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Zou-He spatial pressure BC on east wall (i = Nx) ---
@@ -131,5 +128,4 @@ function apply_zou_he_pressure_east_spatial_2d!(f, rho_arr, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_pressure_east_spatial_2d_kernel!(backend)
     kernel!(f, Nx, rho_arr, Ny; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end

@@ -109,7 +109,6 @@ function collide_thermal_3d!(g, ux, uy, uz, ω_T)
     Nx, Ny, Nz = size(g, 1), size(g, 2), size(g, 3)
     kernel! = collide_thermal_3d_kernel!(backend)
     kernel!(g, ux, uy, uz, eltype(g)(ω_T); ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Compute temperature from thermal populations (D3Q19) ---
@@ -129,7 +128,6 @@ function compute_temperature_3d!(Temp, g)
     Nx, Ny, Nz = size(Temp)
     kernel! = compute_temperature_3d_kernel!(backend)
     kernel!(Temp, g; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Fixed temperature BCs (anti-bounce-back Dirichlet, D3Q19) ---
@@ -157,7 +155,6 @@ function apply_fixed_temp_west_3d!(g, T_wall, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_west_3d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall); ndrange=(Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # East wall (i=Nx): unknown pops with cx<0 → {3, 9, 11, 13, 15}
@@ -180,7 +177,6 @@ function apply_fixed_temp_east_3d!(g, T_wall, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_east_3d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall), Nx; ndrange=(Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # South wall (j=1): unknown pops with cy>0 → {4, 8, 9, 16, 18}
@@ -203,7 +199,6 @@ function apply_fixed_temp_south_3d!(g, T_wall, Nx, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_south_3d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall); ndrange=(Nx, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # North wall (j=Ny): unknown pops with cy<0 → {5, 10, 11, 17, 19}
@@ -226,7 +221,6 @@ function apply_fixed_temp_north_3d!(g, T_wall, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_north_3d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall), Ny; ndrange=(Nx, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # Bottom wall (k=1): unknown pops with cz>0 → {6, 12, 13, 16, 17}
@@ -249,7 +243,6 @@ function apply_fixed_temp_bottom_3d!(g, T_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_bottom_3d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # Top wall (k=Nz): unknown pops with cz<0 → {7, 14, 15, 18, 19}
@@ -272,7 +265,6 @@ function apply_fixed_temp_top_3d!(g, T_wall, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_top_3d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall), Nz; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- BGK collision with per-node Boussinesq body force (Guo scheme, D3Q19) ---
@@ -442,5 +434,4 @@ function collide_boussinesq_3d!(f, Temp, is_solid, ω, β_g, T_ref)
     ET = eltype(f)
     kernel! = collide_boussinesq_3d_kernel!(backend)
     kernel!(f, Temp, is_solid, ET(ω), ET(β_g), ET(T_ref); ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end

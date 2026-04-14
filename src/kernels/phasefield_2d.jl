@@ -57,7 +57,6 @@ function compute_phi_2d!(φ, g)
     Nx, Ny = size(φ)
     kernel! = compute_phi_2d_kernel!(backend)
     kernel!(φ, g; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Compute VOF C = (1+φ)/2 from order parameter ---
@@ -80,7 +79,6 @@ function compute_vof_from_phi_2d!(C, φ)
     Nx, Ny = size(φ)
     kernel! = compute_vof_from_phi_2d_kernel!(backend)
     kernel!(C, φ; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Chemical potential ---
@@ -111,7 +109,6 @@ function compute_chemical_potential_2d!(μ, φ, β, κ)
     T = eltype(φ)
     kernel! = compute_chemical_potential_2d_kernel!(backend)
     kernel!(μ, φ, T(β), T(κ), Int32(Nx), Int32(Ny); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Azimuthal correction to chemical potential (axisymmetric) ---
@@ -149,7 +146,6 @@ function add_azimuthal_chemical_potential_2d!(μ, φ, κ, Ny)
     T = eltype(φ)
     kernel! = add_azimuthal_chemical_potential_2d_kernel!(backend)
     kernel!(μ, φ, T(κ), Int32(Ny); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Surface tension force from phase-field ---
@@ -179,7 +175,6 @@ function compute_phasefield_force_2d!(Fx, Fy, μ, φ)
     Nx, Ny = size(φ)
     kernel! = compute_phasefield_force_2d_kernel!(backend)
     kernel!(Fx, Fy, μ, φ, Int32(Nx), Int32(Ny); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Antidiffusion flux for conservative Allen-Cahn ---
@@ -213,7 +208,6 @@ function compute_antidiffusion_flux_2d!(Ax, Ay, φ)
     Nx, Ny = size(φ)
     kernel! = compute_antidiffusion_flux_2d_kernel!(backend)
     kernel!(Ax, Ay, φ, Int32(Nx), Int32(Ny); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Conservative Allen-Cahn BGK collision for g_q ---
@@ -300,7 +294,6 @@ function collide_allen_cahn_2d!(g, ux, uy, Ax, Ay; τ_g=0.7, W=5.0)
     kernel! = collide_allen_cahn_2d_kernel!(backend)
     kernel!(g, ux, uy, Ax, Ay, inv_tau, src_pref, neg_D_over_W,
             Int32(Nx), Int32(Ny); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Azimuthal diffusion source for Allen-Cahn (axisymmetric) ---
@@ -349,7 +342,6 @@ function add_azimuthal_allen_cahn_source_2d!(g, φ; τ_g=0.7)
     D_g = (tau - T(0.5)) / T(3)
     kernel! = add_azimuthal_allen_cahn_source_2d_kernel!(backend)
     kernel!(g, φ, src_pref, D_g, Int32(Ny); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Pressure-based MRT collision for two-phase phase-field ---
@@ -473,7 +465,6 @@ function collide_pressure_phasefield_mrt_2d!(f, φ, Fx, Fy, is_solid;
     kernel!(f, φ, Fx, Fy, is_solid,
             T(ρ_l), T(ρ_g), T(ν_l), T(ν_g), T(s_e), T(s_eps), T(s_q);
             ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Macroscopic quantities (pressure-based) ---
@@ -521,7 +512,6 @@ function compute_macroscopic_phasefield_2d!(p, ux, uy, f, φ, Fx, Fy;
     T = eltype(f)
     kernel! = compute_macroscopic_phasefield_2d_kernel!(backend)
     kernel!(p, ux, uy, f, φ, Fx, Fy, T(ρ_l), T(ρ_g); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Inlet BC for Allen-Cahn distributions ---
@@ -556,7 +546,6 @@ function set_phasefield_west_2d!(g, φ_inlet, ux_inlet)
     Ny = size(g, 2)
     kernel! = set_phasefield_west_2d_kernel!(backend)
     kernel!(g, φ_inlet, ux_inlet; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Outlet BC: zero-gradient extrapolation for g ---
@@ -579,7 +568,6 @@ function extrapolate_phasefield_east_2d!(g, Nx, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = extrapolate_phasefield_east_2d_kernel!(backend)
     kernel!(g, Int32(Nx); ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- CPU initializers ---

@@ -110,7 +110,6 @@ function prolongate_f_rescaled_3d!(f_fine, f_coarse, rho_c, ux_c, uy_c, uz_c,
             i_c_start, j_c_start, k_c_start,
             Nx_c, Ny_c, Nz_c, FT(omega_c), FT(omega_f);
             ndrange=(Nx_f, Ny_f, Nz_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # =====================================================================
@@ -185,7 +184,6 @@ function prolongate_f_rescaled_full_3d!(f_fine, f_coarse, rho_c, ux_c, uy_c, uz_
             i_c_start, j_c_start, k_c_start,
             Nx_c, Ny_c, Nz_c, FT(omega_c), FT(omega_f);
             ndrange=(Nx_f, Ny_f, Nz_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # =====================================================================
@@ -304,7 +302,6 @@ function prolongate_f_rescaled_temporal_3d!(f_fine,
             Nx_c, Ny_c, Nz_c, eltype(f_fine)(omega_c), eltype(f_fine)(omega_f),
             eltype(f_fine)(t_frac), Ni_prev, Nj_prev, Nk_prev;
             ndrange=(Nx_f, Ny_f, Nz_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # =====================================================================
@@ -377,7 +374,6 @@ function restrict_f_rescaled_3d!(f_coarse, rho_c, ux_c, uy_c, uz_c,
             ratio, n_ghost, i_c_start, j_c_start, k_c_start,
             FT(omega_c), FT(omega_f);
             ndrange=(Nx_overlap, Ny_overlap, Nz_overlap))
-    KernelAbstractions.synchronize(backend)
 end
 
 # =====================================================================
@@ -472,7 +468,6 @@ function _fill_thermal_ghost_temporal_3d!(g_fine, g_coarse, g_prev,
             eltype(g_fine)(t_frac),
             i_lo, j_lo, k_lo, Ni_prev, Nj_prev, Nk_prev;
             ndrange=(Nx_f, Ny_f, Nz_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # =====================================================================

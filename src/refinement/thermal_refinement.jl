@@ -114,7 +114,6 @@ function _restore_coarse_overlap!(f_coarse, g_coarse,
     kernel! = _restore_overlap_kernel!(backend)
     kernel!(f_coarse, g_coarse, patch.f_prev, thermal.g_prev,
             i_off, j_off, i_lo, j_lo; ndrange=(Ni, Nj))
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function _restore_overlap_kernel!(f_c, g_c, @Const(f_prev), @Const(g_prev),
@@ -165,7 +164,6 @@ function _fill_thermal_ghost_simple!(g_fine, g_coarse,
     kernel! = _fill_thermal_ghost_bilinear_kernel!(backend)
     kernel!(g_fine, g_coarse, ratio, Nx_inner, Ny_inner, n_ghost,
             i_offset, j_offset, Nx_c, Ny_c; ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function _fill_thermal_ghost_bilinear_kernel!(g_fine, @Const(g_coarse),
@@ -233,7 +231,6 @@ function _fill_thermal_ghost_temporal!(g_fine, g_coarse, g_prev,
             i_offset, j_offset, Nx_c, Ny_c, t_frac,
             i_lo, j_lo, Ni_prev, Nj_prev;
             ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function _fill_thermal_ghost_temporal_kernel!(
@@ -307,7 +304,6 @@ function fill_thermal_full!(patch::RefinementPatch{T},
     kernel!(thermal.g_in, g_coarse, patch.ratio,
             patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
             Nx_c, Ny_c; ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
     copyto!(thermal.g_out, thermal.g_in)
 end
 
@@ -373,7 +369,6 @@ function _restrict_thermal_simple!(g_coarse, Temp_c, g_fine, Temp_f,
     kernel!(g_coarse, Temp_c, g_fine, Temp_f,
             ratio, n_ghost, i_offset, j_offset;
             ndrange=(Nx_overlap, Ny_overlap))
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function _restrict_thermal_simple_kernel!(g_coarse, Temp_c, @Const(g_fine), @Const(Temp_f),

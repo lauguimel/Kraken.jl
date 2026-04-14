@@ -127,7 +127,6 @@ function aa_even_step!(f, is_solid, Nx, Ny, ω)
     ET = eltype(f)
     kernel! = aa_even_kernel!(backend)
     kernel!(f, is_solid, Nx, Ny, ET(ω); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 """
@@ -141,5 +140,4 @@ function aa_odd_step!(f, is_solid, Nx, Ny, ω)
     ET = eltype(f)
     kernel! = aa_odd_kernel!(backend)
     kernel!(f, is_solid, Nx, Ny, ET(ω); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

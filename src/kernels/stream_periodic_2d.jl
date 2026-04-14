@@ -53,7 +53,6 @@ function stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_periodic_x_wall_y_2d_kernel!(backend)
     kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Fully periodic streaming (for Taylor-Green) ---
@@ -83,7 +82,6 @@ function stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_fully_periodic_2d_kernel!(backend)
     kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Periodic-x, specular-axis (j=1), wall (j=Ny) for axisymmetric pipe ---
@@ -133,7 +131,6 @@ function stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_periodic_x_axisym_2d_kernel!(backend)
     kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Non-periodic x, specular axis (j=1), wall (j=Ny) for axisymmetric inlet/outlet ---
@@ -183,5 +180,4 @@ function stream_axisym_inlet_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_axisym_inlet_2d_kernel!(backend)
     kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

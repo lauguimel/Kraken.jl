@@ -108,7 +108,6 @@ function stream_3d!(f_out, f_in, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_3d_kernel!(backend)
     kernel!(f_out, f_in, Nx, Ny, Nz; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 function collide_3d!(f, is_solid, ω)
@@ -116,5 +115,4 @@ function collide_3d!(f, is_solid, ω)
     Nx, Ny, Nz = size(f,1), size(f,2), size(f,3)
     kernel! = collide_3d_kernel!(backend)
     kernel!(f, is_solid, ω; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end

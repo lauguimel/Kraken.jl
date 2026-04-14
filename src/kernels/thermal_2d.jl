@@ -66,7 +66,6 @@ function collide_thermal_2d!(g, ux, uy, ω_T)
     Nx, Ny = size(g, 1), size(g, 2)
     kernel! = collide_thermal_2d_kernel!(backend)
     kernel!(g, ux, uy, ω_T; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function collide_thermal_masked_2d_kernel!(g, @Const(ux), @Const(uy), ω_T, @Const(is_skip))
@@ -95,7 +94,6 @@ function collide_thermal_masked_2d!(g, ux, uy, ω_T, is_skip)
     Nx, Ny = size(g, 1), size(g, 2)
     kernel! = collide_thermal_masked_2d_kernel!(backend)
     kernel!(g, ux, uy, ω_T, is_skip; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Compute temperature from thermal populations ---
@@ -113,7 +111,6 @@ function compute_temperature_2d!(Temp, g)
     Nx, Ny = size(Temp)
     kernel! = compute_temperature_2d_kernel!(backend)
     kernel!(Temp, g; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Fixed temperature BC (anti-bounce-back for Dirichlet) ---
@@ -147,14 +144,12 @@ function apply_fixed_temp_south_2d!(g, T_wall, Nx)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_south_2d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall); ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end
 
 function apply_fixed_temp_north_2d!(g, T_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_north_2d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall), Ny; ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Fixed temperature BC for west/east walls (natural convection cavity) ---
@@ -187,14 +182,12 @@ function apply_fixed_temp_west_2d!(g, T_wall, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_west_2d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall); ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 
 function apply_fixed_temp_east_2d!(g, T_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_east_2d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall), Nx; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- BGK collision with per-node Boussinesq body force (Guo scheme) ---
@@ -325,7 +318,6 @@ function collide_boussinesq_vt_2d!(f, Temp, is_solid, ν_ref, T_ref, A_arr, β_g
     ET = eltype(f)
     kernel! = collide_boussinesq_vt_2d_kernel!(backend)
     kernel!(f, Temp, is_solid, ET(ν_ref), ET(T_ref), ET(A_arr), ET(β_g); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 function collide_boussinesq_2d!(f, Temp, is_solid, ω, β_g, T_ref)
@@ -334,7 +326,6 @@ function collide_boussinesq_2d!(f, Temp, is_solid, ω, β_g, T_ref)
     T = eltype(f)
     kernel! = collide_boussinesq_2d_kernel!(backend)
     kernel!(f, Temp, is_solid, ω, T(β_g), T(T_ref); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- BGK collision with modified Arrhenius viscosity (linear exponent) ---
@@ -414,5 +405,4 @@ function collide_boussinesq_vt_modified_2d!(f, Temp, is_solid, ν_ref, T0_visc, 
     ET = eltype(f)
     kernel! = collide_boussinesq_vt_modified_2d_kernel!(backend)
     kernel!(f, Temp, is_solid, ET(ν_ref), ET(T0_visc), ET(α_visc), ET(β_g), ET(T_ref_buoy); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

@@ -45,7 +45,6 @@ function compute_vof_normal_2d!(nx, ny, C, Nx, Ny)
     backend = KernelAbstractions.get_backend(C)
     kernel! = compute_vof_normal_2d_kernel!(backend)
     kernel!(nx, ny, C, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ===================================================================
@@ -334,7 +333,6 @@ end
 function _compute_cc_field!(cc, C, backend, Nx, Ny)
     kernel! = _cc_field_kernel!(backend)
     kernel!(cc, C; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ===================================================================
@@ -457,14 +455,12 @@ function advect_vof_2d!(C_new, C, ux, uy, Nx, Ny)
     # Strang splitting: x then y
     kernel_x! = advect_vof_x_2d_kernel!(backend)
     kernel_x!(C_new, C, ux, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 
     # Copy C_new → C for y-pass
     copyto!(C, C_new)
 
     kernel_y! = advect_vof_y_2d_kernel!(backend)
     kernel_y!(C_new, C, uy, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ===================================================================
@@ -537,7 +533,6 @@ function compute_hf_curvature_2d!(κ, C, nx, ny, Nx, Ny)
     backend = KernelAbstractions.get_backend(C)
     kernel! = compute_hf_curvature_2d_kernel!(backend)
     kernel!(κ, C, nx, ny, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ===================================================================
@@ -592,7 +587,6 @@ function add_azimuthal_curvature_2d!(κ, C, ny_n, Ny)
     Nx = size(κ, 1)
     kernel! = add_azimuthal_curvature_2d_kernel!(backend)
     kernel!(κ, C, ny_n, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 function compute_surface_tension_2d!(Fx, Fy, κ, C, σ, Nx, Ny)
@@ -600,7 +594,6 @@ function compute_surface_tension_2d!(Fx, Fy, κ, C, σ, Nx, Ny)
     T = eltype(C)
     kernel! = compute_surface_tension_2d_kernel!(backend)
     kernel!(Fx, Fy, κ, C, T(σ), Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Two-phase collision: variable density and viscosity ---
@@ -671,7 +664,6 @@ function collide_twophase_2d!(f, C, Fx_st, Fy_st, is_solid; ρ_l=1.0, ρ_g=0.001
     T = eltype(f)
     kernel! = collide_twophase_2d_kernel!(backend)
     kernel!(f, C, Fx_st, Fy_st, is_solid, T(ρ_l), T(ρ_g), T(ν_l), T(ν_g); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Axisymmetric viscous correction: ν/r · ∂u_z/∂r added to axial force ---
@@ -714,7 +706,6 @@ function add_axisym_viscous_correction_2d!(Fz, uz, C, ν_l, ν_g, Ny)
     T = eltype(Fz)
     kernel! = axisym_viscous_correction_2d_kernel!(backend)
     kernel!(Fz, uz, C, T(ν_l), T(ν_g), Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Set VOF at west boundary (i=1) from a 1D profile array ---
@@ -729,5 +720,4 @@ function set_vof_west_2d!(C, C_inlet)
     Ny = length(C_inlet)
     kernel! = set_vof_west_2d_kernel!(backend)
     kernel!(C, C_inlet; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end

@@ -17,7 +17,7 @@ using KernelAbstractions
     end
 end
 
-function compute_macroscopic_2d!(ρ, ux, uy, f; sync=true)
+function compute_macroscopic_2d!(ρ, ux, uy, f; sync=false)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(ρ)
     kernel! = compute_macroscopic_2d_kernel!(backend)
@@ -53,7 +53,6 @@ function compute_macroscopic_3d!(ρ, ux, uy, uz, f)
     Nx, Ny, Nz = size(ρ)
     kernel! = compute_macroscopic_3d_kernel!(backend)
     kernel!(ρ, ux, uy, uz, f; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- 2D force-corrected macroscopic computation ---
@@ -79,7 +78,6 @@ function compute_macroscopic_forced_2d!(ρ, ux, uy, f, Fx, Fy)
     Nx, Ny = size(ρ)
     kernel! = compute_macroscopic_forced_2d_kernel!(backend)
     kernel!(ρ, ux, uy, f, Fx, Fy; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- 3D force-corrected macroscopic computation ---
@@ -111,7 +109,6 @@ function compute_macroscopic_forced_3d!(ρ, ux, uy, uz, f, Fx, Fy, Fz)
     Nx, Ny, Nz = size(ρ)
     kernel! = compute_macroscopic_forced_3d_kernel!(backend)
     kernel!(ρ, ux, uy, uz, f, Fx, Fy, Fz; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Pressure-based macroscopic (He-Chen-Zhang model) ---
@@ -170,5 +167,4 @@ function compute_macroscopic_pressure_2d!(p, ux, uy, f, C, Fx, Fy;
     T = eltype(f)
     kernel! = compute_macroscopic_pressure_2d_kernel!(backend)
     kernel!(p, ux, uy, f, C, Fx, Fy, T(ρ_l), T(ρ_g); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

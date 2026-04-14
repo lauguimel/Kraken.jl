@@ -26,7 +26,6 @@ function persistent_fused_bgk!(f_in, f_out, ρ, ux, uy, is_solid, Nx, Ny, ω, Nt
         kernel!(b, a, ρ, ux, uy, is_solid, Nx, Ny, ET(ω); ndrange=(Nx, Ny))
         a, b = b, a
     end
-    KernelAbstractions.synchronize(backend)
     return a, b
 end
 
@@ -53,6 +52,5 @@ function persistent_aa_bgk!(f, is_solid, Nx, Ny, ω, Nt; workgroupsize=nothing)
             odd_k!(f, is_solid, Nx, Ny, ET(ω); ndrange=(Nx, Ny))
         end
     end
-    KernelAbstractions.synchronize(backend)
     return f
 end

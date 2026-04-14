@@ -150,7 +150,6 @@ function prolongate_f_rescaled_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c,
             ratio, Nx_inner, Ny_inner, n_ghost,
             i_c_start, j_c_start, Nx_c, Ny_c, alpha;
             ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Full prolongation (interior + ghost) — used once at init ---
@@ -225,7 +224,6 @@ function prolongate_f_rescaled_full_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c,
             ratio, Nx_inner, Ny_inner, n_ghost,
             i_c_start, j_c_start, Nx_c, Ny_c, alpha;
             ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Temporal prolongation: ghost fill with time-interpolated coarse state ---
@@ -366,7 +364,6 @@ function prolongate_f_rescaled_temporal_2d!(
             i_c_start, j_c_start, Nx_c, Ny_c, alpha, T(t_frac),
             i_lo, j_lo, Ni_prev, Nj_prev;
             ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Restriction: fine → coarse with inverse rescaling ---
@@ -468,7 +465,6 @@ function restrict_f_rescaled_2d!(f_coarse, rho_c, ux_c, uy_c,
             ratio, n_ghost, i_c_start, j_c_start,
             Nx_overlap, Ny_overlap, alpha;
             ndrange=(Nx_overlap, Ny_overlap))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Temporal interpolation of coarse data ---
@@ -521,7 +517,6 @@ function temporal_interpolate_2d!(rho_i, ux_i, uy_i, f_i,
             rho_p, ux_p, uy_p, f_p,
             rho_c, ux_c, uy_c, f_c,
             t_frac; ndrange=(Ni, Nj))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Copy macroscopic overlap for VTK output ---
@@ -575,5 +570,4 @@ function copy_macroscopic_overlap_2d!(rho_c, ux_c, uy_c,
     kernel!(rho_c, ux_c, uy_c, rho_f, ux_f, uy_f,
             ratio, n_ghost, i_c_start, j_c_start;
             ndrange=(Nx_overlap, Ny_overlap))
-    KernelAbstractions.synchronize(backend)
 end

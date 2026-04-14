@@ -44,7 +44,6 @@ function smooth_vof_2d!(C_s, C, C_tmp; n_passes=3)
 
     # First pass: C → C_s
     kernel!(C_s, C, Int32(Nx), Int32(Ny); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 
     # Subsequent passes: ping-pong between C_s and C_tmp
     for pass in 2:n_passes

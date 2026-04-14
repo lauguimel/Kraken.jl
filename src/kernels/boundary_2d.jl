@@ -45,7 +45,6 @@ function apply_zou_he_north_2d!(f, u_wall_x, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_north_2d_kernel!(backend)
     kernel!(f, eltype(f)(u_wall_x), Ny; ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Bounce-back on all 4 walls (2D cavity, no-slip) ---
@@ -95,7 +94,6 @@ function apply_bounce_back_walls_2d!(f, Nx, Ny)
     # East wall (i=Nx)
     kernel!(f, Nx, Ny, Int32(3); ndrange=(Ny,))
 
-    KernelAbstractions.synchronize(backend)
 end
 
 """
@@ -118,7 +116,6 @@ function apply_bounce_back_wall_2d!(f, Nx, Ny, side::Symbol)
     else
         error("apply_bounce_back_wall_2d!: unknown side $(side)")
     end
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Zou-He velocity BC on south wall (j=1) — for Couette ---
@@ -143,7 +140,6 @@ function apply_zou_he_south_2d!(f, u_wall_x, Nx)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_south_2d_kernel!(backend)
     kernel!(f, eltype(f)(u_wall_x); ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Zou-He velocity inlet on west wall (i=1) — for cylinder ---
@@ -167,7 +163,6 @@ function apply_zou_he_west_2d!(f, u_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_west_2d_kernel!(backend)
     kernel!(f, eltype(f)(u_in), Ny; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Zou-He pressure outlet on east wall (i=Nx) ---
@@ -195,7 +190,6 @@ function apply_zou_he_pressure_east_2d!(f, Nx, Ny; ρ_out=1.0)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_pressure_east_2d_kernel!(backend)
     kernel!(f, Nx, eltype(f)(ρ_out); ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Zero-gradient (Neumann) outflow on east wall ---
@@ -220,5 +214,4 @@ function apply_extrapolate_east_2d!(f, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = extrapolate_east_2d_kernel!(backend)
     kernel!(f, Nx; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end

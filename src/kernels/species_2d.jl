@@ -55,7 +55,6 @@ function collide_species_2d!(h, ux, uy, ω_D)
     Nx, Ny = size(h, 1), size(h, 2)
     kernel! = collide_species_2d_kernel!(backend)
     kernel!(h, ux, uy, ω_D; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function compute_concentration_2d_kernel!(C, @Const(h))
@@ -70,7 +69,6 @@ function compute_concentration_2d!(C, h)
     Nx, Ny = size(C)
     kernel! = compute_concentration_2d_kernel!(backend)
     kernel!(C, h; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Fixed concentration BCs (anti-bounce-back Dirichlet) ---
@@ -99,12 +97,10 @@ function apply_fixed_conc_south_2d!(h, C_wall, Nx)
     backend = KernelAbstractions.get_backend(h)
     kernel! = apply_fixed_conc_south_2d_kernel!(backend)
     kernel!(h, eltype(h)(C_wall); ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end
 
 function apply_fixed_conc_north_2d!(h, C_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(h)
     kernel! = apply_fixed_conc_north_2d_kernel!(backend)
     kernel!(h, eltype(h)(C_wall), Ny; ndrange=(Nx,))
-    KernelAbstractions.synchronize(backend)
 end

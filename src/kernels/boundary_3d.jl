@@ -289,7 +289,6 @@ function _apply_zou_he_velocity_3d!(f, face::ZouHeFace3D, idx_fixed,
     T = eltype(f)
     kernel! = zou_he_velocity_3d_kernel!(backend)
     kernel!(f, face, idx_fixed, T(u_normal), T(u_tang1), T(u_tang2); ndrange=(N1, N2))
-    KernelAbstractions.synchronize(backend)
 end
 
 function _apply_zou_he_pressure_3d!(f, face::ZouHeFace3D, idx_fixed,
@@ -298,7 +297,6 @@ function _apply_zou_he_pressure_3d!(f, face::ZouHeFace3D, idx_fixed,
     T = eltype(f)
     kernel! = zou_he_pressure_3d_kernel!(backend)
     kernel!(f, face, idx_fixed, T(ρ_out); ndrange=(N1, N2))
-    KernelAbstractions.synchronize(backend)
 end
 
 # ============================================================================
@@ -478,7 +476,6 @@ function apply_bounce_back_walls_3d!(f, Nx, Ny, Nz)
     # East (i=Nx): ndrange = (Ny, Nz)
     kernel!(f, Ny, Nz, Nx, Int32(5); ndrange=(Ny, Nz))
 
-    KernelAbstractions.synchronize(backend)
 end
 
 """
@@ -510,7 +507,6 @@ function apply_bounce_back_wall_3d!(f, Nx, Ny, Nz, face::Symbol)
     else
         error("apply_bounce_back_wall_3d!: unknown face $face")
     end
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function _bounce_back_top_3d_kernel!(f, Nx, Ny, Nz)

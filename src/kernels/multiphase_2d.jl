@@ -25,7 +25,6 @@ function compute_psi_2d!(ψ, ρ, ρ0)
     T = eltype(ψ)
     kernel! = compute_psi_2d_kernel!(backend)
     kernel!(ψ, ρ, T(ρ0); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Compute Shan-Chen interaction force ---
@@ -62,7 +61,6 @@ function compute_sc_force_2d!(Fx, Fy, ψ, G, Nx, Ny)
     T = eltype(Fx)
     kernel! = compute_sc_force_2d_kernel!(backend)
     kernel!(Fx, Fy, ψ, T(G), Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- BGK collision with per-node Shan-Chen force (Guo scheme) ---
@@ -125,5 +123,4 @@ function collide_sc_2d!(f, Fx_sc, Fy_sc, is_solid, ω)
     Nx, Ny = size(f, 1), size(f, 2)
     kernel! = collide_sc_2d_kernel!(backend)
     kernel!(f, Fx_sc, Fy_sc, is_solid, ω; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

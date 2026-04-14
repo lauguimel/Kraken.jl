@@ -69,5 +69,4 @@ function fused_bgk_step!(f_out, f_in, ρ, ux, uy, is_solid, Nx, Ny, ω)
     ET = eltype(f_in)
     kernel! = fused_bgk_step_kernel!(backend)
     kernel!(f_out, f_in, ρ, ux, uy, is_solid, Nx, Ny, ET(ω); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

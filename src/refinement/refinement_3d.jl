@@ -334,7 +334,6 @@ function _restore_coarse_overlap_3d!(f_coarse, g_coarse,
     kernel! = _restore_overlap_3d_kernel!(backend)
     kernel!(f_coarse, g_coarse, patch.f_prev, thermal.g_prev,
             i_off, j_off, k_off, i_lo, j_lo, k_lo; ndrange=(Ni, Nj, Nk))
-    KernelAbstractions.synchronize(backend)
 end
 
 @kernel function _restore_overlap_3d_kernel!(f_c, g_c, @Const(f_prev), @Const(g_prev),
@@ -378,7 +377,6 @@ function fill_thermal_full_3d!(patch::RefinementPatch3D{T},
     kernel!(thermal.g_in, g_coarse, patch.ratio, patch.n_ghost,
             first(patch.parent_i_range), first(patch.parent_j_range), first(patch.parent_k_range),
             Nx_c, Ny_c, Nz_c; ndrange=(Nx_f, Ny_f, Nz_f))
-    KernelAbstractions.synchronize(backend)
     copyto!(thermal.g_out, thermal.g_in)
 end
 
@@ -394,7 +392,6 @@ function restrict_thermal_to_coarse_3d!(patch::RefinementPatch3D{T},
             patch.ratio, patch.n_ghost,
             first(patch.parent_i_range), first(patch.parent_j_range), first(patch.parent_k_range);
             ndrange=(Nx_ov, Ny_ov, Nz_ov))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Thermal refined sub-cycling (3D) ---

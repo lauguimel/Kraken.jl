@@ -24,24 +24,61 @@ tracked as a v0.2.0 item.
 
 ## What does not yet showcase a win
 
-We ran the De Vahl Davis (1983) natural-convection cavity with and
-without wall refinement on Metal (Apple M3 Max, Float32). Reference
-values are `Nu = 1.118` at `Ra = 10³` and `Nu = 4.519` at `Ra = 10⁵`.
+Results on Metal (Apple M3 Max, Float32) at Ra = 10³ with
+wall_fraction = 0.20, ratio = 2, after the GPU-sync fix (see below).
 
-| Ra | Mode | N_base | ratio | wall_fraction | Nu | error | wall-time |
-|---:|---|---:|---:|---:|---:|---:|---:|
-| 10³ | uniform | 128 | — | — | 1.129 | 0.94 % | 124 s |
-| 10³ | refined | 64  | 2  | 0.20 | 1.188 | 6.26 % | 1595 s |
-| 10⁵ | uniform | 192 | — | — | 4.646 | 2.81 % | 297 s |
-| 10⁵ | refined | 96  | 2  | 0.15 | 5.460 | 20.82 % | 3695 s |
+| Mode | N_base | Nu | error | wall-time | steps/s |
+|---|---:|---:|---:|---:|---:|
+| uniform | 64  | 1.1419 | 2.13 % | 6.0 s   | 10 182 |
+| uniform | 128 | 1.1285 | 0.94 % | 25.6 s  |  9 601 |
+| refined | 64  | 1.1880 | 6.26 % | 506 s   |    121 |
+| refined | 96  | 1.2161 | 8.77 % | 1 202 s |    115 |
+| refined | 128 | 1.2086 | 8.10 % | 2 375 s |    103 |
 
-At both Ra, refinement produces a **larger** Nu error than a uniform
-grid at the same *near-wall* resolution, and takes **10–12 × more
-wall-time**. This is not just failure to converge further: the refined
-runs show a **systematic over-prediction** of Nu that does not
-disappear at longer integration times.
+Two independent problems stand out:
 
-## Root causes
+1. **Throughput gap**: even with the sync fix, refined runs at
+   ~110 steps/s while uniform runs at ~10 000 steps/s — a 90 × gap due
+   to many small kernel launches per coarse step (ghost fills, stream,
+   BC, collide, macro, restrict, copyto!s) versus one fused kernel for
+   the uniform case.
+2. **Accuracy plateau with a positive bias**: the refined error does
+   not improve as `N_base` grows; it actually gets worse (6.26 → 8.77 %)
+   before stabilising near 8 %. This is a zeroth-order bias at the
+   patch interface, not a convergence problem.
+
+## Perf bug fixed (2026-04-14)
+
+Until commit `<sync-fix>` every kernel wrapper ended with
+`KernelAbstractions.synchronize(backend)`. That is fine when the CPU
+driver launches one large kernel per time step (the uniform case: one
+`fused_natconv_step!`), but it is disastrous inside the sub-cycled
+refined step where ~50 wrappers are called per coarse step — each
+blocking the CPU on GPU completion.
+
+The fix removed the unconditional `KernelAbstractions.synchronize`
+calls from 134 kernel wrappers in `src/kernels/` and `src/refinement/`,
+and flipped the default of the opt-in `sync` keyword on
+`stream_2d!`, `collide_2d!` and `compute_macroscopic_2d!` to `false`.
+KernelAbstractions already serialises kernels submitted on the same
+stream, so intermediate syncs are redundant for GPU-only pipelines;
+the only natural sync point is the final `Array(...)` copy back to
+host in the top-level driver.
+
+Measured impact on Metal Float32:
+
+| Mode | N_base | Before | After | Speedup |
+|---|---:|---:|---:|---:|
+| uniform | 64  |   ? | 10 182 sps | — |
+| uniform | 128 | 1 984 sps | 9 601 sps | 4.8 × |
+| refined | 64  |    40 sps |   121 sps | 3.0 × |
+
+The uniform case ran 128 ²=  16 384 cells in one fused kernel so
+each step was already launch-bound; removing the per-step sync
+converts wall-time almost entirely to compute. The refined case
+still has many small launches, so the speedup is smaller but real.
+
+## Root causes (accuracy)
 
 1. **Thermal ghost fill uses no FH rescaling.** The thermal patch
    interpolates coarse temperature populations bilinearly in space and

@@ -97,7 +97,6 @@ function extrapolate_velocity_ghost_2d!(ux, uy, C, ux_tmp, uy_tmp,
     # Initialize valid mask from VOF
     mask_kernel! = initialize_valid_mask_2d_kernel!(backend)
     mask_kernel!(is_valid, C, eltype(C)(C_threshold); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 
     step_kernel! = extrapolate_velocity_step_2d_kernel!(backend)
 
@@ -166,5 +165,4 @@ function reset_feq_ghost_2d!(f, ux, uy, C; C_threshold=0.5)
     Nx, Ny = size(f, 1), size(f, 2)
     kernel! = reset_feq_ghost_2d_kernel!(backend)
     kernel!(f, ux, uy, C, eltype(C)(C_threshold); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

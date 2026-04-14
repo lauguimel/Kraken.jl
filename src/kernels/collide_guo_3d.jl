@@ -180,7 +180,6 @@ function collide_guo_3d!(f, is_solid, ω, Fx, Fy, Fz)
     Nx, Ny, Nz = size(f,1), size(f,2), size(f,3)
     kernel! = collide_guo_3d_kernel!(backend)
     kernel!(f, is_solid, ω, Fx, Fy, Fz; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Per-node force field variant ---
@@ -306,5 +305,4 @@ function collide_guo_field_3d!(f, is_solid, Fx_field, Fy_field, Fz_field, ω)
     Nx, Ny, Nz = size(f,1), size(f,2), size(f,3)
     kernel! = collide_guo_field_3d_kernel!(backend)
     kernel!(f, is_solid, Fx_field, Fy_field, Fz_field, ω; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
 end

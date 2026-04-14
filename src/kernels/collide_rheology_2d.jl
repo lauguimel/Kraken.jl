@@ -245,7 +245,6 @@ function collide_rheology_2d!(f, is_solid, rheology::GeneralizedNewtonian, tau_f
     Nx, Ny = size(f, 1), size(f, 2)
     kernel! = collide_rheology_2d_kernel!(backend)
     kernel!(f, is_solid, rheology, tau_field; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 """
@@ -259,7 +258,6 @@ function collide_rheology_guo_2d!(f, is_solid, rheology::GeneralizedNewtonian,
     Nx, Ny = size(f, 1), size(f, 2)
     kernel! = collide_rheology_guo_2d_kernel!(backend)
     kernel!(f, is_solid, rheology, tau_field, Fx, Fy; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 """
@@ -274,5 +272,4 @@ function collide_rheology_thermal_2d!(f, is_solid, rheology::GeneralizedNewtonia
     Nx, Ny = size(f, 1), size(f, 2)
     kernel! = collide_rheology_thermal_2d_kernel!(backend)
     kernel!(f, is_solid, rheology, tau_field, Fx, Fy, Temp; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

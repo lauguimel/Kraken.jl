@@ -118,5 +118,4 @@ function collide_twophase_rheology_2d!(f, C, Fx_st, Fy_st, is_solid, tau_field;
     kernel! = collide_twophase_rheology_2d_kernel!(backend)
     kernel!(f, C, Fx_st, Fy_st, is_solid, rheology_l, rheology_g,
             T(rho_l), T(rho_g), tau_field; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

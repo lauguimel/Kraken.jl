@@ -64,7 +64,6 @@ function prolongate_bilinear_2d!(q_fine, q_coarse, r; scale=one(eltype(q_fine)))
     T = eltype(q_fine)
     kernel! = prolongate_bilinear_2d_kernel!(backend)
     kernel!(q_fine, q_coarse, r, Nx_c, Ny_c, T(scale); ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Restriction: block average fine → coarse ---
@@ -98,7 +97,6 @@ function restrict_average_2d!(q_coarse, q_fine, r)
     Nx_c, Ny_c = size(q_coarse)
     kernel! = restrict_average_2d_kernel!(backend)
     kernel!(q_coarse, q_fine, r; ndrange=(Nx_c, Ny_c))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Height function curvature with explicit grid spacing ---
@@ -172,7 +170,6 @@ function compute_hf_curvature_dx_2d!(κ, C, nx, ny, Nx, Ny, dx; hw=2)
     T = eltype(C)
     kernel! = compute_hf_curvature_dx_2d_kernel!(backend)
     kernel!(κ, C, nx, ny, Nx, Ny, T(dx), Int(hw); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- CSF surface tension with explicit grid spacing ---
@@ -209,5 +206,4 @@ function compute_surface_tension_dx_2d!(Fx, Fy, κ, C, σ, Nx, Ny, dx)
     T = eltype(C)
     kernel! = compute_surface_tension_dx_2d_kernel!(backend)
     kernel!(Fx, Fy, κ, C, T(σ), Nx, Ny, T(dx); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

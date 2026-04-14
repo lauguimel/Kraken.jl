@@ -248,7 +248,6 @@ function fused_natconv_step!(f_out, f_in, g_out, g_in, Temp, Nx, Ny,
     kernel!(f_out, f_in, g_out, g_in, Temp, Nx, Ny,
             ET(ω_f), ET(ω_T), ET(β_g), ET(T_ref_buoy),
             ET(T_hot), ET(T_cold); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 """
@@ -268,5 +267,4 @@ function fused_natconv_vt_step!(f_out, f_in, g_out, g_in, Temp, Nx, Ny,
             ET(ν_ref), ET(T0_visc), ET(α_visc),
             ET(ω_T), ET(β_g), ET(T_ref_buoy),
             ET(T_hot), ET(T_cold); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end

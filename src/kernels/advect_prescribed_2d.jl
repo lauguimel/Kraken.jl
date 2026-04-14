@@ -29,7 +29,6 @@ function clamp_field_2d!(C, lo, hi)
     T = eltype(C)
     kernel! = clamp_field_2d_kernel!(backend)
     kernel!(C, T(lo), T(hi); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 
 # --- Advect VOF one step + clamp ---
