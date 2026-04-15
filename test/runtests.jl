@@ -33,6 +33,7 @@ using Kraken
     include("test_couette_libb_canary.jl")
     include("test_couette_libb_canary_3d.jl")
     include("test_cylinder_libb.jl")
+    include("test_sphere_libb.jl")
     include("test_stl_libb.jl")
     include("test_taylor_couette_libb.jl")
     include("test_advection_prescribed.jl")
