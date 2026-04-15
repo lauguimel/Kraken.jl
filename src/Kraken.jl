@@ -25,6 +25,7 @@ include("rheology/linalg.jl")
 
 # --- GPU kernels ---
 include("kernels/equilibrium_helpers.jl")
+include("kernels/equilibrium_helpers_3d.jl")
 include("kernels/collide_stream_2d.jl")
 include("kernels/collide_stream_3d.jl")
 include("kernels/stream_periodic_2d.jl")
@@ -58,10 +59,12 @@ include("kernels/viscoelastic_2d.jl")
 # --- Kernel DSL (runtime fusion) ---
 include("kernels/dsl/lbm_spec.jl")
 include("kernels/dsl/bricks.jl")
+include("kernels/dsl/bricks_3d.jl")
 include("kernels/dsl/lbm_builder.jl")
 
 # --- Kernels built from the DSL (must come after li_bb_2d.jl + DSL) ---
 include("kernels/li_bb_2d_v2.jl")
+include("kernels/li_bb_3d_v2.jl")
 
 # --- Simulation drivers ---
 include("drivers/basic.jl")
@@ -144,7 +147,7 @@ export apply_fixed_temp_south_3d!, apply_fixed_temp_north_3d!
 export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
-export fused_trt_libb_step!, fused_trt_libb_v2_step!, precompute_q_wall_cylinder
+export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
 export precompute_q_wall_annulus
 export wall_velocity_rotating_cylinder, wall_velocity_rotating_inner
 export persistent_fused_bgk!, persistent_aa_bgk!

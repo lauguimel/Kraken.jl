@@ -88,11 +88,11 @@ phase(::LBMBrick) = :fluid
 # symbols get appended in insertion order at the tail.
 const CANONICAL_ARG_ORDER = [
     # outputs (mutated)
-    :f_out, :ρ_out, :ux_out, :uy_out,
+    :f_out, :ρ_out, :ux_out, :uy_out, :uz_out,
     # input arrays (@Const-able)
-    :f_in, :is_solid, :q_wall, :uw_link_x, :uw_link_y,
+    :f_in, :is_solid, :q_wall, :uw_link_x, :uw_link_y, :uw_link_z,
     # integer scalars
-    :Nx, :Ny,
+    :Nx, :Ny, :Nz,
     # float scalars
     :ω, :s_plus, :s_minus,
 ]

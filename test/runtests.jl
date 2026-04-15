@@ -31,6 +31,7 @@ using Kraken
     include("test_li_bb_2d.jl")
     include("test_kernel_dsl.jl")
     include("test_couette_libb_canary.jl")
+    include("test_couette_libb_canary_3d.jl")
     include("test_taylor_couette_libb.jl")
     include("test_advection_prescribed.jl")
     include("test_krk_multiphase.jl")

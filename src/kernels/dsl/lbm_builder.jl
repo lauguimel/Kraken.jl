@@ -68,12 +68,17 @@ function build_lbm_kernel(backend, ::LBMSpec{S, Bricks}) where {S, Bricks}
     # Body assembly. If the spec has no :solid brick, we skip the
     # is_solid branching entirely (useful for pure-fluid kernels such
     # as the pull-only MVP).
+    # Stencil → index dimensionality. :D2Q9 uses (i, j); :D3Q19 uses (i, j, k).
+    is_3d    = S === :D3Q19
+    is_solid_ref = is_3d ? :(is_solid[i, j, k]) : :(is_solid[i, j])
+    idx_decl = is_3d ? :((i, j, k) = @index(Global, NTuple)) :
+                       :((i, j)    = @index(Global, NTuple))
     inner_body = if isempty(solid_bricks)
         Expr(:block, pre_body, fluid_body)
     else
         Expr(:block, pre_body,
              Expr(:if,
-                  :(is_solid[i, j]),
+                  is_solid_ref,
                   solid_body,
                   fluid_body))
     end
@@ -81,7 +86,7 @@ function build_lbm_kernel(backend, ::LBMSpec{S, Bricks}) where {S, Bricks}
     kname = gensym(:lbm_gen_kernel)
     src = quote
         @kernel function $(kname)($(args...))
-            i, j = @index(Global, NTuple)
+            $idx_decl
             T = eltype(f_out)
             @inbounds begin
                 $inner_body
