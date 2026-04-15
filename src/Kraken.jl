@@ -94,6 +94,7 @@ include("io/diagnostics.jl")
 include("io/expression.jl")
 include("io/stl_reader.jl")
 include("io/voxelizer.jl")
+include("io/stl_libb.jl")
 include("io/kraken_parser.jl")
 
 # --- Spatial boundary kernels ---
@@ -243,6 +244,7 @@ export TwophaseRefinedArrays, create_twophase_patch_arrays, advance_twophase_ref
 # STL geometry
 export STLTriangle, STLMesh, read_stl, transform_mesh
 export voxelize_2d, voxelize_3d
+export precompute_q_wall_from_stl_2d, precompute_q_wall_from_stl_3d
 
 # Post-processing
 export extract_line, field_error, probe, domain_stats
