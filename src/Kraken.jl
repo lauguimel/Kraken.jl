@@ -137,7 +137,8 @@ export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
 export fused_trt_libb_step!, precompute_q_wall_cylinder
-export wall_velocity_rotating_cylinder
+export precompute_q_wall_annulus
+export wall_velocity_rotating_cylinder, wall_velocity_rotating_inner
 export persistent_fused_bgk!, persistent_aa_bgk!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 

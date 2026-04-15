@@ -335,6 +335,104 @@ function fused_trt_libb_step!(f_out, f_in, ρ, ux, uy, is_solid,
 end
 
 """
+    precompute_q_wall_annulus(Nx, Ny, cx, cy, R_inner, R_outer; FT=Float64)
+                              -> (q_wall, is_solid, is_inner_wall)
+
+Precompute cut fractions for a Taylor-Couette-style annular fluid
+domain: fluid in `R_inner < r < R_outer`, solid elsewhere. Each cut
+link `q_wall[i, j, q] ∈ (0, 1]` records the fraction to the first wall
+the link crosses. `is_inner_wall[i, j, q]` is `true` if that wall is
+the inner cylinder (so a moving-wall correction applies there), else
+`false` for the outer cylinder.
+"""
+function precompute_q_wall_annulus(Nx::Int, Ny::Int,
+                                    cx::Real, cy::Real,
+                                    R_inner::Real, R_outer::Real;
+                                    FT::Type{<:AbstractFloat}=Float64)
+    R_inner < R_outer || error("precompute_q_wall_annulus: R_inner < R_outer required")
+    cxT, cyT = FT(cx), FT(cy)
+    Ri², Ro² = FT(R_inner)^2, FT(R_outer)^2
+    is_solid = zeros(Bool, Nx, Ny)
+    q_wall = zeros(FT, Nx, Ny, 9)
+    is_inner_wall = zeros(Bool, Nx, Ny, 9)
+    cxs = velocities_x(D2Q9())
+    cys = velocities_y(D2Q9())
+
+    @inbounds for j in 1:Ny, i in 1:Nx
+        xf = FT(i - 1); yf = FT(j - 1)
+        dx_f = xf - cxT; dy_f = yf - cyT
+        r² = dx_f * dx_f + dy_f * dy_f
+        if r² ≤ Ri² || r² ≥ Ro²
+            is_solid[i, j] = true
+            continue
+        end
+        for q in 2:9
+            cqx = FT(cxs[q]); cqy = FT(cys[q])
+            xn = xf + cqx; yn = yf + cqy
+            dx_n = xn - cxT; dy_n = yn - cyT
+            rn² = dx_n * dx_n + dy_n * dy_n
+            # Only flag if the neighbour is inside a solid region
+            if rn² > Ri² && rn² < Ro²
+                continue
+            end
+            # Solve quadratic |x_f + t c_q − c|² = R² for both radii,
+            # keep the smallest positive root in (0, 1].
+            a = cqx * cqx + cqy * cqy
+            b = FT(2) * (dx_f * cqx + dy_f * cqy)
+            t_best = FT(Inf)
+            hit_inner = false
+            for (R², is_inner) in ((Ri², true), (Ro², false))
+                c = r² - R²
+                disc = b * b - FT(4) * a * c
+                disc < zero(FT) && continue
+                sd = sqrt(disc)
+                t1 = (-b - sd) / (FT(2) * a)
+                t2 = (-b + sd) / (FT(2) * a)
+                for tc in (t1, t2)
+                    if tc > zero(FT) && tc ≤ one(FT) && tc < t_best
+                        t_best = tc
+                        hit_inner = is_inner
+                    end
+                end
+            end
+            if t_best ≤ one(FT)
+                q_wall[i, j, q] = t_best
+                is_inner_wall[i, j, q] = hit_inner
+            end
+        end
+    end
+    return q_wall, is_solid, is_inner_wall
+end
+
+"""
+    wall_velocity_rotating_inner(q_wall, is_inner_wall, cx, cy, Ω)
+                                 -> (uw_link_x, uw_link_y)
+
+For an annulus with rotating inner cylinder + stationary outer one,
+set the per-link wall velocity to Ω × (x_w − c) on the inner wall and
+zero on the outer wall.
+"""
+function wall_velocity_rotating_inner(q_wall::AbstractArray{T, 3},
+                                       is_inner_wall::AbstractArray{Bool, 3},
+                                       cx::Real, cy::Real, Ω::Real) where {T}
+    Nx, Ny, _ = size(q_wall)
+    cxT, cyT, ΩT = T(cx), T(cy), T(Ω)
+    uw_link_x = zeros(T, Nx, Ny, 9)
+    uw_link_y = zeros(T, Nx, Ny, 9)
+    cxs = velocities_x(D2Q9())
+    cys = velocities_y(D2Q9())
+    @inbounds for q in 2:9, j in 1:Ny, i in 1:Nx
+        qw = q_wall[i, j, q]
+        (qw == zero(T) || !is_inner_wall[i, j, q]) && continue
+        xw = T(i - 1) + qw * T(cxs[q])
+        yw = T(j - 1) + qw * T(cys[q])
+        uw_link_x[i, j, q] = -ΩT * (yw - cyT)
+        uw_link_y[i, j, q] =  ΩT * (xw - cxT)
+    end
+    return uw_link_x, uw_link_y
+end
+
+"""
     wall_velocity_rotating_cylinder(q_wall, cx, cy, Ω; FT=Float64)
                                     -> (uw_link_x, uw_link_y)
 
