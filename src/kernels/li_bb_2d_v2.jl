@@ -19,6 +19,7 @@
 
 const _TRT_LIBB_V2_SPEC = LBMSpec(
     PullHalfwayBB(), SolidInert(),
+    ApplyHalfwayBBPrePhase(),           # substitute solid-sourced pops before moments
     Moments(), CollideTRT(), ApplyLiBB(),
     RecomputeMoments(),
     WriteFLiBB(), WriteMoments(),

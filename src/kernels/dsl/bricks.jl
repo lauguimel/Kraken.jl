@@ -174,6 +174,70 @@ end
 # Boundary conditions
 # ------------------------------------------------------------------
 
+"Pre-collision halfway-BB substitution on flagged cut links. Replaces the pulled pop fp_{q̄} (which came from a solid cell and is junk) with `f_in[i,j,q] + δ_{q̄}` — a lag-1 halfway-BB estimate, consistent with the classical halfway-BB storage at solids (which my DSL replaces with SolidInert equilibrium). At q_w=0.5 this is Bouzidi for pre-collision. Used alongside ApplyLiBB (post-collision) to close the moment-consistency loop."
+struct ApplyHalfwayBBPrePhase <: LBMBrick end
+required_args(::ApplyHalfwayBBPrePhase) = (:f_in, :q_wall, :uw_link_x, :uw_link_y)
+emit_code(::ApplyHalfwayBBPrePhase) = quote
+    # Pair (2, 4): link q=2 flagged → corrupted pop is fp4.
+    if q_wall[i, j, 2] > zero(T)
+        δ4 = -T(2/3) * uw_link_x[i, j, 2]
+        fp4 = f_in[i, j, 2] + δ4
+    end
+    if q_wall[i, j, 4] > zero(T)
+        δ2 =  T(2/3) * uw_link_x[i, j, 4]
+        fp2 = f_in[i, j, 4] + δ2
+    end
+    # Pair (3, 5)
+    if q_wall[i, j, 3] > zero(T)
+        δ5 = -T(2/3) * uw_link_y[i, j, 3]
+        fp5 = f_in[i, j, 3] + δ5
+    end
+    if q_wall[i, j, 5] > zero(T)
+        δ3 =  T(2/3) * uw_link_y[i, j, 5]
+        fp3 = f_in[i, j, 5] + δ3
+    end
+    # Pair (6, 8)
+    if q_wall[i, j, 6] > zero(T)
+        δ8 = -T(1/6) * (uw_link_x[i, j, 6] + uw_link_y[i, j, 6])
+        fp8 = f_in[i, j, 6] + δ8
+    end
+    if q_wall[i, j, 8] > zero(T)
+        δ6 =  T(1/6) * (uw_link_x[i, j, 8] + uw_link_y[i, j, 8])
+        fp6 = f_in[i, j, 8] + δ6
+    end
+    # Pair (7, 9)
+    if q_wall[i, j, 7] > zero(T)
+        δ9 = -T(1/6) * (-uw_link_x[i, j, 7] + uw_link_y[i, j, 7])
+        fp9 = f_in[i, j, 7] + δ9
+    end
+    if q_wall[i, j, 9] > zero(T)
+        δ7 =  T(1/6) * (-uw_link_x[i, j, 9] + uw_link_y[i, j, 9])
+        fp7 = f_in[i, j, 9] + δ7
+    end
+end
+
+"Pre-collision axes-only halfway-BB substitution. Like ApplyHalfwayBBPrePhase but skips diagonal pops (q=6..9) so that diagonals remain as rest-equilibrium from SolidInert. Hypothesis-testing brick for investigating the near-wall residual of ApplyHalfwayBBPrePhase on diagonal links."
+struct ApplyHalfwayBBPrePhaseAxes <: LBMBrick end
+required_args(::ApplyHalfwayBBPrePhaseAxes) = (:f_in, :q_wall, :uw_link_x, :uw_link_y)
+emit_code(::ApplyHalfwayBBPrePhaseAxes) = quote
+    if q_wall[i, j, 2] > zero(T)
+        δ4 = -T(2/3) * uw_link_x[i, j, 2]
+        fp4 = f_in[i, j, 2] + δ4
+    end
+    if q_wall[i, j, 4] > zero(T)
+        δ2 =  T(2/3) * uw_link_x[i, j, 4]
+        fp2 = f_in[i, j, 4] + δ2
+    end
+    if q_wall[i, j, 3] > zero(T)
+        δ5 = -T(2/3) * uw_link_y[i, j, 3]
+        fp5 = f_in[i, j, 3] + δ5
+    end
+    if q_wall[i, j, 5] > zero(T)
+        δ3 =  T(2/3) * uw_link_y[i, j, 5]
+        fp3 = f_in[i, j, 5] + δ3
+    end
+end
+
 "Bouzidi interpolated bounce-back (LI-BB) overwrite on flagged cut links. Reads fp*c + fp*, writes fp*_new for q=2..9."
 struct ApplyLiBB <: LBMBrick end
 required_args(::ApplyLiBB) = (:q_wall, :uw_link_x, :uw_link_y)
