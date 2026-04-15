@@ -14,30 +14,96 @@
 # =====================================================================
 
 """
-    compute_drag_libb_2d(f_post, q_wall, Nx, Ny)
+    compute_drag_libb_2d(f_pre, q_wall, Nx, Ny)
         -> (Fx, Fy)
 
-MEA-style drag/lift integration for LI-BB boundaries (stationary wall).
-`f_post[i, j, q]` must be the post-collision population at the fluid
-node after the LI-BB V2 step (same array the kernel wrote). Sums
-`2·c_q·f_q` over every fluid cell with `q_wall[i, j, q] > 0`.
-
-For a moving wall the signature generalises to include a Ladd
-correction; not needed for Schäfer-Turek (wall stationary).
+Simple halfway-BB MEA drag (2·c_q·f_q at the fluid cell). Underestimates
+Cd when q_w ≠ 0.5; kept for the old scaffold/test. Prefer
+`compute_drag_libb_mei_2d` for quantitative Schäfer-Turek-style
+benchmarks.
 """
 function compute_drag_libb_2d(f_post, q_wall, Nx::Int, Ny::Int)
     f = Array(f_post)
     qw = Array(q_wall)
     cxv = (0, 1, 0, -1,  0, 1, -1, -1,  1)
     cyv = (0, 0, 1,  0, -1, 1,  1, -1, -1)
-    Fx = 0.0
-    Fy = 0.0
+    Fx = 0.0; Fy = 0.0
     @inbounds for j in 1:Ny, i in 1:Nx
         for q in 2:9
             if qw[i, j, q] > 0
                 Fx += 2.0 * Float64(cxv[q]) * Float64(f[i, j, q])
                 Fy += 2.0 * Float64(cyv[q]) * Float64(f[i, j, q])
             end
+        end
+    end
+    return (Fx = Fx, Fy = Fy)
+end
+
+# Opposite direction lookup for D2Q9 (q=1..9).
+const _D2Q9_OPP = (1, 4, 5, 2, 3, 8, 9, 6, 7)
+
+"""
+    compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y, Nx, Ny)
+        -> (Fx, Fy)
+
+Mei-Luo-Shyy 2002 (J. Comput. Phys. 161, 680) momentum-exchange drag
+for LI-BB. Consistent with the V2 pre-phase Bouzidi substitution: for
+each cut link q on a fluid cell, the force per link per step is
+
+    F_link = c_q · (f_q_pre + f_q̄_bouzidi)
+
+where `f_q_pre = f_pre[i,j,q]` (pop q pre-step at the fluid cell,
+i.e. post-coll from the previous step) and `f_q̄_bouzidi` is the
+arriving pop computed via the same `_libb_branch` used in the
+kernel's ApplyLiBBPrePhase brick (lag-1 Bouzidi estimate). Reduces to
+`2·c_q·f_q` at q_w = 0.5 stationary, matching the halfway formula.
+
+`f_pre` must be the `f_in` array at step N (= `f_out` from step N-1
+BEFORE the boundary patches of step N are applied; in the driver we
+pass the full `f_in` each sampling step). `uw_link_x/y` are the per-
+link wall-velocity arrays (zero for a stationary cylinder).
+"""
+function compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y,
+                                    Nx::Int, Ny::Int)
+    f = Array(f_pre)
+    qw = Array(q_wall)
+    uwx = Array(uw_link_x); uwy = Array(uw_link_y)
+    cxv = (0, 1, 0, -1,  0, 1, -1, -1,  1)
+    cyv = (0, 0, 1,  0, -1, 1,  1, -1, -1)
+    Fx = 0.0; Fy = 0.0
+    # Helper: δ for the arriving pop q̄ given outgoing link q.
+    # δ_{q̄} = -2 w_q (c_q · u_w) / c_s² = -6 w_q (c_q · u_w). For axis
+    # links (w=1/9): δ = -(2/3)(c_q·u_w); for diagonal (w=1/36):
+    # δ = -(1/6)(c_q·u_w).
+    @inbounds for j in 1:Ny, i in 1:Nx
+        for q in 2:9
+            q_w = qw[i, j, q]
+            q_w > 0 || continue
+            qbar = _D2Q9_OPP[q]
+            # Pulled value (f_post_back in Bouzidi): the pop q at the
+            # opposite-to-wall neighbour, i.e. pulled along -c_q.
+            im = i - cxv[q]; jm = j - cyv[q]
+            # Clamp to domain (matches the fused kernel's fallback:
+            # out-of-range → reflect to the same cell's opposite pop).
+            fp_q_back = (1 <= im <= Nx && 1 <= jm <= Ny) ?
+                Float64(f[im, jm, q]) : Float64(f[i, j, qbar])
+            fq_here = Float64(f[i, j, q])
+            fqbar_here = Float64(f[i, j, qbar])
+            # δ_{q̄} from wall velocity at this link
+            w_q = (q in (2, 3, 4, 5)) ? 1.0/9.0 : 1.0/36.0
+            cu = Float64(cxv[q]) * uwx[i, j, q] +
+                 Float64(cyv[q]) * uwy[i, j, q]
+            δ = -6.0 * w_q * cu
+            # Bouzidi branch
+            arriving = if q_w ≤ 0.5
+                2q_w * fq_here + (1 - 2q_w) * fp_q_back + δ
+            else
+                inv2q = 1.0 / (2q_w)
+                inv2q * fq_here + (1 - inv2q) * fqbar_here + inv2q * δ
+            end
+            F_link = fq_here + arriving
+            Fx += Float64(cxv[q]) * F_link
+            Fy += Float64(cyv[q]) * F_link
         end
     end
     return (Fx = Fx, Fy = Fy)
@@ -117,13 +183,18 @@ function run_cylinder_libb_2d(; Nx::Int=300, Ny::Int=80,
             f_out[1, j, q] = Kraken.equilibrium(D2Q9(), one(T),
                                                 u_profile[j], zero(T), q)
         end
-        # Outlet (east): Neumann (zero-gradient) on f — copy from i=Nx-1.
+        # Outlet (east): Neumann zero-gradient (Zou-He pressure BC
+        # combined with V2 pre-phase diverges in this setup — the
+        # corner interaction between the halfway-BB fallback at j=1,
+        # j=Ny and the on-node Zou-He at i=Nx is unstable. Neumann
+        # is stable and approximates an outflow at the cost of some
+        # density drift in the bulk).
         @inbounds for j in 1:Ny, q in 1:9
             f_out[Nx, j, q] = f_out[Nx-1, j, q]
         end
 
         if step > max_steps - avg_window
-            drag = compute_drag_libb_2d(f_out, q_wall, Nx, Ny)
+            drag = compute_drag_libb_mei_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny)
             Fx_sum += drag.Fx
             Fy_sum += drag.Fy
             n_avg  += 1

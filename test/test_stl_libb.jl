@@ -79,7 +79,7 @@ end
         @test 0.2 < sum(is_solid) / N^2 < 0.4
 
         # Every fluid cell with a flagged link must have that link's
-        # neighbour actually inside the solid mask.
+        # neighbour actually inside the solid mask, and q_w ∈ (0, 1].
         cxs = velocities_x(D2Q9())
         cys = velocities_y(D2Q9())
         for j in 1:N, i in 1:N
@@ -89,10 +89,17 @@ end
                     ni = i + Int(cxs[q]); nj = j + Int(cys[q])
                     @test 1 <= ni <= N && 1 <= nj <= N
                     @test is_solid[ni, nj]
-                    @test qw[i, j, q] == 0.5   # halfway BB default
+                    @test 0 < qw[i, j, q] <= 1
                 end
             end
         end
+
+        # Sub-cell q_w distribution: values should span (0, 1], not
+        # be constant 0.5.
+        cuts = filter(>(0), vec(qw))
+        @test length(cuts) > 20
+        @test minimum(cuts) < 0.4   # some clearly < 0.5
+        @test maximum(cuts) > 0.6   # some clearly > 0.5
 
         # Ring of fluid cells around the cylinder must have at least
         # one flagged link each.
