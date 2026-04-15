@@ -46,6 +46,8 @@ include("kernels/pressure_vof_2d.jl")
 include("kernels/smooth_vof_2d.jl")
 include("kernels/ghost_fluid_2d.jl")
 include("kernels/fused_bgk_2d.jl")
+include("kernels/fused_trt_2d.jl")
+include("kernels/li_bb_2d.jl")
 include("kernels/aa_bgk_2d.jl")
 include("kernels/persistent_bgk_2d.jl")
 include("kernels/advect_prescribed_2d.jl")
@@ -133,6 +135,9 @@ export apply_fixed_temp_west_3d!, apply_fixed_temp_east_3d!
 export apply_fixed_temp_south_3d!, apply_fixed_temp_north_3d!
 export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
+export fused_trt_step!, trt_rates
+export fused_trt_libb_step!, precompute_q_wall_cylinder
+export wall_velocity_rotating_cylinder
 export persistent_fused_bgk!, persistent_aa_bgk!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
