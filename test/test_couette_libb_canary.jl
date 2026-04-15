@@ -1,0 +1,204 @@
+using Test
+using Kraken
+
+# ==========================================================================
+# Planar Couette — LI-BB + TRT canary
+#
+# Smoking-gun test for the double-BC bug described in
+# docs/design/libb_refactor_plan.md.
+#
+# Setup
+# -----
+# Domain Nx × Ny lattice. Rows j=1 and j=Ny are flagged as solid. Rows
+# j=2..Ny-1 are fluid. Links from the fluid row j=2 into the south solid
+# (q=5, 8, 9) carry q_wall=0.5 (halfway cut). Links from the fluid row
+# j=Ny-1 into the north solid (q=3, 6, 7) carry q_wall=0.5. The north
+# wall moves at (u_top, 0); the south wall is stationary.
+#
+# Columns i=1 and i=Nx are ghost columns: after each step we copy
+# f_out[1,:,:] ← f_out[Nx-1,:,:] and f_out[Nx,:,:] ← f_out[2,:,:] so
+# that the kernel's default halfway-BB fallback at the x boundaries is
+# overridden by periodicity. Sampling happens in the interior column.
+#
+# With q_w = 0.5 uniformly, Bouzidi's formula reduces to halfway BB +
+# Ladd's moving-wall correction. The steady-state velocity profile is
+# exactly linear:
+#
+#     u_x(y) = u_top · (y − y_bot) / (y_top − y_bot)
+#
+# with y_bot = 0.5 and y_top = Ny − 1.5 (the wall sits halfway between
+# solid row j=1 / fluid row j=2 and between fluid row j=Ny-1 / solid
+# row j=Ny). So for fluid row j (j=2..Ny-1):
+#
+#     u_ana(j) = u_top · (j − 1.5) / (Ny − 2)
+#
+# Expected behaviour
+# ------------------
+# CORRECT kernel: L2(u_x, u_ana) < 0.1 %, u_y ~ machine-eps, u_x > 0
+# everywhere in the gap.
+#
+# CURRENT kernel (bug — 2026-04-15): u_x stays non-negative and u_y
+# stays ≈ 0 (so the profile is 1D, as expected from the symmetry), but
+# the linear profile is badly CORRUPTED in amplitude: L2_rel ≈ 47 %,
+# Linf_rel ≈ 55 %. The profile is flattened — u_x at the top wall only
+# reaches ~45 % of u_top instead of saturating near 100 %. This is the
+# signature of the double-BC bug: part of the wall-driven momentum is
+# silently cancelled by the second application of bounce-back.
+#
+# (The plan's original description of "u_x NEGATIVE in the bottom half"
+# came from a different setup — the corruption mode here is amplitude
+# loss, not sign reversal. Same root cause.)
+# ==========================================================================
+
+function planar_couette_libb_setup(Nx::Int, Ny::Int, u_top::Real;
+                                    FT::Type{<:AbstractFloat}=Float64)
+    is_solid = zeros(Bool, Nx, Ny)
+    is_solid[:, 1]  .= true
+    is_solid[:, Ny] .= true
+    q_wall = zeros(FT, Nx, Ny, 9)
+    uw_x   = zeros(FT, Nx, Ny, 9)
+    uw_y   = zeros(FT, Nx, Ny, 9)
+    # Row j=2 (fluid, bottom-adjacent): south-pointing links cross wall
+    # q=5 (S), q=8 (SW), q=9 (SE) — D2Q9 Kraken convention
+    for i in 1:Nx
+        q_wall[i, 2, 5] = FT(0.5)
+        q_wall[i, 2, 8] = FT(0.5)
+        q_wall[i, 2, 9] = FT(0.5)
+        # Bottom wall stationary → uw_x/y stay at 0
+    end
+    # Row j=Ny-1 (fluid, top-adjacent): north-pointing links cross wall
+    # q=3 (N), q=6 (NE), q=7 (NW). Wall moves at (u_top, 0).
+    for i in 1:Nx
+        q_wall[i, Ny-1, 3] = FT(0.5)
+        q_wall[i, Ny-1, 6] = FT(0.5)
+        q_wall[i, Ny-1, 7] = FT(0.5)
+        uw_x[i, Ny-1, 3] = FT(u_top)
+        uw_x[i, Ny-1, 6] = FT(u_top)
+        uw_x[i, Ny-1, 7] = FT(u_top)
+    end
+    return is_solid, q_wall, uw_x, uw_y
+end
+
+# Copy interior column Nx-1 into ghost column 1, and interior column 2
+# into ghost column Nx. Call after every step to fake x-periodicity.
+function wrap_periodic_x!(f::AbstractArray{T,3}) where {T}
+    Nx, Ny, Q = size(f)
+    @inbounds for q in 1:Q, j in 1:Ny
+        f[1,  j, q] = f[Nx-1, j, q]
+        f[Nx, j, q] = f[2,    j, q]
+    end
+    return f
+end
+
+function run_planar_couette_libb(; Nx::Int=8, Ny::Int=33,
+                                    ν::Real=0.1, u_top::Real=0.01,
+                                    steps::Int=5000,
+                                    stepper! = fused_trt_libb_step!)
+    is_solid, qw, uw_x, uw_y = planar_couette_libb_setup(Nx, Ny, u_top)
+    f_in = zeros(Float64, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        f_in[i, j, q] = Kraken.equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+    end
+    wrap_periodic_x!(f_in)
+    f_out = similar(f_in)
+    ρ  = ones(Nx, Ny); ux = zeros(Nx, Ny); uy = zeros(Nx, Ny)
+    for _ in 1:steps
+        stepper!(f_out, f_in, ρ, ux, uy, is_solid,
+                 qw, uw_x, uw_y, Nx, Ny, ν)
+        wrap_periodic_x!(f_out)
+        f_in, f_out = f_out, f_in
+    end
+    return (; Nx, Ny, u_top, ρ, ux, uy, is_solid)
+end
+
+@testset "Planar Couette — LI-BB canary (documents libb double-BC bug)" begin
+
+    out = run_planar_couette_libb(; Nx=8, Ny=33,
+                                    ν=0.1, u_top=0.01, steps=5000)
+    Nx, Ny, u_top = out.Nx, out.Ny, out.u_top
+
+    H = Float64(Ny - 2)
+    u_ana = [u_top * (j - 1.5) / H for j in 2:Ny-1]
+
+    # Sample interior column (away from ghost columns)
+    i_mid = Nx ÷ 2
+    u_num = out.ux[i_mid, 2:Ny-1]
+    uy_num = out.uy[i_mid, 2:Ny-1]
+
+    errs = u_num .- u_ana
+    L2_rel = sqrt(sum(errs .^ 2) / sum(u_ana .^ 2))
+    Linf_rel = maximum(abs.(errs)) / u_top
+    u_min_bottom_half = minimum(u_num[1:length(u_num)÷2])
+
+    @info "Planar Couette LI-BB canary" Nx Ny steps=5000 L2_rel Linf_rel u_min_bottom_half
+
+    # Hard invariants that hold regardless of bug
+    @test all(isfinite.(out.ux))
+    @test all(isfinite.(out.uy))
+    # Sign of u_x not corrupted in this setup (see header notes)
+    @test u_min_bottom_half ≥ 0
+    # 1D invariance preserved (no spurious uy)
+    @test maximum(abs.(uy_num)) / u_top < 1e-6
+
+    # Bug signature: amplitude corruption. These must FLIP to @test
+    # once the refactor lands.
+    @test_broken L2_rel < 1e-3
+    @test_broken Linf_rel < 2e-3
+
+end
+
+@testset "Planar Couette — LI-BB V2 (DSL-refactored, partial fix)" begin
+
+    # V2 uses spec: PullHalfwayBB, SolidInert (rest-eq), Moments,
+    # CollideTRT, ApplyLiBB, RecomputeMoments, WriteFLiBB, WriteMoments.
+    #
+    # Status 2026-04-15:
+    #  - V2 cuts the bug magnitude from L2≈47 % (legacy) to L2≈30 %,
+    #    i.e. ~40 % of the error eliminated. The `SolidInert` +
+    #    `RecomputeMoments` combo removes the double-bounce-back but
+    #    leaves a residual shape defect: the velocity profile has the
+    #    right sign and is smooth, but its slope in the bulk is
+    #    ~1.3× too steep while the near-wall cells undershoot
+    #    (ratio u_num/u_ana ≈ 0.7).
+    #  - Diagnosis: the solid rest-equilibrium populations contribute
+    #    a fixed isotropic mass/momentum to the pre-collision moments
+    #    of wall-adjacent fluid cells, biasing the collision. The fix
+    #    pathway is probably Path B (two-pass: stream+collide, then
+    #    apply_li_bb) which lets ApplyLiBB overwrite moments AND
+    #    collision inputs coherently, or a careful CollideTRT variant
+    #    that masks out solid-sourced pops.
+    #  - The DSL infrastructure is validated regardless — the three
+    #    oracle tests (test_kernel_dsl.jl) prove bit-exact fidelity
+    #    with the legacy kernels, so further fix iterations can
+    #    proceed by editing the spec only.
+
+    out = run_planar_couette_libb(; Nx=8, Ny=33,
+                                    ν=0.1, u_top=0.01, steps=5000,
+                                    stepper! = fused_trt_libb_v2_step!)
+    Nx, Ny, u_top = out.Nx, out.Ny, out.u_top
+
+    H = Float64(Ny - 2)
+    u_ana = [u_top * (j - 1.5) / H for j in 2:Ny-1]
+
+    i_mid = Nx ÷ 2
+    u_num = out.ux[i_mid, 2:Ny-1]
+    uy_num = out.uy[i_mid, 2:Ny-1]
+    errs = u_num .- u_ana
+    L2_rel = sqrt(sum(errs .^ 2) / sum(u_ana .^ 2))
+    Linf_rel = maximum(abs.(errs)) / u_top
+    u_min_bottom_half = minimum(u_num[1:length(u_num)÷2])
+
+    @info "Planar Couette LI-BB V2" Nx Ny steps=5000 L2_rel Linf_rel u_min_bottom_half
+
+    # Non-regressions (all hold under V2)
+    @test all(isfinite.(out.ux))
+    @test all(isfinite.(out.uy))
+    @test u_min_bottom_half ≥ 0
+    @test maximum(abs.(uy_num)) / u_top < 1e-6
+    # Progress gate: V2 must improve strictly on the legacy L2=47 %.
+    @test L2_rel < 0.35
+    # Ultimate target still unmet — flip when Path B / refined spec lands.
+    @test_broken L2_rel < 1e-3
+    @test_broken Linf_rel < 2e-3
+
+end
