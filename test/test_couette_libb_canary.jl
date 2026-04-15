@@ -175,7 +175,7 @@ end
     # V2: L2 ≈ 1.7e-5 (CPU Float64, Ny=33, 5000 steps).
 
     out = run_planar_couette_libb(; Nx=8, Ny=33,
-                                    ν=0.1, u_top=0.01, steps=5000,
+                                    ν=0.1, u_top=0.01, steps=20_000,
                                     stepper! = fused_trt_libb_v2_step!)
     Nx, Ny, u_top = out.Nx, out.Ny, out.u_top
 

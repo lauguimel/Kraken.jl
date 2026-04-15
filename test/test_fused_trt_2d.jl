@@ -4,11 +4,14 @@ using Kraken
 @testset "Fused TRT 2D" begin
 
     @testset "trt_rates — magic Λ=3/16 gives canonical values" begin
-        # At ν = 1/6 (τ = 1.0), s_minus = 1/(3·(1/6) + 0.5) = 1.0
-        # Λ = 3/16 ⇒ s_plus = 1/(3/16 / 0.5 + 0.5) = 1/(3/8 + 1/2) = 1/(7/8) = 8/7
+        # Convention (post-2026-04-15 label fix, Ginzburg/Krüger):
+        #   s_plus  rate on symmetric (even) mode, fixes viscosity.
+        #   s_minus rate on antisymmetric (odd) mode, set by Λ.
+        # At ν = 1/6 (τ = 1.0): s_plus = 1/(3·1/6 + 0.5) = 1.0.
+        # Λ = 3/16 ⇒ s_minus = 1/((3/16)/(0.5) + 0.5) = 8/7.
         sp, sm = trt_rates(1/6; Λ=3/16)
-        @test sm ≈ 1.0 atol=1e-12
-        @test sp ≈ 8/7 atol=1e-12
+        @test sp ≈ 1.0 atol=1e-12
+        @test sm ≈ 8/7 atol=1e-12
     end
 
     @testset "trt_rates — magic Λ reproduces BGK when Λ = (1/s−1/2)²" begin

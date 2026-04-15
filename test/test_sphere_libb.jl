@@ -79,10 +79,10 @@ _pick_3d_backend() =
         A_sphere = π * radius^2
         u_gap_expected = Float64(u_in) * Ny * Nz / (Ny * Nz - A_sphere)
         @test 0.7 * u_gap_expected < u_gap_mean < 1.3 * u_gap_expected
-        # Drag — KNOWN BUG shared with 2D driver (Mei MEA on V2 post-coll
-        # pops gives Cd that scales with Re instead of 1/Re). Tracked in
-        # project memory. At Re=20, expected Cd ≈ 2.6 but measured ≈ 80-100.
-        @test_broken 0.5 < result.Cd < 5.0
+        # Drag: 3D sphere uniform inflow Re=20 free-stream Cd ≈ 2.6
+        # (Clift et al. 1978). With moderate blockage and the LI-BB
+        # sub-cell q_w, expected range 1 .. 8.
+        @test 1.0 < result.Cd < 8.0
     end
 
     @info "Sphere LI-BB Re=20 (scaffold)" backend=bname Cd=result.Cd maxρm1=maximum(abs.(result.ρ .- 1))

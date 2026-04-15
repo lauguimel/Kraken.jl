@@ -98,17 +98,31 @@ end
     trt_rates(ν; Λ=3/16) -> (s_plus, s_minus)
 
 Compute the TRT relaxation rates from kinematic viscosity `ν` and the
-magic parameter `Λ`. The antisymmetric rate `s_minus = 1/(3ν + 1/2)` is
-fixed by viscosity; the symmetric rate is set by
-`(1/s_plus − 1/2)(1/s_minus − 1/2) = Λ`, so
-`s_plus = 1/( Λ/(3ν) + 1/2 )`.
+magic parameter `Λ`. Following Ginzburg & d'Humières 2003 (PRE 68,
+066614) and Krüger et al. 2017 (ch. 10.5):
 
-Default `Λ = 3/16` makes halfway bounce-back error independent of ν
-(Ginzburg & d'Humières 2003, PRE 68, 066614).
+- `s_plus` — rate of the SYMMETRIC (even) mode (f_q + f_q̄)/2. Sets
+  the kinematic shear viscosity via `ν = (1/s_plus − 1/2) / 3`, so
+  `s_plus = 1/(3ν + 1/2)`.
+- `s_minus` — rate of the ANTISYMMETRIC (odd) mode (f_q − f_q̄)/2.
+  Set by the magic parameter via `(1/s_plus − 1/2)(1/s_minus − 1/2) = Λ`,
+  so `s_minus = 1/(Λ/(3ν) + 1/2)`.
+
+The fused TRT/BGK collide in this file applies `s_plus` to the even
+mode and `s_minus` to the odd mode — consistent with this convention.
+Default `Λ = 3/16` makes the halfway bounce-back error
+viscosity-independent (Ginzburg & d'Humières 2003).
+
+Historical note: commits before 2026-04-15 returned the two rates with
+labels swapped (`s_plus` set from Λ, `s_minus` from ν). The collide
+formula then applied the Λ-derived rate to the even mode, giving an
+effective viscosity `ν_eff = Λ/(9ν)` ≈ 13×ν at Λ=3/16, ν=0.04. This
+inflated the real Re by ~13× and silently over-dragged every
+benchmark that relied on `trt_rates`. Fixed here.
 """
 function trt_rates(ν::Real; Λ::Real=3/16)
-    s_minus = 1.0 / (3ν + 0.5)
-    s_plus  = 1.0 / (Λ / (3ν) + 0.5)
+    s_plus  = 1.0 / (3ν + 0.5)
+    s_minus = 1.0 / (Λ / (3ν) + 0.5)
     return s_plus, s_minus
 end
 

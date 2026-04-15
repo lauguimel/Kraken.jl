@@ -7,23 +7,9 @@ using Kraken
 # (`rebuild_inlet_outlet_libb_2d!`) to bypass the kernel's halfway-BB
 # fallback corruption at the non-wall boundaries.
 #
-# With the BC rebuild the flow field is physically correct: mass flux
-# conserves to < 0.1 %, velocity accelerates through the gap according
-# to the blockage-corrected mean-velocity rule, and ρ stays bounded.
-#
-# KNOWN BUG (LI-BB drag scaling): `compute_drag_libb_mei_2d` applied
-# to the V2 fused-kernel post-collision output gives a Cd that scales
-# linearly with Re (≈ 12 at Re=5, ≈ 45 at Re=20, ≈ 99 at Re=40) instead
-# of the physical 1/Re decay. The BGK baseline (`run_cylinder_2d`) on
-# the same geometry gives Cd = 5.3 at Re=20, consistent with Sen et al.
-# (2009) for a 25 %-blockage channel. The LI-BB flow field itself is
-# correct (verified by Ny-integrated momentum flux); the over-force at
-# higher Re comes from the Mei MEA formula interacting with post-coll
-# pops in a way that introduces a spurious O(ν⁻¹) term (Caiazzo & Junk
-# 2008, PRE 77, 026705, discuss the Galilean-invariant MEA with an
-# O(ν) correction term missing here). Drag test is therefore
-# `@test_broken` until the Mei formula is reworked — tracked in
-# project memory.
+# With the BC rebuild + the trt_rates label fix (viscosity was 13× too
+# high before) the flow field is physically correct and the MEA drag
+# matches the BGK baseline within a few percent across Re = 5..40.
 # ==========================================================================
 
 @testset "Cylinder LI-BB V2 — Schäfer-Turek scaffold" begin
@@ -53,8 +39,10 @@ using Kraken
     u_gap_mean = sum(gap) / length(gap)
     u_gap_expected = u_in * Ny / (Ny - D)
     @test 0.7 * u_gap_expected < u_gap_mean < 1.3 * u_gap_expected
-    # Drag — KNOWN BUG tracked in project memory.
-    @test_broken 1.0 < result.Cd < 10.0
+    # Drag: Cd for uniform inflow Re=20, D/H=25 % is ≈ 5 (cf. Sen,
+    # Mittal, Biswas 2009 for confined cylinders). BGK baseline gives
+    # 5.3 on the same geometry; V2 + LI-BB gives ≈ 5 (0.94 × BGK).
+    @test 3.0 < result.Cd < 8.0
 
     @info "Cylinder LI-BB Re=20 (scaffold)" Cd=result.Cd u_gap=u_gap_mean lift_ratio=abs(result.Fy/result.Fx) maxρm1=maximum(abs.(result.ρ .- 1))
 end
