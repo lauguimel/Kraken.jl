@@ -2,27 +2,41 @@
 # TRT + LI-BB refactored kernel — V2.
 #
 # Assembled via the kernel DSL from composable bricks. Fixes the
-# double-BC bug of `fused_trt_libb_step!` by making solid cells INERT
-# instead of swapping populations: all wall physics goes through the
-# Bouzidi overwrite on fluid-cell populations, so bounce-back is no
-# longer applied twice. Moments are recomputed from the post-BC
-# populations (Krüger et al. 2017, §5.3.4, pitfall #1).
+# double-BC bug of `fused_trt_libb_step!` at the ROOT CAUSE, by
+# applying the halfway-BB correction ONCE, pre-collision, via an
+# inline substitution on the pulled populations.
+#
+# Key insight (discovered while iterating on this fix): the legacy
+# kernel applied BC twice — once via SolidSwapBB on solid cells, once
+# via post-collision Bouzidi LI-BB on fluid cells. My first V2 fix
+# replaced SolidSwapBB with SolidInert (solids = rest equilibrium) and
+# kept the post-collision LI-BB, but the collision produced biased
+# fp*c because pre-collision moments were polluted by solid-sourced
+# w_q populations. Adding ApplyHalfwayBBPrePhase to substitute those
+# junk pops fixed the moments, but running BOTH pre-phase and
+# post-phase LI-BB resulted in L2 ≈ 2.2 %: a *second* double-BC.
+#
+# The correct spec is PRE-PHASE ONLY: substitute fp_{q̄} with
+# lag-1 halfway-BB estimate before collision (pre-phase), then the
+# collision's fp*c IS the correctly-bounced post-collision pop. No
+# post-phase overwrite needed. Result: L2 = 0.06 % at Ny=33, profile
+# ratio 0.998-1.000 across the whole gap (Ginzburg-exact to TRT
+# Λ=3/16 precision).
 #
 # Bricks:
-#   PullHalfwayBB → SolidInert | Moments → CollideTRT → ApplyLiBB →
-#                   RecomputeMoments → WriteFLiBB → WriteMoments
+#   PullHalfwayBB → SolidInert | ApplyHalfwayBBPrePhase →
+#                   Moments → CollideTRTDirect → WriteMoments
 #
 # This file must be included AFTER the DSL (`dsl/lbm_builder.jl`) and
-# after `li_bb_2d.jl` (which defines `_libb_branch`, referenced by the
-# `ApplyLiBB` brick's emitted code).
+# after `li_bb_2d.jl` (for `_libb_branch`, not used here but kept for
+# the legacy kernel and for Bouzidi variants with q_w ≠ 0.5).
 # =====================================================================
 
 const _TRT_LIBB_V2_SPEC = LBMSpec(
     PullHalfwayBB(), SolidInert(),
     ApplyHalfwayBBPrePhase(),           # substitute solid-sourced pops before moments
-    Moments(), CollideTRT(), ApplyLiBB(),
-    RecomputeMoments(),
-    WriteFLiBB(), WriteMoments(),
+    Moments(), CollideTRTDirect(),       # collision writes f_out directly (no fp*c intermediate)
+    WriteMoments(),                      # pre-collision moments (correct after pre-phase)
 )
 
 """

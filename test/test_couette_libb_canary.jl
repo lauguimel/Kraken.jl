@@ -147,35 +147,33 @@ end
 
 end
 
-@testset "Planar Couette — LI-BB V2 (DSL refactor with pre-phase BB)" begin
+@testset "Planar Couette — LI-BB V2 (DSL refactor, Ginzburg-exact)" begin
 
     # V2 spec:
-    #   PullHalfwayBB, SolidInert, ApplyHalfwayBBPrePhase,
-    #   Moments, CollideTRT, ApplyLiBB, RecomputeMoments,
-    #   WriteFLiBB, WriteMoments
+    #   PullHalfwayBB → SolidInert | ApplyHalfwayBBPrePhase →
+    #                   Moments → CollideTRTDirect → WriteMoments
     #
-    # The fix has three ingredients versus the legacy fused_trt_libb:
-    # 1. SolidInert — solid cells carry rest-equilibrium populations
-    #    (w_q for ρ=1, u=0), not the BB-swapped pops of the legacy
-    #    SolidSwapBB. This removes the first of the two bounce-backs.
-    # 2. ApplyHalfwayBBPrePhase — for each flagged link q on a fluid
-    #    cell, the post-pull pop fp_{q̄} (which came from a solid cell
-    #    and is junk) is replaced with `f_in[i,j,q] + δ_{q̄}`: a lag-1
-    #    halfway-BB estimate plus Ladd's moving-wall correction. This
-    #    recovers the pre-collision moment consistency that the legacy
-    #    kernel had through SolidSwapBB without double-counting BB.
-    # 3. RecomputeMoments — ρ, ux, uy are recalculated from the
-    #    post-LI-BB populations (Krüger §5.3.4 pitfall #1).
+    # The fix: apply the halfway-BB correction ONCE, pre-collision, via
+    # substitution on the pulled populations:
+    # - SolidInert puts rest-equilibrium w_q on solid cells (bounces
+    #   done locally on the fluid cell via substitution, not via
+    #   stored swap at the solid, removing the first bounce-back path).
+    # - ApplyHalfwayBBPrePhase replaces each junk pulled pop fp_{q̄}
+    #   (sourced from a solid neighbour) with f_in[i,j,q] + δ_{q̄} —
+    #   a lag-1 halfway-BB estimate + Ladd moving-wall correction.
+    # - CollideTRTDirect then collides on properly-reconstructed pops,
+    #   and its post-collision output IS the correctly-bounced pop.
+    #   NO post-collision LI-BB overwrite is needed (applying it was
+    #   the second bounce-back in the legacy kernel).
     #
-    # Result on this canary (Nx=8, Ny=33, ν=0.1, u_top=0.01,
-    # 5000 steps): L2_rel = 2.2 %, Linf_rel = 2.2 %. A 21× improvement
-    # over the legacy kernel's L2 = 47 %. Remaining residual is in the
-    # 2-3 cells immediately adjacent to each wall (where halfway-BB
-    # is not bit-exact on diagonal links even with TRT Λ=3/16); bulk
-    # cells have ratio 0.99-1.02 vs the analytical linear profile.
-    # Refinement study (GPU Metal): L2 ~ 2.2 % at Ny=33, ~1.2 % at
-    # Ny=65, ~1.0 % at Ny=129 — converges slowly toward the halfway-BB
-    # asymptote.
+    # For q_w = 0.5 this reproduces Ginzburg's halfway-BB + TRT Λ=3/16
+    # exactness: L2_rel < 1e-4 at any resolution on CPU Float64. On
+    # Metal GPU Float32, error is limited by FP32 accumulation in
+    # long-running simulations (observed drift from 6e-4 at Ny=33 to
+    # ~8e-3 at Ny=129 with 300k steps, all well within the 0.01 gate).
+    #
+    # Legacy kernel on this same setup: L2 = 47 %.
+    # V2: L2 ≈ 1.7e-5 (CPU Float64, Ny=33, 5000 steps).
 
     out = run_planar_couette_libb(; Nx=8, Ny=33,
                                     ν=0.1, u_top=0.01, steps=5000,
@@ -199,12 +197,10 @@ end
     @test all(isfinite.(out.uy))
     @test u_min_bottom_half ≥ 0
     @test maximum(abs.(uy_num)) / u_top < 1e-6
-    # Firm gate: V2 is >15× better than the legacy kernel.
-    @test L2_rel < 0.03
-    @test Linf_rel < 0.03
-    # Bulk (away from walls) is essentially correct:
-    bulk = 4:length(u_ana)-3
-    L2_bulk = sqrt(sum(errs[bulk] .^ 2) / sum(u_ana[bulk] .^ 2))
-    @test L2_bulk < 0.025
+    # Ginzburg-exact gate: halfway-BB + TRT Λ=3/16 on Couette should
+    # recover the linear profile to machine-precision-like accuracy
+    # (well below 0.1 % L2).
+    @test L2_rel < 1e-4
+    @test Linf_rel < 1e-4
 
 end
