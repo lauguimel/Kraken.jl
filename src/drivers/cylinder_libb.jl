@@ -1,3 +1,5 @@
+using KernelAbstractions
+
 # =====================================================================
 # Schäfer-Turek-style cylinder drivers with Bouzidi LI-BB.
 #
@@ -109,19 +111,150 @@ function compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y,
     return (Fx = Fx, Fy = Fy)
 end
 
+# =====================================================================
+# Boundary "rebuild" for Zou-He inlet/outlet compatible with V2 kernel.
+#
+# Problem: the fused V2 kernel applies halfway-BB fallback at i=1 and
+# i=Nx (PullHalfwayBB brick), which corrupts the boundary density by
+# bouncing back the +x-streamed pops. A post-hoc Zou-He pressure outlet
+# then computes ux = −1 + (known)/ρ_out using these corrupted pops,
+# producing a wrong velocity that streams back into the interior. The
+# error grows exponentially and blows up in O(10) steps.
+#
+# Fix: after the kernel, OVERWRITE `f_out[1, j, :]` and
+# `f_out[Nx, j, :]` for j = 2..Ny-1 by rebuilding the cell from:
+#   (a) pre-step `f_in` values streamed from the interior along each
+#       real lattice link — NOT from the corrupted bounce-back at the
+#       boundary itself;
+#   (b) Zou-He velocity / pressure closure for the three unknown pops
+#       that would have streamed from outside the domain;
+#   (c) local TRT collision on the nine reconstructed pre-collision
+#       pops — same Λ = 3/16 as the kernel.
+#
+# Corners (i∈{1,Nx} ∧ j∈{1,Ny}) are left to the kernel's halfway-BB
+# fallback, since the parabolic profile prescribes u = 0 there (the
+# corner is a true no-slip point where inlet/outlet meets the
+# channel wall).
+# =====================================================================
+
+@inline function _trt_collide_local(f1::T, f2::T, f3::T, f4::T, f5::T,
+                                     f6::T, f7::T, f8::T, f9::T,
+                                     s_p::T, s_m::T) where {T}
+    ρ  = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+    ux = (f2 - f4 + f6 - f8 + f9 - f7) / ρ
+    uy = (f3 - f5 + f6 - f8 + f7 - f9) / ρ
+    usq = ux * ux + uy * uy
+    fe1 = feq_2d(Val(1), ρ, ux, uy, usq)
+    fe2 = feq_2d(Val(2), ρ, ux, uy, usq)
+    fe3 = feq_2d(Val(3), ρ, ux, uy, usq)
+    fe4 = feq_2d(Val(4), ρ, ux, uy, usq)
+    fe5 = feq_2d(Val(5), ρ, ux, uy, usq)
+    fe6 = feq_2d(Val(6), ρ, ux, uy, usq)
+    fe7 = feq_2d(Val(7), ρ, ux, uy, usq)
+    fe8 = feq_2d(Val(8), ρ, ux, uy, usq)
+    fe9 = feq_2d(Val(9), ρ, ux, uy, usq)
+    a = (s_p + s_m) * T(0.5)
+    b = (s_p - s_m) * T(0.5)
+    return (
+        f1 - s_p * (f1 - fe1),
+        f2 - a * (f2 - fe2) - b * (f4 - fe4),
+        f3 - a * (f3 - fe3) - b * (f5 - fe5),
+        f4 - a * (f4 - fe4) - b * (f2 - fe2),
+        f5 - a * (f5 - fe5) - b * (f3 - fe3),
+        f6 - a * (f6 - fe6) - b * (f8 - fe8),
+        f7 - a * (f7 - fe7) - b * (f9 - fe9),
+        f8 - a * (f8 - fe8) - b * (f6 - fe6),
+        f9 - a * (f9 - fe9) - b * (f7 - fe7),
+    )
+end
+
+"""
+    rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out, ν, Nx, Ny)
+
+Overwrite `f_out[1, j, :]` and `f_out[Nx, j, :]` for j = 2..Ny-1 using
+pre-collision Zou-He reconstruction + local TRT collision.
+
+- Inlet (west, i=1): Zou-He velocity with `u = u_profile[j]`, v = 0.
+- Outlet (east, i=Nx): Zou-He pressure with ρ = ρ_out, v = 0.
+
+Call this *after* `fused_trt_libb_v2_step!` and *before* swapping
+`f_in`/`f_out`. `f_in` must still hold the pre-step populations.
+"""
+@kernel function _rebuild_west_libb_2d_kernel!(f_out, f_in, u_profile, s_p, s_m)
+    jm1 = @index(Global)
+    j = jm1 + 1
+    T = eltype(f_out)
+    @inbounds begin
+        fp1 = f_in[1, j,   1]
+        fp3 = f_in[1, j-1, 3]
+        fp4 = f_in[2, j,   4]
+        fp5 = f_in[1, j+1, 5]
+        fp7 = f_in[2, j-1, 7]
+        fp8 = f_in[2, j+1, 8]
+        u_in = u_profile[j]
+        ρ_w  = (fp1 + fp3 + fp5 + T(2) * (fp4 + fp7 + fp8)) / (one(T) - u_in)
+        fp2  = fp4 + T(2/3) * ρ_w * u_in
+        fp6  = fp8 - T(0.5) * (fp3 - fp5) + T(1/6) * ρ_w * u_in
+        fp9  = fp7 + T(0.5) * (fp3 - fp5) + T(1/6) * ρ_w * u_in
+        F1,F2,F3,F4,F5,F6,F7,F8,F9 = _trt_collide_local(
+            fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, s_p, s_m)
+        f_out[1, j, 1] = F1; f_out[1, j, 2] = F2; f_out[1, j, 3] = F3
+        f_out[1, j, 4] = F4; f_out[1, j, 5] = F5; f_out[1, j, 6] = F6
+        f_out[1, j, 7] = F7; f_out[1, j, 8] = F8; f_out[1, j, 9] = F9
+    end
+end
+
+@kernel function _rebuild_east_libb_2d_kernel!(f_out, f_in, Nx, ρ_out, s_p, s_m)
+    jm1 = @index(Global)
+    j = jm1 + 1
+    T = eltype(f_out)
+    @inbounds begin
+        fp1 = f_in[Nx,   j,   1]
+        fp2 = f_in[Nx-1, j,   2]
+        fp3 = f_in[Nx,   j-1, 3]
+        fp5 = f_in[Nx,   j+1, 5]
+        fp6 = f_in[Nx-1, j-1, 6]
+        fp9 = f_in[Nx-1, j+1, 9]
+        u_x = -one(T) + (fp1 + fp3 + fp5 + T(2) * (fp2 + fp6 + fp9)) / ρ_out
+        fp4 = fp2 - T(2/3) * ρ_out * u_x
+        fp7 = fp9 - T(0.5) * (fp3 - fp5) - T(1/6) * ρ_out * u_x
+        fp8 = fp6 + T(0.5) * (fp3 - fp5) - T(1/6) * ρ_out * u_x
+        F1,F2,F3,F4,F5,F6,F7,F8,F9 = _trt_collide_local(
+            fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, s_p, s_m)
+        f_out[Nx, j, 1] = F1; f_out[Nx, j, 2] = F2; f_out[Nx, j, 3] = F3
+        f_out[Nx, j, 4] = F4; f_out[Nx, j, 5] = F5; f_out[Nx, j, 6] = F6
+        f_out[Nx, j, 7] = F7; f_out[Nx, j, 8] = F8; f_out[Nx, j, 9] = F9
+    end
+end
+
+function rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out::Real,
+                                        ν::Real, Nx::Int, Ny::Int)
+    backend = KernelAbstractions.get_backend(f_out)
+    T = eltype(f_out)
+    s_p_r, s_m_r = trt_rates(ν; Λ=3/16)
+    s_p = T(s_p_r); s_m = T(s_m_r); ρ_o = T(ρ_out)
+    kw! = _rebuild_west_libb_2d_kernel!(backend)
+    ke! = _rebuild_east_libb_2d_kernel!(backend)
+    kw!(f_out, f_in, u_profile, s_p, s_m; ndrange=(Ny - 2,))
+    ke!(f_out, f_in, Nx, ρ_o, s_p, s_m; ndrange=(Ny - 2,))
+    return nothing
+end
+
 """
     run_cylinder_libb_2d(; Nx=300, Ny=80, cx=Nx÷4, cy=Ny÷2, radius=10,
                           u_in=0.04, ν=0.04, max_steps=50000,
-                          avg_window=5000, inlet=:parabolic)
+                          avg_window=5000, inlet=:parabolic, ρ_out=1.0)
 
-2D cylinder with LI-BB V2 boundary condition. Zou-He inlet (uniform
-or parabolic), pressure outlet via Zou-He, halfway-BB top/bottom walls
-(fused kernel fallback at j=1 and j=Ny).
+2D cylinder with LI-BB V2 boundary condition. Parabolic / uniform
+Zou-He velocity inlet, Zou-He pressure outlet; both reconstructed from
+pre-step populations to bypass the kernel's halfway-BB fallback
+corruption at the non-wall boundaries. Top / bottom channel walls are
+halfway-BB via the kernel's fallback at j=1 and j=Ny.
 
 Arguments:
-- `u_in`: inlet velocity scale. Interpreted as centerline u_max for
-  parabolic inlet; as uniform velocity for `:uniform` inlet.
-- `inlet`: `:parabolic` (Schäfer-Turek 2D-1 convention) or `:uniform`.
+- `u_in`: centerline u_max for `:parabolic` inlet; uniform u for `:uniform`.
+- `inlet`: `:parabolic` (Schäfer-Turek 2D convention) or `:uniform`.
+- `ρ_out`: outlet density for the Zou-He pressure BC (default 1).
 
 Returns a NamedTuple with:
 - `ρ`, `ux`, `uy`, `is_solid`, `q_wall`, `u_ref`, `D`, `Fx`, `Fy`
@@ -129,7 +262,7 @@ Returns a NamedTuple with:
   (parabolic) or `u_ref = u_in` (uniform).
 - `Cl` analogously.
 
-Reference for Schäfer-Turek 2D-1 (Re=20, blockage 10%): Cd ≈ 5.58.
+Reference for Schäfer-Turek 2D-1 (Re=20, blockage ≈ 25%): Cd ≈ 5.58.
 """
 function run_cylinder_libb_2d(; Nx::Int=300, Ny::Int=80,
                                 cx::Union{Nothing,Real}=nothing,
@@ -139,69 +272,64 @@ function run_cylinder_libb_2d(; Nx::Int=300, Ny::Int=80,
                                 max_steps::Int=50_000,
                                 avg_window::Int=5_000,
                                 inlet::Symbol=:parabolic,
+                                ρ_out::Real=1.0,
+                                backend=KernelAbstractions.CPU(),
                                 T::Type{<:AbstractFloat}=Float64)
     cx = isnothing(cx) ? Nx ÷ 4 : Float64(cx)
     cy = isnothing(cy) ? Ny ÷ 2 : Float64(cy)
 
-    q_wall, is_solid = precompute_q_wall_cylinder(Nx, Ny, cx, cy, radius; FT=T)
-    uw_x = zeros(T, Nx, Ny, 9)
-    uw_y = zeros(T, Nx, Ny, 9)
+    q_wall_h, is_solid_h = precompute_q_wall_cylinder(Nx, Ny, cx, cy, radius; FT=T)
 
-    u_profile = if inlet === :parabolic
-        # u(y) = 4·u_max·(j-1)·(Ny-j) / (Ny-1)²  → peaks at u_max at center
+    u_prof_h = if inlet === :parabolic
         [T(4) * T(u_in) * T(j - 1) * T(Ny - j) / T(Ny - 1)^2 for j in 1:Ny]
     elseif inlet === :uniform
         fill(T(u_in), Ny)
     else
         error("unknown inlet $(inlet); expected :parabolic or :uniform")
     end
-    uy_profile = zeros(T, Ny)
     u_ref = inlet === :parabolic ? (2 / 3) * Float64(u_in) : Float64(u_in)
 
-    # Equilibrium init at the inlet profile; system converges over
-    # ν·max_steps time units.
-    f_in  = zeros(T, Nx, Ny, 9)
+    # Host-side initial populations
+    f_in_h  = zeros(T, Nx, Ny, 9)
     for j in 1:Ny, i in 1:Nx, q in 1:9
-        f_in[i, j, q] = Kraken.equilibrium(D2Q9(), one(T), u_profile[j],
-                                            zero(T), q)
+        f_in_h[i, j, q] = Kraken.equilibrium(D2Q9(), one(T), u_prof_h[j],
+                                               zero(T), q)
     end
-    f_out = similar(f_in)
-    ρ  = ones(T, Nx, Ny)
-    ux = zeros(T, Nx, Ny)
-    uy = zeros(T, Nx, Ny)
 
-    Fx_sum = 0.0
-    Fy_sum = 0.0
-    n_avg  = 0
+    # Device allocations
+    q_wall    = KernelAbstractions.allocate(backend, T, Nx, Ny, 9)
+    is_solid  = KernelAbstractions.allocate(backend, Bool, Nx, Ny)
+    uw_x      = KernelAbstractions.allocate(backend, T, Nx, Ny, 9)
+    uw_y      = KernelAbstractions.allocate(backend, T, Nx, Ny, 9)
+    f_in      = KernelAbstractions.allocate(backend, T, Nx, Ny, 9)
+    f_out     = KernelAbstractions.allocate(backend, T, Nx, Ny, 9)
+    ρ         = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    ux        = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    uy        = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    u_profile = KernelAbstractions.allocate(backend, T, Ny)
+    copyto!(q_wall, q_wall_h); copyto!(is_solid, is_solid_h)
+    fill!(uw_x, zero(T)); fill!(uw_y, zero(T))
+    copyto!(f_in, f_in_h); fill!(f_out, zero(T))
+    fill!(ρ, one(T)); fill!(ux, zero(T)); fill!(uy, zero(T))
+    copyto!(u_profile, u_prof_h)
+
+    Fx_sum = 0.0; Fy_sum = 0.0; n_avg = 0
 
     for step in 1:max_steps
         fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
                                  q_wall, uw_x, uw_y, Nx, Ny, T(ν))
-
-        # Inlet (west): equilibrium enforcement at ρ=1, u=u_profile[j].
-        @inbounds for j in 1:Ny, q in 1:9
-            f_out[1, j, q] = Kraken.equilibrium(D2Q9(), one(T),
-                                                u_profile[j], zero(T), q)
-        end
-        # Outlet (east): Neumann zero-gradient (Zou-He pressure BC
-        # combined with V2 pre-phase diverges in this setup — the
-        # corner interaction between the halfway-BB fallback at j=1,
-        # j=Ny and the on-node Zou-He at i=Nx is unstable. Neumann
-        # is stable and approximates an outflow at the cost of some
-        # density drift in the bulk).
-        @inbounds for j in 1:Ny, q in 1:9
-            f_out[Nx, j, q] = f_out[Nx-1, j, q]
-        end
+        # Pre-collision Zou-He rebuild at i=1 and i=Nx (j=2..Ny-1)
+        rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out, ν, Nx, Ny)
 
         if step > max_steps - avg_window
             drag = compute_drag_libb_mei_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny)
-            Fx_sum += drag.Fx
-            Fy_sum += drag.Fy
+            Fx_sum += drag.Fx; Fy_sum += drag.Fy
             n_avg  += 1
         end
 
         f_in, f_out = f_out, f_in
     end
+    KernelAbstractions.synchronize(backend)
 
     Fx_avg = Fx_sum / n_avg
     Fy_avg = Fy_sum / n_avg
@@ -209,6 +337,8 @@ function run_cylinder_libb_2d(; Nx::Int=300, Ny::Int=80,
     Cd     = 2.0 * Fx_avg / (u_ref^2 * D)
     Cl     = 2.0 * Fy_avg / (u_ref^2 * D)
 
-    return (; ρ, ux, uy, Cd, Cl, Fx = Fx_avg, Fy = Fy_avg,
-            q_wall, is_solid, u_ref, D, inlet)
+    return (; ρ = Array(ρ), ux = Array(ux), uy = Array(uy),
+             Cd, Cl, Fx = Fx_avg, Fy = Fy_avg,
+             q_wall = Array(q_wall), is_solid = Array(is_solid),
+             u_ref, D, inlet)
 end

@@ -136,6 +136,7 @@ export run_poiseuille_2d, run_couette_2d
 export initialize_taylor_green_2d, run_taylor_green_2d
 export initialize_cylinder_2d, run_cylinder_2d, compute_drag_mea_2d
 export run_cylinder_libb_2d, compute_drag_libb_2d, compute_drag_libb_mei_2d
+export rebuild_inlet_outlet_libb_2d!
 export collide_thermal_2d!, compute_temperature_2d!
 export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
