@@ -51,7 +51,8 @@ using Kraken
 # ==========================================================================
 
 function planar_couette_libb_setup(Nx::Int, Ny::Int, u_top::Real;
-                                    FT::Type{<:AbstractFloat}=Float64)
+                                    FT::Type{<:AbstractFloat}=Float64,
+                                    q_w::Real=0.5)
     is_solid = zeros(Bool, Nx, Ny)
     is_solid[:, 1]  .= true
     is_solid[:, Ny] .= true
@@ -59,19 +60,16 @@ function planar_couette_libb_setup(Nx::Int, Ny::Int, u_top::Real;
     uw_x   = zeros(FT, Nx, Ny, 9)
     uw_y   = zeros(FT, Nx, Ny, 9)
     # Row j=2 (fluid, bottom-adjacent): south-pointing links cross wall
-    # q=5 (S), q=8 (SW), q=9 (SE) — D2Q9 Kraken convention
     for i in 1:Nx
-        q_wall[i, 2, 5] = FT(0.5)
-        q_wall[i, 2, 8] = FT(0.5)
-        q_wall[i, 2, 9] = FT(0.5)
-        # Bottom wall stationary → uw_x/y stay at 0
+        q_wall[i, 2, 5] = FT(q_w)
+        q_wall[i, 2, 8] = FT(q_w)
+        q_wall[i, 2, 9] = FT(q_w)
     end
     # Row j=Ny-1 (fluid, top-adjacent): north-pointing links cross wall
-    # q=3 (N), q=6 (NE), q=7 (NW). Wall moves at (u_top, 0).
     for i in 1:Nx
-        q_wall[i, Ny-1, 3] = FT(0.5)
-        q_wall[i, Ny-1, 6] = FT(0.5)
-        q_wall[i, Ny-1, 7] = FT(0.5)
+        q_wall[i, Ny-1, 3] = FT(q_w)
+        q_wall[i, Ny-1, 6] = FT(q_w)
+        q_wall[i, Ny-1, 7] = FT(q_w)
         uw_x[i, Ny-1, 3] = FT(u_top)
         uw_x[i, Ny-1, 6] = FT(u_top)
         uw_x[i, Ny-1, 7] = FT(u_top)
@@ -93,8 +91,9 @@ end
 function run_planar_couette_libb(; Nx::Int=8, Ny::Int=33,
                                     ν::Real=0.1, u_top::Real=0.01,
                                     steps::Int=5000,
+                                    q_w::Real=0.5,
                                     stepper! = fused_trt_libb_step!)
-    is_solid, qw, uw_x, uw_y = planar_couette_libb_setup(Nx, Ny, u_top)
+    is_solid, qw, uw_x, uw_y = planar_couette_libb_setup(Nx, Ny, u_top; q_w=q_w)
     f_in = zeros(Float64, Nx, Ny, 9)
     for j in 1:Ny, i in 1:Nx, q in 1:9
         f_in[i, j, q] = Kraken.equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
@@ -202,5 +201,50 @@ end
     # (well below 0.1 % L2).
     @test L2_rel < 1e-4
     @test Linf_rel < 1e-4
+
+end
+
+@testset "Planar Couette — LI-BB V2 off-center (q_w ≠ 0.5)" begin
+
+    # Exercises the full Bouzidi interpolation (ApplyLiBBPrePhase brick,
+    # both q_w ≤ 0.5 and q_w > 0.5 branches of `_libb_branch`). The
+    # wall position is shifted from the halfway midpoint.
+    #
+    # For q_w uniform on both walls, the wall-to-fluid distance is:
+    #   - bottom wall at y = 1 − q_w   (fluid row j=2 sits at y=1)
+    #   - top wall at y = (Ny − 2) + q_w
+    # Gap H = (Ny − 2 + q_w) − (1 − q_w) = (Ny − 3) + 2·q_w.
+    # Analytical u_x(y) = u_top · (y − y_bot) / H.
+    # At fluid row j (y = j − 1): u_ana(j) = u_top · (j − 2 + q_w) / H.
+
+    for q_w in (0.3, 0.7)
+        Nx, Ny = 8, 33
+        u_top = 0.01; ν = 0.1
+        out = run_planar_couette_libb(; Nx=Nx, Ny=Ny, ν=ν, u_top=u_top,
+                                       steps=10_000, q_w=q_w,
+                                       stepper! = fused_trt_libb_v2_step!)
+
+        H = Float64(Ny - 3) + 2 * q_w
+        u_ana = [u_top * (j - 2 + q_w) / H for j in 2:Ny-1]
+
+        i_mid = Nx ÷ 2
+        u_num = out.ux[i_mid, 2:Ny-1]
+        uy_num = out.uy[i_mid, 2:Ny-1]
+        errs = u_num .- u_ana
+        L2_rel = sqrt(sum(errs .^ 2) / sum(u_ana .^ 2))
+        Linf_rel = maximum(abs.(errs)) / u_top
+
+        @info "Planar Couette V2 off-center" q_w Nx Ny L2_rel Linf_rel
+
+        @test all(isfinite.(out.ux))
+        @test all(isfinite.(out.uy))
+        @test maximum(abs.(uy_num)) / u_top < 1e-4
+        # Full Bouzidi + TRT Λ=3/16 on planar Couette is Ginzburg-exact
+        # at ALL q_w (once the factor-2 δ scaling bug in _libb_branch
+        # for q_w > 0.5 is fixed): L2 reaches machine precision at any
+        # off-center wall position.
+        @test L2_rel < 1e-4
+        @test Linf_rel < 1e-4
+    end
 
 end

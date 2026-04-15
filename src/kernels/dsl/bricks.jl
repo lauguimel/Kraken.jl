@@ -238,6 +238,61 @@ emit_code(::ApplyHalfwayBBPrePhaseAxes) = quote
     end
 end
 
+"Full Bouzidi interpolated bounce-back at the PRE-COLLISION phase. For arbitrary q_w ∈ (0, 1]. Substitutes each corrupted pulled pop fp_{q̄} using `_libb_branch(q_w, fp_post_here, fp_post_back, fp_bar_post_here, δ)` with all three values being lag-1 (post-collision from the previous step). This generalizes ApplyHalfwayBBPrePhase (which assumes q_w=0.5) to STL-style boundaries. At q_w=0.5 it reduces to ApplyHalfwayBBPrePhase exactly.
+
+Mapping of the three f̃ arguments in a pull-stream-collide fused kernel:
+ - `f_post_here` = f̃_q(x_f, t) ≈ f_in[i,j,q]  (pop q at current cell, post-coll-prev)
+ - `f_post_back` = f̃_q(x_f − c_q, t) ≈ fp_q   (pulled pop q = post-coll-prev at opposite-wall neighbour)
+ - `f_bar_post_here` = f̃_{q̄}(x_f, t) ≈ f_in[i,j,q̄]  (pop q̄ at current cell, post-coll-prev)"
+struct ApplyLiBBPrePhase <: LBMBrick end
+required_args(::ApplyLiBBPrePhase) = (:f_in, :q_wall, :uw_link_x, :uw_link_y)
+emit_code(::ApplyLiBBPrePhase) = quote
+    # Pair (2, 4): link q=2 flagged → corrupted pop is fp4 (=q̄ of q=2).
+    qw2 = q_wall[i, j, 2]
+    if qw2 > zero(T)
+        δ4 = -T(2/3) * uw_link_x[i, j, 2]
+        fp4 = _libb_branch(qw2, f_in[i, j, 2], fp2, f_in[i, j, 4], δ4)
+    end
+    qw4 = q_wall[i, j, 4]
+    if qw4 > zero(T)
+        δ2 =  T(2/3) * uw_link_x[i, j, 4]
+        fp2 = _libb_branch(qw4, f_in[i, j, 4], fp4, f_in[i, j, 2], δ2)
+    end
+    # Pair (3, 5)
+    qw3 = q_wall[i, j, 3]
+    if qw3 > zero(T)
+        δ5 = -T(2/3) * uw_link_y[i, j, 3]
+        fp5 = _libb_branch(qw3, f_in[i, j, 3], fp3, f_in[i, j, 5], δ5)
+    end
+    qw5 = q_wall[i, j, 5]
+    if qw5 > zero(T)
+        δ3 =  T(2/3) * uw_link_y[i, j, 5]
+        fp3 = _libb_branch(qw5, f_in[i, j, 5], fp5, f_in[i, j, 3], δ3)
+    end
+    # Pair (6, 8)
+    qw6 = q_wall[i, j, 6]
+    if qw6 > zero(T)
+        δ8 = -T(1/6) * (uw_link_x[i, j, 6] + uw_link_y[i, j, 6])
+        fp8 = _libb_branch(qw6, f_in[i, j, 6], fp6, f_in[i, j, 8], δ8)
+    end
+    qw8 = q_wall[i, j, 8]
+    if qw8 > zero(T)
+        δ6 =  T(1/6) * (uw_link_x[i, j, 8] + uw_link_y[i, j, 8])
+        fp6 = _libb_branch(qw8, f_in[i, j, 8], fp8, f_in[i, j, 6], δ6)
+    end
+    # Pair (7, 9)
+    qw7 = q_wall[i, j, 7]
+    if qw7 > zero(T)
+        δ9 = -T(1/6) * (-uw_link_x[i, j, 7] + uw_link_y[i, j, 7])
+        fp9 = _libb_branch(qw7, f_in[i, j, 7], fp7, f_in[i, j, 9], δ9)
+    end
+    qw9 = q_wall[i, j, 9]
+    if qw9 > zero(T)
+        δ7 =  T(1/6) * (-uw_link_x[i, j, 9] + uw_link_y[i, j, 9])
+        fp7 = _libb_branch(qw9, f_in[i, j, 9], fp9, f_in[i, j, 7], δ7)
+    end
+end
+
 "Bouzidi interpolated bounce-back (LI-BB) overwrite on flagged cut links. Reads fp*c + fp*, writes fp*_new for q=2..9."
 struct ApplyLiBB <: LBMBrick end
 required_args(::ApplyLiBB) = (:q_wall, :uw_link_x, :uw_link_y)

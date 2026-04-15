@@ -34,7 +34,7 @@
 
 const _TRT_LIBB_V2_SPEC = LBMSpec(
     PullHalfwayBB(), SolidInert(),
-    ApplyHalfwayBBPrePhase(),           # substitute solid-sourced pops before moments
+    ApplyLiBBPrePhase(),                # full Bouzidi pre-phase (any q_w ∈ (0, 1])
     Moments(), CollideTRTDirect(),       # collision writes f_out directly (no fp*c intermediate)
     WriteMoments(),                      # pre-collision moments (correct after pre-phase)
 )

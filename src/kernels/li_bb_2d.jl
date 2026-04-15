@@ -78,7 +78,7 @@ using KernelAbstractions
         inv_two_q = one(T) / (T(2) * q_w)
         return inv_two_q * f_post_here +
                (one(T) - inv_two_q) * f_bar_post_here +
-               δ * (one(T) / q_w)
+               δ * inv_two_q
     end
 end
 
