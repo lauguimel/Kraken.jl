@@ -145,19 +145,23 @@ end
 
 """
     run_sphere_libb_3d(; Nx=120, Ny=60, Nz=60, radius=8, u_in=0.04,
-                        ν=…, max_steps=20000, avg_window=5000, ρ_out=1.0)
+                        ν=…, max_steps=20000, avg_window=5000,
+                        inlet=:uniform, ρ_out=1.0)
 
-3D sphere in uniform x-flow. Halfway-BB on y/z walls (kernel
-fallback), Zou-He velocity inlet at i=1 + Zou-He pressure outlet at
-i=Nx reconstructed pre-collision (see
-`rebuild_inlet_outlet_libb_3d!`) so the flow is not stalled by the
-kernel's halfway-BB fallback corruption of ρ_wall.
-Drag integrated via `compute_drag_libb_3d` over `avg_window` final
-steps.
+3D sphere in an x-flow. Halfway-BB on y/z walls (kernel fallback),
+Zou-He velocity inlet at i=1 + Zou-He pressure outlet at i=Nx
+reconstructed pre-collision via the modular BC system
+(`apply_bc_rebuild_3d!`).
 
-Returns a NamedTuple with (; ρ, ux, uy, uz, Cd, Fx, Fy, Fz, ...).
-Reference: 3D sphere in uniform flow at Re=20, Cd ≈ 2.6 (Clift et al.
-1978; confinement-adjusted).
+- `inlet=:uniform`: inlet velocity u = (u_in, 0, 0) constant over y, z.
+- `inlet=:parabolic`: inlet u(y, z) = u_in · 16 · y·(H-y)·z·(D-z) /
+  (H·D)² (parabolic in both y and z). `u_in` is the centerline maximum.
+- `inlet=:parabolic_y`: parabolic in y only (rectangular duct,
+  infinite in z direction).
+
+Drag integrated via `compute_drag_libb_3d` over `avg_window` steps.
+Reference: free-stream sphere Re=20, Cd ≈ 2.6 (Clift et al. 1978;
+confinement-adjusted upward for ducted setups).
 """
 function run_sphere_libb_3d(; Nx::Int=120, Ny::Int=60, Nz::Int=60,
                               cx::Union{Nothing,Real}=nothing,
@@ -167,6 +171,7 @@ function run_sphere_libb_3d(; Nx::Int=120, Ny::Int=60, Nz::Int=60,
                               u_in::Real=0.04, ν::Real=0.04,
                               max_steps::Int=20_000,
                               avg_window::Int=5_000,
+                              inlet::Symbol=:uniform,
                               ρ_out::Real=1.0,
                               backend=KernelAbstractions.CPU(),
                               T::Type{<:AbstractFloat}=Float64)
@@ -177,9 +182,37 @@ function run_sphere_libb_3d(; Nx::Int=120, Ny::Int=60, Nz::Int=60,
     # Precompute on CPU (analytic geometry, not kernel-launched)
     q_wall_h, is_solid_h = precompute_q_wall_sphere_3d(Nx, Ny, Nz, cx, cy, cz,
                                                         radius; FT=T)
+    # Inlet profile matrix (Ny, Nz): normal-into-domain velocity per cell.
+    u_profile_h = zeros(T, Ny, Nz)
+    if inlet === :uniform
+        fill!(u_profile_h, T(u_in))
+    elseif inlet === :parabolic
+        # Parabolic in both y and z, peak = u_in at (Ny/2, Nz/2).
+        # Normalised so max(u) = u_in.
+        Hy = T(Ny - 1); Hz = T(Nz - 1)
+        for k in 1:Nz, j in 1:Ny
+            yy = T(j - 1); zz = T(k - 1)
+            u_profile_h[j, k] = T(16) * T(u_in) *
+                                yy * (Hy - yy) * zz * (Hz - zz) /
+                                (Hy^2 * Hz^2)
+        end
+    elseif inlet === :parabolic_y
+        Hy = T(Ny - 1)
+        for j in 1:Ny
+            yy = T(j - 1)
+            val = T(4) * T(u_in) * yy * (Hy - yy) / Hy^2
+            for k in 1:Nz
+                u_profile_h[j, k] = val
+            end
+        end
+    else
+        error("unknown inlet $(inlet); expected :uniform|:parabolic|:parabolic_y")
+    end
+
     f_in_h = zeros(T, Nx, Ny, Nz, 19)
     for k in 1:Nz, j in 1:Ny, i in 1:Nx, q in 1:19
-        f_in_h[i, j, k, q] = Kraken.equilibrium(D3Q19(), one(T), T(u_in),
+        f_in_h[i, j, k, q] = Kraken.equilibrium(D3Q19(), one(T),
+                                                 u_profile_h[j, k],
                                                  zero(T), zero(T), q)
     end
 
@@ -195,6 +228,7 @@ function run_sphere_libb_3d(; Nx::Int=120, Ny::Int=60, Nz::Int=60,
     ux       = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
     uy       = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
     uz       = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+    u_profile = KernelAbstractions.allocate(backend, T, Ny, Nz)
 
     copyto!(q_wall, q_wall_h)
     copyto!(is_solid, is_solid_h)
@@ -202,6 +236,10 @@ function run_sphere_libb_3d(; Nx::Int=120, Ny::Int=60, Nz::Int=60,
     copyto!(f_in, f_in_h)
     fill!(ρ, one(T));  fill!(ux, zero(T))
     fill!(uy, zero(T)); fill!(uz, zero(T))
+    copyto!(u_profile, u_profile_h)
+
+    bcspec = BCSpec3D(; west = ZouHeVelocity(u_profile),
+                        east = ZouHePressure(T(ρ_out)))
 
     Fx_sum = 0.0; Fy_sum = 0.0; Fz_sum = 0.0; n_avg = 0
 
@@ -209,9 +247,8 @@ function run_sphere_libb_3d(; Nx::Int=120, Ny::Int=60, Nz::Int=60,
         fused_trt_libb_v2_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
                                     q_wall, uw_x, uw_y, uw_z,
                                     Nx, Ny, Nz, T(ν))
-        # Pre-collision Zou-He rebuild at i=1 (velocity) and i=Nx (pressure)
-        rebuild_inlet_outlet_libb_3d!(f_out, f_in, u_in, ρ_out, ν,
-                                        Nx, Ny, Nz)
+        # Pre-collision Zou-He rebuild (modular BC dispatch)
+        apply_bc_rebuild_3d!(f_out, f_in, bcspec, ν, Nx, Ny, Nz)
 
         if step > max_steps - avg_window
             drag = compute_drag_libb_3d(f_out, q_wall, Nx, Ny, Nz)
@@ -228,7 +265,12 @@ function run_sphere_libb_3d(; Nx::Int=120, Ny::Int=60, Nz::Int=60,
     Fz_avg = Fz_sum / n_avg
     D = 2 * Float64(radius)
     A = π * Float64(radius)^2        # cross-section area
-    u_ref = Float64(u_in)
+    # Cd reference velocity: for parabolic inlets the convention is
+    # u_mean — for a doubly parabolic duct, u_mean = (4/9)·u_max; for
+    # y-only parabolic, u_mean = (2/3)·u_max.
+    u_ref = inlet === :parabolic   ? (4/9) * Float64(u_in) :
+            inlet === :parabolic_y ? (2/3) * Float64(u_in) :
+                                       Float64(u_in)
     Cd = 2.0 * Fx_avg / (u_ref^2 * A)
 
     return (; ρ = Array(ρ), ux = Array(ux), uy = Array(uy), uz = Array(uz),
