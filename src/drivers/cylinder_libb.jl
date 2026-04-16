@@ -111,133 +111,19 @@ function compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y,
     return (Fx = Fx, Fy = Fy)
 end
 
-# =====================================================================
-# Boundary "rebuild" for Zou-He inlet/outlet compatible with V2 kernel.
-#
-# Problem: the fused V2 kernel applies halfway-BB fallback at i=1 and
-# i=Nx (PullHalfwayBB brick), which corrupts the boundary density by
-# bouncing back the +x-streamed pops. A post-hoc Zou-He pressure outlet
-# then computes ux = −1 + (known)/ρ_out using these corrupted pops,
-# producing a wrong velocity that streams back into the interior. The
-# error grows exponentially and blows up in O(10) steps.
-#
-# Fix: after the kernel, OVERWRITE `f_out[1, j, :]` and
-# `f_out[Nx, j, :]` for j = 2..Ny-1 by rebuilding the cell from:
-#   (a) pre-step `f_in` values streamed from the interior along each
-#       real lattice link — NOT from the corrupted bounce-back at the
-#       boundary itself;
-#   (b) Zou-He velocity / pressure closure for the three unknown pops
-#       that would have streamed from outside the domain;
-#   (c) local TRT collision on the nine reconstructed pre-collision
-#       pops — same Λ = 3/16 as the kernel.
-#
-# Corners (i∈{1,Nx} ∧ j∈{1,Ny}) are left to the kernel's halfway-BB
-# fallback, since the parabolic profile prescribes u = 0 there (the
-# corner is a true no-slip point where inlet/outlet meets the
-# channel wall).
-# =====================================================================
-
-@inline function _trt_collide_local(f1::T, f2::T, f3::T, f4::T, f5::T,
-                                     f6::T, f7::T, f8::T, f9::T,
-                                     s_p::T, s_m::T) where {T}
-    ρ  = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
-    ux = (f2 - f4 + f6 - f8 + f9 - f7) / ρ
-    uy = (f3 - f5 + f6 - f8 + f7 - f9) / ρ
-    usq = ux * ux + uy * uy
-    fe1 = feq_2d(Val(1), ρ, ux, uy, usq)
-    fe2 = feq_2d(Val(2), ρ, ux, uy, usq)
-    fe3 = feq_2d(Val(3), ρ, ux, uy, usq)
-    fe4 = feq_2d(Val(4), ρ, ux, uy, usq)
-    fe5 = feq_2d(Val(5), ρ, ux, uy, usq)
-    fe6 = feq_2d(Val(6), ρ, ux, uy, usq)
-    fe7 = feq_2d(Val(7), ρ, ux, uy, usq)
-    fe8 = feq_2d(Val(8), ρ, ux, uy, usq)
-    fe9 = feq_2d(Val(9), ρ, ux, uy, usq)
-    a = (s_p + s_m) * T(0.5)
-    b = (s_p - s_m) * T(0.5)
-    return (
-        f1 - s_p * (f1 - fe1),
-        f2 - a * (f2 - fe2) - b * (f4 - fe4),
-        f3 - a * (f3 - fe3) - b * (f5 - fe5),
-        f4 - a * (f4 - fe4) - b * (f2 - fe2),
-        f5 - a * (f5 - fe5) - b * (f3 - fe3),
-        f6 - a * (f6 - fe6) - b * (f8 - fe8),
-        f7 - a * (f7 - fe7) - b * (f9 - fe9),
-        f8 - a * (f8 - fe8) - b * (f6 - fe6),
-        f9 - a * (f9 - fe9) - b * (f7 - fe7),
-    )
-end
-
 """
     rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out, ν, Nx, Ny)
 
-Overwrite `f_out[1, j, :]` and `f_out[Nx, j, :]` for j = 2..Ny-1 using
-pre-collision Zou-He reconstruction + local TRT collision.
-
-- Inlet (west, i=1): Zou-He velocity with `u = u_profile[j]`, v = 0.
-- Outlet (east, i=Nx): Zou-He pressure with ρ = ρ_out, v = 0.
-
-Call this *after* `fused_trt_libb_v2_step!` and *before* swapping
-`f_in`/`f_out`. `f_in` must still hold the pre-step populations.
+Legacy wrapper for the hardcoded (ZouHe-velocity west + ZouHe-pressure
+east) rebuild. Prefer the modular `apply_bc_rebuild_2d!(f_out, f_in,
+BCSpec2D(west=ZouHeVelocity(u_profile), east=ZouHePressure(ρ_out)),
+ν, Nx, Ny)` in new code — it decouples BC choice from the driver.
 """
-@kernel function _rebuild_west_libb_2d_kernel!(f_out, f_in, u_profile, s_p, s_m)
-    jm1 = @index(Global)
-    j = jm1 + 1
-    T = eltype(f_out)
-    @inbounds begin
-        fp1 = f_in[1, j,   1]
-        fp3 = f_in[1, j-1, 3]
-        fp4 = f_in[2, j,   4]
-        fp5 = f_in[1, j+1, 5]
-        fp7 = f_in[2, j-1, 7]
-        fp8 = f_in[2, j+1, 8]
-        u_in = u_profile[j]
-        ρ_w  = (fp1 + fp3 + fp5 + T(2) * (fp4 + fp7 + fp8)) / (one(T) - u_in)
-        fp2  = fp4 + T(2/3) * ρ_w * u_in
-        fp6  = fp8 - T(0.5) * (fp3 - fp5) + T(1/6) * ρ_w * u_in
-        fp9  = fp7 + T(0.5) * (fp3 - fp5) + T(1/6) * ρ_w * u_in
-        F1,F2,F3,F4,F5,F6,F7,F8,F9 = _trt_collide_local(
-            fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, s_p, s_m)
-        f_out[1, j, 1] = F1; f_out[1, j, 2] = F2; f_out[1, j, 3] = F3
-        f_out[1, j, 4] = F4; f_out[1, j, 5] = F5; f_out[1, j, 6] = F6
-        f_out[1, j, 7] = F7; f_out[1, j, 8] = F8; f_out[1, j, 9] = F9
-    end
-end
-
-@kernel function _rebuild_east_libb_2d_kernel!(f_out, f_in, Nx, ρ_out, s_p, s_m)
-    jm1 = @index(Global)
-    j = jm1 + 1
-    T = eltype(f_out)
-    @inbounds begin
-        fp1 = f_in[Nx,   j,   1]
-        fp2 = f_in[Nx-1, j,   2]
-        fp3 = f_in[Nx,   j-1, 3]
-        fp5 = f_in[Nx,   j+1, 5]
-        fp6 = f_in[Nx-1, j-1, 6]
-        fp9 = f_in[Nx-1, j+1, 9]
-        u_x = -one(T) + (fp1 + fp3 + fp5 + T(2) * (fp2 + fp6 + fp9)) / ρ_out
-        fp4 = fp2 - T(2/3) * ρ_out * u_x
-        fp7 = fp9 - T(0.5) * (fp3 - fp5) - T(1/6) * ρ_out * u_x
-        fp8 = fp6 + T(0.5) * (fp3 - fp5) - T(1/6) * ρ_out * u_x
-        F1,F2,F3,F4,F5,F6,F7,F8,F9 = _trt_collide_local(
-            fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, s_p, s_m)
-        f_out[Nx, j, 1] = F1; f_out[Nx, j, 2] = F2; f_out[Nx, j, 3] = F3
-        f_out[Nx, j, 4] = F4; f_out[Nx, j, 5] = F5; f_out[Nx, j, 6] = F6
-        f_out[Nx, j, 7] = F7; f_out[Nx, j, 8] = F8; f_out[Nx, j, 9] = F9
-    end
-end
-
 function rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out::Real,
                                         ν::Real, Nx::Int, Ny::Int)
-    backend = KernelAbstractions.get_backend(f_out)
-    T = eltype(f_out)
-    s_p_r, s_m_r = trt_rates(ν; Λ=3/16)
-    s_p = T(s_p_r); s_m = T(s_m_r); ρ_o = T(ρ_out)
-    kw! = _rebuild_west_libb_2d_kernel!(backend)
-    ke! = _rebuild_east_libb_2d_kernel!(backend)
-    kw!(f_out, f_in, u_profile, s_p, s_m; ndrange=(Ny - 2,))
-    ke!(f_out, f_in, Nx, ρ_o, s_p, s_m; ndrange=(Ny - 2,))
-    return nothing
+    bc = BCSpec2D(; west = ZouHeVelocity(u_profile),
+                    east = ZouHePressure(eltype(f_out)(ρ_out)))
+    apply_bc_rebuild_2d!(f_out, f_in, bc, ν, Nx, Ny)
 end
 
 """

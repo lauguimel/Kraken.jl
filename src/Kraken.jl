@@ -66,6 +66,10 @@ include("kernels/dsl/lbm_builder.jl")
 include("kernels/li_bb_2d_v2.jl")
 include("kernels/li_bb_3d_v2.jl")
 
+# --- Modular BC system (uses TRT rates + feq helpers; compiles face
+#     kernels per BC type via Julia dispatch).
+include("kernels/boundary_rebuild.jl")
+
 # --- Simulation drivers ---
 include("drivers/basic.jl")
 include("drivers/cylinder_libb.jl")
@@ -137,6 +141,8 @@ export initialize_taylor_green_2d, run_taylor_green_2d
 export initialize_cylinder_2d, run_cylinder_2d, compute_drag_mea_2d
 export run_cylinder_libb_2d, compute_drag_libb_2d, compute_drag_libb_mei_2d
 export rebuild_inlet_outlet_libb_2d!, rebuild_inlet_outlet_libb_3d!
+export AbstractBC, HalfwayBB, ZouHeVelocity, ZouHePressure
+export BCSpec2D, BCSpec3D, apply_bc_rebuild_2d!, apply_bc_rebuild_3d!
 export collide_thermal_2d!, compute_temperature_2d!
 export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
