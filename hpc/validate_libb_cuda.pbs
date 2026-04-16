@@ -36,4 +36,6 @@ echo ""
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
 # --- Validation run ---
-julia --project=. hpc/validate_libb_cuda.jl
+# Redirect to a file on shared FS so we can stream-inspect from the
+# head node during the job (PBS's own -j oe buffers until completion).
+julia --project=. hpc/validate_libb_cuda.jl 2>&1 | tee output_validate.log

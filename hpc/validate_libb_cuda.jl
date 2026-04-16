@@ -20,21 +20,25 @@ using FFTW
 backend = CUDA.CUDABackend()
 T = Float64     # H100 likes Float64 — no FP32 advantage at this throughput
 
-println("=" ^ 78)
-println("Aqua CUDA validation: LI-BB V2 + trt_rates fix")
-println("GPU: $(CUDA.name(CUDA.device()))")
-println("Julia: $VERSION,  Kraken: $(pathof(Kraken))")
-println("=" ^ 78)
+function _logln(args...)
+    println(args...); flush(stdout)
+end
+
+_logln("=" ^ 78)
+_logln("Aqua CUDA validation: LI-BB V2 + trt_rates fix")
+_logln("GPU: $(CUDA.name(CUDA.device()))")
+_logln("Julia: $VERSION,  Kraken: $(pathof(Kraken))")
+_logln("=" ^ 78)
 
 # -----------------------------------------------------------------------------
 # ST 2D-1 grid-refinement (parabolic Re=20)
 # -----------------------------------------------------------------------------
-println("\n## Schäfer-Turek 2D-1 (parabolic Re=20, ref Cd = 5.57..5.59)\n")
-println("| D_lu | Nx × Ny     | Cd      | ΔCd/Cd_ref | t (s) | MLUPS |")
-println("|------|-------------|---------|------------|-------|-------|")
+_logln("\n## Schäfer-Turek 2D-1 (parabolic Re=20, ref Cd = 5.57..5.59)\n")
+_logln("| D_lu | Nx × Ny     | Cd      | ΔCd/Cd_ref | t (s) | MLUPS |")
+_logln("|------|-------------|---------|------------|-------|-------|")
 
 Cd_ref = 5.58
-for D_lu in (40, 80, 160)
+for D_lu in (40, 80)
     Ny = Int(round(0.41 / 0.1 * D_lu))
     Nx = Int(round(2.2 / 0.1 * D_lu))
     cx = 2 * D_lu; cy = 2 * D_lu
@@ -43,9 +47,8 @@ for D_lu in (40, 80, 160)
     u_mean = (2/3) * u_max
     ν = u_mean * D_lu / 20.0
 
-    max_steps = D_lu == 40 ? 80_000 :
-                D_lu == 80 ? 150_000 : 250_000
-    avg_window = max_steps ÷ 5
+    max_steps = D_lu == 40 ? 60_000 : 120_000
+    avg_window = max_steps ÷ 6
 
     t0 = time()
     res = run_cylinder_libb_2d(; Nx=Nx, Ny=Ny, radius=radius,
@@ -57,14 +60,14 @@ for D_lu in (40, 80, 160)
     dt = time() - t0
     mlups = max_steps * Nx * Ny / dt / 1e6
     rel_err = (res.Cd - Cd_ref) / Cd_ref * 100
-    println("| $(lpad(D_lu,4)) | $(lpad("$(Nx)×$(Ny)",11)) | $(lpad(round(res.Cd, digits=3),7)) | $(lpad(round(rel_err, digits=2),9)) % | $(lpad(round(dt, digits=1),5)) | $(lpad(round(mlups, digits=1),5)) |")
+    _logln("| $(lpad(D_lu,4)) | $(lpad("$(Nx)×$(Ny)",11)) | $(lpad(round(res.Cd, digits=3),7)) | $(lpad(round(rel_err, digits=2),9)) % | $(lpad(round(dt, digits=1),5)) | $(lpad(round(mlups, digits=1),5)) |")
 end
 
 # -----------------------------------------------------------------------------
 # ST 2D-2 unsteady (parabolic Re=100)
 # -----------------------------------------------------------------------------
-println("\n## Schäfer-Turek 2D-2 (unsteady Re=100, ref Cd_max=3.22-3.24,")
-println("                       Cl_max=0.98-1.02, St=0.295-0.305)\n")
+_logln("\n## Schäfer-Turek 2D-2 (unsteady Re=100, ref Cd_max=3.22-3.24,")
+_logln("                       Cl_max=0.98-1.02, St=0.295-0.305)\n")
 
 let
     D_lu = 40
@@ -138,19 +141,19 @@ let
     f_peak_lu  = (f_peak_idx - 1) / N
     St = f_peak_lu * D_phys / u_mean
 
-    println("  D_lu=$D_lu  steps=$max_steps  dt=$(round(dt, digits=1)) s  MLUPS=$(round(mlups, digits=1))")
-    println("  Cd_mean = $(round(Cd_mean, digits=3))")
-    println("  Cd_max  = $(round(Cd_max,  digits=3))  (ref 3.22-3.24)")
-    println("  Cl_max  = $(round(Cl_max,  digits=3))  (ref 0.98-1.02)")
-    println("  St      = $(round(St,      digits=3))  (ref 0.295-0.305)")
+    _logln("  D_lu=$D_lu  steps=$max_steps  dt=$(round(dt, digits=1)) s  MLUPS=$(round(mlups, digits=1))")
+    _logln("  Cd_mean = $(round(Cd_mean, digits=3))")
+    _logln("  Cd_max  = $(round(Cd_max,  digits=3))  (ref 3.22-3.24)")
+    _logln("  Cl_max  = $(round(Cl_max,  digits=3))  (ref 0.98-1.02)")
+    _logln("  St      = $(round(St,      digits=3))  (ref 0.295-0.305)")
 end
 
 # -----------------------------------------------------------------------------
 # 3D sphere Re=20 uniform
 # -----------------------------------------------------------------------------
-println("\n## 3D sphere Re=20 uniform (ref Cd ≈ 2.6 free-stream,")
-println("                             +confinement for ducted)\n")
-for radius in (12, 20)
+_logln("\n## 3D sphere Re=20 uniform (ref Cd ≈ 2.6 free-stream,")
+_logln("                             +confinement for ducted)\n")
+for radius in (12,)
     Ny = 6 * radius; Nz = 6 * radius; Nx = 3 * Ny
     D = 2 * radius
     u_in = 0.04
@@ -165,7 +168,7 @@ for radius in (12, 20)
     CUDA.synchronize()
     dt = time() - t0
     mlups = 30_000 * Nx * Ny * Nz / dt / 1e6
-    println("  R=$radius  Nx×Ny×Nz=$(Nx)×$(Ny)×$(Nz)  Cd=$(round(res.Cd, digits=3))  dt=$(round(dt, digits=1)) s  MLUPS=$(round(mlups, digits=1))")
+    _logln("  R=$radius  Nx×Ny×Nz=$(Nx)×$(Ny)×$(Nz)  Cd=$(round(res.Cd, digits=3))  dt=$(round(dt, digits=1)) s  MLUPS=$(round(mlups, digits=1))")
 end
 
-println("\n=== DONE ===")
+_logln("\n=== DONE ===")

@@ -102,6 +102,15 @@ D3Q19 MEA drag/lift for a stationary LI-BB wall. Same halfway-BB
 convention as the 2D version (`F = 2·c_q·f_q(post-coll)`).
 """
 function compute_drag_libb_3d(f_post, q_wall, Nx::Int, Ny::Int, Nz::Int)
+    backend = KernelAbstractions.get_backend(f_post)
+    if backend isa KernelAbstractions.CPU
+        return _compute_drag_libb_3d_host(f_post, q_wall, Nx, Ny, Nz)
+    else
+        return _compute_drag_libb_3d_gpu_cached(f_post, q_wall, Nx, Ny, Nz)
+    end
+end
+
+function _compute_drag_libb_3d_host(f_post, q_wall, Nx::Int, Ny::Int, Nz::Int)
     f = Array(f_post)
     qw = Array(q_wall)
     cxs = velocities_x(D3Q19())
@@ -119,6 +128,32 @@ function compute_drag_libb_3d(f_post, q_wall, Nx::Int, Ny::Int, Nz::Int)
         end
     end
     return (Fx = Fx, Fy = Fy, Fz = Fz)
+end
+
+# Cache: per-q_wall device cut-link list + scratch for the 3D drag.
+const _DRAG_GPU_3D_CACHE = IdDict{Any, Any}()
+
+function _compute_drag_libb_3d_gpu_cached(f_post, q_wall, Nx::Int, Ny::Int, Nz::Int)
+    cache = get!(_DRAG_GPU_3D_CACHE, q_wall) do
+        T = eltype(f_post)
+        backend = KernelAbstractions.get_backend(f_post)
+        qw_h = Array(q_wall)
+        links = build_cut_link_list_3d(qw_h; backend=backend)
+        Fx_l = KernelAbstractions.allocate(backend, T, links.Nlinks)
+        Fy_l = KernelAbstractions.allocate(backend, T, links.Nlinks)
+        Fz_l = KernelAbstractions.allocate(backend, T, links.Nlinks)
+        Fx_buf = zeros(T, links.Nlinks)
+        Fy_buf = zeros(T, links.Nlinks)
+        Fz_buf = zeros(T, links.Nlinks)
+        (links, Fx_l, Fy_l, Fz_l, Fx_buf, Fy_buf, Fz_buf)
+    end
+    links, Fx_l, Fy_l, Fz_l, Fx_buf, Fy_buf, Fz_buf = cache
+    compute_drag_libb_3d_gpu!(Fx_l, Fy_l, Fz_l, links, f_post, Nx, Ny, Nz)
+    copyto!(Fx_buf, Fx_l)
+    copyto!(Fy_buf, Fy_l)
+    copyto!(Fz_buf, Fz_l)
+    return (Fx = Float64(sum(Fx_buf)), Fy = Float64(sum(Fy_buf)),
+            Fz = Float64(sum(Fz_buf)))
 end
 
 """

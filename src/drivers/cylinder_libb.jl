@@ -67,36 +67,38 @@ link wall-velocity arrays (zero for a stationary cylinder).
 """
 function compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y,
                                     Nx::Int, Ny::Int)
+    backend = KernelAbstractions.get_backend(f_pre)
+    if backend isa KernelAbstractions.CPU
+        return _compute_drag_libb_mei_2d_host(f_pre, q_wall, uw_link_x,
+                                                uw_link_y, Nx, Ny)
+    else
+        return _compute_drag_libb_mei_2d_gpu_cached(f_pre, q_wall, uw_link_x,
+                                                      uw_link_y, Nx, Ny)
+    end
+end
+
+function _compute_drag_libb_mei_2d_host(f_pre, q_wall, uw_link_x, uw_link_y,
+                                          Nx::Int, Ny::Int)
     f = Array(f_pre)
     qw = Array(q_wall)
     uwx = Array(uw_link_x); uwy = Array(uw_link_y)
     cxv = (0, 1, 0, -1,  0, 1, -1, -1,  1)
     cyv = (0, 0, 1,  0, -1, 1,  1, -1, -1)
     Fx = 0.0; Fy = 0.0
-    # Helper: δ for the arriving pop q̄ given outgoing link q.
-    # δ_{q̄} = -2 w_q (c_q · u_w) / c_s² = -6 w_q (c_q · u_w). For axis
-    # links (w=1/9): δ = -(2/3)(c_q·u_w); for diagonal (w=1/36):
-    # δ = -(1/6)(c_q·u_w).
     @inbounds for j in 1:Ny, i in 1:Nx
         for q in 2:9
             q_w = qw[i, j, q]
             q_w > 0 || continue
             qbar = _D2Q9_OPP[q]
-            # Pulled value (f_post_back in Bouzidi): the pop q at the
-            # opposite-to-wall neighbour, i.e. pulled along -c_q.
             im = i - cxv[q]; jm = j - cyv[q]
-            # Clamp to domain (matches the fused kernel's fallback:
-            # out-of-range → reflect to the same cell's opposite pop).
             fp_q_back = (1 <= im <= Nx && 1 <= jm <= Ny) ?
                 Float64(f[im, jm, q]) : Float64(f[i, j, qbar])
             fq_here = Float64(f[i, j, q])
             fqbar_here = Float64(f[i, j, qbar])
-            # δ_{q̄} from wall velocity at this link
             w_q = (q in (2, 3, 4, 5)) ? 1.0/9.0 : 1.0/36.0
             cu = Float64(cxv[q]) * uwx[i, j, q] +
                  Float64(cyv[q]) * uwy[i, j, q]
             δ = -6.0 * w_q * cu
-            # Bouzidi branch
             arriving = if q_w ≤ 0.5
                 2q_w * fq_here + (1 - 2q_w) * fp_q_back + δ
             else
@@ -109,6 +111,33 @@ function compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y,
         end
     end
     return (Fx = Fx, Fy = Fy)
+end
+
+# Cache: per-q_wall device buffer of cut-link list + per-link Fx/Fy
+# scratch arrays. Indexed by objectid(q_wall) so repeated calls with
+# the same array reuse the upload (the q_wall geometry is static for
+# a given run). For multi-cylinder / dynamic geometry, use the
+# explicit GPU API in `kernels/drag_gpu.jl`.
+const _DRAG_GPU_2D_CACHE = IdDict{Any, Any}()
+
+function _compute_drag_libb_mei_2d_gpu_cached(f_pre, q_wall, uw_x, uw_y,
+                                                Nx::Int, Ny::Int)
+    cache = get!(_DRAG_GPU_2D_CACHE, q_wall) do
+        T = eltype(f_pre)
+        backend = KernelAbstractions.get_backend(f_pre)
+        qw_h = Array(q_wall)
+        links = build_cut_link_list_2d(qw_h; backend=backend)
+        Fx_l = KernelAbstractions.allocate(backend, T, links.Nlinks)
+        Fy_l = KernelAbstractions.allocate(backend, T, links.Nlinks)
+        Fx_buf = zeros(T, links.Nlinks)
+        Fy_buf = zeros(T, links.Nlinks)
+        (links, Fx_l, Fy_l, Fx_buf, Fy_buf)
+    end
+    links, Fx_l, Fy_l, Fx_buf, Fy_buf = cache
+    compute_drag_libb_mei_2d_gpu!(Fx_l, Fy_l, links, f_pre, uw_x, uw_y, Nx, Ny)
+    copyto!(Fx_buf, Fx_l)
+    copyto!(Fy_buf, Fy_l)
+    return (Fx = Float64(sum(Fx_buf)), Fy = Float64(sum(Fy_buf)))
 end
 
 """
