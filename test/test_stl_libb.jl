@@ -158,6 +158,40 @@ end
         rm(f)
     end
 
+    @testset "3D: cube STL sub-cell q_w via Möller-Trumbore" begin
+        # The cube [0,1]³ has axis-aligned faces. Using a grid that's
+        # NOT cell-centre-aligned with the faces, sub-cell ray casts
+        # must give q_w ∈ (0, 1) ≠ 0.5 on the cells adjacent to the
+        # faces (since fluid-node / wall-face midpoints are offset).
+        # This exercises the Möller-Trumbore path and confirms that
+        # the computed fractions are bounded and correct.
+        f = tempname() * ".stl"
+        _write_cube_stl_libb(f)
+        mesh = read_stl(f)
+        N = 20
+        L = 1.4; dx = L / N
+        qw_h, is_s_h = precompute_q_wall_from_stl_3d(mesh, N, N, N, dx, dx, dx;
+                                                       sub_cell=false)
+        qw_s, is_s_s = precompute_q_wall_from_stl_3d(mesh, N, N, N, dx, dx, dx;
+                                                       sub_cell=true)
+        @test is_s_h == is_s_s
+        nh = count(x -> x > 0, qw_h)
+        @test nh > 100
+        @test all(qw_h[qw_h .> 0] .== 0.5)
+        ns = count(x -> x > 0, qw_s)
+        @test ns > 0
+        q_w_vals = qw_s[qw_s .> 0]
+        @test all(0 .< q_w_vals .<= 1)
+        # The cube [0,1]³ on a grid with dx=0.07 offset by half a cell
+        # (cell centres at 0.035 + (i-1)·0.07) places the first fluid
+        # cell centre at 1.015 and the cube wall at 1.0. Axial q_w =
+        # 0.015 / 0.07 ≈ 0.214 — a specific sub-cell value ≠ 0.5. All
+        # axial cut-link q_w should cluster around this ratio.
+        @test all(q_w_vals .< 0.5)
+        @test abs(maximum(q_w_vals) - 0.015/0.07) < 0.02
+        rm(f)
+    end
+
     @testset "STL-driven LI-BB 2D step runs stable (no NaNs)" begin
         f = tempname() * ".stl"
         _write_cylinder_stl_libb(f; R=0.15, cx=0.3, cy=0.5, N=64)

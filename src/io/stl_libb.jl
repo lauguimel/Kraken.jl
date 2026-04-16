@@ -6,9 +6,41 @@
 # `fused_trt_libb_v2_step_3d!` (3D).
 #
 # 2D: sub-cell q_w via ray-segment intersection on the mesh slice.
-# 3D: halfway-BB (q_w = 0.5) default — sub-cell 3D via Möller-Trumbore
-# against mesh triangles is tracked as future work.
+# 3D: sub-cell q_w via Möller-Trumbore ray-triangle intersection; the
+#     default remains halfway (q_w=0.5) for backward compatibility.
 # =====================================================================
+
+"""
+Möller-Trumbore ray-triangle intersection. Returns the smallest `t ≥ 0`
+such that `origin + t · dir` lies on the triangle `(v0, v1, v2)`, or a
+sentinel `-1` if no intersection.
+"""
+@inline function _ray_tri_intersect_t(origin::NTuple{3,T}, dir::NTuple{3,T},
+                                        v0::NTuple{3,T}, v1::NTuple{3,T},
+                                        v2::NTuple{3,T}) where {T}
+    eps_T = eps(T) * T(100)
+    e1x = v1[1] - v0[1]; e1y = v1[2] - v0[2]; e1z = v1[3] - v0[3]
+    e2x = v2[1] - v0[1]; e2y = v2[2] - v0[2]; e2z = v2[3] - v0[3]
+    # h = dir × e2
+    hx = dir[2]*e2z - dir[3]*e2y
+    hy = dir[3]*e2x - dir[1]*e2z
+    hz = dir[1]*e2y - dir[2]*e2x
+    a  = e1x*hx + e1y*hy + e1z*hz
+    abs(a) < eps_T && return -one(T)
+    f = one(T) / a
+    sx = origin[1] - v0[1]; sy = origin[2] - v0[2]; sz = origin[3] - v0[3]
+    u = f * (sx*hx + sy*hy + sz*hz)
+    (u < zero(T) || u > one(T)) && return -one(T)
+    # q = s × e1
+    qx = sy*e1z - sz*e1y
+    qy = sz*e1x - sx*e1z
+    qz = sx*e1y - sy*e1x
+    v = f * (dir[1]*qx + dir[2]*qy + dir[3]*qz)
+    (v < zero(T) || u + v > one(T)) && return -one(T)
+    t = f * (e2x*qx + e2y*qy + e2z*qz)
+    t > eps_T && return t
+    return -one(T)
+end
 
 """
 Smallest positive `t ∈ (0, 1]` such that `(x0 + t·dx, y0 + t·dy)` lies
@@ -105,16 +137,24 @@ end
 
 """
     precompute_q_wall_from_stl_3d(mesh, Nx, Ny, Nz, dx, dy, dz;
-                                   FT=Float64)
+                                   FT=Float64, sub_cell=false)
         -> (q_wall, is_solid)
 
-3D version: voxelise `mesh` into a 3D boolean mask, flag D3Q19
-fluid-cell links that cross into the mask with `q_w = 0.5`.
+3D version. With `sub_cell=false` (default, halfway-BB), every cut
+link gets `q_w = 0.5`. With `sub_cell=true`, each cut link is queried
+against all STL triangles (Möller-Trumbore) and `q_w` is set to the
+fraction of the link length from the fluid node to the first
+intersection — full Bouzidi precision on arbitrary STL surfaces.
+
+Complexity is `O(N_fluid_boundary · N_triangles)` which is fine for
+moderate meshes (~thousands of triangles) but can be accelerated
+with a BVH for very large meshes (future work).
 """
 function precompute_q_wall_from_stl_3d(mesh::STLMesh{T},
                                         Nx::Int, Ny::Int, Nz::Int,
                                         dx::Real, dy::Real, dz::Real;
-                                        FT::Type{<:AbstractFloat}=Float64) where {T}
+                                        FT::Type{<:AbstractFloat}=Float64,
+                                        sub_cell::Bool=false) where {T}
     is_solid = voxelize_3d(mesh, Nx, Ny, Nz, dx, dy, dz)
     q_wall = zeros(FT, Nx, Ny, Nz, 19)
     cxs = velocities_x(D3Q19())
@@ -123,14 +163,41 @@ function precompute_q_wall_from_stl_3d(mesh::STLMesh{T},
     half = FT(0.5)
     @inbounds for k in 1:Nz, j in 1:Ny, i in 1:Nx
         is_solid[i, j, k] && continue
+        # Fluid node position — cell-centre convention matching voxelize_3d.
+        xf = FT((i - 0.5) * dx)
+        yf = FT((j - 0.5) * dy)
+        zf = FT((k - 0.5) * dz)
         for q in 2:19
             ni = i + Int(cxs[q])
             nj = j + Int(cys[q])
             nk = k + Int(czs[q])
-            if 1 <= ni <= Nx && 1 <= nj <= Ny && 1 <= nk <= Nz &&
-                is_solid[ni, nj, nk]
-                q_wall[i, j, k, q] = half
+            (1 <= ni <= Nx && 1 <= nj <= Ny && 1 <= nk <= Nz) || continue
+            is_solid[ni, nj, nk] || continue
+            qw = half
+            if sub_cell
+                # Ray along the link. Link length = |c_q| · Δx (axis) or
+                # √2·Δx (edges in D3Q19 — no body diagonals). Since we
+                # solve for t with the ray parameter, q_w = t directly
+                # when the ray direction equals the link vector scaled
+                # to unit link length.
+                ddx = FT(Int(cxs[q]) * dx)
+                ddy = FT(Int(cys[q]) * dy)
+                ddz = FT(Int(czs[q]) * dz)
+                origin = (xf, yf, zf)
+                dir    = (ddx, ddy, ddz)
+                t_best = FT(Inf)
+                for tri in mesh.triangles
+                    t = _ray_tri_intersect_t(origin, dir,
+                                              (FT(tri.v1[1]), FT(tri.v1[2]), FT(tri.v1[3])),
+                                              (FT(tri.v2[1]), FT(tri.v2[2]), FT(tri.v2[3])),
+                                              (FT(tri.v3[1]), FT(tri.v3[2]), FT(tri.v3[3])))
+                    (t > zero(FT) && t < t_best) && (t_best = t)
+                end
+                if t_best > zero(FT) && t_best ≤ one(FT)
+                    qw = t_best
+                end
             end
+            q_wall[i, j, k, q] = qw
         end
     end
     return q_wall, is_solid
