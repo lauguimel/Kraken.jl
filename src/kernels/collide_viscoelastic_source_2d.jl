@@ -97,3 +97,56 @@ function collide_viscoelastic_source_2d!(f, is_solid, ω, tau_p_xx, tau_p_xy, ta
     kernel!(f, is_solid, T(ω), tau_p_xx, tau_p_xy, tau_p_yy; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end
+
+# --- Standalone Hermite stress source (post-collision addition) ---
+# Used when the collision step has already been performed separately
+# (e.g., by `fused_trt_libb_v2_step!`) and we only need to inject τ_p
+# into f_out. Uses the TRT symmetric rate s_plus in place of ω.
+
+@kernel function apply_hermite_source_2d_kernel!(f, @Const(is_solid), s_plus,
+                                                   @Const(tau_p_xx),
+                                                   @Const(tau_p_xy),
+                                                   @Const(tau_p_yy))
+    i, j = @index(Global, NTuple)
+    @inbounds if !is_solid[i, j]
+        T = eltype(f)
+        txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
+        pre = -s_plus * T(9.0/2.0)
+        cs2 = T(1/3)
+        wr = T(4/9); wa = T(1/9); we = T(1/36)
+
+        T1 = pre * wr * (-cs2*(txx + tyy))
+        T2 = pre * wa * ((one(T)-cs2)*txx - cs2*tyy)
+        T3 = pre * wa * (-cs2*txx + (one(T)-cs2)*tyy)
+        T6 = pre * we * ((one(T)-cs2)*txx + (one(T)-cs2)*tyy + T(2)*txy)
+        T7 = pre * we * ((one(T)-cs2)*txx + (one(T)-cs2)*tyy - T(2)*txy)
+
+        f[i,j,1] += T1
+        f[i,j,2] += T2; f[i,j,4] += T2
+        f[i,j,3] += T3; f[i,j,5] += T3
+        f[i,j,6] += T6; f[i,j,8] += T6
+        f[i,j,7] += T7; f[i,j,9] += T7
+    end
+end
+
+"""
+    apply_hermite_source_2d!(f, is_solid, s_plus, tau_p_xx, tau_p_xy, tau_p_yy)
+
+Post-collision injection of the viscoelastic Hermite stress source T_q
+(Liu et al. 2025, Eq. 25). Use when the BGK/TRT collision has already
+been performed by a separate kernel (e.g. `fused_trt_libb_v2_step!`)
+and only the τ_p contribution remains to be added.
+
+For TRT, pass `s_plus = 1/(3ν+0.5)` (symmetric rate, controls viscosity).
+For BGK, pass `s_plus = ω`.
+"""
+function apply_hermite_source_2d!(f, is_solid, s_plus,
+                                    tau_p_xx, tau_p_xy, tau_p_yy)
+    backend = KernelAbstractions.get_backend(f)
+    Nx, Ny = size(f, 1), size(f, 2)
+    T = eltype(f)
+    kernel! = apply_hermite_source_2d_kernel!(backend)
+    kernel!(f, is_solid, T(s_plus), tau_p_xx, tau_p_xy, tau_p_yy;
+            ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end

@@ -83,6 +83,7 @@ include("drivers/thermal.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
+include("drivers/viscoelastic_spec.jl")
 include("drivers/viscoelastic.jl")
 
 # --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
@@ -284,11 +285,16 @@ export compute_polymeric_force_2d!
 export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 export run_viscoelastic_cylinder_2d, run_conformation_cylinder_2d
+export run_conformation_cylinder_libb_2d
+export AbstractPolymerModel, OldroydB, update_polymer_stress!
+export polymer_modulus, polymer_relaxation_time
+export AbstractPolymerWallBC, CNEBB, NoPolymerWallBC, apply_polymer_wall_bc!
 
 # Conformation TRT-LBM (Liu et al. 2025)
 export collide_conformation_2d!, init_conformation_field_2d!
 export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!
 export collide_viscoelastic_source_2d!, collide_viscoelastic_source_guo_2d!
+export apply_hermite_source_2d!
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
