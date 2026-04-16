@@ -196,34 +196,136 @@ function compute_conformation_macro_2d!(C_field, g)
 end
 
 # ============================================================
-# Conservative non-equilibrium bounce-back (CNEBB) at solid walls
+# Conservative non-equilibrium bounce-back (CNEBB) — Liu et al. 2025, Eqs (38-39)
 # ============================================================
+#
+# Applied at fluid cells x_b adjacent to a solid neighbour, AFTER streaming.
+# Required inputs:
+#   - g_post : populations after streaming (some directions invalid because
+#              they came from solid neighbours)
+#   - g_pre  : populations BEFORE streaming = post-collision of previous step
+#              in the same cell. Used to recover the populations that left
+#              x_b toward the solid (and were lost during streaming).
+#
+# Algorithm at each fluid cell with at least one solid neighbour:
+#   1. Γ = {q : neighbour(i,j, opp(q)) is fluid}  → g_post[q] is valid
+#      H = complement                              → g_post[q] is unknown
+#   2. φ = Σ_{q∈Γ} g_post[q] + Σ_{q∈H} g_pre[opp(q)]
+#      (the second sum recovers populations that streamed out toward solid)
+#   3. g^eq computed with this φ at u_wall = 0 (no-slip)
+#   4. For each q ∈ H: g_post[q] = g^eq[q] + (g_post[opp(q)] - g^eq[opp(q)])
+#   5. Macroscopic update: C_field[i,j] = φ
+#
+# Convention for stream_2d!: g_post[i,j,q] receives from neighbour at
+# (i - cx[q], j - cy[q]). So direction q is "valid" iff that source neighbour
+# is fluid.
 
-@kernel function apply_cnebb_2d_kernel!(g, @Const(is_solid), @Const(ux), @Const(uy),
-                                          @Const(C_field))
+# D2Q9 opposite indices (Kraken convention from header above):
+#   1↔1, 2↔4, 3↔5, 4↔2, 5↔3, 6↔8, 7↔9, 8↔6, 9↔7
+
+@inline _opp_q(q) = q == 1 ? 1 :
+                    q == 2 ? 4 : q == 4 ? 2 :
+                    q == 3 ? 5 : q == 5 ? 3 :
+                    q == 6 ? 8 : q == 8 ? 6 :
+                    q == 7 ? 9 : 7
+
+@inline _cx_q(q) = (0, 1, 0, -1, 0,  1, -1, -1,  1)[q]
+@inline _cy_q(q) = (0, 0, 1,  0,-1,  1,  1, -1, -1)[q]
+
+@kernel function apply_cnebb_2d_kernel!(g_post, @Const(g_pre), @Const(is_solid),
+                                          C_field, Nx, Ny)
     i, j = @index(Global, NTuple)
-    @inbounds if is_solid[i, j]
-        T = eltype(g)
-        φ = C_field[i, j]
-        u = ux[i, j]
-        v = uy[i, j]
-        usq = u*u + v*v
-        g[i,j,1] = feq_2d(Val(1), φ, u, v, usq)
-        g[i,j,2] = feq_2d(Val(2), φ, u, v, usq)
-        g[i,j,3] = feq_2d(Val(3), φ, u, v, usq)
-        g[i,j,4] = feq_2d(Val(4), φ, u, v, usq)
-        g[i,j,5] = feq_2d(Val(5), φ, u, v, usq)
-        g[i,j,6] = feq_2d(Val(6), φ, u, v, usq)
-        g[i,j,7] = feq_2d(Val(7), φ, u, v, usq)
-        g[i,j,8] = feq_2d(Val(8), φ, u, v, usq)
-        g[i,j,9] = feq_2d(Val(9), φ, u, v, usq)
+    @inbounds if !is_solid[i, j]
+        T = eltype(g_post)
+
+        # Detect if any neighbour is solid; if not, nothing to do
+        any_solid = false
+        for q in 2:9
+            ni = i + _cx_q(q)
+            nj = j + _cy_q(q)
+            if 1 <= ni <= Nx && 1 <= nj <= Ny && is_solid[ni, nj]
+                any_solid = true
+            end
+        end
+
+        if any_solid
+            # Step 1+2: compute φ conservatively
+            φ = zero(T)
+            # Rest population is always valid (q=1, no streaming)
+            φ += g_post[i, j, 1]
+            for q in 2:9
+                # Source neighbour for direction q in stream_2d is (i-cx, j-cy).
+                # If that source is solid, g_post[q] is invalid → use g_pre at opposite.
+                si = i - _cx_q(q)
+                sj = j - _cy_q(q)
+                src_solid = !(1 <= si <= Nx && 1 <= sj <= Ny) ||
+                            is_solid[si, sj]
+                if src_solid
+                    φ += g_pre[i, j, _opp_q(q)]
+                else
+                    φ += g_post[i, j, q]
+                end
+            end
+
+            # Step 3: equilibrium at u_wall = 0
+            usq = zero(T)
+            ge1 = feq_2d(Val(1), φ, zero(T), zero(T), usq)
+            ge2 = feq_2d(Val(2), φ, zero(T), zero(T), usq)
+            ge3 = feq_2d(Val(3), φ, zero(T), zero(T), usq)
+            ge4 = feq_2d(Val(4), φ, zero(T), zero(T), usq)
+            ge5 = feq_2d(Val(5), φ, zero(T), zero(T), usq)
+            ge6 = feq_2d(Val(6), φ, zero(T), zero(T), usq)
+            ge7 = feq_2d(Val(7), φ, zero(T), zero(T), usq)
+            ge8 = feq_2d(Val(8), φ, zero(T), zero(T), usq)
+            ge9 = feq_2d(Val(9), φ, zero(T), zero(T), usq)
+
+            # Step 4: reconstruct unknown populations via Eq. (39)
+            # For each direction q whose source is solid, set
+            #   g_post[q] = g^eq[q] + (g_post[opp(q)] - g^eq[opp(q)])
+            # This is non-equilibrium bounce-back.
+            for q in 2:9
+                si = i - _cx_q(q)
+                sj = j - _cy_q(q)
+                src_solid = !(1 <= si <= Nx && 1 <= sj <= Ny) ||
+                            is_solid[si, sj]
+                if src_solid
+                    oq = _opp_q(q)
+                    geq_q  = q == 2 ? ge2 : q == 3 ? ge3 : q == 4 ? ge4 :
+                             q == 5 ? ge5 : q == 6 ? ge6 : q == 7 ? ge7 :
+                             q == 8 ? ge8 : ge9
+                    geq_oq = oq == 2 ? ge2 : oq == 3 ? ge3 : oq == 4 ? ge4 :
+                             oq == 5 ? ge5 : oq == 6 ? ge6 : oq == 7 ? ge7 :
+                             oq == 8 ? ge8 : ge9
+                    g_post[i, j, q] = geq_q + (g_post[i, j, oq] - geq_oq)
+                end
+            end
+
+            # Step 5: update macroscopic field
+            C_field[i, j] = φ
+        end
     end
 end
 
-function apply_cnebb_conformation_2d!(g, is_solid, ux, uy, C_field)
-    backend = KernelAbstractions.get_backend(g)
+"""
+    apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, C_field)
+
+Conservative non-equilibrium bounce-back (CNEBB) for the conformation tensor
+LBM at solid walls. Liu et al. 2025, Eqs. (38-39).
+
+# Arguments
+- `g_post` : populations after streaming (modified in place at near-wall fluid cells)
+- `g_pre`  : populations before streaming (post-collision of previous step)
+- `is_solid` : boolean mask
+- `C_field`  : macroscopic conformation component, updated at near-wall cells
+
+The scheme exactly conserves φ (one component of C) at the wall, eliminating
+the polymer-stress leakage that plagues simple bounce-back / extrapolation
+boundary treatments at high Wi.
+"""
+function apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, C_field)
+    backend = KernelAbstractions.get_backend(g_post)
     Nx, Ny = size(C_field)
     kernel! = apply_cnebb_2d_kernel!(backend)
-    kernel!(g, is_solid, ux, uy, C_field; ndrange=(Nx, Ny))
+    kernel!(g_post, g_pre, is_solid, C_field, Nx, Ny; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end

@@ -165,6 +165,31 @@ function apply_zou_he_west_2d!(f, u_in, Nx, Ny)
     kernel!(f, eltype(f)(u_in), Ny; ndrange=(Ny,))
 end
 
+# --- Zou-He velocity inlet with Poiseuille profile on west wall (i=1) ---
+
+@kernel function zou_he_velocity_west_profile_2d_kernel!(f, @Const(u_profile))
+    j = @index(Global)
+
+    @inbounds begin
+        T = eltype(f)
+        u_in = u_profile[j]
+        f1 = f[1,j,1]; f3 = f[1,j,3]; f4 = f[1,j,4]
+        f5 = f[1,j,5]; f7 = f[1,j,7]; f8 = f[1,j,8]
+
+        ρ_wall = (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / (one(T) - u_in)
+        f[1,j,2] = f4 + T(2.0/3.0) * ρ_wall * u_in
+        f[1,j,6] = f8 - T(0.5) * (f3 - f5) + T(1.0/6.0) * ρ_wall * u_in
+        f[1,j,9] = f7 + T(0.5) * (f3 - f5) + T(1.0/6.0) * ρ_wall * u_in
+    end
+end
+
+function apply_zou_he_west_profile_2d!(f, u_profile, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = zou_he_velocity_west_profile_2d_kernel!(backend)
+    kernel!(f, u_profile; ndrange=(Ny,))
+    KernelAbstractions.synchronize(backend)
+end
+
 # --- Zou-He pressure outlet on east wall (i=Nx) ---
 
 @kernel function zou_he_pressure_east_2d_kernel!(f, Nx, ρ_out)

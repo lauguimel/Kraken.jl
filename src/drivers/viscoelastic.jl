@@ -219,3 +219,152 @@ function run_viscoelastic_cylinder_2d(;
             Theta_xx=Array(Θ_xx), Theta_xy=Array(Θ_xy), Theta_yy=Array(Θ_yy),
             Re=Re, Wi=Wi, beta=beta)
 end
+
+"""
+    run_conformation_cylinder_2d(; Nx=400, Ny=80, radius=10, cx=nothing, cy=nothing,
+                                   u_in=0.02, ν_s=0.08, ν_p=0.02, lambda=10.0,
+                                   tau_plus=1.0,
+                                   max_steps=50_000, avg_window=5_000,
+                                   backend=CPU(), FT=Float64)
+
+Confined-cylinder Oldroyd-B benchmark using the TRT-LBM conformation tensor
+solver (Liu et al. 2025) — same scheme validated on Poiseuille and pure shear.
+
+Solvent: BGK + Hermite stress source (`collide_viscoelastic_source_guo_2d!`).
+Polymer: 3 D2Q9 fields C_xx, C_xy, C_yy advected/diffused/relaxed by TRT.
+Walls : standard `stream_2d!` (bounce-back) for both `f` and the `g_*`
+        conformation distributions; CNEBB on solid C cells.
+
+Drag :  Cd = Cd_s (MEA on f). Because the Hermite stress source injects
+        τ_p directly into the populations f, the MEA drag already captures
+        the full effective shear (solvent + polymer). The separate stress
+        integral Cd_p is reported as a diagnostic only — adding it to Cd_s
+        would double-count the polymer contribution.
+
+Returns NamedTuple `(ux, uy, ρ, C_xx, C_xy, C_yy,
+                     tau_p_xx, tau_p_xy, tau_p_yy,
+                     Cd, Cd_s, Cd_p, Re, Wi, beta)`.
+"""
+function run_conformation_cylinder_2d(;
+        Nx=400, Ny=80, radius=10, cx=nothing, cy=nothing,
+        u_in=0.02, ν_s=0.08, ν_p=0.02, lambda=10.0,
+        tau_plus=1.0,
+        max_steps=50_000, avg_window=5_000,
+        backend=KernelAbstractions.CPU(), FT=Float64)
+
+    cx = isnothing(cx) ? Nx ÷ 4 : cx
+    cy = isnothing(cy) ? Ny ÷ 2 : cy
+    D = 2 * radius
+    ν_total = ν_s + ν_p
+    Re = u_in * D / ν_total
+    Wi = lambda * u_in / radius
+    beta = ν_s / ν_total
+    G = FT(ν_p / lambda)
+    ω_s = FT(1.0 / (3.0 * ν_s + 0.5))
+
+    @info "Conformation cylinder" Nx Ny radius Re Wi beta lambda tau_plus
+
+    # Newtonian initialization (uses solvent viscosity in collide later)
+    state, _ = initialize_cylinder_2d(; Nx=Nx, Ny=Ny, cx=cx, cy=cy,
+                                        radius=radius, u_in=u_in, ν=ν_s,
+                                        backend=backend, T=FT)
+    f_in, f_out = state.f_in, state.f_out
+    ρ, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+
+    # Conformation fields
+    C_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny); fill!(C_xx, FT(1))
+    C_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    C_yy = KernelAbstractions.zeros(backend, FT, Nx, Ny); fill!(C_yy, FT(1))
+
+    g_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    g_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    g_yy = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    init_conformation_field_2d!(g_xx, C_xx, ux, uy)
+    init_conformation_field_2d!(g_xy, C_xy, ux, uy)
+    init_conformation_field_2d!(g_yy, C_yy, ux, uy)
+    g_xx_buf = similar(g_xx); g_xy_buf = similar(g_xy); g_yy_buf = similar(g_yy)
+
+    # Polymeric stress
+    tau_p_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    tau_p_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    tau_p_yy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+
+    Fx_s_sum = 0.0; Fy_s_sum = 0.0
+    Fx_p_sum = 0.0; Fy_p_sum = 0.0
+    n_avg = 0
+
+    for step in 1:max_steps
+        # --- Solvent LBM ---
+        stream_2d!(f_out, f_in, Nx, Ny)
+        apply_zou_he_west_2d!(f_out, FT(u_in), Nx, Ny)
+        apply_zou_he_pressure_east_2d!(f_out, Nx, Ny)
+
+        if step > max_steps - avg_window
+            drag_s = compute_drag_mea_2d(f_in, f_out, is_solid, Nx, Ny)
+            drag_p = compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
+                                                is_solid, Nx, Ny)
+            Fx_s_sum += drag_s.Fx;  Fy_s_sum += drag_s.Fy
+            Fx_p_sum += drag_p.Fx;  Fy_p_sum += drag_p.Fy
+            n_avg += 1
+        end
+
+        collide_viscoelastic_source_guo_2d!(f_out, is_solid, ω_s,
+                                              FT(0), FT(0),
+                                              tau_p_xx, tau_p_xy, tau_p_yy)
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+
+        # --- Conformation LBM (TRT) ---
+        # Stream into buffers; CNEBB needs BOTH pre- (g) and post-stream (g_buf).
+        stream_2d!(g_xx_buf, g_xx, Nx, Ny)
+        stream_2d!(g_xy_buf, g_xy, Nx, Ny)
+        stream_2d!(g_yy_buf, g_yy, Nx, Ny)
+
+        # Conservative non-equilibrium bounce-back at fluid cells adjacent
+        # to solid (Liu et al. 2025, Eqs 38-39). Updates both g_*_buf
+        # populations and the C_* macroscopic field at near-wall cells.
+        apply_cnebb_conformation_2d!(g_xx_buf, g_xx, is_solid, C_xx)
+        apply_cnebb_conformation_2d!(g_xy_buf, g_xy, is_solid, C_xy)
+        apply_cnebb_conformation_2d!(g_yy_buf, g_yy, is_solid, C_yy)
+
+        g_xx, g_xx_buf = g_xx_buf, g_xx
+        g_xy, g_xy_buf = g_xy_buf, g_xy
+        g_yy, g_yy_buf = g_yy_buf, g_yy
+
+        compute_conformation_macro_2d!(C_xx, g_xx)
+        compute_conformation_macro_2d!(C_xy, g_xy)
+        compute_conformation_macro_2d!(C_yy, g_yy)
+
+        collide_conformation_2d!(g_xx, C_xx, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=1)
+        collide_conformation_2d!(g_xy, C_xy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=2)
+        collide_conformation_2d!(g_yy, C_yy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=3)
+
+        # Polymeric stress τ_p = G·(C - I)
+        @. tau_p_xx = G * (C_xx - 1.0)
+        @. tau_p_xy = G * C_xy
+        @. tau_p_yy = G * (C_yy - 1.0)
+
+        f_in, f_out = f_out, f_in
+    end
+
+    compute_macroscopic_2d!(ρ, ux, uy, f_in)
+
+    Fx_s = n_avg > 0 ? Fx_s_sum / n_avg : 0.0
+    Fy_s = n_avg > 0 ? Fy_s_sum / n_avg : 0.0
+    Fx_p = n_avg > 0 ? Fx_p_sum / n_avg : 0.0
+    Fy_p = n_avg > 0 ? Fy_p_sum / n_avg : 0.0
+    # Hermite stress source already injects τ_p into f, so MEA on f
+    # captures the full effective shear. Cd_p kept as diagnostic only.
+    Fx_drag = Fx_s
+    Cd   = 2.0 * Fx_s / (1.0 * u_in^2 * D)
+    Cd_s = 2.0 * Fx_s / (1.0 * u_in^2 * D)
+    Cd_p = 2.0 * Fx_p / (1.0 * u_in^2 * D)
+
+    @info "Conformation cylinder result" Cd Cd_s Cd_p Re Wi
+
+    return (ux=Array(ux), uy=Array(uy), ρ=Array(ρ),
+            C_xx=Array(C_xx), C_xy=Array(C_xy), C_yy=Array(C_yy),
+            tau_p_xx=Array(tau_p_xx), tau_p_xy=Array(tau_p_xy), tau_p_yy=Array(tau_p_yy),
+            Cd=Cd, Cd_s=Cd_s, Cd_p=Cd_p,
+            Re=Re, Wi=Wi, beta=beta)
+end

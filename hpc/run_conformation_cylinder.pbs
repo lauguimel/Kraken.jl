@@ -1,0 +1,35 @@
+#!/bin/bash -l
+#PBS -N krk_conf_cyl
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=16:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+# --- Julia environment ---
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+
+# --- Pre-flight ---
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+echo "=== Conformation cylinder benchmark at $(date) ==="
+echo "Node: $(hostname), GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+
+mkdir -p results
+
+# --- 1. Spatial convergence (Newtonian limit, 5 resolutions) ---
+echo
+echo "### 1/1 Convergence study ###"
+julia --project=. hpc/conformation_cylinder_convergence.jl 2>&1 \
+    | tee results/conformation_cylinder_convergence.txt
+
+# --- 2. Wi sweep vs Alves (2001) / Hulsen (2005) ---
+echo
+echo "### 2/2 Wi sweep (Oldroyd-B confined cylinder) ###"
+julia --project=. hpc/conformation_cylinder_wi_sweep.jl 2>&1 \
+    | tee results/conformation_cylinder_wi_sweep.txt
+
+echo "=== Done at $(date) ==="
