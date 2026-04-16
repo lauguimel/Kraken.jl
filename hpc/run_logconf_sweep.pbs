@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -N krk_liu_cyl
+#PBS -N krk_logc
 #PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
 #PBS -l walltime=12:00:00
 #PBS -j oe
@@ -13,9 +13,9 @@ export JULIA_CUDA_USE_COMPAT=false
 nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
 julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
 
-echo "=== Liu cylinder benchmark at $(date) ==="
+echo "=== log-conformation sweep at $(date) ==="
 mkdir -p results
 
-julia --project=. hpc/liu_cylinder_benchmark.jl 2>&1 | tee results/liu_cylinder_benchmark.txt
+julia --project=. hpc/liu_logconf_sweep.jl 2>&1 | tee results/liu_logconf_sweep.txt
 
 echo "=== Done at $(date) ==="

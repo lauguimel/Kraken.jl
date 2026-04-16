@@ -56,6 +56,7 @@ include("kernels/collide_rheology_2d.jl")
 include("kernels/collide_twophase_rheology_2d.jl")
 include("kernels/viscoelastic_2d.jl")
 include("kernels/conformation_lbm_2d.jl")
+include("kernels/logconformation_lbm_2d.jl")
 include("kernels/collide_viscoelastic_source_2d.jl")
 include("kernels/collide_viscoelastic_guo_2d.jl")
 
@@ -286,7 +287,9 @@ export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 export run_viscoelastic_cylinder_2d, run_conformation_cylinder_2d
 export run_conformation_cylinder_libb_2d
-export AbstractPolymerModel, OldroydB, update_polymer_stress!
+export AbstractPolymerModel, OldroydB, LogConfOldroydB, update_polymer_stress!
+export uses_log_conformation
+export collide_logconf_2d!, psi_to_C_2d!, C_to_psi_2d!
 export polymer_modulus, polymer_relaxation_time
 export AbstractPolymerWallBC, CNEBB, NoPolymerWallBC, apply_polymer_wall_bc!
 

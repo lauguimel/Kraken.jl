@@ -47,4 +47,5 @@ using Kraken
     include("test_viscoelastic_coupling.jl")
     include("test_conformation_lbm.jl")
     include("test_conformation_cylinder.jl")
+    include("test_logconformation.jl")
 end

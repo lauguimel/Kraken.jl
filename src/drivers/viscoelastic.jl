@@ -472,17 +472,26 @@ function run_conformation_cylinder_libb_2d(;
     end
     copyto!(f_in, f_in_h); fill!(f_out, zero(FT))
 
-    # Conformation fields (identity = equilibrium for quiescent polymer)
+    # Evolved field: C (direct) or Ψ = log(C) (log-conformation).
+    # At quiescent equilibrium C = I ⇒ Ψ = 0.
+    use_logconf = uses_log_conformation(polymer_model)
+
     C_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny); fill!(C_xx, FT(1))
     C_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     C_yy = KernelAbstractions.zeros(backend, FT, Nx, Ny); fill!(C_yy, FT(1))
 
+    # `Ψ_*` alias `C_*` for direct conformation so one code path handles
+    # both. For log-conformation we allocate separate Ψ fields.
+    Ψ_xx = use_logconf ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : C_xx
+    Ψ_xy = use_logconf ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : C_xy
+    Ψ_yy = use_logconf ? KernelAbstractions.zeros(backend, FT, Nx, Ny) : C_yy
+
     g_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     g_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     g_yy = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
-    init_conformation_field_2d!(g_xx, C_xx, ux, uy)
-    init_conformation_field_2d!(g_xy, C_xy, ux, uy)
-    init_conformation_field_2d!(g_yy, C_yy, ux, uy)
+    init_conformation_field_2d!(g_xx, Ψ_xx, ux, uy)
+    init_conformation_field_2d!(g_xy, Ψ_xy, ux, uy)
+    init_conformation_field_2d!(g_yy, Ψ_yy, ux, uy)
     g_xx_buf = similar(g_xx); g_xy_buf = similar(g_xy); g_yy_buf = similar(g_yy)
 
     tau_p_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
@@ -511,26 +520,34 @@ function run_conformation_cylinder_libb_2d(;
             n_avg += 1
         end
 
-        # --- Conformation LBM (TRT) + polymer wall BC ---
+        # --- Conformation / log-conformation LBM (TRT) + polymer wall BC ---
         stream_2d!(g_xx_buf, g_xx, Nx, Ny)
         stream_2d!(g_xy_buf, g_xy, Nx, Ny)
         stream_2d!(g_yy_buf, g_yy, Nx, Ny)
 
-        apply_polymer_wall_bc!(g_xx_buf, g_xx, is_solid, C_xx, polymer_bc)
-        apply_polymer_wall_bc!(g_xy_buf, g_xy, is_solid, C_xy, polymer_bc)
-        apply_polymer_wall_bc!(g_yy_buf, g_yy, is_solid, C_yy, polymer_bc)
+        apply_polymer_wall_bc!(g_xx_buf, g_xx, is_solid, Ψ_xx, polymer_bc)
+        apply_polymer_wall_bc!(g_xy_buf, g_xy, is_solid, Ψ_xy, polymer_bc)
+        apply_polymer_wall_bc!(g_yy_buf, g_yy, is_solid, Ψ_yy, polymer_bc)
 
         g_xx, g_xx_buf = g_xx_buf, g_xx
         g_xy, g_xy_buf = g_xy_buf, g_xy
         g_yy, g_yy_buf = g_yy_buf, g_yy
 
-        compute_conformation_macro_2d!(C_xx, g_xx)
-        compute_conformation_macro_2d!(C_xy, g_xy)
-        compute_conformation_macro_2d!(C_yy, g_yy)
+        compute_conformation_macro_2d!(Ψ_xx, g_xx)
+        compute_conformation_macro_2d!(Ψ_xy, g_xy)
+        compute_conformation_macro_2d!(Ψ_yy, g_yy)
 
-        collide_conformation_2d!(g_xx, C_xx, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, λ_p; component=1)
-        collide_conformation_2d!(g_xy, C_xy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, λ_p; component=2)
-        collide_conformation_2d!(g_yy, C_yy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, λ_p; component=3)
+        if use_logconf
+            collide_logconf_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=1)
+            collide_logconf_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=2)
+            collide_logconf_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=3)
+            # Reconstruct C = exp(Ψ) before computing τ_p
+            psi_to_C_2d!(C_xx, C_xy, C_yy, Ψ_xx, Ψ_xy, Ψ_yy)
+        else
+            collide_conformation_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=1)
+            collide_conformation_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=2)
+            collide_conformation_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=3)
+        end
 
         update_polymer_stress!(tau_p_xx, tau_p_xy, tau_p_yy,
                                  C_xx, C_xy, C_yy, polymer_model)
