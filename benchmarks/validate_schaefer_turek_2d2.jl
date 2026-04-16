@@ -108,10 +108,25 @@ mlups = max_steps * Nx * Ny / dt / 1e6
 
 println("Runtime: $(round(dt, digits=1)) s ($(round(mlups, digits=1)) MLUPS)")
 
-# Time-series statistics
-Cd_mean = sum(Cd_t) / length(Cd_t)
-Cd_max  = maximum(Cd_t)
-Cl_max  = maximum(abs.(Cl_t))
+# Time-series statistics. The raw per-step MEA drag signal has
+# high-frequency sampling noise (pop-level fluctuations) on top of the
+# physical vortex-shedding oscillation. Apply a short moving-average
+# (~1 step per 100 period) before extracting peak values.
+function _smooth(x, w)
+    n = length(x); out = similar(x, Float64)
+    for i in 1:n
+        a = max(1, i - w ÷ 2); b = min(n, i + w ÷ 2)
+        out[i] = sum(Float64, @view x[a:b]) / (b - a + 1)
+    end
+    return out
+end
+smooth_w = max(Int(round(T_period / 100)), 20)
+Cd_s = _smooth(Cd_t, smooth_w)
+Cl_s = _smooth(Cl_t, smooth_w)
+
+Cd_mean = sum(Cd_s) / length(Cd_s)
+Cd_max  = maximum(Cd_s)
+Cl_max  = maximum(abs.(Cl_s))
 
 # Strouhal: FFT of Cl
 N = length(Cl_t)

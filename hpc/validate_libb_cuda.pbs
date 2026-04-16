@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -N kraken_libb_validate
+#PBS -l select=1:ncpus=4:ngpus=1:mem=48GB:gpu_id=H100
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m n
+#
+# Kraken LI-BB V2 + trt_rates fix validation on Aqua (CUDA H100).
+# Reproduces the Metal local benchmarks at higher resolution + Float64
+# so that we can quantify (a) accuracy vs literature and (b) MLUPS on
+# a data-centre GPU.
+#
+# Usage (from aqua head node, after `rsync -av ... Kraken.jl/ ~/`):
+#   cd ~/Kraken.jl
+#   qsub hpc/validate_libb_cuda.pbs
+#
+# Output goes to `kraken_libb_validate.o<jobid>` in the working dir.
+cd $PBS_O_WORKDIR
+
+# --- Julia environment ---
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+# Pin 1 thread per core for CPU-side precompute (geometry, FFT, reduction).
+export JULIA_NUM_THREADS=4
+
+# --- Pre-flight GPU check ---
+echo "== nvidia-smi =="
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+echo ""
+
+echo "== julia --version =="
+julia --version
+echo ""
+
+# --- Dependencies (idempotent) ---
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+# --- Validation run ---
+julia --project=. hpc/validate_libb_cuda.jl
