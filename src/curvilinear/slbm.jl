@@ -590,3 +590,248 @@ function slbm_mrt_step!(f_out, f_in, ρ, ux, uy, is_solid,
             geom.periodic_ξ, geom.periodic_η;
             ndrange=(geom.Nξ, geom.Nη))
 end
+
+# ===========================================================================
+# q_wall precomputation for SLBM + LI-BB on curvilinear meshes.
+#
+# On a body-fitted mesh (e.g. O-grid), solid nodes sit on the mesh
+# boundary (j=1 inner wall, j=Nη outer wall). For each fluid node and
+# each D2Q9 direction q, we check whether the computational neighbor
+# (i+cx_q, j+cy_q) is solid. If so, the link is cut and we compute
+# q_w = |P_fluid → P_wall| / |P_fluid → P_neighbor| in physical space,
+# where P_wall is the intersection of the segment with the body surface.
+# ===========================================================================
+
+"""
+    precompute_q_wall_slbm_cylinder_2d(mesh, is_solid, cx, cy, R;
+        omega_inner=0, FT=Float64) -> (q_wall, uw_link_x, uw_link_y)
+
+Precompute LI-BB cut fractions on a curvilinear mesh for a cylindrical
+body centered at `(cx, cy)` with radius `R` in physical space.
+
+For each fluid node `(i,j)` and direction `q`, if the computational
+neighbor `(i+cxq, j+cyq)` is solid, we ray-intersect the physical-space
+segment from the fluid node to the neighbor with the circle. The wall
+velocity for a rotating inner cylinder is `u_wall = omega_inner × r`.
+"""
+function precompute_q_wall_slbm_cylinder_2d(
+        mesh::CurvilinearMesh{T},
+        is_solid::AbstractMatrix{Bool},
+        cx_body::Real, cy_body::Real, R_body::Real;
+        omega_inner::Real=0,
+        FT::Type{<:AbstractFloat}=T) where {T}
+
+    Nξ, Nη = mesh.Nξ, mesh.Nη
+    cxs = velocities_x(D2Q9())
+    cys = velocities_y(D2Q9())
+
+    q_wall    = zeros(FT, Nξ, Nη, 9)
+    uw_link_x = zeros(FT, Nξ, Nη, 9)
+    uw_link_y = zeros(FT, Nξ, Nη, 9)
+
+    cx_b, cy_b, R_b = FT(cx_body), FT(cy_body), FT(R_body)
+    R² = R_b * R_b
+    Ω = FT(omega_inner)
+
+    @inbounds for j in 1:Nη, i in 1:Nξ
+        is_solid[i, j] && continue
+
+        Xf = mesh.X[i, j]
+        Yf = mesh.Y[i, j]
+
+        for q in 2:9
+            diq = cxs[q]
+            djq = cys[q]
+            in_ = i + diq
+            jn_ = j + djq
+
+            if mesh.periodic_ξ
+                in_ = ((in_ - 1) % Nξ + Nξ) % Nξ + 1
+            end
+
+            (in_ < 1 || in_ > Nξ || jn_ < 1 || jn_ > Nη) && continue
+            is_solid[in_, jn_] || continue
+
+            Xn = mesh.X[in_, jn_]
+            Yn = mesh.Y[in_, jn_]
+
+            # Ray-circle intersection: P(t) = P_fluid + t*(P_neighbor - P_fluid)
+            dx = Xn - Xf
+            dy = Yn - Yf
+            fx = Xf - cx_b
+            fy = Yf - cy_b
+
+            a = dx * dx + dy * dy
+            b_coeff = FT(2) * (fx * dx + fy * dy)
+            c_coeff = fx * fx + fy * fy - R²
+            disc = b_coeff * b_coeff - FT(4) * a * c_coeff
+
+            if disc < zero(FT)
+                q_wall[i, j, q] = FT(0.5)
+            else
+                sd = sqrt(disc)
+                t1 = (-b_coeff - sd) / (FT(2) * a)
+                t2 = (-b_coeff + sd) / (FT(2) * a)
+                t = (t1 > zero(FT) && t1 ≤ one(FT)) ? t1 :
+                    (t2 > zero(FT) && t2 ≤ one(FT)) ? t2 : FT(0.5)
+                q_wall[i, j, q] = t
+            end
+
+            if !iszero(Ω)
+                tw = q_wall[i, j, q]
+                Xw = Xf + tw * dx
+                Yw = Yf + tw * dy
+                uw_link_x[i, j, q] = -Ω * (Yw - cy_b)
+                uw_link_y[i, j, q] =  Ω * (Xw - cx_b)
+            end
+        end
+    end
+
+    return q_wall, uw_link_x, uw_link_y
+end
+
+# ---------------------------------------------------------------------------
+# Fused SLBM + TRT + LI-BB kernel.
+# ---------------------------------------------------------------------------
+
+@kernel function slbm_trt_libb_step_kernel!(f_out, @Const(f_in),
+                                              ρ_out, ux_out, uy_out,
+                                              @Const(is_solid),
+                                              @Const(q_wall),
+                                              @Const(uw_link_x), @Const(uw_link_y),
+                                              @Const(i_dep), @Const(j_dep),
+                                              Nξ, Nη, s_plus, s_minus,
+                                              periodic_ξ, periodic_η)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(f_out)
+
+        fp1 = bilinear_f(f_in, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nξ, Nη, periodic_ξ, periodic_η)
+        fp2 = bilinear_f(f_in, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nξ, Nη, periodic_ξ, periodic_η)
+        fp3 = bilinear_f(f_in, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nξ, Nη, periodic_ξ, periodic_η)
+        fp4 = bilinear_f(f_in, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nξ, Nη, periodic_ξ, periodic_η)
+        fp5 = bilinear_f(f_in, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nξ, Nη, periodic_ξ, periodic_η)
+        fp6 = bilinear_f(f_in, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nξ, Nη, periodic_ξ, periodic_η)
+        fp7 = bilinear_f(f_in, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nξ, Nη, periodic_ξ, periodic_η)
+        fp8 = bilinear_f(f_in, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nξ, Nη, periodic_ξ, periodic_η)
+        fp9 = bilinear_f(f_in, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nξ, Nη, periodic_ξ, periodic_η)
+
+        if is_solid[i, j]
+            f_out[i, j, 1] = feq_2d(Val(1), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 2] = feq_2d(Val(2), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 3] = feq_2d(Val(3), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 4] = feq_2d(Val(4), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 5] = feq_2d(Val(5), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 6] = feq_2d(Val(6), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 7] = feq_2d(Val(7), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 8] = feq_2d(Val(8), one(T), zero(T), zero(T), zero(T))
+            f_out[i, j, 9] = feq_2d(Val(9), one(T), zero(T), zero(T), zero(T))
+            ρ_out[i, j] = one(T)
+            ux_out[i, j] = zero(T)
+            uy_out[i, j] = zero(T)
+        else
+            # LI-BB pre-phase: Bouzidi interpolation on cut links.
+            # Uses _libb_branch(q_w, f_post_here, f_post_back, f_bar_post_here, δ)
+            # which does linear interpolation with the true q_w fraction.
+            qw2 = q_wall[i, j, 2]
+            if qw2 > zero(T)
+                δ4 = -T(2/3) * uw_link_x[i, j, 2]
+                fp4 = _libb_branch(qw2, f_in[i, j, 2], fp2, f_in[i, j, 4], δ4)
+            end
+            qw4 = q_wall[i, j, 4]
+            if qw4 > zero(T)
+                δ2 =  T(2/3) * uw_link_x[i, j, 4]
+                fp2 = _libb_branch(qw4, f_in[i, j, 4], fp4, f_in[i, j, 2], δ2)
+            end
+            qw3 = q_wall[i, j, 3]
+            if qw3 > zero(T)
+                δ5 = -T(2/3) * uw_link_y[i, j, 3]
+                fp5 = _libb_branch(qw3, f_in[i, j, 3], fp3, f_in[i, j, 5], δ5)
+            end
+            qw5 = q_wall[i, j, 5]
+            if qw5 > zero(T)
+                δ3 =  T(2/3) * uw_link_y[i, j, 5]
+                fp3 = _libb_branch(qw5, f_in[i, j, 5], fp5, f_in[i, j, 3], δ3)
+            end
+            qw6 = q_wall[i, j, 6]
+            if qw6 > zero(T)
+                δ8 = -T(1/6) * (uw_link_x[i, j, 6] + uw_link_y[i, j, 6])
+                fp8 = _libb_branch(qw6, f_in[i, j, 6], fp6, f_in[i, j, 8], δ8)
+            end
+            qw8 = q_wall[i, j, 8]
+            if qw8 > zero(T)
+                δ6 =  T(1/6) * (uw_link_x[i, j, 8] + uw_link_y[i, j, 8])
+                fp6 = _libb_branch(qw8, f_in[i, j, 8], fp8, f_in[i, j, 6], δ6)
+            end
+            qw7 = q_wall[i, j, 7]
+            if qw7 > zero(T)
+                δ9 = -T(1/6) * (-uw_link_x[i, j, 7] + uw_link_y[i, j, 7])
+                fp9 = _libb_branch(qw7, f_in[i, j, 7], fp7, f_in[i, j, 9], δ9)
+            end
+            qw9 = q_wall[i, j, 9]
+            if qw9 > zero(T)
+                δ7 =  T(1/6) * (-uw_link_x[i, j, 9] + uw_link_y[i, j, 9])
+                fp7 = _libb_branch(qw9, f_in[i, j, 9], fp9, f_in[i, j, 7], δ7)
+            end
+
+            # Moments
+            ρ = fp1 + fp2 + fp3 + fp4 + fp5 + fp6 + fp7 + fp8 + fp9
+            inv_ρ = one(T) / ρ
+            ux = (fp2 - fp4 + fp6 - fp7 - fp8 + fp9) * inv_ρ
+            uy = (fp3 - fp5 + fp6 + fp7 - fp8 - fp9) * inv_ρ
+            usq = ux * ux + uy * uy
+
+            # TRT collision
+            feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
+            feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
+            feq3 = feq_2d(Val(3), ρ, ux, uy, usq)
+            feq4 = feq_2d(Val(4), ρ, ux, uy, usq)
+            feq5 = feq_2d(Val(5), ρ, ux, uy, usq)
+            feq6 = feq_2d(Val(6), ρ, ux, uy, usq)
+            feq7 = feq_2d(Val(7), ρ, ux, uy, usq)
+            feq8 = feq_2d(Val(8), ρ, ux, uy, usq)
+            feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
+
+            a = (s_plus + s_minus) * T(0.5)
+            b = (s_plus - s_minus) * T(0.5)
+
+            f_out[i, j, 1] = fp1 - s_plus * (fp1 - feq1)
+            f_out[i, j, 2] = fp2 - a * (fp2 - feq2) - b * (fp4 - feq4)
+            f_out[i, j, 4] = fp4 - a * (fp4 - feq4) - b * (fp2 - feq2)
+            f_out[i, j, 3] = fp3 - a * (fp3 - feq3) - b * (fp5 - feq5)
+            f_out[i, j, 5] = fp5 - a * (fp5 - feq5) - b * (fp3 - feq3)
+            f_out[i, j, 6] = fp6 - a * (fp6 - feq6) - b * (fp8 - feq8)
+            f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6)
+            f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9)
+            f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7)
+
+            ρ_out[i, j] = ρ
+            ux_out[i, j] = ux
+            uy_out[i, j] = uy
+        end
+    end
+end
+
+"""
+    slbm_trt_libb_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                         q_wall, uw_link_x, uw_link_y,
+                         geom, ν; Λ=3/16)
+
+Fused SLBM + TRT + LI-BB step on a curvilinear mesh. Combines semi-
+Lagrangian streaming, LI-BB pre-phase substitution on cut links, and
+TRT collision with magic parameter Λ.
+"""
+function slbm_trt_libb_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                              q_wall, uw_link_x, uw_link_y,
+                              geom::SLBMGeometry, ν; Λ::Real=3/16)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    kernel! = slbm_trt_libb_step_kernel!(backend)
+    kernel!(f_out, f_in, ρ, ux, uy, is_solid,
+            q_wall, uw_link_x, uw_link_y,
+            geom.i_dep, geom.j_dep,
+            geom.Nξ, geom.Nη, ET(s_plus), ET(s_minus),
+            geom.periodic_ξ, geom.periodic_η;
+            ndrange=(geom.Nξ, geom.Nη))
+end
