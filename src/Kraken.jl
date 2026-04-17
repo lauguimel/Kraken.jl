@@ -86,6 +86,8 @@ include("drivers/viscoelastic.jl")
 include("curvilinear/mesh.jl")
 include("curvilinear/generators.jl")
 include("curvilinear/slbm.jl")
+include("curvilinear/mesh_3d.jl")
+include("curvilinear/slbm_3d.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
@@ -239,6 +241,11 @@ export slbm_bgk_step!, slbm_bgk_moving_step!, slbm_mrt_step!
 export slbm_trt_libb_step!, precompute_q_wall_slbm_cylinder_2d
 export compute_local_omega_2d
 export PullSLBM, CollideTRTLocalDirect
+# 3D SLBM
+export CurvilinearMesh3D, build_mesh_3d, validate_mesh_3d
+export stretched_box_mesh_3d, cartesian_mesh_3d
+export SLBMGeometry3D, build_slbm_geometry_3d, transfer_slbm_geometry_3d
+export slbm_bgk_step_3d!
 
 # Grid refinement
 export RefinementPatch, RefinedDomain
