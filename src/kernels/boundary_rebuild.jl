@@ -249,8 +249,42 @@ end
                                         s_p, s_m; ndrange=(Ny - 2,))
 end
 
-# (South / North ZouHe variants can be added later — channel walls are
-# HalfwayBB in all current benchmarks.)
+# South / North wall bounce-back kernels.
+# Overwrites the wall-crossing populations at j=1 (south) and j=Ny (north)
+# with standard halfway BB: f_out[i,j,q̄] = f_in[i,j,q]. No collision
+# needed — these are on the wall row itself if is_solid, or on the first
+# fluid row if the streaming handles the solid row separately.
+# For PullSLBM (which clamps at boundaries), these kernels fix the
+# populations that the streaming couldn't bounce.
+
+@kernel function _bc_south_halfwaybb_2d!(f_out, @Const(f_in), Ny)
+    im1 = @index(Global); i = im1 + 1
+    @inbounds begin
+        # j=1: bounce populations heading south back north
+        f_out[i, 1, 3] = f_in[i, 1, 5]   # 5→3
+        f_out[i, 1, 6] = f_in[i, 1, 8]   # 8→6
+        f_out[i, 1, 7] = f_in[i, 1, 9]   # 9→7
+    end
+end
+
+@kernel function _bc_north_halfwaybb_2d!(f_out, @Const(f_in), Ny)
+    im1 = @index(Global); i = im1 + 1
+    @inbounds begin
+        # j=Ny: bounce populations heading north back south
+        f_out[i, Ny, 5] = f_in[i, Ny, 3]   # 3→5
+        f_out[i, Ny, 8] = f_in[i, Ny, 6]   # 6→8
+        f_out[i, Ny, 9] = f_in[i, Ny, 7]   # 7→9
+    end
+end
+
+@inline function _apply_bc_2d_south!(backend, f_out, f_in, ::HalfwayBB,
+                                      s_p, s_m, Nx, Ny)
+    _bc_south_halfwaybb_2d!(backend)(f_out, f_in, Ny; ndrange=(Nx - 2,))
+end
+@inline function _apply_bc_2d_north!(backend, f_out, f_in, ::HalfwayBB,
+                                      s_p, s_m, Nx, Ny)
+    _bc_north_halfwaybb_2d!(backend)(f_out, f_in, Ny; ndrange=(Nx - 2,))
+end
 
 """
     apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν, Nx, Ny)
@@ -268,7 +302,8 @@ function apply_bc_rebuild_2d!(f_out, f_in, bcspec::BCSpec2D, ν::Real,
     s_p = T(s_p_r); s_m = T(s_m_r)
     _apply_bc_2d_west!(backend, f_out, f_in, bcspec.west, s_p, s_m, Nx, Ny)
     _apply_bc_2d_east!(backend, f_out, f_in, bcspec.east, s_p, s_m, Nx, Ny)
-    # south / north: HalfwayBB only for now (kernel fallback handles)
+    _apply_bc_2d_south!(backend, f_out, f_in, bcspec.south, s_p, s_m, Nx, Ny)
+    _apply_bc_2d_north!(backend, f_out, f_in, bcspec.north, s_p, s_m, Nx, Ny)
     return nothing
 end
 
