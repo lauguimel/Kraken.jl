@@ -84,6 +84,11 @@ function build_lbm_kernel(backend, ::LBMSpec{S, Bricks}) where {S, Bricks}
     end
 
     kname = gensym(:lbm_gen_kernel)
+    # Define the kernel AND return its constructor in a single eval.
+    # Julia 1.12 enforces strict world-age for module bindings created
+    # by eval; accessing them via getfield from the caller's world
+    # triggers a warning and can segfault. Returning the constructor
+    # directly from eval avoids the cross-world getfield entirely.
     src = quote
         @kernel function $(kname)($(args...))
             $idx_decl
@@ -92,16 +97,9 @@ function build_lbm_kernel(backend, ::LBMSpec{S, Bricks}) where {S, Bricks}
                 $inner_body
             end
         end
+        $(kname)
     end
-    Core.eval(@__MODULE__, src)
-    ctor = getfield(@__MODULE__, kname)
-    # World-age: `ctor` and its produced kernel were just `eval`d. On
-    # CPU, calling the kernel from user code (later world) works. On
-    # GPU backends (CUDA/Metal), `KernelAbstractions` JITs an extra
-    # backend-specific kernel inside the call, which stays too new
-    # for the caller's world → MethodError. We wrap the call in a
-    # closure that routes through `invokelatest` unconditionally —
-    # cheap (one extra dispatch per launch) and backend-uniform.
+    ctor = Core.eval(@__MODULE__, src)
     raw_kernel! = Base.invokelatest(ctor, backend)
     wrapped = (args...; kwargs...) -> Base.invokelatest(raw_kernel!, args...; kwargs...)
     LBM_KERNEL_CACHE[key] = wrapped
