@@ -528,13 +528,24 @@ function run_conformation_cylinder_libb_2d(;
         # Pre-collision Zou-He rebuild at inlet/outlet (fixes halfway-BB corruption)
         apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν_s, Nx, Ny)
 
-        # Inject Hermite polymer source on post-collision f_out
+        # Inject Hermite polymer source on post-collision f_out. The
+        # populations carry the combined solvent + polymer stress into
+        # the next streaming step; MEA below then integrates the FULL
+        # (σ_s + τ_p) · n on the cylinder in one pass.
         apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
                                    tau_p_xx, tau_p_xy, tau_p_yy)
 
-        # MEA drag (Mei-consistent, uses cut-link q_wall)
+        # Standard halfway-BB MEA drag on post-source f_out.
+        # We deliberately AVOID the Mei-with-Bouzidi formula here: Mei
+        # mixes populations from neighbour cells via the LI-BB
+        # interpolation, and when the Hermite source injects spatially-
+        # varying τ_p into f, that neighbour mixing produces a spurious
+        # +10-15 % drag inflation (identified by isolation sweep, R=20
+        # Wi=0.001). Standard halfway-BB MEA (compute_drag_mea_2d) on
+        # post-source f gives ratio = 1.02 vs Newtonian limit, which is
+        # consistent with the expected Wi² correction.
         if step > max_steps - avg_window
-            drag = compute_drag_libb_mei_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny)
+            drag = compute_drag_mea_2d(f_in, f_out, is_solid, Nx, Ny)
             Fx_s_sum += drag.Fx;  Fy_s_sum += drag.Fy
             n_avg += 1
         end
@@ -587,11 +598,11 @@ function run_conformation_cylinder_libb_2d(;
 
     Fx_s = n_avg > 0 ? Fx_s_sum / n_avg : 0.0
     Fy_s = n_avg > 0 ? Fy_s_sum / n_avg : 0.0
-    # Hermite source injects τ_p into f, so Mei MEA on f captures the
-    # full effective shear (solvent + polymer). Reported Cd = Cd_s.
+    # Hermite source injects τ_p into f, so Mei-MEA on post-source f
+    # captures the full effective stress (solvent + polymer). Reported
+    # Cd = Cd_s. Cd_p kept as diagnostic (polymer stress surface integral).
     Cd   = 2.0 * Fx_s / (u_ref^2 * D)
     Cd_s = Cd
-    # Diagnostic: polymeric traction on the cylinder surface
     drag_p = compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
                                         is_solid, Nx, Ny)
     Cd_p = 2.0 * drag_p.Fx / (u_ref^2 * D)
