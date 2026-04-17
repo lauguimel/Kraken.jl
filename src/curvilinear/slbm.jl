@@ -58,13 +58,15 @@ D2Q9 direction. Linearises the mapping locally via the stored metric:
 
 with the inverse Jacobian `dξ/dX = dY/dη / J`, etc.
 """
-function build_slbm_geometry(mesh::CurvilinearMesh{T}) where {T}
+function build_slbm_geometry(mesh::CurvilinearMesh{T}; local_cfl::Bool=false) where {T}
     Nξ, Nη = mesh.Nξ, mesh.Nη
     cx = velocities_x(D2Q9())
     cy = velocities_y(D2Q9())
 
     denom_ξ = T(mesh.periodic_ξ ? Nξ : Nξ - 1)
     denom_η = T(mesh.periodic_η ? Nη : Nη - 1)
+    Δξ = one(T) / denom_ξ
+    Δη = one(T) / denom_η
 
     i_dep = zeros(T, Nξ, Nη, 9)
     j_dep = zeros(T, Nξ, Nη, 9)
@@ -76,17 +78,25 @@ function build_slbm_geometry(mesh::CurvilinearMesh{T}) where {T}
         dXdη = mesh.dXdη[i, j]
         dYdξ = mesh.dYdξ[i, j]
         dYdη = mesh.dYdη[i, j]
-        # Inverse Jacobian rows
         ξx =  dYdη / J
         ξy = -dXdη / J
         ηx = -dYdξ / J
         ηy =  dXdξ / J
+
+        if local_cfl
+            # Local cell size → CFL ≈ 1 per cell
+            lξ = sqrt(dXdξ^2 + dYdξ^2) * Δξ
+            lη = sqrt(dXdη^2 + dYdη^2) * Δη
+            dxr_local = sqrt(lξ * lη)
+        else
+            dxr_local = dxr
+        end
+
         for q in 1:9
             cqx = T(cx[q])
             cqy = T(cy[q])
-            # Departure shift in (ξ, η) space then in grid-index space
-            Δi = -dxr * denom_ξ * (ξx * cqx + ξy * cqy)
-            Δj = -dxr * denom_η * (ηx * cqx + ηy * cqy)
+            Δi = -dxr_local * denom_ξ * (ξx * cqx + ξy * cqy)
+            Δj = -dxr_local * denom_η * (ηx * cqx + ηy * cqy)
             i_dep[i, j, q] = T(i) + Δi
             j_dep[i, j, q] = T(j) + Δj
         end
@@ -613,7 +623,8 @@ for the local cell size variation. Returns 2D arrays `s_plus[Nξ, Nη]` and
 The local cell size is estimated as `√(|J[i,j]|) / (denom_ξ * denom_η)^0.5`
 normalized by `dx_ref`.
 """
-function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/16) where {T}
+function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/16,
+                                 scaling::Symbol=:quadratic) where {T}
     Nξ, Nη = mesh.Nξ, mesh.Nη
     denom_ξ = T(mesh.periodic_ξ ? Nξ : Nξ - 1)
     denom_η = T(mesh.periodic_η ? Nη : Nη - 1)
@@ -633,8 +644,16 @@ function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/1
         dx_local = sqrt(lξ * lη)
         r = dx_local / mesh.dx_ref
 
-        τ_plus_local  = r * (τ_plus_ref  - T(0.5)) + T(0.5)
-        τ_minus_local = r * (τ_minus_ref - T(0.5)) + T(0.5)
+        if scaling === :quadratic
+            # SLBM with global dt: ν = (τ-0.5)/3 * dx²/dt. For uniform ν
+            # with varying dx: τ_local - 0.5 = (dx_ref/dx_local)² * (τ_ref - 0.5)
+            r_inv2 = (mesh.dx_ref / dx_local)^2
+            τ_plus_local  = r_inv2 * (τ_plus_ref  - T(0.5)) + T(0.5)
+            τ_minus_local = r_inv2 * (τ_minus_ref - T(0.5)) + T(0.5)
+        else  # :linear (Filippova-Hänel, for refinement with Δt ∝ Δx)
+            τ_plus_local  = r * (τ_plus_ref  - T(0.5)) + T(0.5)
+            τ_minus_local = r * (τ_minus_ref - T(0.5)) + T(0.5)
+        end
         sp[i, j] = one(T) / τ_plus_local
         sm[i, j] = one(T) / τ_minus_local
     end

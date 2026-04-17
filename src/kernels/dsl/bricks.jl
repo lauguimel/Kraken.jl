@@ -53,6 +53,47 @@ emit_code(::PullSLBM) = quote
     fp9 = bilinear_f(f_in, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nx, Ny, periodic_ξ, periodic_η)
 end
 
+"Non-equilibrium rescaling for SLBM on non-uniform meshes. After interpolation, the f_neq part is scaled for the departure cell tau. This brick corrects it to the arrival cell tau: f = f_eq + (τ_arr-0.5)/(τ_dep-0.5) * f_neq."
+struct RescaleNonEq <: LBMBrick end
+required_args(::RescaleNonEq) = (:s_plus, :i_dep, :j_dep, :Nx, :Ny, :periodic_ξ, :periodic_η)
+phase(::RescaleNonEq) = :pre_solid
+emit_code(::RescaleNonEq) = quote
+    ρ_d = fp1 + fp2 + fp3 + fp4 + fp5 + fp6 + fp7 + fp8 + fp9
+    inv_ρ_d = one(T) / ρ_d
+    ux_d = (fp2 - fp4 + fp6 - fp7 - fp8 + fp9) * inv_ρ_d
+    uy_d = (fp3 - fp5 + fp6 + fp7 - fp8 - fp9) * inv_ρ_d
+    usq_d = ux_d * ux_d + uy_d * uy_d
+
+    τ_arr = one(T) / s_plus[i, j]
+
+    # Departure tau: nearest node to the departure point of direction 2
+    i0_d = max(1, min(Nx, unsafe_trunc(Int, floor(i_dep[i, j, 2] + T(0.5)))))
+    j0_d = max(1, min(Ny, unsafe_trunc(Int, floor(j_dep[i, j, 2] + T(0.5)))))
+    τ_dep = one(T) / s_plus[i0_d, j0_d]
+
+    r_neq = (τ_arr - T(0.5)) / max(τ_dep - T(0.5), T(1e-6))
+
+    feq1_d = feq_2d(Val(1), ρ_d, ux_d, uy_d, usq_d)
+    feq2_d = feq_2d(Val(2), ρ_d, ux_d, uy_d, usq_d)
+    feq3_d = feq_2d(Val(3), ρ_d, ux_d, uy_d, usq_d)
+    feq4_d = feq_2d(Val(4), ρ_d, ux_d, uy_d, usq_d)
+    feq5_d = feq_2d(Val(5), ρ_d, ux_d, uy_d, usq_d)
+    feq6_d = feq_2d(Val(6), ρ_d, ux_d, uy_d, usq_d)
+    feq7_d = feq_2d(Val(7), ρ_d, ux_d, uy_d, usq_d)
+    feq8_d = feq_2d(Val(8), ρ_d, ux_d, uy_d, usq_d)
+    feq9_d = feq_2d(Val(9), ρ_d, ux_d, uy_d, usq_d)
+
+    fp1 = feq1_d + r_neq * (fp1 - feq1_d)
+    fp2 = feq2_d + r_neq * (fp2 - feq2_d)
+    fp3 = feq3_d + r_neq * (fp3 - feq3_d)
+    fp4 = feq4_d + r_neq * (fp4 - feq4_d)
+    fp5 = feq5_d + r_neq * (fp5 - feq5_d)
+    fp6 = feq6_d + r_neq * (fp6 - feq6_d)
+    fp7 = feq7_d + r_neq * (fp7 - feq7_d)
+    fp8 = feq8_d + r_neq * (fp8 - feq8_d)
+    fp9 = feq9_d + r_neq * (fp9 - feq9_d)
+end
+
 # ------------------------------------------------------------------
 # Solid-cell handling
 # ------------------------------------------------------------------
