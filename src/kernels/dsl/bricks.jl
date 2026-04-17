@@ -35,6 +35,22 @@ emit_code(::PullHalfwayBB) = quote
     fp9 = ifelse(i > 1  && j < Ny,  f_in[i - 1, j + 1, 9], f_in[i, j, 7])
 end
 
+"Semi-Lagrangian pull D2Q9: interpolate f_in at precomputed departure points."
+struct PullSLBM <: LBMBrick end
+required_args(::PullSLBM) = (:f_in, :i_dep, :j_dep, :Nx, :Ny, :periodic_ξ, :periodic_η)
+phase(::PullSLBM) = :pre_solid
+emit_code(::PullSLBM) = quote
+    fp1 = bilinear_f(f_in, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nx, Ny, periodic_ξ, periodic_η)
+    fp2 = bilinear_f(f_in, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nx, Ny, periodic_ξ, periodic_η)
+    fp3 = bilinear_f(f_in, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nx, Ny, periodic_ξ, periodic_η)
+    fp4 = bilinear_f(f_in, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nx, Ny, periodic_ξ, periodic_η)
+    fp5 = bilinear_f(f_in, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nx, Ny, periodic_ξ, periodic_η)
+    fp6 = bilinear_f(f_in, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nx, Ny, periodic_ξ, periodic_η)
+    fp7 = bilinear_f(f_in, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nx, Ny, periodic_ξ, periodic_η)
+    fp8 = bilinear_f(f_in, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nx, Ny, periodic_ξ, periodic_η)
+    fp9 = bilinear_f(f_in, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nx, Ny, periodic_ξ, periodic_η)
+end
+
 # ------------------------------------------------------------------
 # Solid-cell handling
 # ------------------------------------------------------------------
