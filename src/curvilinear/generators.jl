@@ -106,6 +106,60 @@ function stretched_box_mesh(; x_min::Real, x_max::Real,
 end
 
 """
+    cylinder_focused_mesh(; x_min, x_max, y_min, y_max, Nx, Ny,
+                            cx, cy, strength=1.0, FT=Float64)
+
+Rectangular mesh with tanh-based concentration of cells around a point
+`(cx, cy)` in physical space (not at the domain boundaries).
+
+The mapping is built piecewise: for each axis, a two-sided tanh collects
+nodes around the focus point while preserving the domain extremes.
+
+Useful for: cylinder flow where the body is NOT at the boundary.
+"""
+function cylinder_focused_mesh(; x_min::Real, x_max::Real,
+                                 y_min::Real, y_max::Real,
+                                 Nx::Int, Ny::Int,
+                                 cx::Real, cy::Real,
+                                 strength::Real=1.0,
+                                 FT::Type{<:AbstractFloat}=Float64)
+    xminT, xmaxT = FT(x_min), FT(x_max)
+    yminT, ymaxT = FT(y_min), FT(y_max)
+    cxT, cyT = FT(cx), FT(cy)
+    sT = FT(strength)
+    ξ_foc = (cxT - xminT) / (xmaxT - xminT)
+    η_foc = (cyT - yminT) / (ymaxT - yminT)
+
+    # Two-sided tanh: bunches nodes near t_foc while pinning t=0→0 and t=1→1
+    function focus_map(t, t_foc, s)
+        iszero(s) && return t
+        # Scale ξ so that ξ=t_foc maps to 0, then apply tanh, then renormalize
+        if t ≤ t_foc
+            # Left half: map [0, t_foc] → [0, t_foc] with tanh clustering at right end
+            ξ = t / t_foc  # ∈ [0, 1]
+            ξ_cluster = one(t) - tanh(s * (one(t) - ξ)) / tanh(s)
+            return t_foc * ξ_cluster
+        else
+            # Right half: map [t_foc, 1] → [t_foc, 1] with tanh clustering at left end
+            ξ = (t - t_foc) / (one(t) - t_foc)
+            ξ_cluster = tanh(s * ξ) / tanh(s)
+            return t_foc + (one(t) - t_foc) * ξ_cluster
+        end
+    end
+
+    function mapping(ξ, η)
+        tx = focus_map(ξ, ξ_foc, sT)
+        ty = focus_map(η, η_foc, sT)
+        return (xminT + (xmaxT - xminT) * tx,
+                yminT + (ymaxT - yminT) * ty)
+    end
+
+    return build_mesh(mapping; Nξ=Nx, Nη=Ny,
+                      periodic_ξ=false, periodic_η=false,
+                      type=:cylinder_focused, FT=FT)
+end
+
+"""
     cartesian_mesh(; x_min, x_max, y_min, y_max, Nx, Ny, FT=Float64)
 
 Convenience: uniform Cartesian mesh exposed as a `CurvilinearMesh`. The

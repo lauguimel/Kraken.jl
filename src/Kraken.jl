@@ -234,7 +234,7 @@ export run_simulation
 
 # Curvilinear mesh (v0.2 SLBM path)
 export CurvilinearMesh, build_mesh, validate_mesh, compute_metric
-export polar_mesh, stretched_box_mesh, cartesian_mesh
+export polar_mesh, stretched_box_mesh, cartesian_mesh, cylinder_focused_mesh
 export cell_area, domain_extent
 export SLBMGeometry, build_slbm_geometry, transfer_slbm_geometry
 export slbm_bgk_step!, slbm_bgk_moving_step!, slbm_mrt_step!
