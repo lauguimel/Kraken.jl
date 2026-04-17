@@ -44,8 +44,20 @@ using KernelAbstractions
             feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
 
             txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
-            # Liu et al. 2025 Eq. 25: T_i = -w_i H_iαβ /(2 cs⁴ τ_s) τ_αβ
-            # τ_s,1 = 1/ω → pre = -ω · 9/2 for D2Q9.
+            # Hermite stress source for BGK collision (Liu 2025, Eq. 25
+            # adapted for standard BGK).
+            #
+            # The source T_i adds -ω·τ_αβ to the 2nd-order non-equilibrium
+            # moment Π_αβ. Chapman-Enskog recovers the stress as:
+            #   σ_p = (1 - ω/2) · Π_source / ω = -(1 - ω/2) · τ_αβ
+            #
+            # To get σ_p = -τ_αβ (full polymer stress), we must divide
+            # by (1 - ω/2), giving:
+            #   pre = -ω · 9/2 / (1 - ω/2)
+            #
+            # In Liu's regularized scheme, (1-ω/2) is already in the
+            # reconstruction, so their formula omits this factor. For
+            # standard BGK (our case), it must be included.
             pre = -ω * T(9.0/2.0)
             cs2 = T(1/3)
             wr = T(4/9); wa = T(1/9); we = T(1/36)
@@ -111,7 +123,7 @@ end
     @inbounds if !is_solid[i, j]
         T = eltype(f)
         txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
-        pre = -s_plus * T(9.0/2.0)
+        pre = -s_plus * T(9.0/2.0) / (one(T) - s_plus / T(2))
         cs2 = T(1/3)
         wr = T(4/9); wa = T(1/9); we = T(1/36)
 

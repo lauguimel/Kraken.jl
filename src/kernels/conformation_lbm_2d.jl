@@ -196,6 +196,57 @@ function compute_conformation_macro_2d!(C_field, g)
 end
 
 # ============================================================
+# Inlet / outlet BC for conformation populations
+# ============================================================
+# At domain boundaries (west inlet, east outlet), stream_2d! applies
+# bounce-back on g-populations which corrupts C. These routines force
+# g = f^eq(C_prescribed, u_prescribed) at the boundary nodes, analogous
+# to the Zou-He rebuild for the hydrodynamic f.
+
+@kernel function _reset_conf_inlet_kernel!(g, @Const(C_inlet), @Const(u_profile))
+    j = @index(Global)
+    @inbounds begin
+        T = eltype(g)
+        φ = C_inlet[j]
+        u = u_profile[j]
+        usq = u * u
+        g[1,j,1] = feq_2d(Val(1), φ, u, zero(T), usq)
+        g[1,j,2] = feq_2d(Val(2), φ, u, zero(T), usq)
+        g[1,j,3] = feq_2d(Val(3), φ, u, zero(T), usq)
+        g[1,j,4] = feq_2d(Val(4), φ, u, zero(T), usq)
+        g[1,j,5] = feq_2d(Val(5), φ, u, zero(T), usq)
+        g[1,j,6] = feq_2d(Val(6), φ, u, zero(T), usq)
+        g[1,j,7] = feq_2d(Val(7), φ, u, zero(T), usq)
+        g[1,j,8] = feq_2d(Val(8), φ, u, zero(T), usq)
+        g[1,j,9] = feq_2d(Val(9), φ, u, zero(T), usq)
+    end
+end
+
+function reset_conformation_inlet_2d!(g, C_inlet, u_profile, Ny)
+    backend = KernelAbstractions.get_backend(g)
+    kernel! = _reset_conf_inlet_kernel!(backend)
+    kernel!(g, C_inlet, u_profile; ndrange=(Ny,))
+    KernelAbstractions.synchronize(backend)
+end
+
+@kernel function _reset_conf_outlet_kernel!(g, Nx)
+    j = @index(Global)
+    @inbounds begin
+        # Zero-gradient: copy from Nx-1 to Nx
+        for q in 1:9
+            g[Nx, j, q] = g[Nx-1, j, q]
+        end
+    end
+end
+
+function reset_conformation_outlet_2d!(g, Nx, Ny)
+    backend = KernelAbstractions.get_backend(g)
+    kernel! = _reset_conf_outlet_kernel!(backend)
+    kernel!(g, Nx; ndrange=(Ny,))
+    KernelAbstractions.synchronize(backend)
+end
+
+# ============================================================
 # Conservative non-equilibrium bounce-back (CNEBB) — Liu et al. 2025, Eqs (38-39)
 # ============================================================
 #

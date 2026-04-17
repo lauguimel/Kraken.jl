@@ -340,9 +340,9 @@ function run_conformation_cylinder_2d(;
         collide_conformation_2d!(g_yy, C_yy, ux, uy, C_xx, C_xy, C_yy, is_solid, tau_plus, lambda; component=3)
 
         # Polymeric stress τ_p = G·(C - I)
-        @. tau_p_xx = G * (C_xx - 1.0)
+        @. tau_p_xx = G * (C_xx - one(FT))
         @. tau_p_xy = G * C_xy
-        @. tau_p_yy = G * (C_yy - 1.0)
+        @. tau_p_yy = G * (C_yy - one(FT))
 
         f_in, f_out = f_out, f_in
     end
@@ -476,6 +476,25 @@ function run_conformation_cylinder_libb_2d(;
     # At quiescent equilibrium C = I ⇒ Ψ = 0.
     use_logconf = uses_log_conformation(polymer_model)
 
+    # Analytical Oldroyd-B inlet C profile (Liu Eq 62):
+    #   C_xy(y) = λ · ∂u/∂y,  C_xx(y) = 1 + 2·(λ·∂u/∂y)²,  C_yy = 1
+    H_chan = FT(Ny)
+    C_xx_inlet_h = ones(FT, Ny)
+    C_xy_inlet_h = zeros(FT, Ny)
+    C_yy_inlet_h = ones(FT, Ny)
+    for j in 1:Ny
+        y = FT(j) - FT(0.5)
+        dudy = u_max * FT(4) * (H_chan - FT(2)*y) / (H_chan * H_chan)
+        C_xy_inlet_h[j] = FT(λ_p) * dudy
+        C_xx_inlet_h[j] = FT(1) + FT(2) * (FT(λ_p) * dudy)^2
+    end
+    C_xx_inlet = KernelAbstractions.allocate(backend, FT, Ny)
+    C_xy_inlet = KernelAbstractions.allocate(backend, FT, Ny)
+    C_yy_inlet = KernelAbstractions.allocate(backend, FT, Ny)
+    copyto!(C_xx_inlet, C_xx_inlet_h)
+    copyto!(C_xy_inlet, C_xy_inlet_h)
+    copyto!(C_yy_inlet, C_yy_inlet_h)
+
     C_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny); fill!(C_xx, FT(1))
     C_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     C_yy = KernelAbstractions.zeros(backend, FT, Nx, Ny); fill!(C_yy, FT(1))
@@ -528,6 +547,16 @@ function run_conformation_cylinder_libb_2d(;
         apply_polymer_wall_bc!(g_xx_buf, g_xx, is_solid, Ψ_xx, polymer_bc)
         apply_polymer_wall_bc!(g_xy_buf, g_xy, is_solid, Ψ_xy, polymer_bc)
         apply_polymer_wall_bc!(g_yy_buf, g_yy, is_solid, Ψ_yy, polymer_bc)
+
+        # Fix conformation at inlet (west, i=1) and outlet (east, i=Nx):
+        # reset g-populations to equilibrium with analytical C and u_profile.
+        # Without this, stream_2d bounce-back at domain edges corrupts C.
+        reset_conformation_inlet_2d!(g_xx_buf, C_xx_inlet, u_profile, Ny)
+        reset_conformation_inlet_2d!(g_xy_buf, C_xy_inlet, u_profile, Ny)
+        reset_conformation_inlet_2d!(g_yy_buf, C_yy_inlet, u_profile, Ny)
+        reset_conformation_outlet_2d!(g_xx_buf, Nx, Ny)
+        reset_conformation_outlet_2d!(g_xy_buf, Nx, Ny)
+        reset_conformation_outlet_2d!(g_yy_buf, Nx, Ny)
 
         g_xx, g_xx_buf = g_xx_buf, g_xx
         g_xy, g_xy_buf = g_xy_buf, g_xy

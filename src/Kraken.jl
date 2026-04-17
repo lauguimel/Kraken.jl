@@ -290,6 +290,7 @@ export run_conformation_cylinder_libb_2d
 export AbstractPolymerModel, OldroydB, LogConfOldroydB, update_polymer_stress!
 export uses_log_conformation
 export collide_logconf_2d!, psi_to_C_2d!, C_to_psi_2d!
+export reset_conformation_inlet_2d!, reset_conformation_outlet_2d!
 export polymer_modulus, polymer_relaxation_time
 export AbstractPolymerWallBC, CNEBB, NoPolymerWallBC, apply_polymer_wall_bc!
 
