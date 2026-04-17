@@ -25,14 +25,16 @@ required_args(::PullHalfwayBB) = (:f_in, :Nx, :Ny)
 phase(::PullHalfwayBB) = :pre_solid
 emit_code(::PullHalfwayBB) = quote
     fp1 = f_in[i, j, 1]
-    fp2 = ifelse(i > 1,             f_in[i - 1, j,     2], f_in[i, j, 4])
-    fp3 = ifelse(j > 1,             f_in[i,     j - 1, 3], f_in[i, j, 5])
-    fp4 = ifelse(i < Nx,            f_in[i + 1, j,     4], f_in[i, j, 2])
-    fp5 = ifelse(j < Ny,            f_in[i,     j + 1, 5], f_in[i, j, 3])
-    fp6 = ifelse(i > 1  && j > 1,   f_in[i - 1, j - 1, 6], f_in[i, j, 8])
-    fp7 = ifelse(i < Nx && j > 1,   f_in[i + 1, j - 1, 7], f_in[i, j, 9])
-    fp8 = ifelse(i < Nx && j < Ny,  f_in[i + 1, j + 1, 8], f_in[i, j, 6])
-    fp9 = ifelse(i > 1  && j < Ny,  f_in[i - 1, j + 1, 9], f_in[i, j, 7])
+    # Clamped indices keep ifelse branchless (GPU-safe) while avoiding
+    # out-of-bounds reads that cause segfaults on CPU at page boundaries.
+    fp2 = ifelse(i > 1,             f_in[max(i - 1, 1),  j,              2], f_in[i, j, 4])
+    fp3 = ifelse(j > 1,             f_in[i,              max(j - 1, 1),  3], f_in[i, j, 5])
+    fp4 = ifelse(i < Nx,            f_in[min(i + 1, Nx), j,              4], f_in[i, j, 2])
+    fp5 = ifelse(j < Ny,            f_in[i,              min(j + 1, Ny), 5], f_in[i, j, 3])
+    fp6 = ifelse(i > 1  && j > 1,   f_in[max(i - 1, 1),  max(j - 1, 1),  6], f_in[i, j, 8])
+    fp7 = ifelse(i < Nx && j > 1,   f_in[min(i + 1, Nx), max(j - 1, 1),  7], f_in[i, j, 9])
+    fp8 = ifelse(i < Nx && j < Ny,  f_in[min(i + 1, Nx), min(j + 1, Ny), 8], f_in[i, j, 6])
+    fp9 = ifelse(i > 1  && j < Ny,  f_in[max(i - 1, 1),  min(j + 1, Ny), 9], f_in[i, j, 7])
 end
 
 "Semi-Lagrangian pull D2Q9: interpolate f_in at precomputed departure points."
