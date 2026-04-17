@@ -592,6 +592,57 @@ function slbm_mrt_step!(f_out, f_in, ρ, ux, uy, is_solid,
 end
 
 # ===========================================================================
+# Local relaxation rate for SLBM on non-uniform meshes.
+#
+# On a stretched mesh, the physical cell size varies. The collision τ must
+# be adjusted per cell to maintain the target physical viscosity ν:
+#
+#   τ_local = r * (τ_ref − 0.5) + 0.5
+#
+# where r = Δx_local / dx_ref is the local-to-reference cell size ratio.
+# This is the same Filippova-Hänel rescaling used in grid refinement.
+# ===========================================================================
+
+"""
+    compute_local_omega_2d(mesh; ν, Λ=3/16) -> (s_plus_field, s_minus_field)
+
+Precompute per-cell TRT relaxation rates on a curvilinear mesh, accounting
+for the local cell size variation. Returns 2D arrays `s_plus[Nξ, Nη]` and
+`s_minus[Nξ, Nη]`.
+
+The local cell size is estimated as `√(|J[i,j]|) / (denom_ξ * denom_η)^0.5`
+normalized by `dx_ref`.
+"""
+function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/16) where {T}
+    Nξ, Nη = mesh.Nξ, mesh.Nη
+    denom_ξ = T(mesh.periodic_ξ ? Nξ : Nξ - 1)
+    denom_η = T(mesh.periodic_η ? Nη : Nη - 1)
+    Δξ = one(T) / denom_ξ
+    Δη = one(T) / denom_η
+
+    s_plus_ref, s_minus_ref = trt_rates(ν; Λ=Λ)
+    τ_plus_ref  = one(T) / T(s_plus_ref)
+    τ_minus_ref = one(T) / T(s_minus_ref)
+
+    sp = zeros(T, Nξ, Nη)
+    sm = zeros(T, Nξ, Nη)
+
+    @inbounds for j in 1:Nη, i in 1:Nξ
+        lξ = sqrt(mesh.dXdξ[i, j]^2 + mesh.dYdξ[i, j]^2) * Δξ
+        lη = sqrt(mesh.dXdη[i, j]^2 + mesh.dYdη[i, j]^2) * Δη
+        dx_local = sqrt(lξ * lη)
+        r = dx_local / mesh.dx_ref
+
+        τ_plus_local  = r * (τ_plus_ref  - T(0.5)) + T(0.5)
+        τ_minus_local = r * (τ_minus_ref - T(0.5)) + T(0.5)
+        sp[i, j] = one(T) / τ_plus_local
+        sm[i, j] = one(T) / τ_minus_local
+    end
+
+    return sp, sm
+end
+
+# ===========================================================================
 # q_wall precomputation for SLBM + LI-BB on curvilinear meshes.
 #
 # On a body-fitted mesh (e.g. O-grid), solid nodes sit on the mesh

@@ -237,7 +237,8 @@ export cell_area, domain_extent
 export SLBMGeometry, build_slbm_geometry, transfer_slbm_geometry
 export slbm_bgk_step!, slbm_bgk_moving_step!, slbm_mrt_step!
 export slbm_trt_libb_step!, precompute_q_wall_slbm_cylinder_2d
-export PullSLBM
+export compute_local_omega_2d
+export PullSLBM, CollideTRTLocalDirect
 
 # Grid refinement
 export RefinementPatch, RefinedDomain

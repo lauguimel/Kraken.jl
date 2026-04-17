@@ -132,6 +132,34 @@ emit_code(::CollideBGKDirect) = quote
     f_out[i, j, 9] = fp9 - ω * (fp9 - feq_2d(Val(9), ρ, ux, uy, usq))
 end
 
+"TRT collision with per-cell relaxation rates from 2D arrays s_plus[i,j], s_minus[i,j]."
+struct CollideTRTLocalDirect <: LBMBrick end
+required_args(::CollideTRTLocalDirect) = (:f_out, :s_plus, :s_minus)
+emit_code(::CollideTRTLocalDirect) = quote
+    feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
+    feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
+    feq3 = feq_2d(Val(3), ρ, ux, uy, usq)
+    feq4 = feq_2d(Val(4), ρ, ux, uy, usq)
+    feq5 = feq_2d(Val(5), ρ, ux, uy, usq)
+    feq6 = feq_2d(Val(6), ρ, ux, uy, usq)
+    feq7 = feq_2d(Val(7), ρ, ux, uy, usq)
+    feq8 = feq_2d(Val(8), ρ, ux, uy, usq)
+    feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
+    sp_local = s_plus[i, j]
+    sm_local = s_minus[i, j]
+    a = (sp_local + sm_local) * T(0.5)
+    b = (sp_local - sm_local) * T(0.5)
+    f_out[i, j, 1] = fp1 - sp_local * (fp1 - feq1)
+    f_out[i, j, 2] = fp2 - a * (fp2 - feq2) - b * (fp4 - feq4)
+    f_out[i, j, 4] = fp4 - a * (fp4 - feq4) - b * (fp2 - feq2)
+    f_out[i, j, 3] = fp3 - a * (fp3 - feq3) - b * (fp5 - feq5)
+    f_out[i, j, 5] = fp5 - a * (fp5 - feq5) - b * (fp3 - feq3)
+    f_out[i, j, 6] = fp6 - a * (fp6 - feq6) - b * (fp8 - feq8)
+    f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6)
+    f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9)
+    f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7)
+end
+
 "TRT collision, written directly to f_out[i, j, :]. Matches fused_trt_step_kernel!."
 struct CollideTRTDirect <: LBMBrick end
 required_args(::CollideTRTDirect) = (:f_out, :s_plus, :s_minus)
