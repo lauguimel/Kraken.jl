@@ -1,0 +1,16 @@
+=== WP-3D-3 — Sphere Re=20 in a duct (CUDA Float64) ===
+
+Reference: Cd ≈ 2.84 (Clift-Gauvin + ~5% confinement, H/D=4)
+
+--- Uniform Cartesian convergence ---
+Uniform D=10                        121×41×41 (   203401 cells) Cd=2.443 err=13.97% MLUPS=68.0 (44.9s, 515 solid, 1794 cuts)
+Uniform D=20                        241×81×81 (  1581201 cells) Cd=2.527 err=11.03% MLUPS=289.0 (82.0s, 4169 solid, 7242 cuts)
+Uniform D=30                      361×121×121 (  5285401 cells) Cd=2.692 err=5.21% MLUPS=242.0 (327.7s, 14115 solid, 16146 cuts)
+
+--- Stretched (local-CFL, illustrative — see NOTE above) ---
+Stretch D=20 s=0.5                  181×61×61 (   673501 cells) Cd=1.496 err=47.33% MLUPS=203.0 (49.8s, 1860 solid, 4194 cuts)
+Stretch D=20 s=1.0                  181×61×61 (   673501 cells) Cd=0.891 err=68.63% MLUPS=229.0 (44.2s, 2017 solid, 4442 cuts)
+Stretch D=30 s=0.5                  241×81×81 (  1581201 cells) Cd=1.149 err=59.53% MLUPS=288.0 (82.2s, 4357 solid, 7362 cuts)
+Stretch D=30 s=1.0                  241×81×81 (  1581201 cells) Cd=0.35 err=87.68% MLUPS=288.0 (82.2s, 4687 solid, 7810 cuts)
+
+=== Done ===
