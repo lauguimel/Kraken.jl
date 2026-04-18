@@ -221,6 +221,72 @@ function slbm_bgk_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
 end
 
 # ===========================================================================
+# Local relaxation rate for SLBM 3D on non-uniform meshes.
+#
+# Mirror of `compute_local_omega_2d` (D2Q9). On a stretched 3D mesh, the
+# physical cell size varies and the collision τ must be adjusted per
+# cell to maintain the target physical viscosity ν:
+#
+#   τ_local = (Δx_ref / Δx_local)² · (τ_ref − 0.5) + 0.5    (quadratic, SLBM)
+#   τ_local =  (Δx_local / Δx_ref) · (τ_ref − 0.5) + 0.5    (linear, refinement)
+# ===========================================================================
+
+"""
+    compute_local_omega_3d(mesh; ν, Λ=3/16, scaling=:quadratic)
+        -> (s_plus_field, s_minus_field)
+
+Precompute per-cell TRT relaxation rates `s_plus[i,j,k]` and
+`s_minus[i,j,k]` on a 3D curvilinear mesh, accounting for the local
+cell-size variation. Returns 3D arrays of size `Nξ × Nη × Nζ`.
+
+`scaling=:quadratic` corresponds to SLBM with a single global Δt
+(τ_local − 0.5 ∝ (Δx_ref/Δx_local)²); `scaling=:linear` is the
+Filippova-Hänel rescaling for grid-refinement-style Δt ∝ Δx.
+
+Local cell size estimated from the column-norm of the metric:
+`Δx_local = (lξ · lη · lζ)^(1/3)` with `lξ = √(dXdξ² + dYdξ² + dZdξ²) · Δξ`.
+"""
+function compute_local_omega_3d(mesh::CurvilinearMesh3D{T};
+                                  ν::Real, Λ::Real=3/16,
+                                  scaling::Symbol=:quadratic) where {T}
+    Nξ, Nη, Nζ = mesh.Nξ, mesh.Nη, mesh.Nζ
+    denom_ξ = T(mesh.periodic_ξ ? Nξ : Nξ - 1)
+    denom_η = T(mesh.periodic_η ? Nη : Nη - 1)
+    denom_ζ = T(mesh.periodic_ζ ? Nζ : Nζ - 1)
+    Δξ = one(T) / denom_ξ
+    Δη = one(T) / denom_η
+    Δζ = one(T) / denom_ζ
+
+    s_plus_ref, s_minus_ref = trt_rates(ν; Λ=Λ)
+    τ_plus_ref  = one(T) / T(s_plus_ref)
+    τ_minus_ref = one(T) / T(s_minus_ref)
+
+    sp = zeros(T, Nξ, Nη, Nζ)
+    sm = zeros(T, Nξ, Nη, Nζ)
+
+    @inbounds for k in 1:Nζ, j in 1:Nη, i in 1:Nξ
+        lξ = sqrt(mesh.dXdξ[i,j,k]^2 + mesh.dYdξ[i,j,k]^2 + mesh.dZdξ[i,j,k]^2) * Δξ
+        lη = sqrt(mesh.dXdη[i,j,k]^2 + mesh.dYdη[i,j,k]^2 + mesh.dZdη[i,j,k]^2) * Δη
+        lζ = sqrt(mesh.dXdζ[i,j,k]^2 + mesh.dYdζ[i,j,k]^2 + mesh.dZdζ[i,j,k]^2) * Δζ
+        dx_local = cbrt(lξ * lη * lζ)
+
+        if scaling === :quadratic
+            r_inv2 = (mesh.dx_ref / dx_local)^2
+            τ_plus_local  = r_inv2 * (τ_plus_ref  - T(0.5)) + T(0.5)
+            τ_minus_local = r_inv2 * (τ_minus_ref - T(0.5)) + T(0.5)
+        else
+            r = dx_local / mesh.dx_ref
+            τ_plus_local  = r * (τ_plus_ref  - T(0.5)) + T(0.5)
+            τ_minus_local = r * (τ_minus_ref - T(0.5)) + T(0.5)
+        end
+        sp[i,j,k] = one(T) / τ_plus_local
+        sm[i,j,k] = one(T) / τ_minus_local
+    end
+
+    return sp, sm
+end
+
+# ===========================================================================
 # q_wall precomputation for SLBM + LI-BB on a 3D curvilinear mesh.
 #
 # Mirror of `precompute_q_wall_slbm_cylinder_2d` — for each fluid node
@@ -359,6 +425,46 @@ function slbm_trt_libb_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
             geom.i_dep, geom.j_dep, geom.k_dep,
             geom.Nξ, geom.Nη, geom.Nζ,
             ET(s_plus), ET(s_minus),
+            geom.periodic_ξ, geom.periodic_η, geom.periodic_ζ;
+            ndrange=(geom.Nξ, geom.Nη, geom.Nζ))
+end
+
+# ---------------------------------------------------------------------------
+# Local-τ variant: per-cell s_plus[i,j,k], s_minus[i,j,k] for SLBM on
+# stretched 3D meshes. Same brick assembly as above, but the collision
+# brick reads relaxation rates from device-side 3D arrays.
+# ---------------------------------------------------------------------------
+
+const _SLBM_TRT_LIBB_LOCAL_SPEC_3D = LBMSpec(
+    PullSLBM_3D(), SolidInert_3D(),
+    ApplyLiBBPrePhase_3D(),
+    Moments_3D(), CollideTRTLocalDirect_3D(),
+    WriteMoments_3D();
+    stencil = :D3Q19,
+)
+
+"""
+    slbm_trt_libb_step_local_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                                  q_wall, uw_link_x, uw_link_y, uw_link_z,
+                                  geom, sp_field, sm_field)
+
+SLBM + TRT + LI-BB step (D3Q19) with PER-CELL relaxation rates from the
+device-side 3D arrays `sp_field` and `sm_field` (e.g. produced by
+`compute_local_omega_3d` and copied to the backend). Required on
+stretched curvilinear meshes where the local cell size — and therefore τ
+— varies per cell.
+"""
+function slbm_trt_libb_step_local_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                                        q_wall, uw_link_x, uw_link_y, uw_link_z,
+                                        geom::SLBMGeometry3D,
+                                        sp_field, sm_field)
+    backend = KernelAbstractions.get_backend(f_in)
+    kernel! = build_lbm_kernel(backend, _SLBM_TRT_LIBB_LOCAL_SPEC_3D)
+    kernel!(f_out, ρ, ux, uy, uz, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y, uw_link_z,
+            geom.i_dep, geom.j_dep, geom.k_dep,
+            geom.Nξ, geom.Nη, geom.Nζ,
+            sp_field, sm_field,
             geom.periodic_ξ, geom.periodic_η, geom.periodic_ζ;
             ndrange=(geom.Nξ, geom.Nη, geom.Nζ))
 end

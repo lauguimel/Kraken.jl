@@ -155,6 +155,158 @@ using KernelAbstractions
     # lie in (0, 1] (we use 0.5 as a safe fallback if the discriminant
     # is negative — only when the geometry is degenerate).
     # ----------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # Poiseuille 3D in a rectangular duct: SLBM + LI-BB (no body) +
+    # ZouHeVelocity inlet (parabolic) + ZouHePressure outlet +
+    # halfway-BB on the 4 transverse walls. Validates WP-3D-2:
+    # apply_bc_rebuild_3d! with apply_transverse=true.
+    #
+    # We use a parabolic inlet (zero at walls) to avoid the Zou-He
+    # corner-singularity that a uniform inlet creates. This is a
+    # SANITY test of the BC infrastructure (no NaN, bounded ρ, +x
+    # bulk flow, no-slip on the four walls). Convergence to the
+    # analytical Poiseuille profile is deferred to WP-3D-3 on Aqua.
+    # ----------------------------------------------------------------
+    @testset "Poiseuille 3D rect duct (apply_transverse)" begin
+        Nx, Ny, Nz = 30, 12, 12
+        ν  = T(0.05)
+        u_max = T(0.02)
+
+        mesh = cartesian_mesh_3d(; x_min=0.0, x_max=T(Nx - 1),
+                                   y_min=0.0, y_max=T(Ny - 1),
+                                   z_min=0.0, z_max=T(Nz - 1),
+                                   Nx=Nx, Ny=Ny, Nz=Nz, FT=T)
+        geom_h = build_slbm_geometry_3d(mesh; local_cfl=false)
+        geom = transfer_slbm_geometry_3d(geom_h, backend)
+
+        is_solid = KernelAbstractions.allocate(backend, Bool, Nx, Ny, Nz); fill!(is_solid, false)
+        q_wall   = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(q_wall, zero(T))
+        uw_x     = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(uw_x, zero(T))
+        uw_y     = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(uw_y, zero(T))
+        uw_z     = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(uw_z, zero(T))
+
+        # Parabolic inlet u(y, z) = u_max · 16 · y(H-y)·z(D-z)/(H²·D²)
+        Hy = T(Ny - 1); Hz = T(Nz - 1)
+        u_profile_h = zeros(T, Ny, Nz)
+        for k in 1:Nz, j in 1:Ny
+            yy = T(j - 1); zz = T(k - 1)
+            u_profile_h[j, k] = T(16) * u_max *
+                                yy * (Hy - yy) * zz * (Hz - zz) /
+                                (Hy^2 * Hz^2)
+        end
+        u_profile = KernelAbstractions.allocate(backend, T, Ny, Nz)
+        copyto!(u_profile, u_profile_h)
+        bcspec = BCSpec3D(; west = ZouHeVelocity(u_profile),
+                            east = ZouHePressure(one(T)))
+
+        # Initial state matches the inlet profile (no transient at i=1).
+        f_h = zeros(T, Nx, Ny, Nz, 19)
+        for k in 1:Nz, j in 1:Ny, i in 1:Nx, q in 1:19
+            f_h[i, j, k, q] = Kraken.equilibrium(D3Q19(), one(T),
+                                                  u_profile_h[j, k],
+                                                  zero(T), zero(T), q)
+        end
+        fa = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); copyto!(fa, f_h)
+        fb = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(fb, zero(T))
+        ρ  = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz); fill!(ρ, one(T))
+        ux = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz); fill!(ux, zero(T))
+        uy = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz); fill!(uy, zero(T))
+        uz = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz); fill!(uz, zero(T))
+
+        for _ in 1:300
+            slbm_trt_libb_step_3d!(fb, fa, ρ, ux, uy, uz, is_solid,
+                                    q_wall, uw_x, uw_y, uw_z, geom, ν)
+            apply_bc_rebuild_3d!(fb, fa, bcspec, ν, Nx, Ny, Nz;
+                                 apply_transverse=true)
+            KernelAbstractions.synchronize(backend)
+            fa, fb = fb, fa
+        end
+
+        ρ_h  = Array(ρ)
+        ux_h = Array(ux)
+        uy_h = Array(uy)
+        @test all(isfinite, ρ_h)
+        @test all(isfinite, ux_h)
+        @test minimum(ρ_h) > 0.90
+        @test maximum(ρ_h) < 1.10
+        mid = Nx ÷ 2
+        @test ux_h[mid, Ny ÷ 2, Nz ÷ 2] > T(0.001)
+        # Wall halfway-BB → near-zero centerline-row velocity at walls.
+        @test abs(ux_h[mid, 1, Nz ÷ 2])  < T(0.01)
+        @test abs(ux_h[mid, Ny, Nz ÷ 2]) < T(0.01)
+        @test abs(ux_h[mid, Ny ÷ 2, 1])  < T(0.01)
+        @test abs(ux_h[mid, Ny ÷ 2, Nz]) < T(0.01)
+    end
+
+    # ----------------------------------------------------------------
+    # compute_local_omega_3d sanity: on a uniform Cartesian mesh the
+    # per-cell s_plus/s_minus arrays should be CONSTANT and equal to
+    # the analytical trt_rates(ν).
+    # ----------------------------------------------------------------
+    @testset "compute_local_omega_3d on uniform mesh ≡ trt_rates" begin
+        Nx, Ny, Nz = 8, 8, 8
+        mesh = cartesian_mesh_3d(; x_min=0.0, x_max=T(Nx - 1),
+                                   y_min=0.0, y_max=T(Ny - 1),
+                                   z_min=0.0, z_max=T(Nz - 1),
+                                   Nx=Nx, Ny=Ny, Nz=Nz, FT=T)
+        ν = T(0.05)
+        sp, sm = compute_local_omega_3d(mesh; ν=ν, scaling=:quadratic)
+        sp_ref, sm_ref = Kraken.trt_rates(ν; Λ=3/16)
+        @test maximum(abs.(sp .- T(sp_ref))) < 1e-10
+        @test maximum(abs.(sm .- T(sm_ref))) < 1e-10
+    end
+
+    # ----------------------------------------------------------------
+    # slbm_trt_libb_step_local_3d! on a uniform mesh should match the
+    # uniform-τ kernel to machine precision (the per-cell field is
+    # constant).
+    # ----------------------------------------------------------------
+    @testset "local-τ kernel ≡ uniform kernel on uniform mesh" begin
+        Nx, Ny, Nz = 10, 8, 8
+        mesh, geom = _build_uniform_geom(Nx, Ny, Nz; periodic=false)
+        ν = T(0.05)
+
+        is_solid = KernelAbstractions.allocate(backend, Bool, Nx, Ny, Nz); fill!(is_solid, false)
+        q_wall   = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(q_wall, zero(T))
+        uw_x     = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(uw_x, zero(T))
+        uw_y     = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(uw_y, zero(T))
+        uw_z     = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(uw_z, zero(T))
+
+        f0 = zeros(T, Nx, Ny, Nz, 19)
+        for k in 1:Nz, j in 1:Ny, i in 1:Nx, q in 1:19
+            ux0 = T(0.03) * sin(2π * (i - 1) / Nx)
+            f0[i, j, k, q] = Kraken.equilibrium(D3Q19(), one(T), ux0, zero(T), zero(T), q)
+        end
+
+        sp_h, sm_h = compute_local_omega_3d(mesh; ν=ν, scaling=:quadratic)
+        sp = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz); copyto!(sp, sp_h)
+        sm = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz); copyto!(sm, sm_h)
+
+        # Path A: local-τ
+        fa_A = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); copyto!(fa_A, f0)
+        fb_A = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(fb_A, zero(T))
+        ρA  = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        uxA = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        uyA = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        uzA = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        slbm_trt_libb_step_local_3d!(fb_A, fa_A, ρA, uxA, uyA, uzA, is_solid,
+                                       q_wall, uw_x, uw_y, uw_z, geom, sp, sm)
+        KernelAbstractions.synchronize(backend)
+
+        # Path B: uniform τ
+        fa_B = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); copyto!(fa_B, f0)
+        fb_B = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19); fill!(fb_B, zero(T))
+        ρB  = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        uxB = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        uyB = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        uzB = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
+        slbm_trt_libb_step_3d!(fb_B, fa_B, ρB, uxB, uyB, uzB, is_solid,
+                                q_wall, uw_x, uw_y, uw_z, geom, ν)
+        KernelAbstractions.synchronize(backend)
+
+        @test maximum(abs.(Array(fb_A) .- Array(fb_B))) < 1e-12
+    end
+
     @testset "sphere q_wall sanity" begin
         Nx, Ny, Nz = 30, 20, 20
         mesh = cartesian_mesh_3d(; x_min=0.0, x_max=T(Nx - 1),

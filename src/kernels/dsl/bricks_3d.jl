@@ -168,6 +168,54 @@ emit_code(::CollideTRTDirect_3D) = quote
     f_out[i, j, k, 18] = fp18 - a * (fp18 - feq18) - b * (fp17 - feq17)
 end
 
+"TRT collision on D3Q19 with PER-CELL relaxation rates s_plus[i,j,k], s_minus[i,j,k]. Writes directly to f_out[i,j,k,:]. Used by SLBM 3D on stretched curvilinear meshes (compute_local_omega_3d)."
+struct CollideTRTLocalDirect_3D <: LBMBrick end
+required_args(::CollideTRTLocalDirect_3D) = (:f_out, :s_plus, :s_minus)
+emit_code(::CollideTRTLocalDirect_3D) = quote
+    feq1  = feq_3d(Val(1),  ρ, ux, uy, uz, usq)
+    feq2  = feq_3d(Val(2),  ρ, ux, uy, uz, usq)
+    feq3  = feq_3d(Val(3),  ρ, ux, uy, uz, usq)
+    feq4  = feq_3d(Val(4),  ρ, ux, uy, uz, usq)
+    feq5  = feq_3d(Val(5),  ρ, ux, uy, uz, usq)
+    feq6  = feq_3d(Val(6),  ρ, ux, uy, uz, usq)
+    feq7  = feq_3d(Val(7),  ρ, ux, uy, uz, usq)
+    feq8  = feq_3d(Val(8),  ρ, ux, uy, uz, usq)
+    feq9  = feq_3d(Val(9),  ρ, ux, uy, uz, usq)
+    feq10 = feq_3d(Val(10), ρ, ux, uy, uz, usq)
+    feq11 = feq_3d(Val(11), ρ, ux, uy, uz, usq)
+    feq12 = feq_3d(Val(12), ρ, ux, uy, uz, usq)
+    feq13 = feq_3d(Val(13), ρ, ux, uy, uz, usq)
+    feq14 = feq_3d(Val(14), ρ, ux, uy, uz, usq)
+    feq15 = feq_3d(Val(15), ρ, ux, uy, uz, usq)
+    feq16 = feq_3d(Val(16), ρ, ux, uy, uz, usq)
+    feq17 = feq_3d(Val(17), ρ, ux, uy, uz, usq)
+    feq18 = feq_3d(Val(18), ρ, ux, uy, uz, usq)
+    feq19 = feq_3d(Val(19), ρ, ux, uy, uz, usq)
+    sp_local = s_plus[i, j, k]
+    sm_local = s_minus[i, j, k]
+    a = (sp_local + sm_local) * T(0.5)
+    b = (sp_local - sm_local) * T(0.5)
+    f_out[i, j, k, 1]  = fp1  - sp_local * (fp1 - feq1)
+    f_out[i, j, k, 2]  = fp2  - a * (fp2  - feq2)  - b * (fp3  - feq3)
+    f_out[i, j, k, 3]  = fp3  - a * (fp3  - feq3)  - b * (fp2  - feq2)
+    f_out[i, j, k, 4]  = fp4  - a * (fp4  - feq4)  - b * (fp5  - feq5)
+    f_out[i, j, k, 5]  = fp5  - a * (fp5  - feq5)  - b * (fp4  - feq4)
+    f_out[i, j, k, 6]  = fp6  - a * (fp6  - feq6)  - b * (fp7  - feq7)
+    f_out[i, j, k, 7]  = fp7  - a * (fp7  - feq7)  - b * (fp6  - feq6)
+    f_out[i, j, k, 8]  = fp8  - a * (fp8  - feq8)  - b * (fp11 - feq11)
+    f_out[i, j, k, 11] = fp11 - a * (fp11 - feq11) - b * (fp8  - feq8)
+    f_out[i, j, k, 9]  = fp9  - a * (fp9  - feq9)  - b * (fp10 - feq10)
+    f_out[i, j, k, 10] = fp10 - a * (fp10 - feq10) - b * (fp9  - feq9)
+    f_out[i, j, k, 12] = fp12 - a * (fp12 - feq12) - b * (fp15 - feq15)
+    f_out[i, j, k, 15] = fp15 - a * (fp15 - feq15) - b * (fp12 - feq12)
+    f_out[i, j, k, 13] = fp13 - a * (fp13 - feq13) - b * (fp14 - feq14)
+    f_out[i, j, k, 14] = fp14 - a * (fp14 - feq14) - b * (fp13 - feq13)
+    f_out[i, j, k, 16] = fp16 - a * (fp16 - feq16) - b * (fp19 - feq19)
+    f_out[i, j, k, 19] = fp19 - a * (fp19 - feq19) - b * (fp16 - feq16)
+    f_out[i, j, k, 17] = fp17 - a * (fp17 - feq17) - b * (fp18 - feq18)
+    f_out[i, j, k, 18] = fp18 - a * (fp18 - feq18) - b * (fp17 - feq17)
+end
+
 "Bouzidi pre-phase (D3Q19). For each flagged link q, substitutes the corrupted pulled pop fp_{q̄} via `_libb_branch(q_w, f_in[i,j,k,q], fp_q, f_in[i,j,k,q̄], δ_{q̄})`. Handles arbitrary q_w ∈ (0, 1]."
 struct ApplyLiBBPrePhase_3D <: LBMBrick end
 required_args(::ApplyLiBBPrePhase_3D) = (:f_in, :q_wall, :uw_link_x, :uw_link_y, :uw_link_z)
