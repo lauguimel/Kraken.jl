@@ -461,3 +461,73 @@ function wall_velocity_rotating_cylinder(q_wall::AbstractArray{T, 3},
     end
     return uw_link_x, uw_link_y
 end
+
+"""
+    precompute_q_wall_contraction_2d(Nx, Ny; i_step, j_low, j_high,
+                                      include_inlet_walls=true,
+                                      FT=Float64) -> (q_wall, is_solid)
+
+Axis-aligned planar contraction (Alves 2003 4:1 benchmark family). Builds
+the `is_solid` mask for two solid blocks above and below the downstream
+half-channel `[j_low, j_high]` for `i ≥ i_step`. The upstream channel
+`i < i_step` is fully open between j=1 and j=Ny.
+
+Sets `q_wall[i, j, q] = 0.5` for every link from a fluid cell into a
+solid neighbour — at q_w = 0.5 the LI-BB reduces to standard halfway
+bounce-back, which is exact for axis-aligned walls placed midway between
+fluid and solid cell centres.
+
+The N/S domain edges (j=1, j=Ny) are handled by the kernel's halfway-BB
+fallback in the upstream block. In the downstream block the channel
+walls coincide with the inner step walls and are captured here via the
+`is_solid` mask.
+
+Set `include_inlet_walls=false` if the upstream channel walls are also
+flagged elsewhere (e.g. by a periodic-y kernel). Default: true.
+
+Returns `(q_wall, is_solid)` of shape `(Nx, Ny, 9)` and `(Nx, Ny)`.
+"""
+function precompute_q_wall_contraction_2d(Nx::Int, Ny::Int;
+                                            i_step::Int, j_low::Int, j_high::Int,
+                                            include_inlet_walls::Bool=true,
+                                            FT::Type{<:AbstractFloat}=Float64)
+    1 ≤ i_step ≤ Nx        || error("i_step out of [1, Nx]")
+    1 ≤ j_low ≤ j_high ≤ Ny || error("require 1 ≤ j_low ≤ j_high ≤ Ny")
+    is_solid = zeros(Bool, Nx, Ny)
+    q_wall   = zeros(FT, Nx, Ny, 9)
+    cxs = velocities_x(D2Q9())
+    cys = velocities_y(D2Q9())
+
+    # 1. Solid mask: top + bottom blocks downstream of the step
+    @inbounds for j in 1:Ny, i in 1:Nx
+        if i ≥ i_step && (j < j_low || j > j_high)
+            is_solid[i, j] = true
+        end
+    end
+
+    # 2. q_wall = 0.5 on every link from fluid to solid neighbour. Out-of-
+    # domain neighbours (including the channel walls if include_inlet_walls)
+    # are ALSO flagged so the LI-BB pre-phase covers them — the fused kernel
+    # would otherwise rely on its halfway-BB fallback, which is fine but
+    # this keeps the BC application uniform.
+    @inbounds for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        for q in 2:9
+            ni = i + cxs[q]
+            nj = j + cys[q]
+            inside = 1 ≤ ni ≤ Nx && 1 ≤ nj ≤ Ny
+            if !inside
+                # Domain edge: only flag N/S walls if requested. E/W edges
+                # are inlet/outlet, BCSpec handles them — leave q_wall = 0.
+                if include_inlet_walls && (cys[q] != 0) && (cxs[q] == 0 || (1 ≤ ni ≤ Nx))
+                    if nj < 1 || nj > Ny
+                        q_wall[i, j, q] = FT(0.5)
+                    end
+                end
+            elseif is_solid[ni, nj]
+                q_wall[i, j, q] = FT(0.5)
+            end
+        end
+    end
+    return q_wall, is_solid
+end
