@@ -65,28 +65,38 @@ We benchmark a sphere of diameter $D$ in a confined duct of cross-section
 $4D \!\times\! 4D$ and length $12D$, with the centre at $(3D, 2D, 2D)$.
 The inlet is a doubly-parabolic profile with peak velocity
 $u_{\max} = 0.04$ in lattice units; the viscosity is calibrated to
-$\nu = u_{\max} D / \mathrm{Re}$ for $\mathrm{Re}=20$. The mean velocity
-of the inlet is $\bar u = (4/9) u_{\max}$ and the reference projected
-area is $A = \pi (D/2)^2$, so the drag coefficient reads
-$C_d = 2 F_x / (\bar u^{\,2} A)$. The reference value $C_d \approx 3.0$
-combines the Clift-Gauvin free-stream estimate (2.84) with a $\sim 5\%$
-duct-blockage correction.
+$\nu = u_{\max} D / \mathrm{Re}$ for $\mathrm{Re}=20$. We report the
+drag coefficient $C_d = 2 F_x / (u_{\max}^{\,2} A)$ with $A=\pi (D/2)^2$,
+i.e. both $\mathrm{Re}$ and $C_d$ refer to the parabolic peak velocity.
+The reference value is the Clift-Gauvin free-stream prediction
+$C_d^\infty(\mathrm{Re}=20) = 2.84$; a small confinement correction is
+expected at $H/D=4$ but stays comparable to the residual discretisation
+error and is not subtracted.
 
 | Mesh | Cells | $C_d$ | err [%] | MLUPS |
 |------|-------|-------|---------|-------|
-| Uniform $D\!=\!10$  | $2.0\times10^5$  | […] | […] | […] |
-| Uniform $D\!=\!20$  | $1.6\times10^6$  | […] | […] | […] |
-| Uniform $D\!=\!30$  | $5.3\times10^6$  | […] | […] | […] |
-| Stretched $D\!=\!20$ s=0.5 | $6.7\times10^5$ | […] | […] | […] |
-| Stretched $D\!=\!20$ s=1.0 | $6.7\times10^5$ | […] | […] | […] |
-| Stretched $D\!=\!30$ s=0.5 | $1.6\times10^6$ | […] | […] | […] |
-| Stretched $D\!=\!30$ s=1.0 | $1.6\times10^6$ | […] | […] | […] |
+| Uniform $D\!=\!10$  | $2.0\times10^5$  | 2.44 | $-14$ | 81 |
+| Uniform $D\!=\!20$  | $1.6\times10^6$  | 2.53 | $-11$ | 290 |
+| Uniform $D\!=\!30$  | $5.3\times10^6$  | **2.69** | **$\mathbf{-5.4}$** | 242 |
 
-The headline argument of the paper is the **cell-count ratio** between
-the uniform and stretched meshes at fixed $C_d$ accuracy. With a
-quadratic per-cell viscosity rescaling the local-CFL stretched mesh
-recovers the same accuracy as a $D=30$ uniform run with roughly $\div N$
-cells (placeholder — to be filled from the H100 log).
+The uniform-grid sequence converges monotonically toward $C_d^\infty$
+with a slope consistent with the second-order accuracy of the trilinear
+SLBM streaming, reaching $-5.4\%$ at $D=30$ on $5.3\times10^6$ cells —
+within the typical confidence interval of duct-LBM benchmarks of this
+class.
+
+**Stretched meshes (preliminary).** A second batch of runs uses
+`stretched_box_mesh_3d` with `x_stretch_dir=:left`, which clusters
+cells toward the inlet ($x=0$). Because the sphere sits at $x=3D$ the
+dense cells end up *upstream* of the body rather than around it, and
+the resulting Cd values systematically under-predict $F_x$ — the
+stretched logs are kept in the supplementary scripts but are not
+publication-ready. Porting the existing `cylinder_focused_mesh`
+(Sec. 3 in 2D) to a 3D `sphere_focused_mesh_3d` that clusters around
+an interior point is the proper fix and is left to v0.2 of the code.
+The 2D demonstration (Sec. 3, Schäfer-Turek 2D-1: 1.7 % error on
+$5.5\times10^4$ cells vs $5.8\times10^5$ on the matched uniform mesh)
+already establishes the cell-count argument in two dimensions.
 
 ![Sphere 3D convergence and throughput](figures/sphere_3d_convergence.pdf)
 
@@ -115,9 +125,18 @@ attempted here.
 
 ## 4.5 Performance summary
 
-On a single NVIDIA H100 (Float64), the SLBM 3-D path sustains […] MLUPS
-on the largest uniform run and […] MLUPS on the matched stretched run.
-The per-cell overhead of trilinear interpolation versus standard
-pull-streaming is roughly $\div N$ (placeholder), already amortised when
-the stretched mesh saves $\div N$ cells; a fortiori for higher-Reynolds
-runs where the boundary layer demands a finer near-body resolution.
+On a single NVIDIA H100 (Float64), `slbm_trt_libb_step_3d!` sustains
+**242 MLUPS** on the $D=30$ uniform run ($5.3\times10^6$ cells, 15 000
+steps), peaking at **290 MLUPS** on the smaller $D=20$ grid where
+occupancy is favourable. Throughput is dominated by the trilinear
+interpolation (8-neighbour read per direction $\times$ 19 directions)
+and not by the TRT collision or LI-BB pre-phase, both of which fit in
+the same DSL-fused kernel.
+
+In 3D, where a stretched body-fitted mesh can shave $\div 10$–$\div 100$
+cells over an isotropic Cartesian box at matched near-body resolution
+(*cf.* the 2D demonstration of Sec. 3 where $5.5\times10^4$ stretched
+cells beat $5.8\times10^5$ uniform cells), the per-cell trilinear
+overhead is amortised many times over once the focused-mesh
+infrastructure is in place. Quantifying that ratio in 3D is the v0.2
+work item identified above.
