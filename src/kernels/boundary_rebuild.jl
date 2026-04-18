@@ -501,8 +501,10 @@ end
 # ----------------------------------------------------------------------
 
 # South wall (j=1, normal +y). Pops with cy>0: 4, 8, 9, 16, 18.
+# Full i,k coverage (including face corners/edges) — SLBM clamps at all
+# edges and corners, so the entire face row needs the BB swap.
 @kernel function _bc_south_halfwaybb_3d!(f_out, @Const(f_in), Ny)
-    im1, km1 = @index(Global, NTuple); i = im1 + 1; k = km1 + 1
+    i, k = @index(Global, NTuple)
     @inbounds begin
         f_out[i, 1, k, 4]  = f_in[i, 1, k, 5]
         f_out[i, 1, k, 8]  = f_in[i, 1, k, 11]
@@ -514,7 +516,7 @@ end
 
 # North wall (j=Ny, normal -y). Pops with cy<0: 5, 11, 10, 19, 17.
 @kernel function _bc_north_halfwaybb_3d!(f_out, @Const(f_in), Ny)
-    im1, km1 = @index(Global, NTuple); i = im1 + 1; k = km1 + 1
+    i, k = @index(Global, NTuple)
     @inbounds begin
         f_out[i, Ny, k, 5]  = f_in[i, Ny, k, 4]
         f_out[i, Ny, k, 11] = f_in[i, Ny, k, 8]
@@ -526,7 +528,7 @@ end
 
 # Bottom wall (k=1, normal +z). Pops with cz>0: 6, 12, 13, 16, 17.
 @kernel function _bc_bottom_halfwaybb_3d!(f_out, @Const(f_in), Nz)
-    im1, jm1 = @index(Global, NTuple); i = im1 + 1; j = jm1 + 1
+    i, j = @index(Global, NTuple)
     @inbounds begin
         f_out[i, j, 1, 6]  = f_in[i, j, 1, 7]
         f_out[i, j, 1, 12] = f_in[i, j, 1, 15]
@@ -538,7 +540,7 @@ end
 
 # Top wall (k=Nz, normal -z). Pops with cz<0: 7, 15, 14, 19, 18.
 @kernel function _bc_top_halfwaybb_3d!(f_out, @Const(f_in), Nz)
-    im1, jm1 = @index(Global, NTuple); i = im1 + 1; j = jm1 + 1
+    i, j = @index(Global, NTuple)
     @inbounds begin
         f_out[i, j, Nz, 7]  = f_in[i, j, Nz, 6]
         f_out[i, j, Nz, 15] = f_in[i, j, Nz, 12]
@@ -548,21 +550,26 @@ end
     end
 end
 
+# Full-face ndrange so the edges/corners of each transverse face also
+# receive the BB swap. West/east Zou-He kernels run BEFORE these and
+# do use (Ny-2, Nz-2), so the inlet/outlet corners are overridden by
+# halfway-BB; this is the standard pragmatic closure when a Zou-He face
+# meets a no-slip wall (matches the 2D behaviour).
 @inline function _apply_bc_3d_south!(backend, f_out, f_in, ::HalfwayBB,
                                       s_p, s_m, Nx, Ny, Nz)
-    _bc_south_halfwaybb_3d!(backend)(f_out, f_in, Ny; ndrange=(Nx - 2, Nz - 2))
+    _bc_south_halfwaybb_3d!(backend)(f_out, f_in, Ny; ndrange=(Nx, Nz))
 end
 @inline function _apply_bc_3d_north!(backend, f_out, f_in, ::HalfwayBB,
                                       s_p, s_m, Nx, Ny, Nz)
-    _bc_north_halfwaybb_3d!(backend)(f_out, f_in, Ny; ndrange=(Nx - 2, Nz - 2))
+    _bc_north_halfwaybb_3d!(backend)(f_out, f_in, Ny; ndrange=(Nx, Nz))
 end
 @inline function _apply_bc_3d_bottom!(backend, f_out, f_in, ::HalfwayBB,
                                        s_p, s_m, Nx, Ny, Nz)
-    _bc_bottom_halfwaybb_3d!(backend)(f_out, f_in, Nz; ndrange=(Nx - 2, Ny - 2))
+    _bc_bottom_halfwaybb_3d!(backend)(f_out, f_in, Nz; ndrange=(Nx, Ny))
 end
 @inline function _apply_bc_3d_top!(backend, f_out, f_in, ::HalfwayBB,
                                     s_p, s_m, Nx, Ny, Nz)
-    _bc_top_halfwaybb_3d!(backend)(f_out, f_in, Nz; ndrange=(Nx - 2, Ny - 2))
+    _bc_top_halfwaybb_3d!(backend)(f_out, f_in, Nz; ndrange=(Nx, Ny))
 end
 
 # ----------------------------------------------------------------------
