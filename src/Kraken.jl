@@ -246,6 +246,8 @@ export CurvilinearMesh3D, build_mesh_3d, validate_mesh_3d
 export stretched_box_mesh_3d, cartesian_mesh_3d
 export SLBMGeometry3D, build_slbm_geometry_3d, transfer_slbm_geometry_3d
 export slbm_bgk_step_3d!
+export slbm_trt_libb_step_3d!, precompute_q_wall_slbm_sphere_3d
+export PullSLBM_3D
 
 # Grid refinement
 export RefinementPatch, RefinedDomain

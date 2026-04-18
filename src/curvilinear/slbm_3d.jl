@@ -219,3 +219,146 @@ function slbm_bgk_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
             geom.periodic_ξ, geom.periodic_η, geom.periodic_ζ;
             ndrange=(geom.Nξ, geom.Nη, geom.Nζ))
 end
+
+# ===========================================================================
+# q_wall precomputation for SLBM + LI-BB on a 3D curvilinear mesh.
+#
+# Mirror of `precompute_q_wall_slbm_cylinder_2d` — for each fluid node
+# `(i, j, k)` and each D3Q19 direction `q`, if the computational neighbour
+# `(i+cxq, j+cyq, k+czq)` is solid we ray-sphere-intersect the physical-
+# space segment from the fluid node to the neighbour with a sphere of
+# radius `R_body` centred at `(cx_body, cy_body, cz_body)`.
+# ===========================================================================
+
+"""
+    precompute_q_wall_slbm_sphere_3d(mesh, is_solid,
+        cx_body, cy_body, cz_body, R_body;
+        FT=Float64)
+        -> (q_wall, uw_link_x, uw_link_y, uw_link_z)
+
+Precompute LI-BB cut fractions on a 3D curvilinear mesh for a stationary
+sphere centred at `(cx_body, cy_body, cz_body)` with radius `R_body` in
+physical space.
+
+For each fluid node `(i, j, k)` and direction `q ∈ 2..19`, if the
+computational neighbour is solid we solve the quadratic
+`|P_f + t·(P_n − P_f) − P_c|² = R²` for the smallest positive `t ∈ (0, 1]`
+and store it as `q_wall[i, j, k, q]`. Wall velocities are zero (returned
+as freshly-allocated zero arrays); rotating-body / moving-body variants
+can be added later by mirroring the 2D `omega_inner` branch.
+"""
+function precompute_q_wall_slbm_sphere_3d(
+        mesh::CurvilinearMesh3D{T},
+        is_solid::AbstractArray{Bool, 3},
+        cx_body::Real, cy_body::Real, cz_body::Real, R_body::Real;
+        FT::Type{<:AbstractFloat}=T) where {T}
+
+    Nξ, Nη, Nζ = mesh.Nξ, mesh.Nη, mesh.Nζ
+    cxs = velocities_x(D3Q19())
+    cys = velocities_y(D3Q19())
+    czs = velocities_z(D3Q19())
+
+    q_wall    = zeros(FT, Nξ, Nη, Nζ, 19)
+    uw_link_x = zeros(FT, Nξ, Nη, Nζ, 19)
+    uw_link_y = zeros(FT, Nξ, Nη, Nζ, 19)
+    uw_link_z = zeros(FT, Nξ, Nη, Nζ, 19)
+
+    cxb, cyb, czb, Rb = FT(cx_body), FT(cy_body), FT(cz_body), FT(R_body)
+    R² = Rb * Rb
+
+    @inbounds for k in 1:Nζ, j in 1:Nη, i in 1:Nξ
+        is_solid[i, j, k] && continue
+
+        Xf = FT(mesh.X[i, j, k])
+        Yf = FT(mesh.Y[i, j, k])
+        Zf = FT(mesh.Z[i, j, k])
+
+        for q in 2:19
+            diq = cxs[q]; djq = cys[q]; dkq = czs[q]
+            in_ = i + diq; jn_ = j + djq; kn_ = k + dkq
+
+            mesh.periodic_ξ && (in_ = ((in_ - 1) % Nξ + Nξ) % Nξ + 1)
+            mesh.periodic_η && (jn_ = ((jn_ - 1) % Nη + Nη) % Nη + 1)
+            mesh.periodic_ζ && (kn_ = ((kn_ - 1) % Nζ + Nζ) % Nζ + 1)
+
+            (in_ < 1 || in_ > Nξ ||
+             jn_ < 1 || jn_ > Nη ||
+             kn_ < 1 || kn_ > Nζ) && continue
+            is_solid[in_, jn_, kn_] || continue
+
+            Xn = FT(mesh.X[in_, jn_, kn_])
+            Yn = FT(mesh.Y[in_, jn_, kn_])
+            Zn = FT(mesh.Z[in_, jn_, kn_])
+
+            dx = Xn - Xf; dy = Yn - Yf; dz = Zn - Zf
+            fx = Xf - cxb; fy = Yf - cyb; fz = Zf - czb
+
+            a = dx * dx + dy * dy + dz * dz
+            b_coeff = FT(2) * (fx * dx + fy * dy + fz * dz)
+            c_coeff = fx * fx + fy * fy + fz * fz - R²
+            disc = b_coeff * b_coeff - FT(4) * a * c_coeff
+
+            if disc < zero(FT)
+                q_wall[i, j, k, q] = FT(0.5)
+            else
+                sd = sqrt(disc)
+                t1 = (-b_coeff - sd) / (FT(2) * a)
+                t2 = (-b_coeff + sd) / (FT(2) * a)
+                t = (t1 > zero(FT) && t1 ≤ one(FT)) ? t1 :
+                    (t2 > zero(FT) && t2 ≤ one(FT)) ? t2 : FT(0.5)
+                q_wall[i, j, k, q] = t
+            end
+        end
+    end
+
+    return q_wall, uw_link_x, uw_link_y, uw_link_z
+end
+
+# ---------------------------------------------------------------------------
+# Fused SLBM + TRT + LI-BB step in 3D, assembled from DSL bricks.
+#
+#   PullSLBM_3D → SolidInert_3D → ApplyLiBBPrePhase_3D →
+#   Moments_3D → CollideTRTDirect_3D → WriteMoments_3D
+#
+# Same recipe as `slbm_trt_libb_step!` (2D) and `fused_trt_libb_v2_step_3d!`
+# (Cartesian 3D), but the streaming brick is the trilinear semi-Lagrangian
+# pull (`PullSLBM_3D`) rather than the halfway-BB pull-stream.
+# ---------------------------------------------------------------------------
+
+const _SLBM_TRT_LIBB_SPEC_3D = LBMSpec(
+    PullSLBM_3D(), SolidInert_3D(),
+    ApplyLiBBPrePhase_3D(),
+    Moments_3D(), CollideTRTDirect_3D(),
+    WriteMoments_3D();
+    stencil = :D3Q19,
+)
+
+"""
+    slbm_trt_libb_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                            q_wall, uw_link_x, uw_link_y, uw_link_z,
+                            geom, ν; Λ=3/16)
+
+Fused single-pass SLBM + TRT + LI-BB step on a 3D curvilinear mesh
+(D3Q19). Combines semi-Lagrangian streaming, LI-BB pre-phase substitution
+on cut links (Bouzidi for arbitrary `q_w ∈ (0, 1]`) and a TRT collision
+with magic parameter `Λ`.
+
+Reduces to the Cartesian halfway-BB + TRT + LI-BB pipeline when the mesh
+is uniform Cartesian (departures land on neighbour nodes, trilinear
+collapses to a single node read).
+"""
+function slbm_trt_libb_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                                  q_wall, uw_link_x, uw_link_y, uw_link_z,
+                                  geom::SLBMGeometry3D, ν; Λ::Real=3/16)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    kernel! = build_lbm_kernel(backend, _SLBM_TRT_LIBB_SPEC_3D)
+    kernel!(f_out, ρ, ux, uy, uz, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y, uw_link_z,
+            geom.i_dep, geom.j_dep, geom.k_dep,
+            geom.Nξ, geom.Nη, geom.Nζ,
+            ET(s_plus), ET(s_minus),
+            geom.periodic_ξ, geom.periodic_η, geom.periodic_ζ;
+            ndrange=(geom.Nξ, geom.Nη, geom.Nζ))
+end

@@ -92,13 +92,13 @@ const CANONICAL_ARG_ORDER = [
     # input arrays (@Const-able)
     :f_in, :is_solid, :q_wall, :uw_link_x, :uw_link_y, :uw_link_z,
     # SLBM departure-point arrays (@Const-able)
-    :i_dep, :j_dep,
+    :i_dep, :j_dep, :k_dep,
     # integer scalars
     :Nx, :Ny, :Nz,
     # float scalars
     :ω, :s_plus, :s_minus,
     # SLBM boolean scalars
-    :periodic_ξ, :periodic_η,
+    :periodic_ξ, :periodic_η, :periodic_ζ,
 ]
 
 function _canonical_sort(args::AbstractVector{Symbol})

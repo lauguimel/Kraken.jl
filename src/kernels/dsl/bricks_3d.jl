@@ -19,6 +19,32 @@
 #   (16, 19) (17, 18)
 # =====================================================================
 
+"Semi-Lagrangian pull D3Q19: trilinear-interpolate f_in at the precomputed departure points (i_dep[i,j,k,q], j_dep[i,j,k,q], k_dep[i,j,k,q]). Reduces to a plain pull-stream when the mesh is uniform Cartesian (departures land exactly on neighbour nodes)."
+struct PullSLBM_3D <: LBMBrick end
+required_args(::PullSLBM_3D) = (:f_in, :i_dep, :j_dep, :k_dep, :Nx, :Ny, :Nz, :periodic_ξ, :periodic_η, :periodic_ζ)
+phase(::PullSLBM_3D) = :pre_solid
+emit_code(::PullSLBM_3D) = quote
+    fp1  = trilinear_f(f_in, i_dep[i,j,k,1],  j_dep[i,j,k,1],  k_dep[i,j,k,1],  1,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp2  = trilinear_f(f_in, i_dep[i,j,k,2],  j_dep[i,j,k,2],  k_dep[i,j,k,2],  2,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp3  = trilinear_f(f_in, i_dep[i,j,k,3],  j_dep[i,j,k,3],  k_dep[i,j,k,3],  3,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp4  = trilinear_f(f_in, i_dep[i,j,k,4],  j_dep[i,j,k,4],  k_dep[i,j,k,4],  4,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp5  = trilinear_f(f_in, i_dep[i,j,k,5],  j_dep[i,j,k,5],  k_dep[i,j,k,5],  5,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp6  = trilinear_f(f_in, i_dep[i,j,k,6],  j_dep[i,j,k,6],  k_dep[i,j,k,6],  6,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp7  = trilinear_f(f_in, i_dep[i,j,k,7],  j_dep[i,j,k,7],  k_dep[i,j,k,7],  7,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp8  = trilinear_f(f_in, i_dep[i,j,k,8],  j_dep[i,j,k,8],  k_dep[i,j,k,8],  8,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp9  = trilinear_f(f_in, i_dep[i,j,k,9],  j_dep[i,j,k,9],  k_dep[i,j,k,9],  9,  Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp10 = trilinear_f(f_in, i_dep[i,j,k,10], j_dep[i,j,k,10], k_dep[i,j,k,10], 10, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp11 = trilinear_f(f_in, i_dep[i,j,k,11], j_dep[i,j,k,11], k_dep[i,j,k,11], 11, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp12 = trilinear_f(f_in, i_dep[i,j,k,12], j_dep[i,j,k,12], k_dep[i,j,k,12], 12, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp13 = trilinear_f(f_in, i_dep[i,j,k,13], j_dep[i,j,k,13], k_dep[i,j,k,13], 13, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp14 = trilinear_f(f_in, i_dep[i,j,k,14], j_dep[i,j,k,14], k_dep[i,j,k,14], 14, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp15 = trilinear_f(f_in, i_dep[i,j,k,15], j_dep[i,j,k,15], k_dep[i,j,k,15], 15, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp16 = trilinear_f(f_in, i_dep[i,j,k,16], j_dep[i,j,k,16], k_dep[i,j,k,16], 16, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp17 = trilinear_f(f_in, i_dep[i,j,k,17], j_dep[i,j,k,17], k_dep[i,j,k,17], 17, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp18 = trilinear_f(f_in, i_dep[i,j,k,18], j_dep[i,j,k,18], k_dep[i,j,k,18], 18, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+    fp19 = trilinear_f(f_in, i_dep[i,j,k,19], j_dep[i,j,k,19], k_dep[i,j,k,19], 19, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
+end
+
 "Pull-stream D3Q19 with halfway-BB fallback at domain edges."
 struct PullHalfwayBB_3D <: LBMBrick end
 required_args(::PullHalfwayBB_3D) = (:f_in, :Nx, :Ny, :Nz)
