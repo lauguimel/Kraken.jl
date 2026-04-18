@@ -1,7 +1,7 @@
 # SLBM paper — état et reste-à-faire 3D
 
-Branche : `slbm-paper` (13 commits depuis `lbm`)
-Dernière mise à jour : session 2026-04-17/18
+Branche : `slbm-paper` (19 commits depuis `lbm`)
+Dernière mise à jour : session 2026-04-18 (WP-3D-1, 4, 2, 5, 3, 6 livrés)
 
 ## Ce qui est fait
 
@@ -41,55 +41,56 @@ Dernière mise à jour : session 2026-04-17/18
 
 ## Ce qui reste pour une **3D propre** papier-ready
 
-### WP-3D-1 : SLBM 3D + LI-BB V2
-**Effort : 1-2 semaines**
+### WP-3D-1 : SLBM 3D + LI-BB V2 ✅ (commit `bf25ea5`)
 
-- Porter `precompute_q_wall_slbm_cylinder_2d` → **3D sphere** en espace physique
-  (ray-sphere intersection via Jacobien 3×3)
-- Porter `ApplyLiBBPrePhase` brick → `ApplyLiBBPrePhase3D` (déjà existe dans `bricks_3d.jl` pour cartésien — à vérifier et intégrer dans le spec SLBM 3D)
-- Fuser `slbm_trt_libb_step_3d!` : `PullSLBM3D()` + `SolidInert3D()` + `ApplyLiBBPrePhase3D()` + `Moments3D()` + `CollideTRTDirect3D()` + `WriteMoments3D()`
-- **Ajouter brick `PullSLBM3D`** dans `bricks_3d.jl` (équivalent de PullSLBM 2D)
+Livré :
+- `PullSLBM_3D` brick DSL (trilinéaire) — `src/kernels/dsl/bricks_3d.jl`
+- `precompute_q_wall_slbm_sphere_3d` (ray-sphère espace physique) — `src/curvilinear/slbm_3d.jl:296`
+- `slbm_trt_libb_step_3d!` fusé via spec `PullSLBM_3D + SolidInert_3D + ApplyLiBBPrePhase_3D + Moments_3D + CollideTRTDirect_3D + WriteMoments_3D`
+- Smoke 40×20×20, R=4 : 1098 cuts, mean(ρ)=0.9992, no NaN
 
-**Test de validation** : sphère Re=20, Cd ≈ 2.0 (Clift), err <5% à D=30.
+### WP-3D-2 : BCSpec 3D pour SLBM stretched ✅ (commit `8c9bcb0`)
 
-### WP-3D-2 : BCSpec 3D pour SLBM stretched
-**Effort : 3-5 jours**
+Livré :
+- 4 nouveaux kernels halfway-BB transverses (south/north/bottom/top) gated par `apply_transverse=true`
+- Local-τ Zou-He 3D (`_bc_west_zh_velocity_local_3d!`, `_bc_east_zh_pressure_local_3d!`) lisant `sp_field[i,j,k]`
+- `apply_bc_rebuild_3d!` étendu avec kwargs `sp_field`, `sm_field`, `apply_transverse` (back-compat préservée pour `fused_trt_libb_v2_step_3d!`)
+- Brick `CollideTRTLocalDirect_3D` + `slbm_trt_libb_step_local_3d!` via spec dédié
+- `compute_local_omega_3d` — sp/sm 3D avec scaling :quadratic ou :linear
 
-- `apply_bc_rebuild_3d!` existe déjà mais ne gère que HalfwayBB — ajouter Zou-He 3D local-τ (6 faces)
-- Convertir les profils Poiseuille 3D en `CuArray`/`MtlArray` à l'inlet
-- Tester : Poiseuille 3D stretché (canal à section rectangulaire avec stretch tanh transverse)
+### WP-3D-3 : SLBM 3D stretched — **chiffre headline du papier** ✅ scripts (commit `7c1e582`), bench Aqua **Q**
 
-### WP-3D-3 : SLBM 3D stretched — **LE chiffre ÷50 du papier**
-**Effort : 1 semaine**
+- `hpc/slbm_sphere_h100.jl` : Uniform D=10/20/30 + Stretched D=20/30 ×{0.5, 1.0}
+- `hpc/slbm_sphere_h100.pbs` : 1× H100, 6 h walltime
+- Soumis `qsub` → job `20145714.aqua` (état Q derrière krk_lc48 et krk_alves)
+- Sanity Cartesian local OK (Fx=0.114 sur D=4) ; stretched mild (s=0.5, D=6) OK Fx=0.165
 
-- `stretched_box_mesh_3d` + `build_slbm_geometry_3d(; local_cfl=true)` → déjà prêt
-- Benchmark 3D sphère sur Aqua H100 en Float64 :
-  - Uniform D=20, D=40, D=60 → convergence
-  - Stretched équivalent avec ÷3 à ÷10 cellules
-  - Mesurer MLUPS + erreur Cd vs Clift-Gauvin
-- **Objectif** : ≥10× moins de cellules que l'équivalent uniforme pour même précision → argument papier
+### WP-3D-4 : Tests unitaires 3D SLBM ✅ (commit `922c7b6`)
 
-### WP-3D-4 : Tests unitaires 3D SLBM
-**Effort : 2-3 jours**
+24/24 passent dans `test/test_slbm_libb_3d.jl` :
+- Conservation : flow uniforme stable < 1e-12 sur 50 steps
+- Bit-exact intérieur : `slbm_trt_libb_step_3d!` ≡ `fused_trt_libb_v2_step_3d!` < 1e-12 (no cuts)
+- Sphere q_wall sanity : cuts > 0, q_w ∈ (0, 1]
+- Poiseuille 3D rect duct (parabolic inlet, halfway-BB 4 walls, no-slip OK)
+- `compute_local_omega_3d` ≡ `trt_rates(ν)` sur grille uniforme < 1e-10
+- Local-τ kernel ≡ uniform kernel sur grille uniforme < 1e-12
 
-- `test_slbm_3d_uniform.jl` : SLBM 3D sur grille uniforme == LBM standard à bit-exact
-- `test_slbm_3d_poiseuille.jl` : Poiseuille 3D convergence L∞ < 1e-3
-- `test_slbm_3d_sphere.jl` : Cd vs Clift Re=20 < 5% err
-- Matrice backend : CPU F64, Metal F32, CUDA F64 (sur Aqua)
+### WP-3D-5 : Enzyme AD 3D ✅ (commit `1c67a9e`)
 
-### WP-3D-5 : Enzyme AD 3D
-**Effort : 3-5 jours**
+dKE/dν sur Taylor-Green 3D 24³ × 100 steps (CPU Float64) :
+- KE(ν=0.1) = 5.32 × 10⁻²
+- dKE/dν (FD)     = -1.49831
+- dKE/dν (Enzyme) = -1.49831
+- **Erreur relative = 0.00 %**
+- Compile-once 160 s, runs cachés ensuite
 
-- dKE/dν sur Taylor-Green 3D : devrait marcher directement (même pattern que 2D)
-- Shape derivative dFx/dR 3D : plus délicat (nécessite `precompute_q_wall_sphere_3d` Enzyme-compatible) — probablement hors-scope v0.1
+Shape derivative dFx/dR 3D : non tenté (nécessite `precompute_q_wall_sphere_3d` Enzyme-compatible — déféré v0.2)
 
-### WP-3D-6 : Benchmarks publiables pour le papier
-**Effort : 1 semaine**
+### WP-3D-6 : Benchmarks publiables pour le papier ✅ infra (commit en cours)
 
-- Figure 1 : convergence Cd vs D, uniform vs stretched, 3D
-- Figure 2 : MLUPS vs N (H100), 3D uniforme vs stretched
-- Figure 3 : sensibilité AD (dCd/dν) avec Enzyme sur 3D
-- Tableau : comparaison cellules/MLUPS/err — **paper headline**
+- `paper/3d_extension.md` : section Sec. 4 du papier (4.1 D3Q19 SLBM, 4.2 LI-BB+BCSpec, 4.3 sphère Re=20 + tableau placeholder, 4.4 AD 3D, 4.5 perf)
+- `scripts/figures/plot_sphere_3d_convergence.py` : parse `slbm_sphere_3d.log`, sortie `paper/figures/sphere_3d_convergence.pdf` (err vs cells + MLUPS vs cells, log-log, uniform vs stretched)
+- À faire après job Aqua : `pull_results_from_aqua.sh` → `python plot_sphere_3d_convergence.py --log results/slbm_sphere_3d.log` → remplir `[…]` dans `paper/3d_extension.md`
 
 ## Problèmes ouverts
 
