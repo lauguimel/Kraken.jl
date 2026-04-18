@@ -1,0 +1,49 @@
+#!/bin/bash -l
+#PBS -N slbm_sphere_3d
+#PBS -l select=1:ncpus=8:ngpus=1:mem=96GB:gpu_id=H100
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m n
+#
+# WP-3D-3 — Sphere Re=20 drag benchmark on H100 (CUDA Float64).
+#   1. Uniform Cartesian convergence (D=10/20/30)
+#   2. Stretched SLBM (local_cfl) at equivalent near-body resolution
+#
+# Headline metric: cells-to-target-accuracy ratio between uniform and
+# stretched meshes (paper table 1).
+#
+# Usage:
+#   hpc/sync_to_aqua.sh --apply
+#   ssh aqua "cd ~/Kraken.jl && qsub hpc/slbm_sphere_h100.pbs"
+#
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS=8
+
+echo "== nvidia-smi =="
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+echo ""
+echo "== julia --version =="
+julia --version
+echo ""
+
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+echo ""
+echo "=============================="
+echo "3D sphere benchmarks (CUDA H100)"
+echo "=============================="
+julia --project=. hpc/slbm_sphere_h100.jl 2>&1 | tee slbm_sphere_3d.log
+
+echo ""
+echo "=============================="
+echo "AD 3D proof-of-concept (CPU/Enzyme)"
+echo "=============================="
+julia --project=. hpc/slbm_ad_3d.jl 2>&1 | tee slbm_ad_3d.log
+
+echo ""
+echo "=============================="
+echo "Done"
+echo "=============================="
