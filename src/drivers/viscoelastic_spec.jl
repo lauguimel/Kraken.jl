@@ -127,7 +127,15 @@ struct NoPolymerWallBC <: AbstractPolymerWallBC end
 Dispatch hook; default falls through for `NoPolymerWallBC`.
 """
 apply_polymer_wall_bc!(g_post, g_pre, is_solid, C, ::NoPolymerWallBC) = nothing
-function apply_polymer_wall_bc!(g_post, g_pre, is_solid, C, ::CNEBB)
+# CNEBB dispatches on the dimensionality of the populations array:
+# 3 dims = (Nx, Ny, 9) → 2D D2Q9; 4 dims = (Nx, Ny, Nz, 19) → 3D D3Q19.
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,
+                                  ::CNEBB) where {T}
     apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, C)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,4}, g_pre, is_solid, C,
+                                  ::CNEBB) where {T}
+    apply_cnebb_conformation_3d!(g_post, g_pre, is_solid, C)
     return nothing
 end

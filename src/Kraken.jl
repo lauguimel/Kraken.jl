@@ -56,9 +56,13 @@ include("kernels/collide_rheology_2d.jl")
 include("kernels/collide_twophase_rheology_2d.jl")
 include("kernels/viscoelastic_2d.jl")
 include("kernels/conformation_lbm_2d.jl")
+include("kernels/conformation_lbm_3d.jl")
 include("kernels/logconformation_lbm_2d.jl")
 include("kernels/collide_viscoelastic_source_2d.jl")
 include("kernels/collide_viscoelastic_guo_2d.jl")
+# `kernels/viscoelastic_3d.jl` dispatches `update_polymer_stress_3d!` on
+# polymer model types defined in `drivers/viscoelastic_spec.jl`, so it
+# must be included AFTER the spec — see drivers/ block below.
 
 # --- Kernel DSL (runtime fusion) ---
 include("kernels/dsl/lbm_spec.jl")
@@ -85,8 +89,10 @@ include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
 include("drivers/viscoelastic_spec.jl")
+include("kernels/viscoelastic_3d.jl")
 include("drivers/viscoelastic.jl")
 include("drivers/contraction_libb.jl")
+include("drivers/viscoelastic_3d.jl")
 
 # --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
 include("curvilinear/mesh.jl")
@@ -290,6 +296,7 @@ export run_viscoelastic_cylinder_2d, run_conformation_cylinder_2d
 export run_conformation_cylinder_libb_2d
 export run_conformation_contraction_libb_2d
 export vortex_length_contraction_2d, outlet_centerline_N1_contraction_2d
+export run_conformation_sphere_libb_3d
 export AbstractPolymerModel, OldroydB, LogConfOldroydB, update_polymer_stress!
 export uses_log_conformation
 export collide_logconf_2d!, psi_to_C_2d!, C_to_psi_2d!
@@ -302,6 +309,11 @@ export collide_conformation_2d!, init_conformation_field_2d!
 export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!
 export collide_viscoelastic_source_2d!, collide_viscoelastic_source_guo_2d!
 export apply_hermite_source_2d!
+# 3D viscoelastic (D3Q19 port)
+export collide_conformation_3d!, init_conformation_field_3d!
+export compute_conformation_macro_3d!, apply_cnebb_conformation_3d!
+export reset_conformation_inlet_3d!, reset_conformation_outlet_3d!
+export apply_hermite_source_3d!, update_polymer_stress_3d!
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!
