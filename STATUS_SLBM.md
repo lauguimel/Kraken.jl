@@ -1,7 +1,35 @@
 # SLBM paper — état et reste-à-faire 3D
 
-Branche : `slbm-paper` (19 commits depuis `lbm`)
-Dernière mise à jour : session 2026-04-18 (WP-3D-1, 4, 2, 5, 3, 6 livrés)
+Branche : `slbm-paper` (32 commits depuis `lbm`)
+Dernière mise à jour : session 2026-04-19 (WP-MESH-1..4 — workflow gmsh livré)
+
+## Workflow gmsh / blockMesh — externe → SLBM (WP-MESH 2026-04-19)
+
+L'utilisateur génère un mesh structuré dans gmsh (Transfinite, n'importe quel
+format `.msh` v4) avec des Physical Groups pour les BCs ; Kraken charge,
+construit la metric exacte via cubic B-spline + ForwardDiff, et le pipe dans
+le solver SLBM existant. Plus besoin de réinventer un mesh-generator dans
+le code Julia.
+
+| Étape | Fichier | Notes |
+|---|---|---|
+| Cubic B-spline + ForwardDiff sur arrays X[i,j], Y | `src/curvilinear/mesh_from_arrays.jl` | err 1e-10 sur X,Y ; 1e-4 sur dXdξ vs polar_mesh analytique (cubic truncation) ; reste différentiable Enzyme |
+| Loader gmsh `.msh` axis-aligned (Phase A) | `src/curvilinear/mesh_gmsh.jl` `:axis_aligned` | err 1e-12 vs cartesian_mesh ; 5 Physical Groups parsés |
+| Loader gmsh topologique (Phase B) — 4-corner + half-annulus | `:topological` | edge-walking sur quad connectivity, support O-grid block (multi-block stitching deferred) |
+| Pipeline complet gmsh → SLBM TRT-LIBB | Poiseuille 81×41 → Linf u(y) = 3.45 % | 5-step workflow opérationnel |
+| Matrice comparative Schäfer-Turek 2D-1 | `paper/data/mesh_matrix_2d.log` + `paper/figures/mesh_matrix_2d.pdf` | (A) Cart+halfBB 3.55 % / (B) Cart+LIBB 2.12 % / (C) gmsh+SLBM+LIBB 2.37 % — gmsh ≡ Cart à 0.25 % |
+| Tests | `test/test_gmsh_loader.jl` 569 / 569 | inclus dans `runtests.jl` |
+
+## Workflow utilisateur
+
+```
+gmsh GUI / .geo script              # définit la géométrie + Transfinite + Physical Groups
+   ↓ (any .msh v4 file)
+load_gmsh_mesh_2d(path)             # auto-detect surface, parse nodes + tags
+   → (mesh::CurvilinearMesh, groups::GmshPhysicalGroups)
+build_slbm_geometry(mesh)            # SLBM departure indices via metric
+slbm_trt_libb_step!(...)             # standard SLBM-LIBB step on the mesh
+```
 
 ## Ce qui est fait
 
