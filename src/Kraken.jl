@@ -178,7 +178,9 @@ export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
 export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
 export precompute_q_wall_sphere_3d, compute_drag_libb_3d, run_sphere_libb_3d
+export precompute_q_wall_cylinder_extruded_3d
 export precompute_q_wall_annulus, precompute_q_wall_contraction_2d
+export compute_drag_mea_3d
 export wall_velocity_rotating_cylinder, wall_velocity_rotating_inner
 export persistent_fused_bgk!, persistent_aa_bgk!
 export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d

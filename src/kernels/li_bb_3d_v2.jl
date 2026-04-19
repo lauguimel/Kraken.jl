@@ -95,6 +95,66 @@ function precompute_q_wall_sphere_3d(Nx::Int, Ny::Int, Nz::Int,
 end
 
 """
+    precompute_q_wall_cylinder_extruded_3d(Nx, Ny, Nz, cx, cy, R; FT=Float64)
+                                            -> (q_wall, is_solid)
+
+3D extrusion of `precompute_q_wall_cylinder` along the z direction:
+the obstacle is an infinite cylinder of axis (cx, cy, all z) and
+radius R. Generates a (Nx, Ny, Nz, 19) `q_wall` and (Nx, Ny, Nz)
+`is_solid` consistent with the LI-BB V2 3D kernel.
+
+Used to verify that the 3D viscoelastic port reproduces the 2D
+cylinder benchmark when the geometry is z-extruded (and the flow is
+z-periodic with no z-gradients), isolating "true 3D" curvature
+effects in any sphere benchmark discrepancy.
+
+Pure-axial-z directions (q=6, 7) never cut the cylindrical wall.
+Other directions reuse the 2D quadratic on (x, y) projection — the
+parameter t parameterizes the link in 3D and t ∈ (0, 1] gives the
+fractional cut position along the link.
+"""
+function precompute_q_wall_cylinder_extruded_3d(Nx::Int, Ny::Int, Nz::Int,
+                                                  cx::Real, cy::Real, R::Real;
+                                                  FT::Type{<:AbstractFloat}=Float64)
+    cxT, cyT, RT = FT(cx), FT(cy), FT(R)
+    R² = RT * RT
+    is_solid = zeros(Bool, Nx, Ny, Nz)
+    q_wall   = zeros(FT,   Nx, Ny, Nz, 19)
+    cxs = velocities_x(D3Q19())
+    cys = velocities_y(D3Q19())
+    czs = velocities_z(D3Q19())
+
+    @inbounds for k in 1:Nz, j in 1:Ny, i in 1:Nx
+        xf = FT(i - 1); yf = FT(j - 1)
+        dx_f = xf - cxT; dy_f = yf - cyT
+        if dx_f * dx_f + dy_f * dy_f ≤ R²
+            is_solid[i, j, k] = true
+            continue
+        end
+        for q in 2:19
+            cqx = FT(cxs[q]); cqy = FT(cys[q])
+            (cqx == zero(FT) && cqy == zero(FT)) && continue   # pure z, never cuts
+            xn = xf + cqx; yn = yf + cqy
+            dx_n = xn - cxT; dy_n = yn - cyT
+            (dx_n * dx_n + dy_n * dy_n > R²) && continue
+            a = cqx * cqx + cqy * cqy
+            b = FT(2) * (dx_f * cqx + dy_f * cqy)
+            c = dx_f * dx_f + dy_f * dy_f - R²
+            disc = b * b - FT(4) * a * c
+            disc < zero(FT) && continue
+            sd = sqrt(disc)
+            t1 = (-b - sd) / (FT(2) * a)
+            t2 = (-b + sd) / (FT(2) * a)
+            t = t1 > zero(FT) ? t1 : t2
+            if t > zero(FT) && t ≤ one(FT)
+                q_wall[i, j, k, q] = t
+            end
+        end
+    end
+    return q_wall, is_solid
+end
+
+"""
     compute_drag_libb_3d(f_post, q_wall, Nx, Ny, Nz)
         -> (Fx, Fy, Fz)
 

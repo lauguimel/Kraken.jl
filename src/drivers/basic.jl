@@ -379,6 +379,53 @@ function compute_drag_mea_2d(f_pre, f_post, is_solid, Nx, Ny)
 end
 
 """
+    compute_drag_mea_3d(f_pre, f_post, is_solid, Nx, Ny, Nz) → (Fx, Fy, Fz)
+
+3D D3Q19 momentum-exchange drag on a stationary obstacle defined by the
+boolean `is_solid` mask. Direct port of `compute_drag_mea_2d`.
+
+For each fluid cell with at least one solid neighbour along link q,
+`F += c_q · (f_q(pre-stream) + f_opp(post-stream))`. With halfway-BB
+this reduces to `2·c_q·f_q(pre-stream)` because `f_opp(post-stream) =
+f_q(pre-stream)` (the bounced-back population). The two-time-level form
+is preferred when the post-collision populations carry an extra source
+(e.g. Hermite τ_p injection in the viscoelastic driver) — Mei-with-
+Bouzidi mixes neighbour populations and double-counts that source.
+
+Use this in any 3D driver that calls `apply_hermite_source_3d!` BEFORE
+the drag step. For pure-Newtonian flows the result is consistent (within
+the q_w=0.5 halfway-BB approximation) with `compute_drag_libb_3d`.
+"""
+function compute_drag_mea_3d(f_pre, f_post, is_solid, Nx::Int, Ny::Int, Nz::Int)
+    fpre  = Array(f_pre)
+    fpost = Array(f_post)
+    solid = Array(is_solid)
+    cxv = [0,  1, -1,  0,  0,  0,  0,  1, -1,  1, -1,  1, -1,  1, -1,  0,  0,  0,  0]
+    cyv = [0,  0,  0,  1, -1,  0,  0,  1,  1, -1, -1,  0,  0,  0,  0,  1, -1,  1, -1]
+    czv = [0,  0,  0,  0,  0,  1, -1,  0,  0,  0,  0,  1,  1, -1, -1,  1,  1, -1, -1]
+    opp = [1,  3,  2,  5,  4,  7,  6, 11, 10,  9,  8, 15, 14, 13, 12, 19, 18, 17, 16]
+
+    Fx = 0.0; Fy = 0.0; Fz = 0.0
+
+    @inbounds for k in 1:Nz, j in 1:Ny, i in 1:Nx
+        if !solid[i, j, k]
+            for q in 2:19
+                ni = i + cxv[q]; nj = j + cyv[q]; nk = k + czv[q]
+                if 1 ≤ ni ≤ Nx && 1 ≤ nj ≤ Ny && 1 ≤ nk ≤ Nz && solid[ni, nj, nk]
+                    oq = opp[q]
+                    s = fpre[i, j, k, q] + fpost[i, j, k, oq]
+                    Fx += Float64(cxv[q]) * s
+                    Fy += Float64(cyv[q]) * s
+                    Fz += Float64(czv[q]) * s
+                end
+            end
+        end
+    end
+
+    return (Fx=Fx, Fy=Fy, Fz=Fz)
+end
+
+"""
     run_cylinder_2d(; Nx=200, Ny=50, radius=10, u_in=0.05, ν=0.05,
                      max_steps=20000, backend, T)
 

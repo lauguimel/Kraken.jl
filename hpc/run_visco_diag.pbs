@@ -1,0 +1,26 @@
+#!/bin/bash -l
+#PBS -N krk_diag
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+
+mkdir -p results
+
+echo "=== STEP 1: Poiseuille viscoelastic 2D vs 3D — $(date) ==="
+julia --project=. hpc/poiseuille_visco_diag.jl 2>&1 | tee results/poiseuille_visco_diag.txt
+
+echo ""
+echo "=== STEP 2: Cylinder extruded 2D vs 3D — $(date) ==="
+julia --project=. hpc/cylinder_extruded_diag.jl 2>&1 | tee results/cylinder_extruded_diag.txt
+
+echo ""
+echo "=== Done at $(date) ==="
