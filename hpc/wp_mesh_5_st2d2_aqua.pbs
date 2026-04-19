@@ -1,0 +1,18 @@
+#!/bin/bash -l
+#PBS -N wp_mesh_5_st2d2
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=H100
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m n
+cd $PBS_O_WORKDIR
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS=8
+nvidia-smi || { echo "GPU missing"; exit 1; }
+julia --version
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+echo "=========================="
+echo "ST 2D-2 matrix on H100"
+echo "=========================="
+julia --project=. hpc/wp_mesh_5_st2d2_aqua.jl 2>&1 | tee wp_mesh_5_st2d2.log
+echo "Done."
