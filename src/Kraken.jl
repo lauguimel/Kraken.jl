@@ -89,6 +89,7 @@ include("curvilinear/slbm.jl")
 include("curvilinear/mesh_3d.jl")
 include("curvilinear/slbm_3d.jl")
 include("curvilinear/mesh_from_arrays.jl")
+include("curvilinear/mesh_gmsh.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
@@ -250,6 +251,8 @@ export slbm_bgk_step_3d!
 export slbm_trt_libb_step_3d!, slbm_trt_libb_step_local_3d!
 export precompute_q_wall_slbm_sphere_3d, compute_local_omega_3d
 export PullSLBM_3D, CollideTRTLocalDirect_3D
+# gmsh / external mesh import
+export load_gmsh_mesh_2d, load_gmsh_mesh_3d, GmshPhysicalGroups
 
 # Grid refinement
 export RefinementPatch, RefinedDomain
