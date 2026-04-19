@@ -88,6 +88,7 @@ include("curvilinear/generators.jl")
 include("curvilinear/slbm.jl")
 include("curvilinear/mesh_3d.jl")
 include("curvilinear/slbm_3d.jl")
+include("curvilinear/mesh_from_arrays.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
