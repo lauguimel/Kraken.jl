@@ -29,6 +29,7 @@ include("kernels/equilibrium_helpers_3d.jl")
 include("kernels/collide_stream_2d.jl")
 include("kernels/collide_stream_3d.jl")
 include("kernels/stream_periodic_2d.jl")
+include("kernels/stream_periodic_3d.jl")
 include("kernels/collide_guo_2d.jl")
 include("kernels/collide_guo_3d.jl")
 include("kernels/macroscopic.jl")
@@ -133,6 +134,7 @@ export opposite, cs2, equilibrium
 # Kernels
 export stream_2d!, collide_2d!, stream_3d!, collide_3d!
 export stream_periodic_x_wall_y_2d!, stream_fully_periodic_2d!, stream_periodic_x_axisym_2d!
+export stream_fully_periodic_3d!
 export stream_axisym_inlet_2d!
 export collide_guo_2d!, collide_guo_field_2d!
 export collide_guo_3d!, collide_guo_field_3d!
