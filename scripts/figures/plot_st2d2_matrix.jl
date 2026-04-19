@@ -16,7 +16,7 @@ const REF_CD  = 3.23
 const REF_CLR = 0.706
 const REF_ST  = 0.30
 
-const LINE_RE = r"^\[(?<method>[ABC])\s+D=(?<D>\d+)\s+cells=(?<cells>\d+)\]\s+Cd=(?<cd>[-\d.]+)\s+Cl_RMS=(?<clr>[-\d.]+)\s+St=(?<st>[-\d.]+)\s+\|\s+(?<mlups>[-\d.]+)\s+MLUPS"
+const LINE_RE = r"^\[(?<method>[ABC])\s+D=(?<D>\d+)\s+cells=(?<cells>\d+)\]\s+Cd=(?<cd>\S+).*?Cl_RMS=(?<clr>\S+).*?St=(?<st>\S+).*?\|\s+(?<mlups>\S+)\s+MLUPS"
 
 struct Run
     method::Symbol      # :A, :B, :C
@@ -53,12 +53,17 @@ method_marker(s) = s === :A ? :circle : s === :B ? :rect : :diamond
 function build_fig(rows::Vector{Run}, out_path::AbstractString)
     fig = Figure(; size = (1200, 380))
 
-    function panel!(ax, getter, ref, ylabel, title)
+    function panel!(ax, getter, ref, ylabel, title; min_err=0.01)
         for m in (:A, :B, :C)
             sel = sort([r for r in rows if r.method == m]; by = r -> r.cells)
             isempty(sel) && continue
-            cells = [r.cells for r in sel]
-            err   = [100 * abs(getter(r) - ref) / abs(ref) for r in sel]
+            # Drop runs that diverged (NaN values) from this panel
+            sel_clean = filter(r -> isfinite(getter(r)), sel)
+            isempty(sel_clean) && continue
+            cells = [r.cells for r in sel_clean]
+            # Clamp to min_err so log10 is well-defined when the FFT
+            # bin resolution returns 0% on St.
+            err   = [max(min_err, 100 * abs(getter(r) - ref) / abs(ref)) for r in sel_clean]
             scatterlines!(ax, cells, err;
                 color = method_color(m), marker = method_marker(m),
                 markersize = 12, linewidth = 2,

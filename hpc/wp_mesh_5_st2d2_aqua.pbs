@@ -10,7 +10,7 @@ export JULIA_CUDA_USE_COMPAT=false
 export JULIA_NUM_THREADS=8
 nvidia-smi || { echo "GPU missing"; exit 1; }
 julia --version
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. -e 'using Pkg; Pkg.add(["Interpolations", "Gmsh"]); Pkg.instantiate()'
 echo "=========================="
 echo "ST 2D-2 matrix on H100"
 echo "=========================="

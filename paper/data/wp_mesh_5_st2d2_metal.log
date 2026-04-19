@@ -1,0 +1,17 @@
+=== WP-MESH-5 — ST 2D-2 Re=100 (Metal M3 Max FP32) ===
+Reference: Cd≈3.23, Cl_RMS≈0.706, St≈0.30
+
+--- D_lu=20  steps=80000  sample_every=10  window=40000 ---
+[A D=20 cells=36603] Cd=3.313 (err 2.57%)  Cl_RMS=0.678 (err 3.91%)  St=0.3 (err 0.0%)  | 90.0 MLUPS  32.4s
+[B D=20 cells=36603] Cd=3.185 (err 1.39%)  Cl_RMS=0.598 (err 15.29%)  St=0.3 (err 0.0%)  | 97.0 MLUPS  30.2s
+[C D=20 cells=36603] Cd=NaN (err NaN%)  Cl_RMS=NaN (err NaN%)  St=0.019 (err 93.75%)  | 90.0 MLUPS  32.4s
+--- D_lu=40  steps=160000  sample_every=10  window=80000 ---
+[A D=40 cells=145365] Cd=3.238 (err 0.26%)  Cl_RMS=0.697 (err 1.22%)  St=0.3 (err 0.0%)  | 393.0 MLUPS  59.2s
+[B D=40 cells=145365] Cd=3.226 (err 0.14%)  Cl_RMS=0.699 (err 1.05%)  St=0.3 (err 0.0%)  | 385.0 MLUPS  60.4s
+[C D=40 cells=145365] Cd=3.229 (err 0.03%)  Cl_RMS=0.697 (err 1.22%)  St=0.3 (err 0.0%)  | 283.0 MLUPS  82.2s
+--- D_lu=80  steps=320000  sample_every=20  window=160000 ---
+[A D=80 cells=579369] Cd=3.213 (err 0.53%)  Cl_RMS=0.698 (err 1.12%)  St=0.3 (err 0.0%)  | 948.0 MLUPS  195.6s
+[B D=80 cells=579369] Cd=3.219 (err 0.34%)  Cl_RMS=0.71 (err 0.59%)  St=0.3 (err 0.0%)  | 890.0 MLUPS  208.3s
+[C D=80 cells=579369] Cd=3.219 (err 0.35%)  Cl_RMS=0.706 (err 0.01%)  St=0.3 (err 0.0%)  | 264.0 MLUPS  703.4s
+
+=== Done ===
