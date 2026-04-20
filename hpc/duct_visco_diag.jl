@@ -94,7 +94,8 @@ for k in 1:Nz, j in 1:Ny
     Cxx_in_h[j, k] = FT(1) + FT(2) * (FT(λ_visc) * dudy)^2 + FT(2) * (FT(λ_visc) * dudz)^2
 end
 
-# --- Device allocations
+# --- Device allocations + main loop wrapped in `let` (Julia 1.12 soft-scope)
+let
 q_wall   = KernelAbstractions.allocate(backend, FT,   Nx, Ny, Nz, 19); copyto!(q_wall, q_wall_h)
 is_solid = KernelAbstractions.allocate(backend, Bool, Nx, Ny, Nz);     copyto!(is_solid, is_solid_h)
 uw_x = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz, 19)
@@ -240,5 +241,7 @@ for k in 1:4:Nz
     @printf("  k=%-3d  u_x=%.5f  C_xz=%.4e  C_xy=%.4e\n",
             k, ux_h[i_s,jc,k], Cxz_h[i_s,jc,k], Cxy_h[i_s,jc,k])
 end
+
+end  # close `let` block
 
 println("\nDone.")
