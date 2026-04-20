@@ -265,6 +265,7 @@ export getblock, edge_length, edge_coords
 export MultiBlockSanityIssue, sanity_check_multiblock
 export BlockState2D, allocate_block_state_2d, interior_f, interior_macro, ext_dims
 export exchange_ghost_2d!, fill_physical_wall_ghost_2d!
+export load_gmsh_multiblock_2d
 
 # Grid refinement
 export RefinementPatch, RefinedDomain

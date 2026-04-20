@@ -146,6 +146,51 @@ for each incoming `q`). With that helper in place, multi-block
 simulations with mixed interface + physical-wall BCs reproduce
 single-block results bit-exactly over any number of steps. Phase A.5c.
 
+## Importing multi-block meshes from gmsh (Phase B.1)
+
+A multi-surface `.geo` or pre-meshed `.msh` file is loaded with
+
+```julia
+mbm, groups = load_gmsh_multiblock_2d("ogrid.geo";
+                                         FT=Float64,
+                                         layout=:topological)
+```
+
+implemented in
+[src/multiblock/mesh_gmsh_multiblock.jl](../../../src/multiblock/mesh_gmsh_multiblock.jl).
+The loader walks every 2D physical surface, builds one `Block` per
+surface using the existing per-surface layout helpers
+(`:axis_aligned` for rectangles, `:topological` for O-grids with arc
+edges), and stitches them together:
+
+- **Block id** — `Symbol(physical_surface_name)` when the surface has
+  a named Physical group, else `Symbol("block_<gmsh_tag>")`.
+- **Edge tags** — for each of the four logical edges `(:west, :east,
+  :south, :north)`, the loader finds the bounding gmsh curve by
+  matching curve endpoints to the block's corner nodes. The curve's
+  Physical-group name (e.g. `Physical Curve("inlet")`) becomes the
+  edge tag. Curves that are geometrically shared between two surfaces
+  and carry no physical name default to `:interface`; curves whose
+  Physical name appears in the loader's `interface_names` tuple
+  (default `("interface",)`) are forced to `:interface`.
+- **Interfaces** — every edge tagged `:interface` is paired with
+  exactly one mate across a different block by spatial colocation of
+  the edge-coordinate sequence (aligned OR reversed). Both shared-node
+  (zero offset) and non-overlap (one-cell offset) topologies are
+  accepted.
+
+gmsh's natural output is **shared-node** (adjacent surfaces literally
+share the same boundary curve, so the two blocks' edge nodes
+coincide). The current `exchange_ghost_2d!` kernel expects
+**non-overlap** (edge offset = one cell); on shared-node input the
+colocation invariant reports a `:warning` and the caller must either
+wire a shared-node exchange variant (Phase B.2) or shift one block's
+coordinates to create the offset. Blocks loaded via the
+`:topological` layout can also end up with flipped ξ/η orientation
+between neighbours — in that case the sanity check
+`InterfaceOrientationTrivial` flags which edges need to be reoriented
+before a simulation can run.
+
 ## MVP validation
 
 - [test/test_multiblock_topology.jl](../../../test/test_multiblock_topology.jl)
@@ -156,6 +201,14 @@ single-block results bit-exactly over any number of steps. Phase A.5c.
   away-from-edge interior untouched; swapped `from/to`; error paths
   (length mismatch, mixed `n_ghost`, unsupported same-normal pair).
 - [test/test_multiblock_canal.jl](../../../test/test_multiblock_canal.jl)
-  (8 tests) — 2-block BGK canal with ghost-layer pipeline: `u = 0`
+  (10 tests) — 2-block BGK canal with ghost-layer pipeline: `u = 0`
   uniform preserved over 10 steps, `u = 0.05` step-1 interface
-  columns bit-exact, 1000-step smoke run stays finite.
+  columns bit-exact, 1000-step smoke run stays finite, and 20-step
+  bit-exact match vs single-block once the physical-wall ghost fill
+  is layered in.
+- [test/test_multiblock_gmsh.jl](../../../test/test_multiblock_gmsh.jl)
+  (44 tests) — gmsh loader on an on-the-fly 2-block canal (`.geo`
+  with shared interior curve) and on a 4-block O-grid around a
+  cylinder (`:topological` layout, four 90° quadrants between an
+  inner arc and an outer arc). Both exercises assert correct block
+  count, edge tags, interface count, and (structural) sanity.

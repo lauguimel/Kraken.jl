@@ -200,7 +200,15 @@ function _check_interface_edges_colocated!(issues, mbm; tol)
         edge_length(Ba, a_edge) == edge_length(Bb, b_edge) || continue
         xa, ya = edge_coords(Ba, a_edge)
         xb, yb = edge_coords(Bb, b_edge)
-        max_err = maximum(@. sqrt((xa - xb)^2 + (ya - yb)^2))
+        # Evaluate both aligned and reversed orientations; the
+        # InterfaceOrientationTrivial check handles the flip case
+        # separately, but the colocation distance itself must use
+        # whichever orientation actually lines up so a flipped-but-
+        # shared edge is not reported as geometrically disjoint.
+        xb_rev = reverse(xb); yb_rev = reverse(yb)
+        err_aligned = maximum(@. sqrt((xa - xb)^2 + (ya - yb)^2))
+        err_flip    = maximum(@. sqrt((xa - xb_rev)^2 + (ya - yb_rev)^2))
+        max_err = min(err_aligned, err_flip)
         # Accept either 0 (shared-node — warning: exchange not supported)
         # or 1·dx (non-overlap — what exchange_ghost_2d! needs).
         dx_a = (a_edge in (:west, :east)) ?
