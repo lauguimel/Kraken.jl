@@ -1,0 +1,18 @@
+#!/bin/bash -l
+#PBS -N wp_mesh_6_long
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=H100
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -m n
+cd $PBS_O_WORKDIR
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS=8
+nvidia-smi || { echo "GPU missing"; exit 1; }
+julia --version
+julia --project=. -e 'using Pkg; Pkg.add(["Interpolations", "Gmsh"]); Pkg.instantiate()'
+echo "=========================="
+echo "WP-MESH-6 Chemin B: long run of (C) SLBM+LI-BB Bump 0.1 at D=40"
+echo "=========================="
+julia --project=. hpc/wp_mesh_6_bump_long_aqua.jl 2>&1 | tee wp_mesh_6_bump_long.log
+echo "Done."
