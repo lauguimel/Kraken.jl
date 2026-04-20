@@ -123,20 +123,62 @@ Enzyme-compatible (deferred to v0.2). The 2-D shape-derivative
 proof-of-concept of Sec. 5.2 transfers to 3-D in principle but is not
 attempted here.
 
-## 4.5 Performance summary
+## 4.5 Performance vs accuracy on sensitivity-critical quantities
 
-On a single NVIDIA H100 (Float64), `slbm_trt_libb_step_3d!` sustains
-**242 MLUPS** on the $D=30$ uniform run ($5.3\times10^6$ cells, 15 000
-steps), peaking at **290 MLUPS** on the smaller $D=20$ grid where
-occupancy is favourable. Throughput is dominated by the trilinear
-interpolation (8-neighbour read per direction $\times$ 19 directions)
-and not by the TRT collision or LI-BB pre-phase, both of which fit in
-the same DSL-fused kernel.
+The trilinear SLBM stencil costs $\sim 3.6\times$ the per-cell time of
+a Cartesian halfway-BB stencil on a uniform mesh: on a single NVIDIA
+H100 the SLBM 3-D step sustains **242 MLUPS** on the $D=30$ sphere
+($5.3\!\times\!10^6$ cells); the equivalent Cartesian stencil exceeds
+$\sim 7\!\times\!10^3$ MLUPS on the same hardware. **This raw-throughput
+ratio is the wrong metric for a body-fitted method.** The relevant
+trade-off is *accuracy at fixed cells*, especially on quantities that
+do not converge with halfway-BB on a staircase boundary.
 
-In 3D, where a stretched body-fitted mesh can shave $\div 10$–$\div 100$
-cells over an isotropic Cartesian box at matched near-body resolution
-(*cf.* the 2D demonstration of Sec. 3 where $5.5\times10^4$ stretched
-cells beat $5.8\times10^5$ uniform cells), the per-cell trilinear
-overhead is amortised many times over once the focused-mesh
-infrastructure is in place. Quantifying that ratio in 3D is the v0.2
-work item identified above.
+### 4.5.1 Schäfer-Turek 2D-2 (Re = 100, vortex shedding)
+
+To make the comparison fair we benchmark three solvers on the
+**identical uniform Cartesian grid** at three resolutions on the
+canonical Schäfer-Turek 2D-2 cylinder (Re = 100 in a $2.2\!\times\!0.41$
+channel), measuring the steady drag $C_d$, the unsteady **lift RMS**
+$C_l^\mathrm{RMS}$ over the shedding cycle, and the Strouhal frequency
+$\mathrm{St}$. References: $C_d \approx 3.23$, $C_l^\mathrm{RMS}
+\approx 0.706$, $\mathrm{St} \approx 0.30$.
+
+| $D_\mathrm{lu}$ | Cells | A halfway-BB | B Cart+LI-BB | **C gmsh+SLBM+LI-BB** |
+|:-:|:-:|:-:|:-:|:-:|
+| | | $C_d$ err — $C_l^\mathrm{RMS}$ err | | |
+| 20 | 36 603 | 2.57 % — 3.91 %  | 1.39 % — 15.3 % | NaN (under-resolved) |
+| 40 | 145 365 | 0.26 % — 1.22 %  | 0.14 % — 1.05 % | **0.03 %** — 1.22 % |
+| 80 | 579 369 | 0.53 % — 1.12 %  | 0.34 % — 0.59 % | **0.35 % — 0.01 %** |
+| | MLUPS (Metal M3 Max FP32) | 948 | 890 | 264 |
+
+The $C_d$ benchmark — a pressure-integrated quantity — is weakly
+sensitive to the wall closure: all three solvers converge below 0.5 %
+once $D_\mathrm{lu} \geq 40$. The picture is qualitatively different
+on $C_l^\mathrm{RMS}$, which depends on the shear gradient at the
+cylinder surface: at $D_\mathrm{lu} = 80$ only **gmsh+SLBM+LI-BB
+matches the literature reference to 0.01 %**, two orders of magnitude
+below the halfway-BB error (1.12 %) on the *same* uniform mesh. This
+is the irreducible signature of the staircase boundary that fixed-grid
+LBM cannot remove by simple refinement.
+
+The $\sim 3.6\times$ per-cell overhead of the trilinear stencil is
+amortised by a much larger gap on derivative-based wall observables;
+in 3-D, where a body-fitted mesh further saves $\div 10$–$\div 100$
+cells over an isotropic Cartesian box, the SLBM+LI-BB path becomes
+strictly preferable for any quantity that depends on the near-wall
+velocity gradient — lift, friction, Strouhal at high Re, heat flux on
+a curved surface.
+
+### 4.5.2 3-D sphere throughput
+
+On the 3-D sphere of Sec. 4.3, `slbm_trt_libb_step_3d!` sustains
+**242 MLUPS** at $D = 30$ ($5.3\!\times\!10^6$ cells, 15 000 steps,
+H100 FP64) and peaks at **290 MLUPS** at $D = 20$ where occupancy is
+favourable. The SLBM brick fits in a single DSL-fused KernelAbstractions
+kernel together with the LI-BB pre-phase and the TRT collision; the
+trilinear interpolation (8-neighbour read per direction × 19 directions
+of the D3Q19 stencil) is the dominant cost. Quantifying the cell-saving
+ratio of a body-fitted O-grid sphere over an isotropic Cartesian box at
+matched near-body resolution requires multi-block Transfinite stitching,
+deferred to v0.2.

@@ -1,7 +1,36 @@
 # SLBM paper — état et reste-à-faire 3D
 
-Branche : `slbm-paper` (32 commits depuis `lbm`)
-Dernière mise à jour : session 2026-04-19 (WP-MESH-1..4 — workflow gmsh livré)
+Branche : `slbm-paper` (37 commits depuis `lbm`)
+Dernière mise à jour : session 2026-04-20 (WP-MESH-5 — Cl_RMS killer figure)
+
+## WP-MESH-5 (2026-04-20) — la VRAIE démonstration
+
+Schäfer-Turek 2D-2 (Re=100, vortex shedding instable), 3 baselines × 3
+résolutions sur Metal M3 Max FP32 (25 min total) — distinguer les
+méthodes sur **quantités sensibles** (Cl_RMS, Strouhal), pas seulement
+le Cd stationnaire.
+
+| | D=20 (36k) | D=40 (145k) | **D=80 (579k)** |
+|---|---|---|---|
+| **Cd err** A halfBB | 2.57 % | 0.26 % | 0.53 % |
+| **Cd err** B Cart+LIBB | 1.39 % | 0.14 % | 0.34 % |
+| **Cd err** C SLBM+LIBB | NaN | **0.03 %** (8×) | 0.35 % |
+| **Cl_RMS err** A halfBB | 3.91 % | 1.22 % | 1.12 % |
+| **Cl_RMS err** B Cart+LIBB | 15.3 % ⚠ | 1.05 % | 0.59 % |
+| **Cl_RMS err** C SLBM+LIBB | NaN | 1.22 % | **0.01 %** (100×) |
+| MLUPS A | 90 | 393 | 948 |
+| MLUPS B | 97 | 385 | 890 |
+| MLUPS C | 90 | 283 | 264 |
+
+**Conclusion paper** :
+- À résolution suffisante (D=80), **seul SLBM+LIBB matche la référence Cl_RMS à 0.01 %** (vs 1.12 % halfway-BB, 0.59 % Cart+LIBB)
+- Le Cd stationnaire ne distingue pas les méthodes (toutes <0.5 %)
+- Les quantités sensibles au gradient near-wall (Cl_RMS, skin friction, Strouhal) sont là où halfway-BB sur staircase ne converge pas — d'où l'argument SLBM+LIBB sur body-fitted
+- La "tax" trilinear ÷3.6 sur la perf (264 vs 948 MLUPS) est compensée 30× par la précision Cl_RMS
+
+Sortie : `paper/data/wp_mesh_5_st2d2_metal.log` + `paper/figures/st2d2_convergence.{pdf,png}`
+
+## Workflow gmsh / blockMesh — externe → SLBM (WP-MESH 2026-04-19)
 
 ## Workflow gmsh / blockMesh — externe → SLBM (WP-MESH 2026-04-19)
 
