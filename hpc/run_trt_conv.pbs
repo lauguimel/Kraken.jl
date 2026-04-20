@@ -1,0 +1,17 @@
+#!/bin/bash -l
+#PBS -N krk_trtc
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=6:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+
+nvidia-smi
+julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+mkdir -p results
+echo "=== TRT+LIBB constant-Wi convergence at $(date) ==="
+julia --project=. hpc/poiseuille_trt_convergence.jl 2>&1 | tee results/poiseuille_trt_convergence.txt
+echo "=== Done at $(date) ==="
