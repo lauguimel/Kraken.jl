@@ -248,7 +248,8 @@ Local cell size estimated from the column-norm of the metric:
 """
 function compute_local_omega_3d(mesh::CurvilinearMesh3D{T};
                                   ν::Real, Λ::Real=3/16,
-                                  scaling::Symbol=:quadratic) where {T}
+                                  scaling::Symbol=:quadratic,
+                                  τ_floor::Real=0.5) where {T}
     Nξ, Nη, Nζ = mesh.Nξ, mesh.Nη, mesh.Nζ
     denom_ξ = T(mesh.periodic_ξ ? Nξ : Nξ - 1)
     denom_η = T(mesh.periodic_η ? Nη : Nη - 1)
@@ -260,6 +261,7 @@ function compute_local_omega_3d(mesh::CurvilinearMesh3D{T};
     s_plus_ref, s_minus_ref = trt_rates(ν; Λ=Λ)
     τ_plus_ref  = one(T) / T(s_plus_ref)
     τ_minus_ref = one(T) / T(s_minus_ref)
+    τ_lo = T(τ_floor)
 
     sp = zeros(T, Nξ, Nη, Nζ)
     sm = zeros(T, Nξ, Nη, Nζ)
@@ -279,8 +281,8 @@ function compute_local_omega_3d(mesh::CurvilinearMesh3D{T};
             τ_plus_local  = r * (τ_plus_ref  - T(0.5)) + T(0.5)
             τ_minus_local = r * (τ_minus_ref - T(0.5)) + T(0.5)
         end
-        sp[i,j,k] = one(T) / τ_plus_local
-        sm[i,j,k] = one(T) / τ_minus_local
+        sp[i,j,k] = one(T) / max(τ_plus_local,  τ_lo)
+        sm[i,j,k] = one(T) / max(τ_minus_local, τ_lo)
     end
 
     return sp, sm

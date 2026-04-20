@@ -168,13 +168,16 @@ run_C(D_lu, steps, sw, se) = begin
         gmsh.finalize()
     end
     mesh, _ = load_gmsh_mesh_2d(fpath)
-    geom_h = build_slbm_geometry(mesh)
+    # local_cfl=true: departures use the LOCAL cell size per point so CFL ≈ 1
+    # everywhere — recipe from slbm_sphere_h100.jl for stretched 3D meshes
+    # (memory: "Global τ correct … with local CFL, each cell's lattice unit
+    # IS its local size"). On aggressive stretching we combine local-CFL
+    # departures with quadratic per-cell τ, clamped from below by τ_floor to
+    # avoid τ → 0.5 instability on the coarsest cells (Bump 0.1 ratio ≈ 93×).
+    geom_h = build_slbm_geometry(mesh; local_cfl=true)
     geom = transfer_slbm_geometry(geom_h, backend)
-    # Local-τ field: Bump mesh has ~93× cell-area ratio between centre and
-    # edges → a single global τ goes unstable (τ→0.5) on the smallest cells
-    # and over-diffuses on the largest. Per-cell rescaling preserves the
-    # physical viscosity ν everywhere (SLBM global-Δt → quadratic scaling).
-    sp_h, sm_h = compute_local_omega_2d(mesh; ν=s.ν, scaling=:quadratic)
+    sp_h, sm_h = compute_local_omega_2d(mesh; ν=s.ν, scaling=:quadratic,
+                                         τ_floor=0.51)
     sp_field = CuArray(T.(sp_h)); sm_field = CuArray(T.(sm_h))
     is_solid_h = zeros(Bool, mesh.Nξ, mesh.Nη)
     for j in 1:mesh.Nη, i in 1:mesh.Nξ

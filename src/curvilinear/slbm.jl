@@ -614,17 +614,26 @@ end
 # ===========================================================================
 
 """
-    compute_local_omega_2d(mesh; ν, Λ=3/16) -> (s_plus_field, s_minus_field)
+    compute_local_omega_2d(mesh; ν, Λ=3/16, scaling=:quadratic, τ_floor=0.5)
+        -> (s_plus_field, s_minus_field)
 
 Precompute per-cell TRT relaxation rates on a curvilinear mesh, accounting
 for the local cell size variation. Returns 2D arrays `s_plus[Nξ, Nη]` and
 `s_minus[Nξ, Nη]`.
 
-The local cell size is estimated as `√(|J[i,j]|) / (denom_ξ * denom_η)^0.5`
-normalized by `dx_ref`.
+On meshes with aggressive stretching (cell-size ratio ≳ 10×), quadratic
+SLBM rescaling drives `τ → 0.5` on the largest cells, which destabilises
+TRT. The `τ_floor` kwarg clamps `τ_local ≥ τ_floor`, trading a small
+excess numerical viscosity on coarse cells (where resolution is already
+poor so it matters little) for stability. Set `τ_floor=0.5` (default) to
+disable the clamp — identical to pre-clamp behaviour.
+
+The local cell size is estimated as
+`√(dXdξ² + dYdξ²) · Δξ · √(dXdη² + dYdη²) · Δη`.
 """
 function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/16,
-                                 scaling::Symbol=:quadratic) where {T}
+                                 scaling::Symbol=:quadratic,
+                                 τ_floor::Real=0.5) where {T}
     Nξ, Nη = mesh.Nξ, mesh.Nη
     denom_ξ = T(mesh.periodic_ξ ? Nξ : Nξ - 1)
     denom_η = T(mesh.periodic_η ? Nη : Nη - 1)
@@ -634,6 +643,7 @@ function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/1
     s_plus_ref, s_minus_ref = trt_rates(ν; Λ=Λ)
     τ_plus_ref  = one(T) / T(s_plus_ref)
     τ_minus_ref = one(T) / T(s_minus_ref)
+    τ_lo = T(τ_floor)
 
     sp = zeros(T, Nξ, Nη)
     sm = zeros(T, Nξ, Nη)
@@ -654,8 +664,8 @@ function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/1
             τ_plus_local  = r * (τ_plus_ref  - T(0.5)) + T(0.5)
             τ_minus_local = r * (τ_minus_ref - T(0.5)) + T(0.5)
         end
-        sp[i, j] = one(T) / τ_plus_local
-        sm[i, j] = one(T) / τ_minus_local
+        sp[i, j] = one(T) / max(τ_plus_local,  τ_lo)
+        sm[i, j] = one(T) / max(τ_minus_local, τ_lo)
     end
 
     return sp, sm
