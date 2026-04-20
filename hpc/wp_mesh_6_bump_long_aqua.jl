@@ -89,24 +89,32 @@ end
 fa = CuArray(f_h); fb = similar(fa); fill!(fb, zero(T))
 ρ = CUDA.ones(T, mesh.Nξ, mesh.Nη); ux = CUDA.zeros(T, mesh.Nξ, mesh.Nη); uy = CUDA.zeros(T, mesh.Nξ, mesh.Nη)
 
-cd_h = Float64[]; cl_h = Float64[]
+function _timeloop!(fa, fb, ρ, ux, uy, is_solid, q_wall, uw_x, uw_y, geom, bcspec,
+                    ν, Nξ, Nη, steps, sample_every, sample_window, norm_)
+    cd_h = Float64[]; cl_h = Float64[]
+    for step in 1:steps
+        slbm_trt_libb_step!(fb, fa, ρ, ux, uy, is_solid, q_wall, uw_x, uw_y, geom, ν)
+        apply_bc_rebuild_2d!(fb, fa, bcspec, ν, Nξ, Nη)
+        if step > steps - sample_window && step % sample_every == 0
+            Fx, Fy = compute_drag_libb_mei_2d(fb, q_wall, uw_x, uw_y, Nξ, Nη)
+            push!(cd_h, 2*Fx/norm_); push!(cl_h, 2*Fy/norm_)
+        end
+        fa, fb = fb, fa
+        if step % 200_000 == 0
+            CUDA.synchronize()
+            rho_h = Array(ρ); ux_h = Array(ux)
+            println("  step $step : ρ ∈ [$(round(minimum(rho_h),digits=4)), $(round(maximum(rho_h),digits=4))]  ",
+                    "ux ∈ [$(round(minimum(ux_h),digits=4)), $(round(maximum(ux_h),digits=4))]")
+        end
+    end
+    return cd_h, cl_h
+end
+
 norm_ = u_mean^2 * (R_p * 2 / mesh.dx_ref)
 t0 = time()
-for step in 1:steps
-    slbm_trt_libb_step!(fb, fa, ρ, ux, uy, is_solid, q_wall, uw_x, uw_y, geom, ν)
-    apply_bc_rebuild_2d!(fb, fa, bcspec, ν, mesh.Nξ, mesh.Nη)
-    if step > steps - sample_window && step % sample_every == 0
-        Fx, Fy = compute_drag_libb_mei_2d(fb, q_wall, uw_x, uw_y, mesh.Nξ, mesh.Nη)
-        push!(cd_h, 2*Fx/norm_); push!(cl_h, 2*Fy/norm_)
-    end
-    fa, fb = fb, fa
-    if step % 200_000 == 0
-        CUDA.synchronize()
-        rho_h = Array(ρ); ux_h = Array(ux)
-        println("  step $step : ρ ∈ [$(round(minimum(rho_h),digits=4)), $(round(maximum(rho_h),digits=4))]  ",
-                "ux ∈ [$(round(minimum(ux_h),digits=4)), $(round(maximum(ux_h),digits=4))]")
-    end
-end
+cd_h, cl_h = _timeloop!(fa, fb, ρ, ux, uy, is_solid, q_wall, uw_x, uw_y, geom,
+                         bcspec, ν, mesh.Nξ, mesh.Nη, steps, sample_every,
+                         sample_window, norm_)
 CUDA.synchronize()
 elapsed = time() - t0
 
