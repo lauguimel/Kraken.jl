@@ -177,6 +177,20 @@ function _check_interface_edges_same_length!(issues, mbm)
 end
 
 function _check_interface_edges_colocated!(issues, mbm; tol)
+    # Two valid topologies at an interface:
+    # (1) NON-OVERLAP (standard LBM multi-block): A's edge cells and
+    #     B's edge cells are 1·dx apart — B's row lies one cell past A's
+    #     row. Each block owns DISJOINT physical cells. This is what the
+    #     ghost-layer exchange expects: A's east ghost row (one cell past
+    #     A's east edge) ← B's west edge interior row.
+    # (2) SHARED-NODE: A's east edge nodes and B's west edge nodes are
+    #     colocated. The interface is a single line of nodes stored in
+    #     both blocks. Exchange must then read from one cell INSIDE the
+    #     neighbour (ng + 2), not at the neighbour's edge. NOT supported
+    #     by `exchange_ghost_2d!` in its current form.
+    # We detect which topology the user built. For (1), we check that the
+    # offset equals ONE cell width in the direction normal to the edge;
+    # for (2), zero offset (colocated). Anything else is flagged.
     for (k, iface) in enumerate(mbm.interfaces)
         a_id, a_edge = iface.from
         b_id, b_edge = iface.to
@@ -187,11 +201,26 @@ function _check_interface_edges_colocated!(issues, mbm; tol)
         xa, ya = edge_coords(Ba, a_edge)
         xb, yb = edge_coords(Bb, b_edge)
         max_err = maximum(@. sqrt((xa - xb)^2 + (ya - yb)^2))
-        if max_err > tol
+        # Accept either 0 (shared-node — warning: exchange not supported)
+        # or 1·dx (non-overlap — what exchange_ghost_2d! needs).
+        dx_a = (a_edge in (:west, :east)) ?
+               (Ba.mesh.X[2, 1] - Ba.mesh.X[1, 1]) :
+               (Ba.mesh.Y[1, 2] - Ba.mesh.Y[1, 1])
+        dx = abs(dx_a)
+        colocated = max_err < tol
+        one_cell  = isapprox(max_err, dx; atol=tol, rtol=1e-6)
+        if !(colocated || one_cell)
             push!(issues, MultiBlockSanityIssue(:error, :InterfaceEdgesColocated,
                 a_id, a_edge,
-                "interface #$k: edge physical coords differ by up to $(max_err) " *
-                "(tol=$tol) between $a_id.$a_edge and $b_id.$b_edge"))
+                "interface #$k: edge physical offset = $(max_err); expected " *
+                "either 0 (shared node) or $(dx) (one-cell non-overlap). " *
+                "Got neither — check block coordinates."))
+        elseif colocated
+            push!(issues, MultiBlockSanityIssue(:warning, :InterfaceEdgesColocated,
+                a_id, a_edge,
+                "interface #$k: shared-node topology (zero offset). " *
+                "exchange_ghost_2d! assumes NON-OVERLAP (one-cell offset); " *
+                "results will be incorrect unless you restructure the blocks."))
         end
     end
 end

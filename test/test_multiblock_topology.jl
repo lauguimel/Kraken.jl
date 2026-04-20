@@ -82,7 +82,9 @@ using Kraken
         blk_l, blk_r, iface = mk_two_blocks()
         mbm = MultiBlockMesh2D([blk_l, blk_r]; interfaces=[iface])
         issues = sanity_check_multiblock(mbm; verbose=false)
-        @test isempty(issues)
+        # Shared-node topology (edges colocated) now raises a :warning
+        # about the exchange semantics. No :error issues expected.
+        @test all(iss -> iss.severity !== :error, issues)
     end
 
     # ---- sanity: individual failure modes ------------------------------
