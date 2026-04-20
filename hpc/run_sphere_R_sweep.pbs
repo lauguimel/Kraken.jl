@@ -1,0 +1,21 @@
+#!/bin/bash -l
+#PBS -N krk_sRsweep
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+
+echo "=== 3D sphere R-sweep Wi=0.1 at $(date) ==="
+mkdir -p results
+
+julia --project=. hpc/sphere_R_sweep.jl 2>&1 | tee results/sphere_R_sweep.txt
+
+echo "=== Done at $(date) ==="
