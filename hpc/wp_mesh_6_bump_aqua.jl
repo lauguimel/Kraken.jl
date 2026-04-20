@@ -36,7 +36,8 @@ const u_mean         = u_max               # uniform inlet here, not parabolic
 const Cd_ref         = 1.4
 const Cl_ref         = 0.33
 const St_ref         = 0.165
-const BUMP_COEF      = 0.1
+const BUMP_COEFS     = (0.1, 0.5)   # 0.1 = extreme stretching (ratio ~93×, instability study)
+                                    # 0.5 = moderate stretching (ratio ~10×, paper demo)
 T = Float64
 
 backend = CUDABackend()
@@ -145,7 +146,7 @@ run_B(D_lu, steps, sw, se) = begin
     _step_loop_cart("B D=$D_lu", s, ish, qwh, steps, se, sw)
 end
 
-run_C(D_lu, steps, sw, se) = begin
+run_C(D_lu, steps, sw, se; bump_coef=0.1, label_suffix="") = begin
     s = _setup(D_lu)
     fpath = tempname() * ".msh"
     gmsh.initialize()
@@ -158,10 +159,10 @@ run_C(D_lu, steps, sw, se) = begin
         gmsh.model.geo.addLine(1,2,1); gmsh.model.geo.addLine(2,3,2)
         gmsh.model.geo.addLine(3,4,3); gmsh.model.geo.addLine(4,1,4)
         gmsh.model.geo.addCurveLoop([1,2,3,4],1); gmsh.model.geo.addPlaneSurface([1],1)
-        gmsh.model.geo.mesh.setTransfiniteCurve(1, s.Nx, "Bump", BUMP_COEF)
-        gmsh.model.geo.mesh.setTransfiniteCurve(3, s.Nx, "Bump", BUMP_COEF)
-        gmsh.model.geo.mesh.setTransfiniteCurve(2, s.Ny, "Bump", BUMP_COEF)
-        gmsh.model.geo.mesh.setTransfiniteCurve(4, s.Ny, "Bump", BUMP_COEF)
+        gmsh.model.geo.mesh.setTransfiniteCurve(1, s.Nx, "Bump", bump_coef)
+        gmsh.model.geo.mesh.setTransfiniteCurve(3, s.Nx, "Bump", bump_coef)
+        gmsh.model.geo.mesh.setTransfiniteCurve(2, s.Ny, "Bump", bump_coef)
+        gmsh.model.geo.mesh.setTransfiniteCurve(4, s.Ny, "Bump", bump_coef)
         gmsh.model.geo.mesh.setTransfiniteSurface(1); gmsh.model.geo.mesh.setRecombine(2,1)
         gmsh.model.geo.synchronize(); gmsh.model.mesh.generate(2); gmsh.write(fpath)
     finally
@@ -201,14 +202,14 @@ run_C(D_lu, steps, sw, se) = begin
     St = _strouhal(cl_h, se, 2 * s.R_lu)
     cells = mesh.Nξ * mesh.Nη
     mlups = cells * steps / elapsed / 1e6
-    _format("C D=$D_lu", cells, cd, clr, St, mlups, elapsed)
+    _format("C$(label_suffix) D=$D_lu", cells, cd, clr, St, mlups, elapsed)
     return (; cells, cd, cl_rms=clr, St, mlups, elapsed)
 end
 
 println("=== WP-MESH-6 — Cylinder cross-flow Re=100 (CUDA H100, FP64) ===")
 println("Reference (Williamson 1996, Park 1998): Cd≈$Cd_ref  Cl_RMS≈$Cl_ref  St≈$St_ref")
 println("Domain $Lx × $Ly  cylinder ($cx_p, $cy_p) R=$R_p  blockage = $(round(2*R_p/Ly*100, digits=1))%")
-println("Bump coef = $BUMP_COEF\n")
+println("Bump coefs = $BUMP_COEFS\n")
 
 for D_lu in (20, 40, 80)
     steps = D_lu == 20 ? 80_000 : D_lu == 40 ? 160_000 : 320_000
@@ -217,7 +218,11 @@ for D_lu in (20, 40, 80)
     println("--- D_lu=$D_lu  steps=$steps  sample_every=$se  window=$sw ---")
     try; run_A(D_lu, steps, sw, se); catch e; println("  A FAILED: ", sprint(showerror, e)[1:min(end,200)]); end
     try; run_B(D_lu, steps, sw, se); catch e; println("  B FAILED: ", sprint(showerror, e)[1:min(end,200)]); end
-    try; run_C(D_lu, steps, sw, se); catch e; println("  C FAILED: ", sprint(showerror, e)[1:min(end,200)]); end
+    for bc in BUMP_COEFS
+        suffix = "[b=$(bc)]"
+        try; run_C(D_lu, steps, sw, se; bump_coef=bc, label_suffix=suffix)
+        catch e; println("  C$suffix FAILED: ", sprint(showerror, e)[1:min(end,200)]); end
+    end
 end
 
 println("\n=== Done ===")
