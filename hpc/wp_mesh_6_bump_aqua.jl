@@ -168,17 +168,8 @@ run_C(D_lu, steps, sw, se) = begin
         gmsh.finalize()
     end
     mesh, _ = load_gmsh_mesh_2d(fpath)
-    # local_cfl=true: departures use the LOCAL cell size per point so CFL ≈ 1
-    # everywhere — recipe from slbm_sphere_h100.jl for stretched 3D meshes
-    # (memory: "Global τ correct … with local CFL, each cell's lattice unit
-    # IS its local size"). On aggressive stretching we combine local-CFL
-    # departures with quadratic per-cell τ, clamped from below by τ_floor to
-    # avoid τ → 0.5 instability on the coarsest cells (Bump 0.1 ratio ≈ 93×).
-    geom_h = build_slbm_geometry(mesh; local_cfl=true)
+    geom_h = build_slbm_geometry(mesh)
     geom = transfer_slbm_geometry(geom_h, backend)
-    sp_h, sm_h = compute_local_omega_2d(mesh; ν=s.ν, scaling=:quadratic,
-                                         τ_floor=0.51)
-    sp_field = CuArray(T.(sp_h)); sm_field = CuArray(T.(sm_h))
     is_solid_h = zeros(Bool, mesh.Nξ, mesh.Nη)
     for j in 1:mesh.Nη, i in 1:mesh.Nξ
         x = mesh.X[i,j]; y = mesh.Y[i,j]
@@ -196,9 +187,7 @@ run_C(D_lu, steps, sw, se) = begin
     norm = u_mean^2 * (s.R_lu * 2)
     t0 = time()
     for step in 1:steps
-        slbm_trt_libb_step_local_2d!(fb, fa, ρ, ux, uy, is_solid,
-                                       q_wall, uw_x, uw_y, geom,
-                                       sp_field, sm_field)
+        slbm_trt_libb_step!(fb, fa, ρ, ux, uy, is_solid, q_wall, uw_x, uw_y, geom, s.ν)
         apply_bc_rebuild_2d!(fb, fa, bcspec, s.ν, mesh.Nξ, mesh.Nη)
         if step > steps - sw && step % se == 0
             Fx, Fy = compute_drag_libb_mei_2d(fb, q_wall, uw_x, uw_y, mesh.Nξ, mesh.Nη)
