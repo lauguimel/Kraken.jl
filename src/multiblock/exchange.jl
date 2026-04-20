@@ -1,134 +1,137 @@
 # =====================================================================
-# Ghost-cell exchange for a MultiBlockMesh2D (v0.3 MVP).
+# Ghost-cell exchange on extended block arrays (Phase A.5b).
 #
-# Protocol (halo strict, no extra ghost rows in the f array):
+# Each block stores f on an extended grid (Nξ_phys + 2Ng, Nη_phys +
+# 2Ng, 9). The physical interior lives at indices (Ng+1 .. Ng+Nξ_phys,
+# Ng+1 .. Ng+Nη_phys); ghost rows wrap it on all 4 sides.
 #
-# Each block stores f of size (Nξ × Nη × 9) and runs its normal
-# single-block LBM step. At an interface edge, the step's pull for
-# populations that would read OUTSIDE the block falls back to the
-# usual boundary treatment (clamp / halfway-BB) — those outputs are
-# WRONG on purpose. The exchange then immediately overwrites them
-# with the valid post-step populations from the NEIGHBOUR block,
-# where those same directions streamed from interior cells.
+# PROTOCOL — pre-step fill, bit-exact to single-block
+# ---------------------------------------------------
+# Before each timestep, `exchange_ghost_2d!` walks the interface list
+# and copies 1 row/column of ghost data from the neighbour block's
+# physical interior, one cell deep from the shared interface.
 #
-# For a west-east interface (block A on left, edge :east; block B on
-# right, edge :west):
+# For a west-east interface (A on left, :east; B on right, :west):
+#   A's east ghost at i = Nξ_phys_A + Ng + 1 ← B's interior at i = Ng + 1
+#   B's west ghost at i = Ng                 ← A's interior at i = Nξ_phys_A + Ng
 #
-#   cqx > 0  (q ∈ {2, 6, 9}): valid in A (came from A's interior)
-#                              → f_B[1, j, q]     ← f_A[Nξ_A, j, q]
-#   cqx < 0  (q ∈ {4, 7, 8}): valid in B (came from B's interior)
-#                              → f_A[Nξ_A, j, q]  ← f_B[1, j, q]
-#   cqx = 0  (q ∈ {1, 3, 5}): both sides already agree by construction;
-#                              we re-sync by assignment for robustness.
+# With Ng = 1 this simplifies to two rank-2 copies per interface:
+#   A[Nξ_phys_A + 2, :, :] ← B[2, :, :]
+#   B[1, :, :]             ← A[Nξ_phys_A + 1, :, :]
 #
-# Same shape for south-north interfaces with cqy instead of cqx.
+# Analogous for south-north with j instead of i.
 #
-# The API takes a MultiBlockMesh2D and a Vector of f arrays, one per
-# block, ordered the same as mbm.blocks. We use `view(...) .= view(...)`
-# so this works transparently on CPU, CUDA, and Metal backends.
+# After the exchange, the step kernel reads from these ghost rows
+# when its pull would cross the interface — no halfway-BB fallback
+# fires on a physical interior-boundary cell. Post-step, ghost-row
+# contents in `f_out` are garbage (the kernel's halfway-BB fired at
+# the extended array's outer edges) but are irrelevant: the next
+# iteration's `exchange_ghost_2d!` overwrites them before the next
+# step reads them.
+#
+# The API takes a `MultiBlockMesh2D` and a vector of `BlockState2D`,
+# one per block, ordered like `mbm.blocks`. All blocks must share the
+# same n_ghost. Broadcasting via `view(...) .= view(...)` keeps this
+# backend-agnostic (CPU / CUDA / Metal).
 # =====================================================================
 
-# D2Q9 split by the sign of the x-velocity component
-const _Q_CQX_POS = (2, 6, 9)
-const _Q_CQX_NEG = (4, 7, 8)
-const _Q_CQX_ZERO = (1, 3, 5)
-
-# D2Q9 split by the sign of the y-velocity component
-const _Q_CQY_POS = (3, 6, 7)
-const _Q_CQY_NEG = (5, 8, 9)
-const _Q_CQY_ZERO = (1, 2, 4)
-
 """
-    exchange_ghost_2d!(mbm::MultiBlockMesh2D, f_arrays::Vector{<:AbstractArray})
+    exchange_ghost_2d!(mbm::MultiBlockMesh2D,
+                        states::AbstractVector{<:BlockState2D})
 
-Run the ghost exchange for every interface declared in `mbm`. Mutates
-each block's `f` in place. `f_arrays[i]` must be the populations of
-`mbm.blocks[i]`, a `(Nξ × Nη × 9)` array on the same backend as the
-block's mesh (CPU, CUDA, Metal — the exchange is a broadcast).
+Fill the ghost rows of each block's `state.f` from the physical
+interior of its neighbour across every declared interface. Must be
+called BEFORE the step kernel (reads `state.f` as `f_in`).
+
+Precondition: all blocks share the same `n_ghost`.
 
 Call sequence per timestep:
 
-    for k in 1:length(mbm.blocks)
-        step_kernel!(f_out[k], f_in[k], ...)       # each block's own step
+    exchange_ghost_2d!(mbm, states)                   # fill ghosts
+    for (k, blk) in enumerate(mbm.blocks)
+        Nx_ext, Ny_ext = ext_dims(states[k])
+        fused_bgk_step!(f_out[k], states[k].f, ...,   # step on extended size
+                          states[k].ρ, states[k].ux, states[k].uy,
+                          is_solid_ext[k], Nx_ext, Ny_ext, ω)
     end
-    exchange_ghost_2d!(mbm, f_out)                  # sync interface populations
-    apply_physical_bcs!(mbm, f_out, f_in)           # BCs on non-interface edges
-    f_in, f_out = f_out, f_in
-
-Does not touch populations away from the interface edge. Does not
-average the `c_qx = 0` populations — it copies block A's value into
-block B (chosen deterministically for reproducibility).
+    for (k, blk) in enumerate(mbm.blocks)
+        apply_bc_rebuild_2d!(interior_f(f_out[k]),    # physical BCs on interior view
+                              interior_f(states[k].f), bcspec[k], ν,
+                              states[k].Nξ_phys, states[k].Nη_phys)
+    end
+    # swap states[k].f ↔ f_out[k]  (handled by caller)
 """
 function exchange_ghost_2d!(mbm::MultiBlockMesh2D,
-                             f_arrays::AbstractVector{<:AbstractArray})
-    length(f_arrays) == length(mbm.blocks) ||
-        error("exchange_ghost_2d!: f_arrays has $(length(f_arrays)) entries, " *
+                             states::AbstractVector{<:BlockState2D})
+    length(states) == length(mbm.blocks) ||
+        error("exchange_ghost_2d!: states has $(length(states)) entries, " *
               "mbm has $(length(mbm.blocks)) blocks")
+    # Consistency: all blocks must share n_ghost
+    ng = states[1].n_ghost
+    for k in 2:length(states)
+        states[k].n_ghost == ng ||
+            error("exchange_ghost_2d!: n_ghost mismatch (block 1: $ng, block $k: $(states[k].n_ghost))")
+    end
     for iface in mbm.interfaces
         a_idx = mbm.block_by_id[iface.from[1]]
         b_idx = mbm.block_by_id[iface.to[1]]
-        a_edge = iface.from[2]
-        b_edge = iface.to[2]
-        _exchange_pair_2d!(f_arrays[a_idx], f_arrays[b_idx],
-                            a_edge, b_edge,
-                            mbm.blocks[a_idx].mesh, mbm.blocks[b_idx].mesh)
+        _exchange_pair_ghost_2d!(states[a_idx], states[b_idx],
+                                  iface.from[2], iface.to[2])
     end
     return mbm
 end
 
-function _exchange_pair_2d!(f_a, f_b,
-                             a_edge::Symbol, b_edge::Symbol,
-                             mesh_a, mesh_b)
-    # Normalise so `left_f` is always the block whose :east edge is the
-    # interface and `right_f` is the block whose :west edge is the
-    # interface; analogous for south-north. This keeps the inner
-    # copy logic in one place.
-    if a_edge === :east && b_edge === :west
-        _exchange_we_aligned!(f_a, f_b, mesh_a.Nξ, mesh_a.Nη)
-    elseif a_edge === :west && b_edge === :east
-        _exchange_we_aligned!(f_b, f_a, mesh_b.Nξ, mesh_b.Nη)
-    elseif a_edge === :north && b_edge === :south
-        _exchange_sn_aligned!(f_a, f_b, mesh_a.Nξ, mesh_a.Nη)
-    elseif a_edge === :south && b_edge === :north
-        _exchange_sn_aligned!(f_b, f_a, mesh_b.Nξ, mesh_b.Nη)
+function _exchange_pair_ghost_2d!(state_a::BlockState2D, state_b::BlockState2D,
+                                    edge_a::Symbol, edge_b::Symbol)
+    if edge_a === :east && edge_b === :west
+        _fill_ghost_we!(state_a, state_b)
+    elseif edge_a === :west && edge_b === :east
+        _fill_ghost_we!(state_b, state_a)
+    elseif edge_a === :north && edge_b === :south
+        _fill_ghost_sn!(state_a, state_b)
+    elseif edge_a === :south && edge_b === :north
+        _fill_ghost_sn!(state_b, state_a)
     else
-        error("_exchange_pair_2d!: unsupported edge pair $a_edge → $b_edge. " *
+        error("_exchange_pair_ghost_2d!: unsupported edge pair $edge_a → $edge_b. " *
               "MVP supports only opposite-normal aligned pairs " *
               "(east↔west, north↔south).")
     end
 end
 
-# west-east interface: `f_left` is the block on the LEFT (its :east
-# edge at i=Nξ_left is the interface) and `f_right` is the block on
-# the RIGHT (its :west edge at i=1 is the interface). Both blocks
-# must have the same Nη at this interface.
-function _exchange_we_aligned!(f_left, f_right, Nξ_l::Int, Nη_l::Int)
-    # cqx > 0: valid in f_left, copy to f_right
-    @inbounds for q in _Q_CQX_POS
-        view(f_right, 1, :, q) .= view(f_left, Nξ_l, :, q)
-    end
-    # cqx < 0: valid in f_right, copy to f_left
-    @inbounds for q in _Q_CQX_NEG
-        view(f_left, Nξ_l, :, q) .= view(f_right, 1, :, q)
-    end
-    # cqx = 0: sync to A's value (deterministic)
-    @inbounds for q in _Q_CQX_ZERO
-        view(f_right, 1, :, q) .= view(f_left, Nξ_l, :, q)
+# West-east: state_left is the LEFT block (its :east edge is the
+# interface), state_right is the RIGHT block (its :west edge is the
+# interface). Both must share Nη_phys and n_ghost.
+function _fill_ghost_we!(state_left::BlockState2D, state_right::BlockState2D)
+    ng = state_left.n_ghost
+    Nx_l = state_left.Nξ_phys
+    Ny_phys = state_left.Nη_phys
+    # East-ghost of LEFT ← west-interior of RIGHT
+    #   LEFT[Nx_l + ng + k, :, :]  ←  RIGHT[ng + k, :, :]   for k = 1..ng
+    # West-ghost of RIGHT ← east-interior of LEFT
+    #   RIGHT[k, :, :]  ←  LEFT[Nx_l + k, :, :]              for k = 1..ng
+    # Both blocks' physical rows in η are (ng+1 .. ng+Ny_phys).
+    j_range = (ng + 1):(ng + Ny_phys)
+    @inbounds for k in 1:ng
+        view(state_left.f,  Nx_l + ng + k, j_range, :) .=
+            view(state_right.f, ng + k,     j_range, :)
+        view(state_right.f, k,              j_range, :) .=
+            view(state_left.f,  Nx_l + k,   j_range, :)
     end
     return nothing
 end
 
-# south-north interface: `f_bot` is on the bottom (:north at j=Nη_b)
-# and `f_top` is on top (:south at j=1). Both blocks must share Nξ.
-function _exchange_sn_aligned!(f_bot, f_top, Nξ_b::Int, Nη_b::Int)
-    @inbounds for q in _Q_CQY_POS
-        view(f_top, :, 1, q) .= view(f_bot, :, Nη_b, q)
-    end
-    @inbounds for q in _Q_CQY_NEG
-        view(f_bot, :, Nη_b, q) .= view(f_top, :, 1, q)
-    end
-    @inbounds for q in _Q_CQY_ZERO
-        view(f_top, :, 1, q) .= view(f_bot, :, Nη_b, q)
+# South-north: state_bot is the BOTTOM block (:north edge is interface),
+# state_top is the TOP block (:south edge is interface).
+function _fill_ghost_sn!(state_bot::BlockState2D, state_top::BlockState2D)
+    ng = state_bot.n_ghost
+    Ny_b = state_bot.Nη_phys
+    Nx_phys = state_bot.Nξ_phys
+    i_range = (ng + 1):(ng + Nx_phys)
+    @inbounds for k in 1:ng
+        view(state_bot.f, i_range, Ny_b + ng + k, :) .=
+            view(state_top.f, i_range, ng + k,    :)
+        view(state_top.f, i_range, k,              :) .=
+            view(state_bot.f, i_range, Ny_b + k,  :)
     end
     return nothing
 end

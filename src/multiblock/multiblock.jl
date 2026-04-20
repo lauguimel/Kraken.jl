@@ -26,4 +26,5 @@
 
 include("topology.jl")
 include("sanity.jl")
+include("state.jl")
 include("exchange.jl")
