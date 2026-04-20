@@ -263,6 +263,7 @@ export Block, Interface, MultiBlockMesh2D
 export EDGE_SYMBOLS_2D, INTERFACE_TAG
 export getblock, edge_length, edge_coords
 export MultiBlockSanityIssue, sanity_check_multiblock
+export exchange_ghost_2d!
 
 # Grid refinement
 export RefinementPatch, RefinedDomain
