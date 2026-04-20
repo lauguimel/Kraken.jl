@@ -91,6 +91,9 @@ include("curvilinear/slbm_3d.jl")
 include("curvilinear/mesh_from_arrays.jl")
 include("curvilinear/mesh_gmsh.jl")
 
+# --- Multi-block structured (v0.3) ---
+include("multiblock/multiblock.jl")
+
 # --- Grid refinement ---
 include("refinement/refinement.jl")
 include("kernels/refinement_exchange_2d.jl")
@@ -254,6 +257,12 @@ export precompute_q_wall_slbm_sphere_3d, compute_local_omega_3d
 export PullSLBM_3D, CollideTRTLocalDirect_3D
 # gmsh / external mesh import
 export load_gmsh_mesh_2d, load_gmsh_mesh_3d, GmshPhysicalGroups
+
+# Multi-block structured (v0.3)
+export Block, Interface, MultiBlockMesh2D
+export EDGE_SYMBOLS_2D, INTERFACE_TAG
+export getblock, edge_length, edge_coords
+export MultiBlockSanityIssue, sanity_check_multiblock
 
 # Grid refinement
 export RefinementPatch, RefinedDomain
