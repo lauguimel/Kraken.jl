@@ -24,7 +24,11 @@ using Kraken, CUDA, KernelAbstractions, Gmsh
 using FFTW: rfft, rfftfreq
 
 const Lx, Ly         = 1.0, 0.5
-const cx_p, cy_p     = 0.5, 0.25
+const cx_p, cy_p     = 0.5, 0.245   # cy slightly off-axis (10% of D below
+                                    # the centreline) to break symmetry and
+                                    # trigger vortex shedding without having
+                                    # to wait for numerical noise to amplify.
+                                    # Same trick as Schäfer-Turek 2D-2.
 const R_p            = 0.025
 const Re_target      = 100.0
 const u_max          = 0.04
@@ -166,6 +170,12 @@ run_C(D_lu, steps, sw, se) = begin
     mesh, _ = load_gmsh_mesh_2d(fpath)
     geom_h = build_slbm_geometry(mesh)
     geom = transfer_slbm_geometry(geom_h, backend)
+    # Local-τ field: Bump mesh has ~93× cell-area ratio between centre and
+    # edges → a single global τ goes unstable (τ→0.5) on the smallest cells
+    # and over-diffuses on the largest. Per-cell rescaling preserves the
+    # physical viscosity ν everywhere (SLBM global-Δt → quadratic scaling).
+    sp_h, sm_h = compute_local_omega_2d(mesh; ν=s.ν, scaling=:quadratic)
+    sp_field = CuArray(T.(sp_h)); sm_field = CuArray(T.(sm_h))
     is_solid_h = zeros(Bool, mesh.Nξ, mesh.Nη)
     for j in 1:mesh.Nη, i in 1:mesh.Nξ
         x = mesh.X[i,j]; y = mesh.Y[i,j]
@@ -183,7 +193,9 @@ run_C(D_lu, steps, sw, se) = begin
     norm = u_mean^2 * (s.R_lu * 2)
     t0 = time()
     for step in 1:steps
-        slbm_trt_libb_step!(fb, fa, ρ, ux, uy, is_solid, q_wall, uw_x, uw_y, geom, s.ν)
+        slbm_trt_libb_step_local_2d!(fb, fa, ρ, ux, uy, is_solid,
+                                       q_wall, uw_x, uw_y, geom,
+                                       sp_field, sm_field)
         apply_bc_rebuild_2d!(fb, fa, bcspec, s.ν, mesh.Nξ, mesh.Nη)
         if step > steps - sw && step % se == 0
             Fx, Fy = compute_drag_libb_mei_2d(fb, q_wall, uw_x, uw_y, mesh.Nξ, mesh.Nη)

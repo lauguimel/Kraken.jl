@@ -905,3 +905,49 @@ function slbm_trt_libb_step!(f_out, f_in, ρ, ux, uy, is_solid,
             geom.periodic_ξ, geom.periodic_η;
             ndrange=(geom.Nξ, geom.Nη))
 end
+
+# ---------------------------------------------------------------------------
+# Local-τ variant (2D, D2Q9): per-cell s_plus[i,j], s_minus[i,j] for SLBM on
+# stretched curvilinear meshes. Pure DSL-brick assembly — mirror of the 3D
+# `slbm_trt_libb_step_local_3d!` (src/curvilinear/slbm_3d.jl). Required when
+# the physical cell size varies across the mesh (e.g. gmsh Bump, O-grid),
+# where a single global τ breaks down: small cells → τ_eff → 0.5 (unstable),
+# large cells → ν_eff too high (biased drag).
+#
+#   PullSLBM → SolidInert → ApplyLiBBPrePhase →
+#   Moments → CollideTRTLocalDirect → WriteMoments
+# ---------------------------------------------------------------------------
+
+const _SLBM_TRT_LIBB_LOCAL_SPEC_2D = LBMSpec(
+    PullSLBM(), SolidInert(),
+    ApplyLiBBPrePhase(),
+    Moments(), CollideTRTLocalDirect(),
+    WriteMoments();
+    stencil = :D2Q9,
+)
+
+"""
+    slbm_trt_libb_step_local_2d!(f_out, f_in, ρ, ux, uy, is_solid,
+                                  q_wall, uw_link_x, uw_link_y,
+                                  geom, sp_field, sm_field)
+
+SLBM + TRT + LI-BB step (D2Q9) with PER-CELL relaxation rates from the
+device-side 2D arrays `sp_field[Nξ, Nη]` and `sm_field[Nξ, Nη]` (e.g.
+produced by `compute_local_omega_2d` with `scaling=:quadratic` and
+copied to the backend). Required on stretched curvilinear meshes where
+the local cell size — and therefore τ — varies per cell.
+"""
+function slbm_trt_libb_step_local_2d!(f_out, f_in, ρ, ux, uy, is_solid,
+                                        q_wall, uw_link_x, uw_link_y,
+                                        geom::SLBMGeometry,
+                                        sp_field, sm_field)
+    backend = KernelAbstractions.get_backend(f_in)
+    kernel! = build_lbm_kernel(backend, _SLBM_TRT_LIBB_LOCAL_SPEC_2D)
+    kernel!(f_out, ρ, ux, uy, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y,
+            geom.i_dep, geom.j_dep,
+            geom.Nξ, geom.Nη,
+            sp_field, sm_field,
+            geom.periodic_ξ, geom.periodic_η;
+            ndrange=(geom.Nξ, geom.Nη))
+end
