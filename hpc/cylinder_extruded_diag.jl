@@ -20,14 +20,15 @@
 # Output: results/cylinder_extruded_diag.txt
 
 using Kraken, Printf, CUDA, KernelAbstractions
-import Kraken: D3Q19, equilibrium, fused_trt_libb_v2_step_3d!,
+import Kraken: D3Q19, equilibrium, fused_trt_libb_v2_step_3d_periodic_z!,
                apply_bc_rebuild_3d!, apply_hermite_source_3d!,
                compute_drag_libb_3d, init_conformation_field_3d!,
                compute_conformation_macro_3d!, apply_polymer_wall_bc!,
                collide_conformation_3d!, update_polymer_stress_3d!,
                reset_conformation_inlet_3d!, reset_conformation_outlet_3d!,
                precompute_q_wall_cylinder_extruded_3d, BCSpec3D,
-               ZouHeVelocity, ZouHePressure, CNEBB, OldroydB, stream_3d!
+               ZouHeVelocity, ZouHePressure, CNEBB, OldroydB,
+               stream_fully_periodic_3d!
 
 backend = CUDABackend()
 FT = Float64
@@ -171,9 +172,9 @@ let
     polymer_model = OldroydB(G=FT(G), λ=FT(λ))
     Fx_sum = 0.0; n_avg = 0
     for step in 1:max_steps
-        fused_trt_libb_v2_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
-                                     q_wall, uw_x, uw_y, uw_z,
-                                     Nx_l, Ny_l, Nz_l, FT(ν_s))
+        fused_trt_libb_v2_step_3d_periodic_z!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                                                q_wall, uw_x, uw_y, uw_z,
+                                                Nx_l, Ny_l, Nz_l, FT(ν_s))
         apply_bc_rebuild_3d!(f_out, f_in, bcspec, ν_s, Nx_l, Ny_l, Nz_l)
         apply_hermite_source_3d!(f_out, is_solid, s_plus_s, txx, txy, txz, tyy, tyz, tzz)
         if step > max_steps - avg_window
@@ -181,12 +182,12 @@ let
             Fx_sum += d.Fx; n_avg += 1
         end
         # Conformation
-        stream_3d!(g_xx_buf, g_xx, Nx_l, Ny_l, Nz_l)
-        stream_3d!(g_xy_buf, g_xy, Nx_l, Ny_l, Nz_l)
-        stream_3d!(g_xz_buf, g_xz, Nx_l, Ny_l, Nz_l)
-        stream_3d!(g_yy_buf, g_yy, Nx_l, Ny_l, Nz_l)
-        stream_3d!(g_yz_buf, g_yz, Nx_l, Ny_l, Nz_l)
-        stream_3d!(g_zz_buf, g_zz, Nx_l, Ny_l, Nz_l)
+        stream_fully_periodic_3d!(g_xx_buf, g_xx, Nx_l, Ny_l, Nz_l)
+        stream_fully_periodic_3d!(g_xy_buf, g_xy, Nx_l, Ny_l, Nz_l)
+        stream_fully_periodic_3d!(g_xz_buf, g_xz, Nx_l, Ny_l, Nz_l)
+        stream_fully_periodic_3d!(g_yy_buf, g_yy, Nx_l, Ny_l, Nz_l)
+        stream_fully_periodic_3d!(g_yz_buf, g_yz, Nx_l, Ny_l, Nz_l)
+        stream_fully_periodic_3d!(g_zz_buf, g_zz, Nx_l, Ny_l, Nz_l)
         apply_polymer_wall_bc!(g_xx_buf, g_xx, is_solid, Cxx, CNEBB())
         apply_polymer_wall_bc!(g_xy_buf, g_xy, is_solid, Cxy, CNEBB())
         apply_polymer_wall_bc!(g_xz_buf, g_xz, is_solid, Cxz, CNEBB())

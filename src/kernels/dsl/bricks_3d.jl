@@ -19,6 +19,50 @@
 #   (16, 19) (17, 18)
 # =====================================================================
 
+"""
+Pull-stream D3Q19 with periodic wrap in z and halfway-BB fallback in x and y.
+
+Used for z-extruded benchmarks (infinite cylinder, 3D viscoelastic
+diagnostics) where the z direction is intended to be a homogeneous
+infinite axis. Without this, the standard `PullHalfwayBB_3D` treats
+z=1 and z=Nz as solid walls, breaking the homogeneity assumption and
+generating spurious `uz`, `C_xz`, `C_yz` artefacts (validated in
+hpc/cylinder_extruded_diag.jl 2026-04-20).
+"""
+struct PullPeriodicZHalfwayBBxy_3D <: LBMBrick end
+required_args(::PullPeriodicZHalfwayBBxy_3D) = (:f_in, :Nx, :Ny, :Nz)
+phase(::PullPeriodicZHalfwayBBxy_3D) = :pre_solid
+emit_code(::PullPeriodicZHalfwayBBxy_3D) = quote
+    # z-periodic source indices
+    km1 = ifelse(k > 1,  k - 1, Nz)
+    kp1 = ifelse(k < Nz, k + 1, 1)
+    fp1  = f_in[i, j, k, 1]
+    # Axis x (halfway-BB)
+    fp2  = ifelse(i > 1,              f_in[i-1, j,   k,   2],  f_in[i, j, k, 3])
+    fp3  = ifelse(i < Nx,             f_in[i+1, j,   k,   3],  f_in[i, j, k, 2])
+    # Axis y (halfway-BB)
+    fp4  = ifelse(j > 1,              f_in[i,   j-1, k,   4],  f_in[i, j, k, 5])
+    fp5  = ifelse(j < Ny,             f_in[i,   j+1, k,   5],  f_in[i, j, k, 4])
+    # Axis z (PERIODIC)
+    fp6  = f_in[i, j, km1, 6]
+    fp7  = f_in[i, j, kp1, 7]
+    # Edge xy (halfway-BB on both x and y)
+    fp8  = ifelse(i > 1  && j > 1,    f_in[i-1, j-1, k,   8],  f_in[i, j, k, 11])
+    fp9  = ifelse(i < Nx && j > 1,    f_in[i+1, j-1, k,   9],  f_in[i, j, k, 10])
+    fp10 = ifelse(i > 1  && j < Ny,   f_in[i-1, j+1, k,   10], f_in[i, j, k, 9])
+    fp11 = ifelse(i < Nx && j < Ny,   f_in[i+1, j+1, k,   11], f_in[i, j, k, 8])
+    # Edge xz (halfway-BB on x, periodic in z)
+    fp12 = ifelse(i > 1,              f_in[i-1, j,   km1, 12], f_in[i, j, km1, 15])
+    fp13 = ifelse(i < Nx,             f_in[i+1, j,   km1, 13], f_in[i, j, km1, 14])
+    fp14 = ifelse(i > 1,              f_in[i-1, j,   kp1, 14], f_in[i, j, kp1, 13])
+    fp15 = ifelse(i < Nx,             f_in[i+1, j,   kp1, 15], f_in[i, j, kp1, 12])
+    # Edge yz (halfway-BB on y, periodic in z)
+    fp16 = ifelse(j > 1,              f_in[i,   j-1, km1, 16], f_in[i, j, km1, 19])
+    fp17 = ifelse(j < Ny,             f_in[i,   j+1, km1, 17], f_in[i, j, km1, 18])
+    fp18 = ifelse(j > 1,              f_in[i,   j-1, kp1, 18], f_in[i, j, kp1, 17])
+    fp19 = ifelse(j < Ny,             f_in[i,   j+1, kp1, 19], f_in[i, j, kp1, 16])
+end
+
 "Pull-stream D3Q19 with halfway-BB fallback at domain edges."
 struct PullHalfwayBB_3D <: LBMBrick end
 required_args(::PullHalfwayBB_3D) = (:f_in, :Nx, :Ny, :Nz)

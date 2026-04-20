@@ -41,6 +41,42 @@ function fused_trt_libb_v2_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
             ndrange=(Nx, Ny, Nz))
 end
 
+# Same as the V2 spec but replaces PullHalfwayBB_3D (walls on all 6 faces)
+# with PullPeriodicZHalfwayBBxy_3D (periodic in z, halfway-BB in x/y).
+const _TRT_LIBB_V2_PERIODIC_Z_SPEC_3D = LBMSpec(
+    PullPeriodicZHalfwayBBxy_3D(), SolidInert_3D(),
+    ApplyLiBBPrePhase_3D(),
+    Moments_3D(), CollideTRTDirect_3D(),
+    WriteMoments_3D();
+    stencil = :D3Q19,
+)
+
+"""
+    fused_trt_libb_v2_step_3d_periodic_z!(f_out, f_in, ρ, ux, uy, uz,
+                                            is_solid, q_wall,
+                                            uw_x, uw_y, uw_z,
+                                            Nx, Ny, Nz, ν; Λ=3/16)
+
+Z-periodic variant of `fused_trt_libb_v2_step_3d!`. Uses periodic wrap
+at z=1 and z=Nz instead of halfway-BB, for z-extruded benchmarks
+(infinite cylinder, Lees-Edwards-like shear, viscoelastic 2D-vs-3D
+diagnostics). X and Y faces retain halfway-BB; internal solids still
+use LI-BB Bouzidi via `q_wall`.
+"""
+function fused_trt_libb_v2_step_3d_periodic_z!(f_out, f_in, ρ, ux, uy, uz,
+                                                 is_solid, q_wall,
+                                                 uw_link_x, uw_link_y, uw_link_z,
+                                                 Nx, Ny, Nz, ν; Λ::Real=3/16)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    kernel! = build_lbm_kernel(backend, _TRT_LIBB_V2_PERIODIC_Z_SPEC_3D)
+    kernel!(f_out, ρ, ux, uy, uz, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y, uw_link_z,
+            Nx, Ny, Nz, ET(s_plus), ET(s_minus);
+            ndrange=(Nx, Ny, Nz))
+end
+
 """
     precompute_q_wall_sphere_3d(Nx, Ny, Nz, cx, cy, cz, R; FT=Float64)
         -> (q_wall, is_solid)

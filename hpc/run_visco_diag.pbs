@@ -15,11 +15,11 @@ julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompil
 
 mkdir -p results
 
-echo "=== STEP 1: Poiseuille viscoelastic 2D vs 3D — $(date) ==="
-julia --project=. hpc/poiseuille_visco_diag.jl 2>&1 | tee results/poiseuille_visco_diag.txt
+echo "=== STEP 1: 3D Poiseuille square duct (axis-aligned walls) — $(date) ==="
+julia --project=. hpc/duct_visco_diag.jl 2>&1 | tee results/duct_visco_diag.txt
 
 echo ""
-echo "=== STEP 2: Cylinder extruded 2D vs 3D — $(date) ==="
+echo "=== STEP 2: Cylinder extruded 2D vs 3D z-periodic — $(date) ==="
 julia --project=. hpc/cylinder_extruded_diag.jl 2>&1 | tee results/cylinder_extruded_diag.txt
 
 echo ""

@@ -176,7 +176,7 @@ export apply_fixed_temp_south_3d!, apply_fixed_temp_north_3d!
 export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
-export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
+export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_step_3d!, fused_trt_libb_v2_step_3d_periodic_z!, precompute_q_wall_cylinder
 export precompute_q_wall_sphere_3d, compute_drag_libb_3d, run_sphere_libb_3d
 export precompute_q_wall_cylinder_extruded_3d
 export precompute_q_wall_annulus, precompute_q_wall_contraction_2d
