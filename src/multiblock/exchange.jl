@@ -135,3 +135,103 @@ function _fill_ghost_sn!(state_bot::BlockState2D, state_top::BlockState2D)
     end
     return nothing
 end
+
+# =====================================================================
+# Shared-node variant (Phase B.2).
+#
+# Natural gmsh multi-block produces SHARED-NODE topology: adjacent
+# surfaces share the boundary curve, so each block stores the same
+# interface column. The non-overlap exchange above fetches the
+# neighbour's interior row 1 cell past the shared edge; for shared-
+# node, the neighbour's 1-cell-past-edge column is at interior index
+# (ng + 2) rather than (ng + 1), because (ng + 1) is the duplicated
+# shared column.
+#
+# Both blocks keep computing their step on the shared column; after
+# each step the duplicated column values in A and B can drift
+# slightly (they read different ghosts at the previous step). In
+# practice this is tolerated at the interface — the shared column is
+# essentially a redundant dof that is refreshed by both sides' steps
+# plus ghost fill. For a bit-exact match vs. single-block you would
+# additionally copy A's shared column into B's after the swap, but we
+# don't enforce that here: the MVP target is convergence to a
+# physically correct solution, not bit-exactness.
+# =====================================================================
+
+"""
+    exchange_ghost_shared_node_2d!(mbm::MultiBlockMesh2D,
+                                    states::AbstractVector{<:BlockState2D})
+
+Ghost-fill for the SHARED-NODE topology (gmsh's natural output: two
+adjacent blocks store the same interface column). Read the neighbour's
+interior one column PAST the shared column (index `ng + 1 + k` instead
+of `ng + k`), so the ghost row represents the physical cell 1·dx
+beyond the interface in the normal direction, just as the non-overlap
+exchange does. Call sequence is identical to `exchange_ghost_2d!`.
+"""
+function exchange_ghost_shared_node_2d!(mbm::MultiBlockMesh2D,
+                                          states::AbstractVector{<:BlockState2D})
+    length(states) == length(mbm.blocks) ||
+        error("exchange_ghost_shared_node_2d!: states has $(length(states)) entries, " *
+              "mbm has $(length(mbm.blocks)) blocks")
+    ng = states[1].n_ghost
+    for k in 2:length(states)
+        states[k].n_ghost == ng ||
+            error("exchange_ghost_shared_node_2d!: n_ghost mismatch")
+    end
+    for iface in mbm.interfaces
+        a_idx = mbm.block_by_id[iface.from[1]]
+        b_idx = mbm.block_by_id[iface.to[1]]
+        _exchange_pair_ghost_shared_node_2d!(states[a_idx], states[b_idx],
+                                               iface.from[2], iface.to[2])
+    end
+    return mbm
+end
+
+function _exchange_pair_ghost_shared_node_2d!(state_a::BlockState2D, state_b::BlockState2D,
+                                                edge_a::Symbol, edge_b::Symbol)
+    if edge_a === :east && edge_b === :west
+        _fill_ghost_we_shared!(state_a, state_b)
+    elseif edge_a === :west && edge_b === :east
+        _fill_ghost_we_shared!(state_b, state_a)
+    elseif edge_a === :north && edge_b === :south
+        _fill_ghost_sn_shared!(state_a, state_b)
+    elseif edge_a === :south && edge_b === :north
+        _fill_ghost_sn_shared!(state_b, state_a)
+    else
+        error("_exchange_pair_ghost_shared_node_2d!: unsupported edge pair " *
+              "$edge_a → $edge_b. MVP supports only opposite-normal aligned pairs.")
+    end
+end
+
+function _fill_ghost_we_shared!(state_left::BlockState2D, state_right::BlockState2D)
+    ng = state_left.n_ghost
+    Nx_l = state_left.Nξ_phys
+    Ny_phys = state_left.Nη_phys
+    j_range = (ng + 1):(ng + Ny_phys)
+    # East-ghost of LEFT ← right block one cell past the shared column
+    # (skip the duplicate at ng + 1 → read from ng + 1 + k).
+    # West-ghost of RIGHT ← left block one cell before the shared column
+    # (skip the duplicate at Nx_l + ng → read from Nx_l + ng - 1 - (k-1)).
+    @inbounds for k in 1:ng
+        view(state_left.f,  Nx_l + ng + k, j_range, :) .=
+            view(state_right.f, ng + 1 + k,     j_range, :)
+        view(state_right.f, k,              j_range, :) .=
+            view(state_left.f,  Nx_l + ng - 1 - (ng - k), j_range, :)
+    end
+    return nothing
+end
+
+function _fill_ghost_sn_shared!(state_bot::BlockState2D, state_top::BlockState2D)
+    ng = state_bot.n_ghost
+    Ny_b = state_bot.Nη_phys
+    Nx_phys = state_bot.Nξ_phys
+    i_range = (ng + 1):(ng + Nx_phys)
+    @inbounds for k in 1:ng
+        view(state_bot.f, i_range, Ny_b + ng + k, :) .=
+            view(state_top.f, i_range, ng + 1 + k, :)
+        view(state_top.f, i_range, k,              :) .=
+            view(state_bot.f, i_range, Ny_b + ng - 1 - (ng - k), :)
+    end
+    return nothing
+end
