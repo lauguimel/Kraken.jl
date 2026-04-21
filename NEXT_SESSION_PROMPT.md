@@ -9,93 +9,153 @@ Continue work on `dev-viscoelastic` branch of Kraken.jl
 
 ## Where we stand (2026-04-22)
 
-A full audit ran last session and **invalidated most prior claims**.
-Read `AUDIT_SUMMARY.md` at repo root FIRST — it is the single source
-of truth. Key facts :
+A full audit ran last session. Prior claims (cylinder 0.32% error,
+3D sphere 10% deficit diagnosed as HWNP or as 3D-specific bug) were
+retracted — **read `AUDIT_SUMMARY.md` for the full record of what was
+ruled out and the flip-flops I made**.
 
-**Kraken is self-consistent** across 2D cylinder (β=0.5 and β=0.59)
-and 3D sphere (β=0.5), and across Float64 (Aqua CUDA) and Float32
-(Metal local). At Wi=0.1 they all give Cd_visco/Cd_Newt ≈ **0.89–0.90**.
+**What is factually established by data** :
 
-| Benchmark | Wi=0.001 | Wi=0.01 | Wi=0.1 |
-|-----------|----------|---------|--------|
-| 2D cyl β=0.5 R=30 F64 | 1.103 | 1.076 | 0.901 |
-| 2D cyl β=0.5 R=30 F32 | 1.173 | 1.067 | 0.847 |
-| 3D sphère β=0.5 R=16 F64 | — | 1.081 | 0.892 |
+1. Kraken gives **the same Cd_visco/Cd_Newt ratio ~0.89 at Wi=0.1**
+   across 2D cylinder (β=0.5 and β=0.59) and 3D sphere (β=0.5), and
+   across Float64 (Aqua) and Float32 (Metal local).
 
-Ruled out this session :
-- Not a 3D-specific bug (2D shows same pattern).
-- Not a Float32 precision issue (F64 Aqua reproduces).
-- Not a Hermite-source or UCD formula error (verified by hand 2D vs 3D).
-- Not a coupling-loop bug (G=0 gives ratio=1.000 exact).
-- Not CNEBB causing the deficit (removing CNEBB makes it worse).
-- Not HWNP (I incorrectly claimed HWNP at Wi=0.03 ; retracted).
+   | Benchmark | Wi=0.001 | Wi=0.01 | Wi=0.1 |
+   |-----------|----------|---------|--------|
+   | 2D cyl β=0.5 R=30 F64 | 1.103 | 1.076 | 0.901 |
+   | 2D cyl β=0.5 R=30 F32 | 1.173 | 1.067 | 0.847 |
+   | 3D sphère β=0.5 R=16 F64 | — | 1.081 | 0.892 |
 
-**Two real findings (not bugs)** :
-1. λ < ~50 lattice units → TRT-LBM conformation is stiff → numerical
-   artifact giving +5–17% bias (visible at Wi=0.001 with λ=1.5). NOT
-   physical, but not a code bug either.
-2. Ratio ≈ 0.89 at Wi=0.1 β=0.5 blockage 0.5 is reproduced across
-   2D/3D/Float32/Float64. Kraken is self-consistent. Whether this is
-   the CORRECT physical answer is the open question.
+2. **Bug hypotheses ruled out by targeted tests** :
+   - Not Float32 (F64 reproduces).
+   - Not 3D-specific (2D shows same pattern at β=0.5).
+   - Not a Hermite-source or UCD formula error (verified by hand,
+     2D vs 3D kernels bit-consistent).
+   - Not a coupling-loop bug (G=0 gives ratio=1.000 exact).
+   - Not CNEBB causing the deficit (removing CNEBB makes it worse).
+
+**What is NOT established** (and what I pretended to establish last
+session — explicit self-retractions) :
+
+- The **cause** of the +10% at Wi=0.001 is unknown. I speculated
+  "λ-stiffness" but did NOT run a test that isolates λ from Wi. A
+  real stiffness signature would be monotone bias decreasing with
+  larger λ; the data shows bias flipping sign between Wi=0.01 and
+  Wi=0.1, which is NOT the stiffness pattern. Do not trust that
+  narrative.
+- Whether ratio 0.89 at Wi=0.1 is **physically correct** is unknown.
+  I claimed "probably physical for confined geometry" but I did not
+  find any reference to support this.
+- Bug-free status of large chunks of the code I did NOT inspect :
+  the 3D streaming on g, the 3D CNEBB implementation details, the
+  feq_3d used for conformation equilibrium (does it use the right
+  moments?), the inlet/outlet reset in 3D. Absence of evidence is
+  not evidence of absence.
 
 ## Core question for this session
 
-**Is ratio 0.89 (drag reduction of 10%) at Wi=0.1 β=0.5 blockage 0.5
-the physically correct answer, or is there a bug we haven't found ?**
+**Two open questions, both requiring actual tests — not speculation** :
 
-The prior "expected enhancement from Lunsmann 1993" comparison was a
-category error : Lunsmann is for UNBOUNDED sphere, but the Kraken
-benchmark is heavily confined (blockage 0.5). For confined geometry,
-drag reduction by Oldroyd-B can be physically correct.
+### Q1 : Is ratio 0.89 at Wi=0.1 β=0.5 blockage 0.5 physically correct ?
 
-## Suggested actions
+Last session's comparison to Lunsmann 1993 was a category error
+(Lunsmann is unbounded, Kraken is confined). Need a PROPER reference
+for confined Oldroyd-B sphere. Candidates to check :
 
-1. **Literature dive** for confined cylinder/sphere Oldroyd-B Cd :
-   - Alves, Oliveira, Pinho, J. Non-Newtonian Fluid Mech. (multiple
-     papers on 2D cylinder between parallel plates, especially the
-     2001 paper cited often : "The flow of viscoelastic fluids past
-     a cylinder: finite-volume high-resolution methods")
-   - Owens & Phillips book "Computational Rheology" (Imperial College
-     Press 2002) ch. 7 on confined geometries
-   - Fan, Tanner, Phan-Thien papers on ducted sphere (Phan-Thien 1984,
-     Zheng et al.)
-   - **Liu et al. 2025 (arxiv 2508.16997)** itself — Table 3 reports
-     Cd at Wi=0.1,0.5,1.0 for β=0.59 R=30 = {130.36, 126.31, 151.31}.
-     Note the Wi=0.5 value (126.31) is LOWER than Wi=0.1 (130.36),
-     confirming confined geometry can give non-monotone Cd(Wi) with a
-     dip near Wi~0.5. Consistent with Kraken's pattern.
+- Alves, Oliveira, Pinho 2001 "The flow of viscoelastic fluids past a
+  cylinder" — confined cylinder Oldroyd-B Cd vs Wi. Should directly
+  compare.
+- Owens & Phillips 2002 book, ch. 7 — tables for confined geometries.
+- Phan-Thien 1984, Zheng et al. for ducted sphere.
+- Liu 2025 arxiv 2508.16997 Table 3 at β=0.59 R=30 gives Cd at
+  Wi=0.1,0.5,1.0 = {130.36, 126.31, 151.31} — note the non-monotone
+  shape (dips at mid-Wi, rises high-Wi). Kraken's β=0.5 result
+  qualitatively matches the low-Wi dip.
 
-   Find one reference that gives ratio Cd_visco/Cd_Newt (or absolute Cd
-   plus a Newtonian reference) at β=0.5 blockage 0.5 so we can compare
-   directly to 128.70/142.87=0.901. If it matches → Kraken validated.
+**Concrete action** : find one reference that gives
+Cd_visco/Cd_Newt at β=0.5 blockage 0.5 Wi=0.1, compare to Kraken's
+0.901. If it matches within ~5% → Kraken validated for this benchmark.
+If off by >10% → real issue, dig into code.
 
-2. **Verify λ-stiffness explanation** by running 2D cylinder at larger
-   R with the same Wi to check if the +10% artifact at Wi=0.001
-   disappears when λ grows. E.g. R=120 Wi=0.001 gives λ=6 (still
-   stiff). R=1000 Wi=0.001 gives λ=50 (should be clean). Useful
-   sanity check but low priority.
+### Q2 : What actually causes the +10% bias at Wi=0.001 ?
 
-3. **Alternative sphere 3D reference** : Alves 2003 did "4:1:1
-   contraction" with a plug, which is a different geometry. For a
-   sphere in a CUBIC duct with blockage 0.5, Owens-Phillips book
-   section 7.4 has tables. Phan-Thien has Cd vs Wi for PTT at β=0.5.
+My "λ-stiffness" speculation is NOT consistent with the data (sign
+flip between Wi=0.01 and Wi=0.1 is not a stiffness signature). The
+real cause is unknown. Targeted diagnostics to try :
 
-4. **Once reference is found**, report Kraken vs reference at R=16,32
-   and settle the validity question.
+- **Stiffness test** : at fixed Wi=0.1 (known "regime OK"), scan R ∈
+  {15, 30, 60, 120} to vary λ (= Wi·R/u_mean). If bias is λ-driven,
+  larger R should keep λ > threshold and bias should be stable. If
+  bias changes with R at fixed Wi, it's discretization, not λ.
+- **Artifact-decomposition** : at Wi=0.001 where +10% appears, dump
+  Cxy(x,y) and C_xx(x,y) profiles. Compare to analytic Poiseuille
+  Oldroyd-B. If the fields are vastly off from analytic at places
+  where τ_p is small (far from cylinder), something WAY upstream is
+  wrong, not just the drag integration.
+- **β sweep at Wi=0.001** : if +10% bias scales with β (more polymer
+  contribution → larger bias), it's a polymer-stress bug. If it's
+  insensitive to β, it's flow-side.
+
+### Code paths NOT yet inspected (bug hypotheses still open)
+
+- **3D streaming for g** (`stream_3d!`) — how does it handle
+  boundaries, does it see is_solid, interaction with CNEBB.
+- **3D CNEBB implementation details** — specifically how the 19-
+  population version groups the wall-adjacent populations.
+- **`feq_3d` used for conformation equilibrium** — is the Mach
+  expansion correct? g_q^eq in 3D should match C tensor moments; any
+  mismatch would give a systematic drift.
+- **`reset_conformation_inlet_3d!` / `reset_conformation_outlet_3d!`**
+
+Any of these could contain a factor-of-2 or sign error that produces
+the systematic bias without affecting G=0 tests (where τ_p never
+enters f).
+
+### Equations: Kraken vs canonical (NOT CROSS-CHECKED LAST SESSION)
+
+Last session I verified 2D-vs-3D internal consistency by eye. I did
+NOT compare against canonical references. This is a hand-wave and
+should be the FIRST thing done now.
+
+**Canonical references to check term-by-term** :
+
+- **Liu et al. arxiv 2508.16997 Eq. 25** (Hermite source, the exact
+  prefactor with / without (1−s/2) depending on TRT vs BGK)
+- **Liu Eqs. 38-39** (CNEBB at curved walls — 2D then 3D port)
+- **Pimenta & Alves 2017** J. Non-Newt. Fluid Mech. — the rheoTool
+  paper, which documents the UCD source terms and boundary conditions
+  for confined cylinder Oldroyd-B at canonical accuracy.
+- **Fattal & Kupferman 2004** — log-conformation formulation (for
+  future 3D log-conf extension).
+
+**Open-source codes to transpose / compare against** :
+
+- **rheoTool** (https://github.com/fppimenta/rheoTool) — OpenFOAM
+  Oldroyd-B solver by the Alves group. Gold standard for confined
+  viscoelastic benchmarks. Implements Pimenta-Alves 2017 equations
+  directly. Good path : run rheoTool's cylinder benchmark at β=0.5
+  blockage 0.5 Wi=0.1 → get a canonical Cd_visco/Cd_Newt ratio →
+  compare to Kraken's 0.901. If rheoTool gives 0.9, Kraken is
+  validated. If rheoTool gives something else, Kraken bug is real.
+- **Palabos viscoelastic plugin** (C++ LBM, less canonical).
+- **Liu et al. supplementary material** — check arxiv 2508.16997 for
+  linked GitHub or supplement. If they released code, transposing
+  to Julia for bit-for-bit comparison is the cleanest path.
+
+Concrete test: write `bench/equations_cross_check.md` that lists each
+equation used in Kraken viscoelastic 3D side-by-side with its citation
+in Liu 2025 or Pimenta-Alves 2017. Any mismatch is a lead.
 
 ## What NOT to do
 
-- Do not propose "log-conformation 3D" as THE fix until we confirm
-  there is a bug to fix. The sphere data at Wi=0.1 is CONSISTENT with
-  Kraken's 2D result and with Liu's own Wi-sweep pattern. It may not
-  be wrong.
-- Do not invoke HWNP as an explanation unless Wi > ~0.5 and the scheme
-  actually blows up (NaN / oscillations). The Wi=0.1 regime is NOT
-  HWNP.
-- Do not reverse-engineer a narrative to explain away a result before
-  the raw data clearly demands it. Last session I did this twice and
-  had to retract both times.
+- Do not speculate a cause without a test that distinguishes it. The
+  previous session had 4 retractions because I kept narrating instead
+  of testing.
+- Do not invoke HWNP at Wi ≤ 0.1 — that regime is never HWNP.
+- Do not assume Kraken is correct OR incorrect without a reference.
+  Both possibilities are open.
+- Do not assume the "+10% at Wi=0.001" is the same phenomenon as the
+  "-10% at Wi=0.1". They may have entirely different causes.
 
 ## Session artifacts (read before acting)
 
