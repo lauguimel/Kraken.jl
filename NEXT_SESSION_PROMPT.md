@@ -7,102 +7,114 @@ Copy-paste everything below to start a fresh session.
 Continue work on `dev-viscoelastic` branch of Kraken.jl
 (worktree `~/Documents/Recherche/Kraken.jl-viscoelastic`).
 
+## Where we stand (2026-04-22)
+
+A full audit ran last session and **invalidated most prior claims**.
+Read `AUDIT_SUMMARY.md` at repo root FIRST — it is the single source
+of truth. Key facts :
+
+**Kraken is self-consistent** across 2D cylinder (β=0.5 and β=0.59)
+and 3D sphere (β=0.5), and across Float64 (Aqua CUDA) and Float32
+(Metal local). At Wi=0.1 they all give Cd_visco/Cd_Newt ≈ **0.89–0.90**.
+
+| Benchmark | Wi=0.001 | Wi=0.01 | Wi=0.1 |
+|-----------|----------|---------|--------|
+| 2D cyl β=0.5 R=30 F64 | 1.103 | 1.076 | 0.901 |
+| 2D cyl β=0.5 R=30 F32 | 1.173 | 1.067 | 0.847 |
+| 3D sphère β=0.5 R=16 F64 | — | 1.081 | 0.892 |
+
+Ruled out this session :
+- Not a 3D-specific bug (2D shows same pattern).
+- Not a Float32 precision issue (F64 Aqua reproduces).
+- Not a Hermite-source or UCD formula error (verified by hand 2D vs 3D).
+- Not a coupling-loop bug (G=0 gives ratio=1.000 exact).
+- Not CNEBB causing the deficit (removing CNEBB makes it worse).
+- Not HWNP (I incorrectly claimed HWNP at Wi=0.03 ; retracted).
+
+**Two real findings (not bugs)** :
+1. λ < ~50 lattice units → TRT-LBM conformation is stiff → numerical
+   artifact giving +5–17% bias (visible at Wi=0.001 with λ=1.5). NOT
+   physical, but not a code bug either.
+2. Ratio ≈ 0.89 at Wi=0.1 β=0.5 blockage 0.5 is reproduced across
+   2D/3D/Float32/Float64. Kraken is self-consistent. Whether this is
+   the CORRECT physical answer is the open question.
+
 ## Core question for this session
 
-**Does the 3D viscoelastic sphere driver converge to Lunsmann 1993 reference
-when R is refined?** If yes → publishable. If no → real bug to find.
+**Is ratio 0.89 (drag reduction of 10%) at Wi=0.1 β=0.5 blockage 0.5
+the physically correct answer, or is there a bug we haven't found ?**
 
-Previous session spent many hours on 2D Poiseuille diagnostics that were
-muddled by incorrect scaling (Nx too small, Wi varying with Ny, BGK instead
-of TRT, etc). **Do NOT restart those diagnostics.** Go directly to the R-sweep
-on sphere 3D.
+The prior "expected enhancement from Lunsmann 1993" comparison was a
+category error : Lunsmann is for UNBOUNDED sphere, but the Kraken
+benchmark is heavily confined (blockage 0.5). For confined geometry,
+drag reduction by Oldroyd-B can be physically correct.
 
-## What is validated (don't re-test, don't touch)
+## Suggested actions
 
-- **2D Liu cylinder Cd at R=48, Wi=0.1**: 130.78 vs Liu Table 3 130.83 → **0.32% error**
-- **2D R-convergence of Cd** (from commit `97c5d35`):
-  - R=20: −7.4%, R=30: −3.0%, R=48: +0.35% → order ~3.5 on Cd
-- **Driver `run_conformation_cylinder_libb_2d`** (`src/drivers/viscoelastic.jl`):
-  TRT + LI-BB V2 + ZouHe inlet/outlet + Hermite source + CNEBB on cylinder
-  + inlet/outlet conformation reset. DO NOT CHANGE.
-- **Hermite source 3D calibration**: machine-precision match 2D (via
-  `hpc/hermite_magnitude_diag.jl`)
-- **Simple shear 3D kernels**: identical to 2D at the bit (Mach error 2-6%
-  at Wi=0.25, same in both)
-- **Test suite**: 16/16 `test_conformation_lbm.jl`, 17/17
-  `test_conformation_lbm_3d.jl`, 24/24 contraction, 13/13 sphere 3D
-  (but the sphere tolerance is 50%, masks the bug)
+1. **Literature dive** for confined cylinder/sphere Oldroyd-B Cd :
+   - Alves, Oliveira, Pinho, J. Non-Newtonian Fluid Mech. (multiple
+     papers on 2D cylinder between parallel plates, especially the
+     2001 paper cited often : "The flow of viscoelastic fluids past
+     a cylinder: finite-volume high-resolution methods")
+   - Owens & Phillips book "Computational Rheology" (Imperial College
+     Press 2002) ch. 7 on confined geometries
+   - Fan, Tanner, Phan-Thien papers on ducted sphere (Phan-Thien 1984,
+     Zheng et al.)
+   - **Liu et al. 2025 (arxiv 2508.16997)** itself — Table 3 reports
+     Cd at Wi=0.1,0.5,1.0 for β=0.59 R=30 = {130.36, 126.31, 151.31}.
+     Note the Wi=0.5 value (126.31) is LOWER than Wi=0.1 (130.36),
+     confirming confined geometry can give non-monotone Cd(Wi) with a
+     dip near Wi~0.5. Consistent with Kraken's pattern.
 
-## Open bug — 3D sphere Cd deficit
+   Find one reference that gives ratio Cd_visco/Cd_Newt (or absolute Cd
+   plus a Newtonian reference) at β=0.5 blockage 0.5 so we can compare
+   directly to 128.70/142.87=0.901. If it matches → Kraken validated.
 
-From `hpc/sphere_oldroyd_3d.jl` (job 20147611 on Aqua H100):
-```
-Wi=0   Cd_Newt = 215.3  (ref)
-Wi=0.1 Cd = 192.0  → ratio 0.89 (should be ~1.0 at low Wi)
-Wi=0.5 Cd = 144.9  → ratio 0.67
-Wi=1.0 Cd = 131.5  → ratio 0.61
-```
+2. **Verify λ-stiffness explanation** by running 2D cylinder at larger
+   R with the same Wi to check if the +10% artifact at Wi=0.001
+   disappears when λ grows. E.g. R=120 Wi=0.001 gives λ=6 (still
+   stiff). R=1000 Wi=0.001 gives λ=50 (should be clean). Useful
+   sanity check but low priority.
 
-Cd **DECREASES with Wi**, opposite of Lunsmann 1993 (sphere drag enhancement).
+3. **Alternative sphere 3D reference** : Alves 2003 did "4:1:1
+   contraction" with a plug, which is a different geometry. For a
+   sphere in a CUBIC duct with blockage 0.5, Owens-Phillips book
+   section 7.4 has tables. Phan-Thien has Cd vs Wi for PTT at β=0.5.
 
-At R=16, the 2D R-convergence analog would give ~10% Cd error (matches the
-11% we see). So the deficit **may be just discretization** — but the
-monotone-decreasing trend is physically wrong either way.
+4. **Once reference is found**, report Kraken vs reference at R=16,32
+   and settle the validity question.
 
-## Proposed action — decisive test
+## What NOT to do
 
-**Run the sphere at R=16, 32, 48 at Wi=0.1 and see if Cd converges toward
-Newtonian** (= ν_total) at low Wi, and **toward Lunsmann-enhancement** at
-higher Wi. Use `hpc/sphere_oldroyd_3d.jl` as template, add R sweep.
+- Do not propose "log-conformation 3D" as THE fix until we confirm
+  there is a bug to fix. The sphere data at Wi=0.1 is CONSISTENT with
+  Kraken's 2D result and with Liu's own Wi-sweep pattern. It may not
+  be wrong.
+- Do not invoke HWNP as an explanation unless Wi > ~0.5 and the scheme
+  actually blows up (NaN / oscillations). The Wi=0.1 regime is NOT
+  HWNP.
+- Do not reverse-engineer a narrative to explain away a result before
+  the raw data clearly demands it. Last session I did this twice and
+  had to retract both times.
 
-Expected decisions from the sweep:
-- **Monotone Cd → target**, order ~3 like 2D cylinder → driver validated,
-  publish at R=48
-- **Cd plateau below target** → real bug; drill into CNEBB 3D + LI-BB cut
-  link interaction on curved surface (sphere has many q_w at extremes at
-  small R, unlike 2D cylinder)
+## Session artifacts (read before acting)
 
-Computational cost per R on H100 (Nx=24R, blockage R/H=0.5):
-- R=16: ~3 min (already done = 192.0)
-- R=32: ~15 min (factor 8× cells, higher Wi regime so λ scales)
-- R=48: ~50 min
-- R=64: ~2 hours
+- `AUDIT_SUMMARY.md` — single source of truth
+- `REFERENCES.md` — Liu Table 3 canonical values
+- `bench/viscoelastic_audit/` — 5 modular diagnostic scripts + results
+  - `step1_bgk_guo.jl` — canal baseline (bulk order 1.5, wall bias)
+  - `step1b_profile_dump.jl` — shows wall bias is localized
+  - `step1c_analytic_wall.jl` — proves scheme is correct with good BC
+  - `step2_trt_hermite.jl` — TRT ≡ BGK on flat wall
+  - `step5_3d_diagnostic/` — 5a/b/c/d sphère + 2D cyl
+- `~/.claude/projects/.../memory/project_viscoelastic_audit.md` —
+  ongoing notes
 
-A single PBS with all three fits in 4h walltime. Start with R=16/32/48
-only (skip 64). If you need R=64 later, submit separately.
+## Aqua jobs left queued
 
-## Key gotchas (from `VISCOELASTIC_FINDINGS.md` — READ IT)
-
-1. **MEA drag with Hermite source**: use `compute_drag_mea_2d` in 2D
-   (halfway-BB, single cell). In 3D, `compute_drag_libb_3d` is single-cell
-   too — NOT the Mei-Bouzidi variant — so it should be OK.
-2. **Cd_p (surface integral of τ_p) is DIAGNOSTIC ONLY** when the Hermite
-   source is active; Cd_s already captures σ_s + τ_p.
-3. **Pre-existing segfault** in `run_sphere_libb_3d` at >30k cells on Mac
-   M3 (Metal/CPU). Use H100 for any 3D run with R≥8.
-4. **compute_drag_libb_3d** crashes with empty cut-link list (divides by 0
-   in GPU partition). Workaround: don't run drivers with no obstacle in 3D.
-5. **Julia 1.12 soft-scope**: wrap HPC scripts' main time loop in `let` to
-   avoid `f_in, f_out = f_out, f_in` creating new locals.
-
-## Files touched this session (diagnostic detours — DO NOT USE)
-
-These are diagnostic one-offs that were mostly inconclusive or flawed.
-Don't depend on them:
-- `hpc/poiseuille_2d_analog_diag.jl`, `hpc/duct_visco_diag.jl`,
-  `hpc/cylinder_extruded_diag.jl`, `hpc/poiseuille_convergence_diag.jl`,
-  `hpc/poiseuille_constwi_convergence.jl`, `hpc/poiseuille_exact_benchmark.jl`,
-  `hpc/poiseuille_trt_convergence.jl`, `hpc/hermite_magnitude_diag.jl`,
-  `hpc/poiseuille_modular_diag.jl`
-- `src/kernels/stream_periodic_3d.jl` (was for a test that didn't help)
-- `src/kernels/li_bb_3d_v2.jl` adds `precompute_q_wall_cylinder_extruded_3d`
-  and `fused_trt_libb_v2_step_3d_periodic_z!` (for diagnostics, fine to keep)
-- `src/drivers/basic.jl` adds `compute_drag_mea_3d` (useful for
-  axis-aligned walls, keep)
-
-**Production code unchanged** (`src/drivers/viscoelastic.jl`,
-`src/drivers/viscoelastic_3d.jl`, `src/kernels/conformation_lbm_*.jl`,
-`src/kernels/viscoelastic_*.jl`). Tests still pass.
+Check with `ssh maitreje@aqua.qut.edu.au qstat -u maitreje` — the
+sphere + cylinder R-convergence jobs may still have data in
+`~/Kraken.jl-dev-viscoelastic/results/` from last session.
 
 ## HPC workflow
 
@@ -113,39 +125,24 @@ ssh maitreje@aqua.qut.edu.au 'cd ~/Kraken.jl-dev-viscoelastic && qsub hpc/XXX.pb
 ```
 
 Standard PBS: ncpus=8, gpu_id=H100, mem=32GB, walltime 4-12h.
+GPU queue was idle after wp_mesh_6 jobs cleared.
 
-## Suggested first action
+## Key gotchas (persist from prior session)
 
-1. **Check whether 20169899 (krk_trtc) and earlier R-sweep jobs have
-   finished**: `ssh maitreje@aqua.qut.edu.au 'qstat -u maitreje && ls
-   -lt ~/Kraken.jl-dev-viscoelastic/results/'`
-2. **Write `hpc/sphere_R_sweep.jl`**: sphere Oldroyd-B at Wi=0.1 for
-   R=16, 32, 48. Same setup as `hpc/sphere_oldroyd_3d.jl` (β=0.5, Re=1,
-   blockage 0.5, doubly-parabolic inlet). Output Cd(R) + convergence rate.
-3. **Submit to Aqua**, wait ~2h for result.
-4. **If Cd converges** (order ~2-3 on |Cd − Cd_Newt| or similar metric) →
-   driver validated, update `VISCOELASTIC_FINDINGS.md` §1 and §6 to remove
-   the "bug confirmed" framing, close the investigation.
-5. **If Cd plateaus wrong** → drill in: (a) run the same sphere with
-   `polymer_bc=NoPolymerWallBC()` to isolate CNEBB; (b) measure Cd_s and
-   Cd_p (polymer stress integral) separately to see which dominates the
-   deficit.
-
-## Modular refactor (parked until after the R-sweep verdict)
-
-User wants production viscoelastic drivers decomposed into swappable
-bricks:
-```
-struct ViscoLoop2D
-    solvent_step!::Function   # BGKGuoStep | BGKZouHeStep | TRTLIBBStep
-    conformation_step!::Function  # PeriodicXWallY | HBBWithReset
-    stress_model::AbstractPolymerModel
-end
-```
-so each component can be tested independently. Don't start this until
-we know the R-sweep result — we might rebuild and the design might
-change depending on what we find.
+1. **3D sphere R=48 needs >80 GB** — don't try it on H100. Stick to
+   R≤32 or implement memory-efficient variant.
+2. **Julia 1.12 soft-scope** — wrap HPC-script `for` loops assigning
+   `f, f_buf = f_buf, f` in `let … end`.
+3. **Inlet C profile** : for `:uniform` in 3D, C_inlet = I (identity).
+   For `:parabolic_y`, full analytic profile. Check match in
+   `run_conformation_sphere_libb_3d`.
+4. **compute_drag_libb_3d** IS halfway-BB single-cell (NOT Mei-
+   Bouzidi), despite what `VISCOELASTIC_FINDINGS §1` claimed.
+5. **Prior sphere tests passed 13/13 with 50% tolerance** — that
+   tolerance masked nothing because there is probably nothing to mask,
+   just means the tests aren't tight enough to be useful.
 
 ---
 
-End of prompt. Good luck.
+End of prompt. Good luck. Focus on the physical reference question
+before anything else.
