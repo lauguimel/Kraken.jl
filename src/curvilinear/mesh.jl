@@ -97,6 +97,7 @@ function build_mesh(mapping;
                     periodic_ξ::Bool=false, periodic_η::Bool=false,
                     type::Symbol=:custom,
                     dx_ref::Union{Real, Nothing}=nothing,
+                    skip_validate::Bool=false,
                     FT::Type{<:AbstractFloat}=Float64)
     X = zeros(FT, Nξ, Nη)
     Y = zeros(FT, Nξ, Nη)
@@ -129,7 +130,7 @@ function build_mesh(mapping;
 
     mesh = CurvilinearMesh{FT, Matrix{FT}}(type, Nξ, Nη, periodic_ξ, periodic_η,
                                             X, Y, dXdξ, dXdη, dYdξ, dYdη, J, dxr)
-    validate_mesh(mesh)
+    skip_validate || validate_mesh(mesh)
     return mesh
 end
 

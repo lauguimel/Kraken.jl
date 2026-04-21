@@ -135,6 +135,31 @@ function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false)
     # (false, false, false) = identity. Applied in order:
     # transpose → flip_ξ → flip_η, matching reorient_block.
     orient_state = fill((false, false, false), n_blocks)
+    # Force root block to have a positive Jacobian so validate_mesh
+    # accepts the extended mesh downstream. Left-handed parameterisations
+    # (J<0 everywhere) would be CONSISTENT on the interior but cause
+    # sign-change errors after mesh extension on curved boundaries. We
+    # flip ξ if the root's interior Jacobian (via finite differences at
+    # (i=2, j=2)) is negative; this orients the block so ξ-η is
+    # right-handed, which then propagates through the BFS to every
+    # downstream block via canonical interface pairing.
+    _J_at_22(blk) = begin
+        m = blk.mesh
+        m.Nξ < 3 || m.Nη < 3 ? zero(eltype(m.X)) : begin
+            dXξ = (m.X[3,2] - m.X[1,2]) / 2
+            dYξ = (m.Y[3,2] - m.Y[1,2]) / 2
+            dXη = (m.X[2,3] - m.X[2,1]) / 2
+            dYη = (m.Y[2,3] - m.Y[2,1]) / 2
+            dXξ * dYη - dXη * dYξ
+        end
+    end
+    if _J_at_22(blocks[1]) < 0
+        verbose && println("  autoreorient: root block :$(blocks[1].id) has J<0, " *
+                             "applying transpose to get right-handed orientation " *
+                             "(also migrates tags from south/north to west/east)")
+        blocks[1] = reorient_block(blocks[1]; transpose=true)
+        orient_state[1] = (false, false, true)
+    end
     visited = falses(n_blocks)
     visited[1] = true
     queue = [1]

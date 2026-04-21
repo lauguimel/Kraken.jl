@@ -107,16 +107,31 @@ mktempdir() do dir
 
     f_out = [similar(st.f) for st in states]
     for k in 1:n_blocks; fill!(f_out[k], zero(T)); end
-    bcspecs = map(enumerate(mbm.blocks)) do (k, blk)
-        east_tag = blk.boundary_tags.east
-        u_prof = DeviceArray(fill(T(u_max), blk.mesh.Nη))
-        east_bc = east_tag === :inlet ? ZouHeVelocity(u_prof) :
-                  east_tag === :outlet ? ZouHePressure(one(T)) :
-                  HalfwayBB()
-        BCSpec2D(; west=HalfwayBB(), east=east_bc, south=HalfwayBB(), north=HalfwayBB())
+    # Build per-block BC by dispatching on EVERY edge's tag. Ring blocks
+    # have `cylinder` on one edge (handled via LI-BB + wall_ghost on
+    # that edge, BC=HalfwayBB here), interfaces on two edges
+    # (HalfwayBB no-op, handled by exchange_ghost), and an inlet/outlet/
+    # wall_top/wall_bot on the remaining physical edge.
+    _bc_for_tag(tag, Nη, Nξ) = begin
+        if tag === :inlet
+            ZouHeVelocity(DeviceArray(fill(T(u_max), Nη)))
+        elseif tag === :outlet
+            ZouHePressure(one(T))
+        else
+            HalfwayBB()
+        end
+    end
+    bcspecs = map(mbm.blocks) do blk
+        t = blk.boundary_tags
+        BCSpec2D(; west=_bc_for_tag(t.west, blk.mesh.Nη, blk.mesh.Nξ),
+                   east=_bc_for_tag(t.east, blk.mesh.Nη, blk.mesh.Nξ),
+                   south=_bc_for_tag(t.south, blk.mesh.Nξ, blk.mesh.Nξ),
+                   north=_bc_for_tag(t.north, blk.mesh.Nξ, blk.mesh.Nξ))
     end
 
-    println("  bcspec per block: ", [b.boundary_tags.east for b in mbm.blocks])
+    println("  bcspec tags per block: ",
+            [(b.boundary_tags.west, b.boundary_tags.east,
+              b.boundary_tags.south, b.boundary_tags.north) for b in mbm.blocks])
     println("Starting $steps-step pipeline loop …")
 
     function _loop!(mbm, states, f_out, solid_ext, qwall_ext, uwx_ext, uwy_ext,

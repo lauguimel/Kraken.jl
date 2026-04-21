@@ -42,6 +42,7 @@ function CurvilinearMesh(X::AbstractMatrix{<:Real}, Y::AbstractMatrix{<:Real};
                          periodic_ξ::Bool=false, periodic_η::Bool=false,
                          type::Symbol=:imported,
                          dx_ref::Union{Real, Nothing}=nothing,
+                         skip_validate::Bool=false,
                          FT::Type{<:AbstractFloat}=Float64)
     size(X) == size(Y) || error("CurvilinearMesh: X and Y must share the same size, got $(size(X)) and $(size(Y))")
     Nξ, Nη = size(X)
@@ -64,7 +65,8 @@ function CurvilinearMesh(X::AbstractMatrix{<:Real}, Y::AbstractMatrix{<:Real};
     end
     return build_mesh(mapping; Nξ=Nξ, Nη=Nη,
                        periodic_ξ=periodic_ξ, periodic_η=periodic_η,
-                       type=type, dx_ref=dx_ref, FT=FT)
+                       type=type, dx_ref=dx_ref,
+                       skip_validate=skip_validate, FT=FT)
 end
 
 """
