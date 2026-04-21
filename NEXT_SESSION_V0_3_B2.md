@@ -103,39 +103,41 @@ Cl_RMS ≈ 0.28, MLUPS meilleur que Bump (par meilleure condition du τ).
 **Status** : driver squelette écrit (`hpc/wp_mesh_6_ogrid_aqua.jl`,
 commit à venir) mais 2 issues d'infra bloquent la soumission Aqua :
 
-**(I1) Loader topological attribue les mauvais tags physiques**
+**(I1) ~~Loader topological attribue les mauvais tags physiques~~ ✅ FIXÉ `76728c8`**
 
-Symptôme : après `autoreorient_blocks`, ring_0 a `:west=:cylinder`
-mais la géométrie du bord i=1 est en fait un SPOKE radial (y≈cy, x
-allant de cx+R_in à Lx), pas l'arc cylindre. Le walker topologique a
-démarré d'un coin arbitraire, et la correspondance curve→edge dans
-`_match_curve_to_edge` (fonction de `mesh_gmsh_multiblock.jl`) fait
-un match fortuit sur un endpoint partagé.
+Midpoint check ajouté à `_match_curve_to_edge` : chaque bord candidat
+est scoré par distance entre midpoint du bord et midpoint de la courbe
+(via gmsh `getParametrizationBounds` + `getValue`). L'arc et son spoke
+voisin partagent un endpoint mais divergent au milieu → désambiguïsation
+propre. Validation sur 8-block : toutes les `:west` edges à mean radius
+= R_in, `:east` au bord extérieur, match physique.
 
-**Fix proposé** (priorité 1 de la sous-session) :
-- Soit étendre le loader pour retrouver les Transfinite corners via
-  `gmsh.model.mesh.getTransfiniteConstraints()` (ou équivalent) et
-  utiliser cet ordre pour forcer ξ = arc, η = radial sur chaque bloc
-  O-grid.
-- Soit ajouter une passe POST-load qui vérifie la cohérence tag↔
-  géométrie par échantillonnage du milieu de chaque edge, et
-  corrige/échange les tags si nécessaire.
+**(I2) extend_mesh_2d folde le Jacobien pour arcs — STILL OPEN**
 
-**(I2) extend_mesh_2d folde le Jacobien pour arcs serrés**
+Avec `radial_progression=0.8` dans le .geo, l'extension radiale
+(ξ direction) près du cylindre est OK (cells clustered). Mais
+l'extension ANGULAIRE (η direction) folde toujours sur les arcs
+serrés : les spokes du ring bloc ont des longueurs différentes
+selon le rayon, donc extrapoler en η aux petits rayons produit des
+cellules qui croisent le ring bloc voisin. Fold au bord j=1 ou j=Nη.
 
-Symptôme : `build_block_slbm_geometry_extended(ring_0)` échoue avec
-"degenerate Jacobian (sign change or zero) at (i=5, j=1)". Ring_0
-pour R_in=0.025 avec N_arc=7, N_radial=20 → dx_radial ≈ 0.0075 qui
-est du même ordre que R_in. L'extrapolation linéaire vers l'intérieur
-du cylindre produit des cellules fold.
+**Fix proposé** (priorité 1 prochaine session) :
+- **Option 1** : Extension géométrique basée sur la bissectrice. Pour
+  le ghost η, utiliser une rotation (autour du centre cylindre) des
+  points intérieurs plutôt qu'une extrapolation linéaire. Pour les
+  extensions non-wall (interfaces), fetch depuis le voisin via
+  exchange à l'init.
+- **Option 2** : Construire `SLBMGeometry` sur le mesh NON-étendu
+  `(Nξ, Nη)` et écrire un kernel variant qui accepte state arrays
+  étendus `(Nξ+2Ng, Nη+2Ng)` mais stencils interior-sized, en
+  dispatchant sur la bordure via ghost-layer lookup (requiert
+  modification du kernel SLBM — plus invasif).
 
-**Fix proposé** (priorité 2 de la sous-session) :
-- Remplacer extrapolation linéaire par une MIRROR reflection géométrique
-  à travers le mur pour les edges non-:interface. Le ghost a alors un
-  Jacobien symétrique à l'interior boundary row.
-- Ou : construire `SLBMGeometry` sur le mesh NON-étendu (Nξ, Nη) et
-  écrire un kernel variant qui accepte des state arrays étendus mais
-  des stencil arrays interior-sized, en dispatchant sur la bordure.
+Simplification alternative : pour les blocs n'ayant PAS de bord courbé
+sur l'axe à étendre, utiliser l'extension linéaire existante. Pour les
+blocs O-grid avec arc, implémenter une variante `extend_mesh_2d_arc`
+qui connaît le centre du cylindre et rotationne les points intérieurs
+pour générer un ghost cohérent.
 
 **Driver stagé** :
 
