@@ -149,12 +149,23 @@ run_E3(D_lu, steps, sw, se) = begin
     # --- Allocate per-block state (extended Nξ+2Ng, Nη+2Ng, 9) ---
     states = [allocate_block_state_2d(b; n_ghost=ng, backend=backend) for b in mbm.blocks]
 
-    # --- Cylinder geometry in block C's local lattice units ---
+    # --- Cylinder geometry: compute on GLOBAL grid, then slice per block ---
+    # Computing cx_C_lu via (cx_p - x0_C)/dx + 1 introduces ~1e-14 FP
+    # drift because x0_C = Nx_W * dx is not exactly representable. Even
+    # this tiny offset QUALITATIVELY changes precompute_q_wall_cylinder's
+    # output (cells at the cylinder circumference flip solid↔fluid), so
+    # we compute the cylinder mask ONCE on the global Nx_total × Ny grid
+    # and slice into each block by integer offsets.
     Nx_C = mbm.blocks[2].mesh.Nξ
-    cx_C_lu = (cx_p - mbm.blocks[2].mesh.X[1, 1]) / s.dx_ref
-    cy_C_lu = (cy_p - mbm.blocks[2].mesh.Y[1, 1]) / s.dx_ref
-    q_wall_C_int, is_solid_C_int = precompute_q_wall_cylinder(Nx_C, s.Ny,
-                                                                 cx_C_lu, cy_C_lu, s.R_lu)
+    cx_g_lu = cx_p / s.dx_ref + 1
+    cy_g_lu = cy_p / s.dx_ref + 1
+    q_g, is_solid_g = precompute_q_wall_cylinder(s.Nx_total, s.Ny,
+                                                   cx_g_lu, cy_g_lu, s.R_lu)
+    # Block C starts at global i = Nx_W + 1
+    i_C_lo = s.Nx_W + 1
+    i_C_hi = i_C_lo + Nx_C - 1
+    q_wall_C_int   = q_g[i_C_lo:i_C_hi, 1:s.Ny, :]
+    is_solid_C_int = is_solid_g[i_C_lo:i_C_hi, 1:s.Ny]
     # uw zeros (stationary cylinder)
     uw_x_C_int = zeros(T, Nx_C, s.Ny, 9)
     uw_y_C_int = zeros(T, Nx_C, s.Ny, 9)
