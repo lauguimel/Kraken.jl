@@ -40,12 +40,22 @@ using Gmsh
                                   Lx=1.0, Ly=0.5,
                                   cx_p=0.5, cy_p=0.245,
                                   R_in=0.025,
-                                  N_arc=8, N_radial=16)
+                                  N_arc=8, N_radial=16,
+                                  radial_progression=0.8)
 
 Write an 8-block O-grid-in-rectangle `.geo` file at `path`. Each of the
 8 blocks has `N_arc` cells along its cylinder arc (ξ direction) and
 `N_radial` cells along its radial spoke (η direction), so the total
 cell count is `8 * N_arc * N_radial`.
+
+`radial_progression` (gmsh Transfinite "Progression"): ratio < 1 clusters
+cells at the INNER (cylinder) end of each spoke, which is essential for
+a body-fitted O-grid to resolve the boundary layer — and, for the Kraken
+multi-block pipeline, to keep `dx_radial_at_cylinder` below `R_in` so
+that `extend_mesh_2d` can linearly extrapolate one ghost row inward
+without crossing the cylinder centre. A value of 0.8 gives ≈10× finer
+cells at the cylinder than at the rectangle; use 0.7 for aggressive
+clustering.
 
 Use the resulting `.geo` with `load_gmsh_multiblock_2d(path)` to
 obtain a `MultiBlockMesh2D` with 8 blocks + 8 interfaces.
@@ -54,7 +64,8 @@ function write_ogrid_rect_8block_geo(path::AbstractString;
                                        Lx::Real=1.0, Ly::Real=0.5,
                                        cx_p::Real=0.5, cy_p::Real=0.245,
                                        R_in::Real=0.025,
-                                       N_arc::Int=8, N_radial::Int=16)
+                                       N_arc::Int=8, N_radial::Int=16,
+                                       radial_progression::Real=0.8)
     # Cylinder surface points at 45° intervals.
     θ = [k * π / 4 for k in 0:7]     # 0°, 45°, 90°, ..., 315°
     p_xy = [(cx_p + R_in * cos(θk), cy_p + R_in * sin(θk)) for θk in θ]
@@ -122,7 +133,10 @@ function write_ogrid_rect_8block_geo(path::AbstractString;
         spoke_ids = join([200 + k for k in 1:8], ", ")
         println(io, "Transfinite Curve {$arc_ids} = $N_arc;")
         println(io, "Transfinite Curve {$outer_ids} = $N_arc;")
-        println(io, "Transfinite Curve {$spoke_ids} = $N_radial;")
+        # Spokes: Progression <1 clusters nodes at the inner (cylinder)
+        # end so the boundary-layer resolution and the Kraken mesh
+        # extension inward remain valid.
+        println(io, "Transfinite Curve {$spoke_ids} = $N_radial Using Progression $radial_progression;")
         for k in 1:8
             kn = k == 8 ? 1 : k + 1
             # Surface corners in canonical order: p_k, p_{k+1}, q_{k+1}, q_k

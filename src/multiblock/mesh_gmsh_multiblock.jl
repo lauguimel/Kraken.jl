@@ -141,14 +141,28 @@ function _load_multiblock_2d_open(; FT, layout, interface_names, tol)
         corner_WN = (X[1,  Nη],  Y[1,  Nη])
         corner_EN = (X[Nξ, Nη],  Y[Nξ, Nη])
 
+        # Edge midpoints for disambiguation when multiple curves share
+        # the same endpoints (typical for O-grid: at each corner, an
+        # arc and two spokes meet, and endpoint-only matching picks
+        # one ambiguously).
+        mid_ξ = (Nξ + 1) ÷ 2
+        mid_η = (Nη + 1) ÷ 2
+        mid_west  = (X[1,   mid_η], Y[1,   mid_η])
+        mid_east  = (X[Nξ,  mid_η], Y[Nξ,  mid_η])
+        mid_south = (X[mid_ξ, 1],   Y[mid_ξ, 1])
+        mid_north = (X[mid_ξ, Nη],  Y[mid_ξ, Nη])
+
         edge_tag = Dict{Symbol, Symbol}(
             :west => :wall, :east => :wall, :south => :wall, :north => :wall,
         )
         for ct in surface_bdry_curves[stag]
             p1, p2 = _curve_endpoint_coords_2d(ct, FT)
-            edge_sym = _match_curve_to_edge(p1, p2,
+            curve_mid = _curve_midpoint_coords_2d(ct, FT)
+            edge_sym = _match_curve_to_edge(p1, p2, curve_mid,
                                               corner_WS, corner_ES,
-                                              corner_WN, corner_EN, tol)
+                                              corner_WN, corner_EN,
+                                              mid_west, mid_east, mid_south, mid_north,
+                                              tol)
             edge_sym === :unknown && continue
             pname = get(curve_phys_name, ct, Symbol())  # empty Symbol if no name
             is_named = pname !== Symbol()
@@ -216,24 +230,50 @@ function _curve_endpoint_coords_2d(curve_tag::Int, FT)
     return pt_coord(Int(bnd[1][2])), pt_coord(Int(bnd[2][2]))
 end
 
-# Match a curve (given by its two endpoints) to one of the 4 logical edges
-# of a structured block, defined by its 4 corners. Returns `:unknown` if
-# neither endpoint matches any corner.
-function _match_curve_to_edge(p1, p2,
-                                corner_WS, corner_ES, corner_WN, corner_EN, tol)
-    near(a, b) = hypot(a[1] - b[1], a[2] - b[2]) < tol
-    pairs = (
-        (:west,  corner_WS, corner_WN),
-        (:east,  corner_ES, corner_EN),
-        (:south, corner_WS, corner_ES),
-        (:north, corner_WN, corner_EN),
+# Midpoint of a gmsh curve via parametric evaluation. Used to
+# disambiguate curves that share corner endpoints with a block edge —
+# the arc and the two spokes at an O-grid corner all share an endpoint
+# but diverge in the middle.
+function _curve_midpoint_coords_2d(curve_tag::Int, FT)
+    # Parametric range is typically [0, 1] but gmsh returns the true
+    # bounds via `getParametrizationBounds`.
+    umin_arr, umax_arr = gmsh.model.getParametrizationBounds(1, curve_tag)
+    umin = umin_arr[1]; umax = umax_arr[1]
+    umid = 0.5 * (umin + umax)
+    xyz = gmsh.model.getValue(1, curve_tag, Float64[umid])
+    return (FT(xyz[1]), FT(xyz[2]))
+end
+
+# Match a curve to one of the 4 logical edges of a structured block.
+# Endpoint-only matching is ambiguous when multiple curves share a
+# corner; we break the tie by checking the curve midpoint against the
+# edge midpoint. Returns `:unknown` if no candidate edge has both
+# endpoint AND midpoint agreement.
+function _match_curve_to_edge(p1, p2, curve_mid,
+                                corner_WS, corner_ES, corner_WN, corner_EN,
+                                mid_west, mid_east, mid_south, mid_north, tol)
+    near(a, b, t=tol) = hypot(a[1] - b[1], a[2] - b[2]) < t
+    # For the endpoint test use `tol`; for the midpoint test use a
+    # larger tol scaled by the edge length (we only need "on this edge
+    # rather than the neighbour", not geometric equality).
+    candidates = (
+        (:west,  corner_WS, corner_WN, mid_west),
+        (:east,  corner_ES, corner_EN, mid_east),
+        (:south, corner_WS, corner_ES, mid_south),
+        (:north, corner_WN, corner_EN, mid_north),
     )
-    for (edge_sym, c_a, c_b) in pairs
-        if (near(p1, c_a) && near(p2, c_b)) || (near(p1, c_b) && near(p2, c_a))
-            return edge_sym
+    best_edge = :unknown
+    best_mid_err = Inf
+    for (edge_sym, c_a, c_b, mid_e) in candidates
+        ok = (near(p1, c_a) && near(p2, c_b)) || (near(p1, c_b) && near(p2, c_a))
+        ok || continue
+        mid_err = hypot(curve_mid[1] - mid_e[1], curve_mid[2] - mid_e[2])
+        if mid_err < best_mid_err
+            best_mid_err = mid_err
+            best_edge = edge_sym
         end
     end
-    return :unknown
+    return best_edge
 end
 
 # Pair every edge tagged :interface with its mate across a different
