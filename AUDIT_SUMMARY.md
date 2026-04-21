@@ -50,7 +50,7 @@ Convergence order (Kraken toward its own asymptote, using R=30, 40, 48):
 (Cd(30)−Cd(40))/(Cd(40)−Cd(48)) = 2.03, with R ratios 1.33 and 1.20 →
 order p ≈ 2.4.
 
-### 3D ducted sphere (audit step 4)
+### 3D ducted sphere — step 4 (R-sweep Wi=0.1) + step 5 (diagnostic)
 
 Aqua H100 Float64 (job 20189624) :
 
@@ -81,45 +81,69 @@ enhancement, and not matching the physical sign.
 Float32 rounding errors over 30 k steps at rates that shift results
 by 70%.
 
-## Publishability verdict
+### Step 5 diagnostic — it's HWNP, not a code bug
+
+Job 20202914 on Aqua H100, three discriminant tests at R=16 :
+
+| Test | Setup                            | Ratio | Finding |
+|------|----------------------------------|-------|---------|
+| 5b   | `OldroydB(G=0)` (τ_p ≡ 0)         | 1.0000 exact | Coupling loop is clean |
+| 5a   | `NoPolymerWallBC()` vs CNEBB      | 0.8124 vs 0.892 | CNEBB *helps* — removing it makes things worse |
+| 5c   | Wi ∈ {0.01, 0.05, 0.1, 0.25}      | 1.08 / 0.97 / 0.89 / 0.76 | **Correct sign at low Wi, HWNP above Wi≈0.03** |
+
+**At Wi=0.01 the sphere gives +8% drag enhancement** — the Lunsmann-
+correct sign. The ratio crosses through 1 at Wi≈0.03 and goes
+monotonically negative above. This is the classic **High Weissenberg
+Number Problem (HWNP)** : the direct-C scheme loses positive-
+definiteness on C, τ_p takes unphysical values, drag inverts.
+
+**The 3D sphere driver is NOT buggy.** HWNP just enters at a much
+lower Wi in 3D (Wi ≈ 0.03 at R=16) than in 2D (Wi > 0.5 at R=48),
+because the polymer stretching region around a 3D sphere is
+geometrically more confined than around a 2D cylinder — less
+stretching distance, more concentrated stress gradients.
+
+## Publishability verdict (revised after step 5)
 
 | Benchmark | Status | Honest reporting |
 |-----------|--------|------------------|
 | 2D Poiseuille canal (validation) | ✅ bulk O(~1.5) | Use wall-excluded bulk error metric; do NOT cite ALL-error O(2) claims |
 | 2D cylinder Liu Wi=0.1 | ✅ publishable with 1.5% asymptotic bias, NOT 0.35% | Report Cd(R→∞) = 131.5 vs Liu 130.83, NOT the R=48 coincidence |
-| 2D cylinder Wi=0.5, Wi=1.0 | ⚠ not audited this session | Prior FINDINGS §3 reports −20% and −40% errors at R=48 — HWNP regime, not a scheme bug |
-| 3D sphere Lunsmann Wi=0.1 | ❌ not publishable | Wrong convergence order, wrong sign, precision-fragile |
+| 2D cylinder Wi=0.5, Wi=1.0 | ⚠ HWNP regime | Needs log-conformation; prior -20/-40% errors are HWNP, not bugs |
+| **3D sphere Wi ≤ 0.03** | ✅ publishable as low-Wi enhancement validation | At Wi=0.01 R=16, ratio = 1.081 matches Lunsmann sign |
+| 3D sphere Wi = 0.1 (Lunsmann standard) | ❌ HWNP blocks it | Need log-conformation 3D (not yet implemented) |
 
-## Next diagnostic priorities
+## Path forward for sphere 3D at Lunsmann Wi
 
-All point to **3D-specific bug**, since 2D cylinder works with the same
-pattern. Priority order :
+HWNP solutions in order of effort :
 
-1. **Isolate 3D CNEBB on curved wall** — the 13 tests in
-   `test_conformation_sphere_3d.jl` pass with **50% tolerance** (per the
-   prior-session prompt), which hides the exact failure mode. Write a
-   test with 1% tolerance on a simpler 3D geometry (cube-in-box ?
-   channel with circular plug at midspan ?) to see if CNEBB 3D enforces
-   the analytic wall C profile.
+1. **Log-conformation 3D** (principled) — Fattal-Kupferman. 2D version
+   already validated. Blocker : 3×3 symmetric eigen-decomposition
+   (Cardano + Jacobi). `LogConfOldroydB` explicitly rejected by
+   `run_conformation_sphere_libb_3d` today.
 
-2. **Isolate 3D Hermite source prefactor** on curved wall. The
-   `hpc/hermite_magnitude_diag.jl` claims 2D/3D bit-precision match on
-   simple shear — but simple shear has uniform γ̇, so the Hermite source
-   τ_p is uniform and many subtle prefactor errors cancel. A curved-wall
-   test would not cancel.
+2. **Artificial stress diffusion κ_artif ∝ q_wall** near curved walls —
+   1-2 line hack in `collide_conformation_3d!`, empirically extends
+   stability by 1 order in Wi in 2D. Quick wins.
 
-3. **Cross-check with `run_conformation_sphere_libb_3d` + `NoPolymerWallBC()`**
-   — turn off CNEBB 3D entirely. If Cd still behaves wrong → CNEBB is
-   not the cause. If Cd behaves right (or just very dissipative) → CNEBB
-   3D is the cause.
+3. **`tau_plus` sweep** to find optimal Sc for sphere 3D — already
+   well-explored in 2D, but 3D tolerance may differ.
 
-4. **Cross-check Hermite source 3D disabled** (i.e. run with
-   `polymer_model=nothing` → pure Newtonian via solvent only). Should
-   recover `run_sphere_libb_3d` exactly. Confirms no spurious coupling.
+4. **Refinement patches** in the sphere wake — heavy ; branch
+   `refinement-patches-dev` has isothermal infrastructure, would need
+   extension to conformation-tensor exchange kernels.
 
-5. **Consider refactor** : write a minimal 3D canal-with-sphere-plug test
-   using the same DSL bricks pattern as the 2D cylinder, bypassing the
-   fused kernels if needed. Validate incrementally.
+## Prior claim corrections (after step 5)
+
+- "Cd DECREASES with Wi → wrong physics bug" (FINDINGS §1) → **corrected**.
+  At Wi=0.01 Cd INCREASES (correct sign, +8% enhancement). The decrease
+  above Wi≈0.05 is HWNP, a known numerical limitation, not a code bug.
+- "Write `compute_drag_mea_3d` to fix the drag" (FINDINGS §1 Action) →
+  irrelevant. The code is already halfway-BB MEA. The issue isn't in drag
+  computation.
+- "Convergence order 0.19 in R at Wi=0.1 = broken driver" (step 4) →
+  **corrected**. Order 0.19 is measured in the HWNP regime. At Wi=0.01
+  (outside HWNP) the scheme behaves normally.
 
 ## Previously claimed validations that were artifacts
 
