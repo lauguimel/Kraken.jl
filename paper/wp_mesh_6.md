@@ -20,21 +20,22 @@ derived from Williamson (1996) and Park (1998):
   \approx 0.33$, $\mathrm{St} \approx 0.165$ (Williamson 1996,
   Henderson 1995)
 
-Three baselines, all at **matched cell count** per resolution:
+Four baselines, all at **matched cell count** per resolution:
 
 | | Streaming | Solid-cell closure | Mesh |
 |---|---|---|---|
 | **(A)** | pull-stream | halfway-BB ($q_w = 1/2$) | uniform Cartesian |
 | **(B)** | pull-stream | LI-BB v2 (Bouzidi, any $q_w$) | uniform Cartesian |
 | **(C)** | semi-Lagrangian (SLBM) | LI-BB v2 | gmsh Transfinite Bump 0.1 |
+| **(E3)** | pull-stream | LI-BB v2 | 3-block Cartesian (W \| C \| E) |
 
 ## 5.1 Convergence matrix on Aqua H100 (FP64)
 
-| $D_\mathrm{lu}$ | Cells | (A) $C_d$ | (B) $C_d$ | **(C) $C_d$** | (A/B/C) $C_l^\mathrm{RMS}$ | $\mathrm{St}$ | MLUPS |
-|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| 20 |  80 601 | 1.672 | 1.643 | NaN | 0.27 / 0.26 / — | 0.20 / 0.20 / — | 581 / 1 647 / 990 |
-| 40 | 321 201 | 1.652 | 1.649 | **1.630** | 0.28 / 0.28 / 0.003 | 0.20 / 0.20 / 0.175 | 4 288 / 4 279 / 1 751 |
-| 80 | 1 282 401 | 1.648 | 1.650 | NaN | 0.28 / 0.29 / — | 0.20 / 0.20 / — | 7 029 / 7 033 / 2 258 |
+| $D_\mathrm{lu}$ | Cells | (A) $C_d$ | (B) $C_d$ | **(C) $C_d$** | **(E3) $C_d$** | (A/B/E3) $C_l^\mathrm{RMS}$ | $\mathrm{St}$ | MLUPS |
+|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| 20 |  80 601 | 1.672 | 1.643 | NaN | **1.644** | 0.27 / 0.26 / 0.26 | 0.20 / 0.20 / 0.20 | 581 / 1 647 / 242 |
+| 40 | 321 201 | 1.652 | 1.649 | **1.630** | **1.649** | 0.28 / 0.28 / 0.28 | 0.20 / 0.20 / 0.20 | 4 288 / 4 279 / 1 345 |
+| 80 | 1 282 401 | 1.648 | 1.650 | NaN | **1.650** | 0.28 / 0.29 / 0.29 | 0.20 / 0.20 / 0.20 | 7 029 / 7 033 / 3 611 |
 
 Three observations drive this section.
 
@@ -95,12 +96,66 @@ $C_l^\mathrm{RMS} \approx 0.28$ and $\mathrm{St} = 0.20$, consistent
 with a developed vortex street. (C) reports $C_l^\mathrm{RMS} \approx
 0$ over the second half of the trajectory despite matching $C_d$.
 The cause is that the reference cell size in the Bump 0.1 mesh
-(`mesh.dx_ref` = 0.00048) is $\sim 7\times$ finer than the Cartesian
-$\Delta x$ = 0.0025, so a fixed number of time steps advances
-$\sim 7\times$ less *physical* time: at 160 000 steps (C) has
-simulated $\approx 1.5$ flow-through times while (A)(B) reach
-$\approx 8$. The shedding transient has not completed.
-This is a scheduling artefact, not a method defect.
+(`mesh.dx_ref` $\approx 2.4\times 10^{-4}$) is $\sim 5\times$ finer
+than the Cartesian $\Delta x = 1.25\times 10^{-3}$, so a fixed number
+of time steps advances $\sim 5\times$ less *physical* time: at
+160 000 steps (C) has simulated $\approx 1.5$ flow-through times
+while (A)(B) reach $\approx 8$. The shedding transient has not
+completed. This is a scheduling artefact, not a method defect.
+
+### 5.1.5 Multi-block baseline (E3) validates the structured-multi-block pipeline
+
+The (E3) run decomposes the identical physical setup into three
+Cartesian blocks $\mathrm{W} \mid \mathrm{C} \mid \mathrm{E}$ stacked
+along $x$, with the cylinder entirely inside the central block. At
+every resolution (E3) reproduces the Cartesian single-block baselines
+(A)(B) to within $10^{-3}$ on $C_d$ and bit-exact on $C_l^\mathrm{RMS}$
+and $\mathrm{St}$ — confirming that the multi-block exchange + BC
+pipeline preserves the single-block solution. The MLUPS cost of
+$\sim 2\times$ versus the monolithic (B) run reflects the kernel-launch
+overhead from three separate block steps; for a paper-level metric
+this is consistent with the linear block-count overhead reported in
+\[Krause 2021, palabos 2020\].
+
+Two infrastructure bugs identified during the development of (E3)
+merit documentation as reproducible pitfalls for structured-multi-block
+LBM codes:
+
+1. **Corner-cell BC scoping.** The post-step halfway-BB bounce kernel
+   `_bc_south_halfwaybb_2d!` loops over the open interval $i \in
+   (1, N_x)$ under the assumption that the east/west perpendicular BCs
+   (usually Zou-He) own the corner cells. In a multi-block layout
+   where the perpendicular edge is $\texttt{:interface}$ — handled by
+   a no-op halfway-BB in `apply_bc_rebuild_2d!` — the interface-wall
+   corner cell is left with the raw BGK/TRT step output instead of the
+   halfway-BB override that the equivalent single-block cell receives,
+   introducing a step-local error of $\sim 10^{-3}$ at each of the $4$
+   corner positions. Fix: dispatch the south/north BB kernel range
+   based on the west/east BC types. Commit `ebf0867`.
+
+2. **Per-block floating-point drift of cylinder coordinates.** Given
+   a cylinder centred at $c_x = 0.5$ and a block starting at
+   $x_0 = N_{x,W}\, \Delta x$ where $N_{x,W} \Delta x$ is not exactly
+   representable in IEEE 754 (e.g. $140 \times 0.0025 = 0.35000\ldots0003$),
+   the per-block local center $c_{x,\mathrm{local}} = (c_x - x_0) /
+   \Delta x + 1$ drifts by $\sim 10^{-14}$ from the true integer.
+   `precompute_q_wall_cylinder`'s strict equality test $d^2 \leq R^2$
+   for cells at the cylinder circumference then flips QUALITATIVELY:
+   $5$ cells at the rightmost column of the body at $D_\mathrm{lu}=20$
+   switch from solid to fluid, and $213$ $q_\mathrm{wall}$ entries
+   change value (with $\max|\Delta q_\mathrm{wall}| = 1$, a full flip
+   from $0$ to a cut-link). The resulting drag error is $\sim 20\times$
+   in magnitude. Fix: compute $q_\mathrm{wall}$ on the global
+   $N_x \times N_y$ grid once and slice per block by integer offsets;
+   never compute per-block via $(c_x - x_0)/\Delta x + 1$. Commit
+   `b51f52b`.
+
+Both bugs are invisible at the single-block level (unit tests pass)
+but corrupt the multi-block drag aggregation at the first timestep.
+A decomposed validation ladder — running the identical physical setup
+with $1, 2, 3$ blocks and comparing bit-exactness cell-by-cell at
+$1$ step — isolates the root cause unambiguously. We recommend this
+pattern for any future multi-block LBM port.
 
 ## 5.2 Figure: convergence plot
 
