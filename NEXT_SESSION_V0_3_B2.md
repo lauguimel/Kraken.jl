@@ -98,7 +98,58 @@ Cl_RMS ≈ 0.28, MLUPS meilleur que Bump (par meilleure condition du τ).
 `build_block_slbm_geometry_extended(block; n_ghost, local_cfl)`,
 `extend_interior_field_2d(field, n_ghost; pad_value)`.
 
-### Priorité 4 — Driver approach (E) — SEULE TÂCHE RESTANTE
+### Priorité 4 — Driver approach (E-full) — 2 bugs infra à lever avant Aqua
+
+**Status** : driver squelette écrit (`hpc/wp_mesh_6_ogrid_aqua.jl`,
+commit à venir) mais 2 issues d'infra bloquent la soumission Aqua :
+
+**(I1) Loader topological attribue les mauvais tags physiques**
+
+Symptôme : après `autoreorient_blocks`, ring_0 a `:west=:cylinder`
+mais la géométrie du bord i=1 est en fait un SPOKE radial (y≈cy, x
+allant de cx+R_in à Lx), pas l'arc cylindre. Le walker topologique a
+démarré d'un coin arbitraire, et la correspondance curve→edge dans
+`_match_curve_to_edge` (fonction de `mesh_gmsh_multiblock.jl`) fait
+un match fortuit sur un endpoint partagé.
+
+**Fix proposé** (priorité 1 de la sous-session) :
+- Soit étendre le loader pour retrouver les Transfinite corners via
+  `gmsh.model.mesh.getTransfiniteConstraints()` (ou équivalent) et
+  utiliser cet ordre pour forcer ξ = arc, η = radial sur chaque bloc
+  O-grid.
+- Soit ajouter une passe POST-load qui vérifie la cohérence tag↔
+  géométrie par échantillonnage du milieu de chaque edge, et
+  corrige/échange les tags si nécessaire.
+
+**(I2) extend_mesh_2d folde le Jacobien pour arcs serrés**
+
+Symptôme : `build_block_slbm_geometry_extended(ring_0)` échoue avec
+"degenerate Jacobian (sign change or zero) at (i=5, j=1)". Ring_0
+pour R_in=0.025 avec N_arc=7, N_radial=20 → dx_radial ≈ 0.0075 qui
+est du même ordre que R_in. L'extrapolation linéaire vers l'intérieur
+du cylindre produit des cellules fold.
+
+**Fix proposé** (priorité 2 de la sous-session) :
+- Remplacer extrapolation linéaire par une MIRROR reflection géométrique
+  à travers le mur pour les edges non-:interface. Le ghost a alors un
+  Jacobien symétrique à l'interior boundary row.
+- Ou : construire `SLBMGeometry` sur le mesh NON-étendu (Nξ, Nη) et
+  écrire un kernel variant qui accepte des state arrays étendus mais
+  des stencil arrays interior-sized, en dispatchant sur la bordure.
+
+**Driver stagé** :
+
+- `hpc/wp_mesh_6_ogrid_aqua.jl` — full driver skeleton (n_blocks=8,
+  hybrid step loop, drag aggregation). Tous les appels composent
+  l'infra livrée (`load_gmsh_multiblock_2d` + `autoreorient_blocks` +
+  `build_block_slbm_geometry_extended` + `exchange_ghost_shared_node_2d!`
+  + per-block bcspec + `compute_drag_libb_mei_2d` sum).
+- `hpc/wp_mesh_6_ogrid_aqua.pbs` — PBS (ne PAS soumettre avant fix).
+- `tmp/smoke_ogrid_local_metal.jl` — Metal smoke qui reproduit I1/I2.
+- `tmp/gen_ogrid_rect_8block.jl` — .geo generator (déjà validé
+  structurellement, commit `2935a26`).
+
+**Étapes** (répétition pour référence rapide, une fois I1+I2 résolus) :
 
 **Infrastructure complète, reste l'assemblage** : écrire
 [hpc/wp_mesh_6_multi_aqua.jl](hpc/wp_mesh_6_multi_aqua.jl).
