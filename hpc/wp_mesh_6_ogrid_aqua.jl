@@ -132,13 +132,21 @@ run_Efull(D_lu, steps, sw, se; N_arc=8, N_radial_factor=2) = begin
     # rows at the same D_lu.
     N_arc_k    = max(8, round(Int, D_lu / 2))   # rough scaling
     N_radial_k = max(8, round(Int, D_lu * N_radial_factor))
+    # Adaptive Progression: target a cell-size ratio between outer and
+    # inner radial cells of ~50×, independent of N_radial. With a
+    # fixed progression=0.8 the ratio grows as 0.8^(N-1), which at
+    # N_radial=80 gives 10⁸× and produces 1e-9 cells near the cylinder
+    # that pollute dx_ref and break the SLBM metric.
+    target_ratio = 50.0
+    radial_prog  = target_ratio^(-1.0 / (N_radial_k - 1))
 
     mktempdir() do dir
         geo_path = joinpath(dir, "ogrid_rect_8block.geo")
         write_ogrid_rect_8block_geo(geo_path;
                                       Lx=Lx, Ly=Ly, cx_p=cx_p, cy_p=cy_p,
                                       R_in=R_p,
-                                      N_arc=N_arc_k, N_radial=N_radial_k)
+                                      N_arc=N_arc_k, N_radial=N_radial_k,
+                                      radial_progression=radial_prog)
 
         mbm_raw, _ = load_gmsh_multiblock_2d(geo_path; FT=T, layout=:topological)
         mbm = autoreorient_blocks(mbm_raw; verbose=false)

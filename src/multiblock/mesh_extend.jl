@@ -189,9 +189,15 @@ function extend_mesh_2d(mesh::CurvilinearMesh{T, AT};
     # (O-grid ring blocks). These cells are not read by the SLBM
     # kernel (the kernel only accesses physical interior + 1-ghost
     # rows adjacent to it). Skipping validation avoids false positives.
+    # Preserve the original mesh's dx_ref: the extended mesh adds ghost-
+    # corner cells whose spline-fit edge lengths can collapse to ~1e-9
+    # (spurious cusps where ξ- and η-extrapolated ghost corners meet).
+    # `dx_ref` is used downstream to scale τ and drag norms, so a
+    # polluted dx_ref from a ghost corner would break the SLBM physics.
     return CurvilinearMesh(X_ext, Y_ext;
                              periodic_ξ=false, periodic_η=false,
                              type=Symbol(string(mesh.type) * "_ext"),
+                             dx_ref=mesh.dx_ref,
                              skip_validate=true,
                              FT=T)
 end
