@@ -660,6 +660,11 @@ function compute_local_omega_2d(mesh::CurvilinearMesh{T}; ν::Real, Λ::Real=3/1
             r_inv2 = (mesh.dx_ref / dx_local)^2
             τ_plus_local  = r_inv2 * (τ_plus_ref  - T(0.5)) + T(0.5)
             τ_minus_local = r_inv2 * (τ_minus_ref - T(0.5)) + T(0.5)
+        elseif scaling === :none
+            # Uniform τ (no local rescaling). Use this for diagnostic
+            # comparison or when local-CFL is disabled.
+            τ_plus_local  = τ_plus_ref
+            τ_minus_local = τ_minus_ref
         else  # :linear (Filippova-Hänel, for refinement with Δt ∝ Δx)
             τ_plus_local  = r * (τ_plus_ref  - T(0.5)) + T(0.5)
             τ_minus_local = r * (τ_minus_ref - T(0.5)) + T(0.5)
