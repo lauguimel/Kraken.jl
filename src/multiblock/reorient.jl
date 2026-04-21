@@ -36,43 +36,68 @@
 # =====================================================================
 
 """
-    reorient_block(block::Block; flip_ξ=false, flip_η=false) -> Block
+    reorient_block(block::Block; flip_ξ=false, flip_η=false, transpose=false)
+        -> Block
 
-Return a new `Block` whose mesh has been flipped along the requested
-logical axes. Both mesh arrays (`X, Y`, metric, Jacobian) and the
-`boundary_tags` NamedTuple are updated consistently. The underlying
-spline-based metric is recomputed on the flipped node coordinates so
-the resulting mesh is fully self-consistent.
+Return a new `Block` whose mesh has been transformed by the requested
+combination of flips and/or a transpose (ξ↔η swap). Both mesh arrays
+(`X, Y`, metric, Jacobian) and the `boundary_tags` NamedTuple are
+updated consistently. The underlying spline-based metric is recomputed
+on the transformed node coordinates.
 
-`flip_ξ=true` maps `X_new[i, j] = X[Nξ + 1 - i, j]`
-(and similarly for `Y`); edge tags rotate `west ↔ east`.
-`flip_η=true` maps `X_new[i, j] = X[i, Nη + 1 - j]`; edge tags rotate
-`south ↔ north`.
+Operations (applied in order: transpose → flip_ξ → flip_η):
 
-Apply `flip_ξ=true, flip_η=true` for a 180° rotation.
+- `transpose=true` : `X_new[i, j] = X[j, i]` — swap logical axes. Tags
+  rotate `west ↔ south` and `east ↔ north`. Changes the block shape
+  from `(Nξ, Nη)` to `(Nη, Nξ)`.
+- `flip_ξ=true`    : mirror along ξ. Tags rotate `west ↔ east`.
+- `flip_η=true`    : mirror along η. Tags rotate `south ↔ north`.
+
+Combinations span the full dihedral group of 8 orientations, which
+covers every per-block reorientation the multi-block loader can
+produce from the gmsh topological walker.
 """
 function reorient_block(block::Block{T, AT};
-                         flip_ξ::Bool=false, flip_η::Bool=false) where {T, AT}
-    (!flip_ξ && !flip_η) && return block
+                         flip_ξ::Bool=false, flip_η::Bool=false,
+                         transpose::Bool=false) where {T, AT}
+    (!flip_ξ && !flip_η && !transpose) && return block
     mesh = block.mesh
-    Nξ, Nη = mesh.Nξ, mesh.Nη
-    # Start from the plain (X, Y) so the spline refit in
-    # `CurvilinearMesh(X, Y; ...)` produces a consistent metric.
-    X_new = Matrix{T}(undef, Nξ, Nη)
-    Y_new = Matrix{T}(undef, Nξ, Nη)
-    @inbounds for j in 1:Nη, i in 1:Nξ
-        ii = flip_ξ ? (Nξ + 1 - i) : i
-        jj = flip_η ? (Nη + 1 - j) : j
-        X_new[i, j] = mesh.X[ii, jj]
-        Y_new[i, j] = mesh.Y[ii, jj]
+    Nξ_src, Nη_src = mesh.Nξ, mesh.Nη
+    if transpose
+        Nξ_new, Nη_new = Nη_src, Nξ_src
+    else
+        Nξ_new, Nη_new = Nξ_src, Nη_src
+    end
+    X_new = Matrix{T}(undef, Nξ_new, Nη_new)
+    Y_new = Matrix{T}(undef, Nξ_new, Nη_new)
+    @inbounds for j in 1:Nη_new, i in 1:Nξ_new
+        i0, j0 = transpose ? (j, i) : (i, j)
+        ii = flip_ξ ? (Nξ_src + 1 - i0) : i0
+        jj = flip_η ? (Nη_src + 1 - j0) : j0
+        # After transpose, flip_ξ acts on the NEW ξ (= old η), so swap
+        # the interpretation: when transpose=true, flip_ξ means flip the
+        # ORIGINAL η direction, and flip_η the ORIGINAL ξ.
+        if transpose
+            ii_orig = flip_η ? (Nξ_src + 1 - i0) : i0
+            jj_orig = flip_ξ ? (Nη_src + 1 - j0) : j0
+            X_new[i, j] = mesh.X[ii_orig, jj_orig]
+            Y_new[i, j] = mesh.Y[ii_orig, jj_orig]
+        else
+            X_new[i, j] = mesh.X[ii, jj]
+            Y_new[i, j] = mesh.Y[ii, jj]
+        end
     end
     new_mesh = CurvilinearMesh(X_new, Y_new;
                                  periodic_ξ=mesh.periodic_ξ,
                                  periodic_η=mesh.periodic_η,
                                  type=mesh.type, FT=T)
-    # Permute edge tags
+    # Permute tags: transpose first (swaps w↔s, e↔n), then flips.
     w, e, s, n = block.boundary_tags.west, block.boundary_tags.east,
                  block.boundary_tags.south, block.boundary_tags.north
+    if transpose
+        w, s = s, w
+        e, n = n, e
+    end
     if flip_ξ
         w, e = e, w
     end
@@ -106,14 +131,16 @@ function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false)
     blocks = collect(mbm.blocks)
     n_blocks = length(blocks)
     n_blocks == 0 && return mbm
-    # Per-block cumulative flip state (false, false) = identity. When
-    # a block is flipped, its edge labels in all interfaces must be
-    # remapped through this state to resolve "which curve is this
-    # interface talking about" after the flip.
-    flip_state = fill((false, false), n_blocks)
+    # Per-block cumulative orientation state (flip_ξ, flip_η, transpose).
+    # (false, false, false) = identity. Applied in order:
+    # transpose → flip_ξ → flip_η, matching reorient_block.
+    orient_state = fill((false, false, false), n_blocks)
     visited = falses(n_blocks)
     visited[1] = true
     queue = [1]
+    orient_options = [(fξ, fη, tr) for tr in (false, true)
+                                   for fη in (false, true)
+                                   for fξ in (false, true)]
     while !isempty(queue)
         a_idx = popfirst!(queue)
         a_id = blocks[a_idx].id
@@ -125,43 +152,34 @@ function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false)
             b_idx == 0 && continue
             visited[b_idx] && continue
             a_edge_original = (iface.from[1] === a_id ? iface.from[2] : iface.to[2])
-            # Resolve a's edge through its cumulative flip state so we
-            # know which edge of the CURRENT a_block the interface is on.
-            a_edge_current = _apply_flip_to_edge(a_edge_original, flip_state[a_idx])
-            # Try the 4 flips of b. The check must compare:
-            #   * a's edge on CURRENT a (already flipped)
-            #   * b's edge on CANDIDATE b (blocks[b_idx] already has any
-            #     prior flip baked in — in a BFS tree it has none yet)
-            # b_edge_original refers to the ORIGINAL b's labelling.
+            a_edge_current = _apply_orient_to_edge(a_edge_original, orient_state[a_idx])
             best = nothing
-            for (fξ, fη) in ((false, false), (true, false), (false, true), (true, true))
-                candidate_b = reorient_block(blocks[b_idx]; flip_ξ=fξ, flip_η=fη)
-                # After the tentative flip, the original edge label maps to:
-                b_edge_after = _apply_flip_to_edge(b_edge_original, (fξ, fη))
+            for (fξ, fη, tr) in orient_options
+                candidate_b = reorient_block(blocks[b_idx];
+                                               flip_ξ=fξ, flip_η=fη, transpose=tr)
+                b_edge_after = _apply_orient_to_edge(b_edge_original, (fξ, fη, tr))
                 ok = _is_canonical_pair(blocks[a_idx], a_edge_current,
                                           candidate_b, b_edge_after)
                 if ok
-                    best = (candidate_b, (fξ, fη), b_edge_after)
-                    verbose && println("  autoreorient: $(b_id) flip=$((fξ, fη)) " *
+                    best = (candidate_b, (fξ, fη, tr), b_edge_after)
+                    verbose && println("  autoreorient: $(b_id) orient=$((fξ, fη, tr)) " *
                                         "→ $(a_id).$a_edge_current ↔ $(b_id).$b_edge_after canonical")
                     break
                 end
             end
             best === nothing &&
-                error("autoreorient_blocks: no consistent flip for block :$b_id " *
+                error("autoreorient_blocks: no consistent orientation for block :$b_id " *
                       "relative to :$a_id via interface " *
                       "($a_id.$a_edge_original ↔ $b_id.$b_edge_original). " *
-                      "Mesh may need a transpose (not MVP-supported) or " *
-                      "manual reorient_block.")
+                      "Tried all 8 flips × transpose combinations.")
             blocks[b_idx] = best[1]
-            flip_state[b_idx] = best[2]
+            orient_state[b_idx] = best[2]
             visited[b_idx] = true
             push!(queue, b_idx)
         end
     end
     any(.!visited) &&
         @warn "autoreorient_blocks: $(sum(.!visited)) block(s) not reached by BFS"
-    # Update every interface's edge labels through the final flip_state.
     updated_ifaces = Interface[]
     for iface in mbm.interfaces
         from_id, from_edge = iface.from
@@ -169,16 +187,22 @@ function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false)
         from_idx = mbm.block_by_id[from_id]
         to_idx   = mbm.block_by_id[to_id]
         push!(updated_ifaces,
-              Interface(; from=(from_id, _apply_flip_to_edge(from_edge, flip_state[from_idx])),
-                          to=(to_id,   _apply_flip_to_edge(to_edge,   flip_state[to_idx]))))
+              Interface(; from=(from_id, _apply_orient_to_edge(from_edge, orient_state[from_idx])),
+                          to=(to_id,   _apply_orient_to_edge(to_edge,   orient_state[to_idx]))))
     end
     return MultiBlockMesh2D(blocks; interfaces=updated_ifaces)
 end
 
-# Apply a (flip_ξ, flip_η) transformation to an edge symbol. flip_ξ
-# swaps west ↔ east; flip_η swaps south ↔ north.
-function _apply_flip_to_edge(edge::Symbol, flip::Tuple{Bool, Bool})
-    fξ, fη = flip
+# Apply a (flip_ξ, flip_η, transpose) transformation to an edge symbol.
+# Operation order matches reorient_block: transpose first, then flips.
+function _apply_orient_to_edge(edge::Symbol, orient::Tuple{Bool, Bool, Bool})
+    fξ, fη, tr = orient
+    if tr
+        edge = edge === :west  ? :south :
+               edge === :south ? :west  :
+               edge === :east  ? :north :
+               edge === :north ? :east  : edge
+    end
     if fξ
         edge = edge === :west ? :east : (edge === :east ? :west : edge)
     end
