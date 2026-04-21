@@ -29,4 +29,9 @@ echo "=== 5c Wi sweep at $(date) ==="
 julia --project=. bench/viscoelastic_audit/step5_3d_diagnostic/5c_sphere_wi_sweep.jl 2>&1 \
     | tee results/step5c_wi_sweep.txt
 
+echo
+echo "=== 5d 2D cylinder Wi sweep at $(date) ==="
+julia --project=. bench/viscoelastic_audit/step5_3d_diagnostic/5d_cylinder_wi_sweep.jl 2>&1 \
+    | tee results/step5d_cyl_wi_sweep.txt
+
 echo "=== All diagnostic runs done at $(date) ==="
