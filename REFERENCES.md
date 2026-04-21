@@ -61,6 +61,15 @@ confirm values and remove this warning.
   |130.78 − 130.83| / 130.83 = **0.038%**, not 0.32%. The "0.32%" figure
   in the prompt appears to be mis-stated.
 
+- **Cylinder convergence measurement (2026-04-21 audit)** : the Apr 18
+  production run (job 20142038) gave Cd = {119.85, 126.41, 129.68, 131.29}
+  at R = {20, 30, 40, 48}. Monotone increasing (deltas 6.56, 3.27, 1.61,
+  ratio ~2 per R-step). **Richardson extrapolation Cd(R→∞) ≈ 131.5**,
+  which is **~1.5% above Liu's 130.83**. The "0.35% at R=48" is a
+  sign-crossing artifact, not a convergence proof. True asymptotic bias
+  is ~1.5% — still acceptable for an LBM benchmark, but prior docs
+  systematically misrepresented the accuracy as sub-1%.
+
 - `VISCOELASTIC_FINDINGS.md:49` claimed "130.83 → 131.29" (0.35% err)
   as the R=48 validation. 131.29 is inconsistent with the best
   log-conformation result quoted at §3:143 (Cd_logconf = 130.78).
