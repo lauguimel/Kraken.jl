@@ -108,17 +108,63 @@ end
 # pulls from the physical-boundary-row corner cells will read. jsrc out
 # of the physical range is clamped to the boundary — for interior cells
 # that never read those ghost slots, the clamped value is unused.
+# KernelAbstractions kernels — broadcast-compatible on CPU and any GPU
+# backend (CUDA, Metal). Each kernel fills one row/column × 3 populations
+# so we launch once per edge with a (Nye, 3) or (Nxe, 3) work domain.
+
+@kernel function _fill_wall_vertical_kernel_2d!(f, i_ghost::Int, i_bd::Int,
+                                                   pop1::Int, pop2::Int, pop3::Int,
+                                                   cqy1::Int, cqy2::Int, cqy3::Int,
+                                                   q_opp1::Int, q_opp2::Int, q_opp3::Int,
+                                                   j_lo::Int, j_hi::Int)
+    idx, p = @index(Global, NTuple)
+    # idx = 1..Nye (j'), p = 1..3 (which population)
+    j′ = idx
+    q, cqy, q_opp = if p == 1
+        (pop1, cqy1, q_opp1)
+    elseif p == 2
+        (pop2, cqy2, q_opp2)
+    else
+        (pop3, cqy3, q_opp3)
+    end
+    # clamp j' + cqy to [j_lo, j_hi]
+    jsrc = j′ + cqy
+    jsrc = jsrc < j_lo ? j_lo : (jsrc > j_hi ? j_hi : jsrc)
+    @inbounds f[i_ghost, j′, q] = f[i_bd, jsrc, q_opp]
+end
+
+@kernel function _fill_wall_horizontal_kernel_2d!(f, j_ghost::Int, j_bd::Int,
+                                                     pop1::Int, pop2::Int, pop3::Int,
+                                                     cqx1::Int, cqx2::Int, cqx3::Int,
+                                                     q_opp1::Int, q_opp2::Int, q_opp3::Int,
+                                                     i_lo::Int, i_hi::Int)
+    idx, p = @index(Global, NTuple)
+    i′ = idx
+    q, cqx, q_opp = if p == 1
+        (pop1, cqx1, q_opp1)
+    elseif p == 2
+        (pop2, cqx2, q_opp2)
+    else
+        (pop3, cqx3, q_opp3)
+    end
+    isrc = i′ + cqx
+    isrc = isrc < i_lo ? i_lo : (isrc > i_hi ? i_hi : isrc)
+    @inbounds f[i′, j_ghost, q] = f[isrc, j_bd, q_opp]
+end
+
 @inline function _fill_wall_vertical_2d!(st::BlockState2D, edge::Symbol,
                                            ng, Nxp, Nyp, pop_list)
     i_ghost = edge === :west ? ng      : ng + Nxp + 1
     i_bd    = edge === :west ? ng + 1  : ng + Nxp
     Nye = 2 * ng + Nyp
-    @inbounds for j′ in 1:Nye, q in pop_list
-        q_opp = _Q_OPP[q]
-        cqy = _CQY[q]
-        jsrc = clamp(j′ + cqy, ng + 1, ng + Nyp)
-        st.f[i_ghost, j′, q] = st.f[i_bd, jsrc, q_opp]
-    end
+    p1, p2, p3 = pop_list
+    cqy1, cqy2, cqy3 = _CQY[p1], _CQY[p2], _CQY[p3]
+    qo1, qo2, qo3    = _Q_OPP[p1], _Q_OPP[p2], _Q_OPP[p3]
+    backend = KernelAbstractions.get_backend(st.f)
+    kernel = _fill_wall_vertical_kernel_2d!(backend)
+    kernel(st.f, i_ghost, i_bd, p1, p2, p3, cqy1, cqy2, cqy3,
+            qo1, qo2, qo3, ng + 1, ng + Nyp; ndrange=(Nye, 3))
+    KernelAbstractions.synchronize(backend)
     return nothing
 end
 
@@ -127,11 +173,13 @@ end
     j_ghost = edge === :south ? ng     : ng + Nyp + 1
     j_bd    = edge === :south ? ng + 1 : ng + Nyp
     Nxe = 2 * ng + Nxp
-    @inbounds for i′ in 1:Nxe, q in pop_list
-        q_opp = _Q_OPP[q]
-        cqx = _CQX[q]
-        isrc = clamp(i′ + cqx, ng + 1, ng + Nxp)
-        st.f[i′, j_ghost, q] = st.f[isrc, j_bd, q_opp]
-    end
+    p1, p2, p3 = pop_list
+    cqx1, cqx2, cqx3 = _CQX[p1], _CQX[p2], _CQX[p3]
+    qo1, qo2, qo3    = _Q_OPP[p1], _Q_OPP[p2], _Q_OPP[p3]
+    backend = KernelAbstractions.get_backend(st.f)
+    kernel = _fill_wall_horizontal_kernel_2d!(backend)
+    kernel(st.f, j_ghost, j_bd, p1, p2, p3, cqx1, cqx2, cqx3,
+            qo1, qo2, qo3, ng + 1, ng + Nxp; ndrange=(Nxe, 3))
+    KernelAbstractions.synchronize(backend)
     return nothing
 end
