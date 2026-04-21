@@ -81,27 +81,48 @@ enhancement, and not matching the physical sign.
 Float32 rounding errors over 30 k steps at rates that shift results
 by 70%.
 
-### Step 5 diagnostic — it's HWNP, not a code bug
+### Step 5 diagnostic — CORRECTION : the earlier "HWNP" narrative was wrong
 
-Job 20202914 on Aqua H100, three discriminant tests at R=16 :
+**Retracted** : Wi=0.03 is not HWNP by any physical standard. Step 5d
+on Aqua Float64 at β=0.5 R=30 (job 20207349) reproduces the same
+pattern as the 3D sphere, so the issue is not 3D-specific and not a
+Float32 precision issue.
 
-| Test | Setup                            | Ratio | Finding |
-|------|----------------------------------|-------|---------|
-| 5b   | `OldroydB(G=0)` (τ_p ≡ 0)         | 1.0000 exact | Coupling loop is clean |
-| 5a   | `NoPolymerWallBC()` vs CNEBB      | 0.8124 vs 0.892 | CNEBB *helps* — removing it makes things worse |
-| 5c   | Wi ∈ {0.01, 0.05, 0.1, 0.25}      | 1.08 / 0.97 / 0.89 / 0.76 | **Correct sign at low Wi, HWNP above Wi≈0.03** |
+**2D cylinder, Aqua Float64, β=0.5, R=30** (step 5d, `results/step5d_cyl_wi_sweep_aqua.txt`) :
 
-**At Wi=0.01 the sphere gives +8% drag enhancement** — the Lunsmann-
-correct sign. The ratio crosses through 1 at Wi≈0.03 and goes
-monotonically negative above. This is the classic **High Weissenberg
-Number Problem (HWNP)** : the direct-C scheme loses positive-
-definiteness on C, τ_p takes unphysical values, drag inverts.
+| Wi    | λ (lattice) | Cd_visco | Cd_visco/Cd_Newt |
+|-------|-------------|----------|------------------|
+| 0.001 | 1.5         | 157.63   | 1.103 (+10%)     |
+| 0.01  | 15          | 153.71   | 1.076 (+8%)      |
+| 0.1   | 150         | 128.70   | 0.901 (−10%)     |
 
-**The 3D sphere driver is NOT buggy.** HWNP just enters at a much
-lower Wi in 3D (Wi ≈ 0.03 at R=16) than in 2D (Wi > 0.5 at R=48),
-because the polymer stretching region around a 3D sphere is
-geometrically more confined than around a 2D cylinder — less
-stretching distance, more concentrated stress gradients.
+Cd_Newt(Kraken) at ν_total=0.6 = **142.87**.
+
+Compared to 2D cylinder β=0.59 Wi=0.1 R=30 Cd=126.41 (ratio vs same
+Newt = 0.885), the β=0.5 result (ratio 0.901) is within ~2% — Kraken
+is self-consistent across β values.
+
+The sphere 3D at β=0.5 Wi=0.1 R=16 gave ratio 0.892. **Same ratio
+~0.89 across all configs**. Kraken is consistent.
+
+**Two actual findings** (not a bug) :
+
+1. **λ-stiffness at very low Wi** : at Wi=0.001 λ=1.5 (sub-cell), the
+   TRT-LBM conformation scheme is stiff. This gives the "+10% at
+   Wi=0.001" which is a numerical artifact of polymer relaxation
+   happening faster than one lattice step. For λ ≫ cell (Wi ≥ 0.05
+   with R=30), this artifact is negligible.
+
+2. **Ratio 0.89 at Wi=0.1 β=0.5 blockage 0.5 is plausibly physical**
+   for a *confined* cylinder/sphere. Lunsmann 1993's enhancement
+   applies to **unbounded** sphere — comparing our ducted geometry
+   (blockage 0.5) against unbounded Lunsmann was a category error.
+
+**Diagnostic tests that rule out coding bugs** :
+- 5b (G=0, τ_p ≡ 0) : ratio = 1.0000 exact. Coupling is clean.
+- 5a (NoPolymerWallBC vs CNEBB) : CNEBB partially corrects an
+  upstream numerical issue (without it, deficit grows from 10.8% to
+  18.8%). CNEBB is the fix, not the cause.
 
 ## Publishability verdict (revised after step 5)
 
@@ -109,9 +130,9 @@ stretching distance, more concentrated stress gradients.
 |-----------|--------|------------------|
 | 2D Poiseuille canal (validation) | ✅ bulk O(~1.5) | Use wall-excluded bulk error metric; do NOT cite ALL-error O(2) claims |
 | 2D cylinder Liu Wi=0.1 | ✅ publishable with 1.5% asymptotic bias, NOT 0.35% | Report Cd(R→∞) = 131.5 vs Liu 130.83, NOT the R=48 coincidence |
-| 2D cylinder Wi=0.5, Wi=1.0 | ⚠ HWNP regime | Needs log-conformation; prior -20/-40% errors are HWNP, not bugs |
-| **3D sphere Wi ≤ 0.03** | ✅ publishable as low-Wi enhancement validation | At Wi=0.01 R=16, ratio = 1.081 matches Lunsmann sign |
-| 3D sphere Wi = 0.1 (Lunsmann standard) | ❌ HWNP blocks it | Need log-conformation 3D (not yet implemented) |
+| 2D cylinder Wi=0.5, Wi=1.0 (β=0.59) | ⚠ HWNP regime | Needs log-conformation at high Wi (already partially done in 2D) |
+| 3D sphere Wi=0.1 β=0.5 | ⚠ needs physical reference | Kraken gives ratio 0.89, consistent with 2D at same β. Not a Lunsmann-unbounded comparison; need ducted-sphere reference (Alves 2003, Owens-Phillips) |
+| All configs at Wi ≤ 0.01 | ❌ λ-stiffness artifact | λ < 50 cells shows +5-17% bias that is numerical, not physical |
 
 ## Path forward for sphere 3D at Lunsmann Wi
 
