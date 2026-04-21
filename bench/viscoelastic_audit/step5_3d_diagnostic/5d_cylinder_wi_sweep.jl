@@ -10,10 +10,31 @@
 # If 2D also gives +5-10% at Wi=0.01 → the bug is in the shared code
 # path (prefactor or drag formula).
 
-using Kraken, Printf, CUDA
-
-backend = CUDABackend()
-FT = Float64
+using Kraken, Printf, KernelAbstractions
+# Prefer CUDA (Aqua) if available; fall back to Metal (local) or CPU
+local_backend = nothing
+try
+    using CUDA
+    if CUDA.functional()
+        global local_backend = CUDABackend()
+        println("CUDA backend OK")
+    end
+catch
+end
+if local_backend === nothing
+    try
+        using Metal
+        global local_backend = MetalBackend()
+        println("Metal backend OK")
+    catch
+        global local_backend = KernelAbstractions.CPU()
+        println("CPU fallback")
+    end
+end
+backend = local_backend
+# Use Float64 on CUDA (Aqua), Float32 on Metal (local GPU precision)
+FT = backend isa KernelAbstractions.CPU || (isdefined(Main, :CUDA) && backend isa CUDABackend) ? Float64 : Float32
+@printf("Backend=%s  FT=%s\n", typeof(backend), FT)
 
 println("="^75)
 println("Step 5d — 2D cylinder Wi sweep at R=30, β=0.5 (same as sphere)")
@@ -30,10 +51,10 @@ t0 = time()
 ref_Cd = NaN
 try
     ref = run_cylinder_libb_2d(; Nx=Nx, Ny=Ny, cx=cx, cy=cy, radius=R,
-                                u_mean=u_mean, ν=ν_total,
+                                u_in=3*u_mean/2, ν=ν_total,
                                 inlet=:parabolic,
                                 max_steps=60_000, avg_window=12_000,
-                                backend=backend, FT=FT)
+                                backend=backend, T=FT)
     global ref_Cd = ref.Cd
 catch err
     @warn "Newtonian ref failed — falling back to Liu table value 130.36" err
