@@ -50,6 +50,24 @@ cellules** pour le cylindre Re=100 (Williamson 1996, Schäfer-Turek 2D-2) :
      one-shot helper for per-block SLBM on ghost-layer arrays
    - `extend_interior_field_2d(field, n_ghost)` lifts `is_solid`,
      `q_wall`, `uw_x`, `uw_y` onto the extended grid
+6. **`439e4db`** — approach (E3) 3-block Cartesian multi-block cylinder
+   driver + PBS + Metal smoke — first multi-block Re=100 cylinder
+   driver running end-to-end (pipeline: exchange_ghost + wall_ghost +
+   per-block step + per-block BCSpec with HalfwayBB-as-noop for
+   interface sides + drag on block-C interior view).  Rewrote
+   `fill_physical_wall_ghost_2d!` as KernelAbstractions kernels for
+   GPU compatibility.
+7. **`2935a26`** — `reorient_block` + `autoreorient_blocks` extended
+   with TRANSPOSE (ξ↔η swap) for the dihedral-8 group. Needed for
+   the 8-block O-grid topology where the walker produces orthogonal
+   ξ/η orientations between neighbour blocks. `tmp/gen_ogrid_rect_8block.jl`
+   writes the 8-block .geo programmatically; `tmp/validate_ogrid_rect_8block.jl`
+   loads + reorients + sanity-checks it → 0 errors, 8 warnings
+   (expected shared-node), topology READY for (E-full) driver.
+
+**Aqua jobs submitted** :
+- `20185587.aqua` — wp_mesh_6_focus (approach D cylinder-focused)
+- `20186108.aqua` — wp_mesh_6_multi (approach E3 3-block Cartesian)
 
 **Total multiblock v0.3 : 683 tests verts** (31 + 163 + 10 + 44 + 363 + 42 + 30).
 
