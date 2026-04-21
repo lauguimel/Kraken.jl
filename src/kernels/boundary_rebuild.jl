@@ -257,8 +257,8 @@ end
 # For PullSLBM (which clamps at boundaries), these kernels fix the
 # populations that the streaming couldn't bounce.
 
-@kernel function _bc_south_halfwaybb_2d!(f_out, @Const(f_in), Ny)
-    im1 = @index(Global); i = im1 + 1
+@kernel function _bc_south_halfwaybb_2d!(f_out, @Const(f_in), Ny, i_shift::Int)
+    im1 = @index(Global); i = im1 + i_shift
     @inbounds begin
         # j=1: bounce populations heading south back north
         f_out[i, 1, 3] = f_in[i, 1, 5]   # 5→3
@@ -267,8 +267,8 @@ end
     end
 end
 
-@kernel function _bc_north_halfwaybb_2d!(f_out, @Const(f_in), Ny)
-    im1 = @index(Global); i = im1 + 1
+@kernel function _bc_north_halfwaybb_2d!(f_out, @Const(f_in), Ny, i_shift::Int)
+    im1 = @index(Global); i = im1 + i_shift
     @inbounds begin
         # j=Ny: bounce populations heading north back south
         f_out[i, Ny, 5] = f_in[i, Ny, 3]   # 3→5
@@ -341,12 +341,27 @@ end
 end
 
 @inline function _apply_bc_2d_south!(backend, f_out, f_in, ::HalfwayBB,
-                                      s_p, s_m, Nx, Ny)
-    _bc_south_halfwaybb_2d!(backend)(f_out, f_in, Ny; ndrange=(Nx - 2,))
+                                      s_p, s_m, Nx, Ny;
+                                      west_bc=nothing, east_bc=nothing)
+    # Include i=1 if west is HalfwayBB (wall/interface); skip otherwise
+    # because ZouHe writers want to own the corner (legacy single-block
+    # behaviour). Same on i=Nx. When multi-block has east=:interface
+    # (HalfwayBB), the south BB must fire at i=Nx so the interface-wall
+    # corner matches what single-block would compute at the same x.
+    i_lo = (west_bc isa HalfwayBB || west_bc === nothing) ? 1 : 2
+    i_hi = (east_bc isa HalfwayBB || east_bc === nothing) ? Nx : Nx - 1
+    count = i_hi - i_lo + 1
+    count ≤ 0 && return nothing
+    _bc_south_halfwaybb_2d!(backend)(f_out, f_in, Ny, i_lo - 1; ndrange=(count,))
 end
 @inline function _apply_bc_2d_north!(backend, f_out, f_in, ::HalfwayBB,
-                                      s_p, s_m, Nx, Ny)
-    _bc_north_halfwaybb_2d!(backend)(f_out, f_in, Ny; ndrange=(Nx - 2,))
+                                      s_p, s_m, Nx, Ny;
+                                      west_bc=nothing, east_bc=nothing)
+    i_lo = (west_bc isa HalfwayBB || west_bc === nothing) ? 1 : 2
+    i_hi = (east_bc isa HalfwayBB || east_bc === nothing) ? Nx : Nx - 1
+    count = i_hi - i_lo + 1
+    count ≤ 0 && return nothing
+    _bc_north_halfwaybb_2d!(backend)(f_out, f_in, Ny, i_lo - 1; ndrange=(count,))
 end
 
 """
@@ -377,8 +392,10 @@ function apply_bc_rebuild_2d!(f_out, f_in, bcspec::BCSpec2D, ν::Real,
         _apply_bc_2d_west_local!(backend, f_out, f_in, bcspec.west, sp_field, sm_field, Nx, Ny)
         _apply_bc_2d_east_local!(backend, f_out, f_in, bcspec.east, sp_field, sm_field, Nx, Ny)
     end
-    _apply_bc_2d_south!(backend, f_out, f_in, bcspec.south, s_p_uni, s_m_uni, Nx, Ny)
-    _apply_bc_2d_north!(backend, f_out, f_in, bcspec.north, s_p_uni, s_m_uni, Nx, Ny)
+    _apply_bc_2d_south!(backend, f_out, f_in, bcspec.south, s_p_uni, s_m_uni, Nx, Ny;
+                          west_bc=bcspec.west, east_bc=bcspec.east)
+    _apply_bc_2d_north!(backend, f_out, f_in, bcspec.north, s_p_uni, s_m_uni, Nx, Ny;
+                          west_bc=bcspec.west, east_bc=bcspec.east)
     return nothing
 end
 
