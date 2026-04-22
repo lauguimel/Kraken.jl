@@ -217,11 +217,12 @@ function build_block_slbm_geometry_extended(block::Block;
                                               n_ghost::Int=1,
                                               local_cfl::Bool=true,
                                               curved_edges::Tuple{Vararg{Symbol}}=(),
-                                              curved_center::Tuple{<:Real,<:Real}=(0, 0))
+                                              curved_center::Tuple{<:Real,<:Real}=(0, 0),
+                                              dx_ref::Real=0)
     mesh_ext = extend_mesh_2d(block.mesh; n_ghost=n_ghost,
                                 curved_edges=curved_edges,
                                 curved_center=curved_center)
-    geom = build_slbm_geometry(mesh_ext; local_cfl=local_cfl)
+    geom = build_slbm_geometry(mesh_ext; local_cfl=local_cfl, dx_ref=dx_ref)
     return mesh_ext, geom
 end
 

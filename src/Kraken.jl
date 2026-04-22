@@ -264,7 +264,7 @@ export EDGE_SYMBOLS_2D, INTERFACE_TAG
 export getblock, edge_length, edge_coords
 export MultiBlockSanityIssue, sanity_check_multiblock
 export BlockState2D, allocate_block_state_2d, interior_f, interior_macro, ext_dims
-export exchange_ghost_2d!, exchange_ghost_shared_node_2d!, fill_physical_wall_ghost_2d!
+export exchange_ghost_2d!, exchange_ghost_shared_node_2d!, fill_physical_wall_ghost_2d!, fill_slbm_wall_ghost_2d!
 export load_gmsh_multiblock_2d
 export reorient_block, autoreorient_blocks
 export extend_mesh_2d, build_block_slbm_geometry_extended, extend_interior_field_2d

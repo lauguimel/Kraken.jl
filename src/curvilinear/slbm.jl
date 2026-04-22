@@ -58,7 +58,9 @@ D2Q9 direction. Linearises the mapping locally via the stored metric:
 
 with the inverse Jacobian `dξ/dX = dY/dη / J`, etc.
 """
-function build_slbm_geometry(mesh::CurvilinearMesh{T}; local_cfl::Bool=false) where {T}
+function build_slbm_geometry(mesh::CurvilinearMesh{T};
+                              local_cfl::Bool=false,
+                              dx_ref::Real=0) where {T}
     Nξ, Nη = mesh.Nξ, mesh.Nη
     cx = velocities_x(D2Q9())
     cy = velocities_y(D2Q9())
@@ -70,7 +72,7 @@ function build_slbm_geometry(mesh::CurvilinearMesh{T}; local_cfl::Bool=false) wh
 
     i_dep = zeros(T, Nξ, Nη, 9)
     j_dep = zeros(T, Nξ, Nη, 9)
-    dxr = mesh.dx_ref
+    dxr = dx_ref > 0 ? T(dx_ref) : mesh.dx_ref
 
     @inbounds for j in 1:Nη, i in 1:Nξ
         J = mesh.J[i, j]

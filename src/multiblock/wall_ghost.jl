@@ -183,3 +183,62 @@ end
     KernelAbstractions.synchronize(backend)
     return nothing
 end
+
+# =====================================================================
+# Full pre-fill for SLBM multi-block (Phase B.2.3 fix).
+#
+# On a curvilinear mesh, SLBM departure points at cells near a physical
+# wall can cross into the ghost region at OBLIQUE angles, reading
+# populations that the standard 3-population wall-ghost fill did not
+# set. This helper copies ALL 9 populations from the boundary row into
+# the ghost row for every physical-wall edge, providing valid data for
+# any departure direction. Called BEFORE `fill_physical_wall_ghost_2d!`,
+# which then overwrites the 3 reflected populations with more accurate
+# halfway-BB values.
+# =====================================================================
+
+@kernel function _copy_col_kernel_2d!(f, i_dst::Int, i_src::Int)
+    j, q = @index(Global, NTuple)
+    @inbounds f[i_dst, j, q] = f[i_src, j, q]
+end
+
+@kernel function _copy_row_kernel_2d!(f, j_dst::Int, j_src::Int)
+    i, q = @index(Global, NTuple)
+    @inbounds f[i, j_dst, q] = f[i, j_src, q]
+end
+
+"""
+    fill_slbm_wall_ghost_2d!(mbm, states)
+
+Copy ALL 9 populations from the physical boundary row/column into each
+physical-wall ghost row/column. Skips `:interface` edges (handled by the
+exchange). Must be called BEFORE `fill_physical_wall_ghost_2d!` in the
+SLBM multi-block pipeline so that oblique departure reads find valid
+values for every population, not just the 3 that cross the wall.
+"""
+function fill_slbm_wall_ghost_2d!(mbm::MultiBlockMesh2D,
+                                    states::AbstractVector{<:BlockState2D})
+    for (k, blk) in enumerate(mbm.blocks)
+        st = states[k]
+        ng = st.n_ghost; Nxp = st.Nξ_phys; Nyp = st.Nη_phys
+        Nxe = Nxp + 2 * ng; Nye = Nyp + 2 * ng
+        backend = KernelAbstractions.get_backend(st.f)
+        for edge in EDGE_SYMBOLS_2D
+            tag = getproperty(blk.boundary_tags, edge)
+            tag === INTERFACE_TAG && continue
+            if edge === :west || edge === :east
+                i_ghost = edge === :west ? ng      : ng + Nxp + 1
+                i_bd    = edge === :west ? ng + 1  : ng + Nxp
+                kernel = _copy_col_kernel_2d!(backend)
+                kernel(st.f, i_ghost, i_bd; ndrange=(Nye, 9))
+            else
+                j_ghost = edge === :south ? ng     : ng + Nyp + 1
+                j_bd    = edge === :south ? ng + 1 : ng + Nyp
+                kernel = _copy_row_kernel_2d!(backend)
+                kernel(st.f, j_ghost, j_bd; ndrange=(Nxe, 9))
+            end
+        end
+        KernelAbstractions.synchronize(backend)
+    end
+    return mbm
+end
