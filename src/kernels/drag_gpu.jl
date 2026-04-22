@@ -192,6 +192,12 @@ each thread writes its own slot. The caller sums on host with
 function compute_drag_libb_mei_2d_gpu!(Fx_link, Fy_link, links::CutLinkList,
                                          f, uw_x, uw_y,
                                          Nx::Integer, Ny::Integer)
+    # Skip kernel launch for empty link list — KernelAbstractions on CUDA
+    # with ndrange=(0,) triggers an integer division error in the
+    # workgroup-size computation. An empty list can arise in multi-block
+    # setups where some blocks do not contain any cut cells (the cylinder
+    # sits entirely in another block).
+    links.Nlinks == 0 && return nothing
     backend = KernelAbstractions.get_backend(f)
     _drag_mei_2d_list_kernel!(backend)(Fx_link, Fy_link,
                                          links.list_i, links.list_j,
