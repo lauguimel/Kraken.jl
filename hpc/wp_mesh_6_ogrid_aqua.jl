@@ -132,13 +132,17 @@ run_Efull(D_lu, steps, sw, se; N_arc=8, N_radial_factor=2) = begin
     # rows at the same D_lu.
     N_arc_k    = max(8, round(Int, D_lu / 2))   # rough scaling
     N_radial_k = max(8, round(Int, D_lu * N_radial_factor))
-    # Adaptive Progression: target a cell-size ratio between outer and
-    # inner radial cells of ~50×, independent of N_radial. With a
-    # fixed progression=0.8 the ratio grows as 0.8^(N-1), which at
-    # N_radial=80 gives 10⁸× and produces 1e-9 cells near the cylinder
-    # that pollute dx_ref and break the SLBM metric.
+    # Adaptive Progression with CORRECT direction (sign):
+    # Spoke is Line(p_k → q_k), p_k = cylinder (inner, START), q_k =
+    # rectangle (outer, END). gmsh convention: Progression d > 1 ⇒
+    # cells smaller at START (= cylinder side). For body-fitted
+    # resolution we want finest cells on the cylinder surface, so
+    # d > 1 is required. target_ratio = dx_outer/dx_inner (>1).
+    # Previous (-1.0 exponent) gave d < 1 which clustered at the
+    # RECTANGLE instead, collapsing radial cells at the outer wall
+    # to 1e-9 and breaking SLBM.
     target_ratio = 50.0
-    radial_prog  = target_ratio^(-1.0 / (N_radial_k - 1))
+    radial_prog  = target_ratio^(+1.0 / (N_radial_k - 1))
 
     mktempdir() do dir
         geo_path = joinpath(dir, "ogrid_rect_8block.geo")
