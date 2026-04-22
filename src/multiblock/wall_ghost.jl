@@ -207,17 +207,34 @@ end
     @inbounds f[i, j_dst, q] = f[i, j_src, q]
 end
 
+@kernel function _extrap_col_kernel_2d!(f, i_dst::Int, i_bd::Int, i_inner::Int)
+    j, q = @index(Global, NTuple)
+    @inbounds f[i_dst, j, q] = 2 * f[i_bd, j, q] - f[i_inner, j, q]
+end
+
+@kernel function _extrap_row_kernel_2d!(f, j_dst::Int, j_bd::Int, j_inner::Int)
+    i, q = @index(Global, NTuple)
+    @inbounds f[i, j_dst, q] = 2 * f[i, j_bd, q] - f[i, j_inner, q]
+end
+
 """
     fill_slbm_wall_ghost_2d!(mbm, states)
 
-Copy ALL 9 populations from the physical boundary row/column into each
-physical-wall ghost row/column. Skips `:interface` edges (handled by the
-exchange). Must be called BEFORE `fill_physical_wall_ghost_2d!` in the
-SLBM multi-block pipeline so that oblique departure reads find valid
-values for every population, not just the 3 that cross the wall.
+Pre-fill ALL 9 populations at each physical-wall ghost for SLBM on
+curvilinear meshes, where oblique departure points may read any
+population from the ghost region.
+
+- **Wall/cylinder edges**: boundary-row copy (zeroth-order extrapolation).
+- **Inlet/outlet edges**: linear extrapolation `ghost = 2·boundary − interior`
+  to avoid a feedback loop through the BC-reconstructed boundary row.
+
+Skips `:interface` edges (handled by the exchange). Must be called
+BEFORE `fill_physical_wall_ghost_2d!`, which then overwrites the 3
+reflected populations with more accurate halfway-BB values.
 """
 function fill_slbm_wall_ghost_2d!(mbm::MultiBlockMesh2D,
                                     states::AbstractVector{<:BlockState2D})
+    _EXTRAP_TAGS = (:inlet, :outlet)
     for (k, blk) in enumerate(mbm.blocks)
         st = states[k]
         ng = st.n_ghost; Nxp = st.Nξ_phys; Nyp = st.Nη_phys
@@ -226,16 +243,29 @@ function fill_slbm_wall_ghost_2d!(mbm::MultiBlockMesh2D,
         for edge in EDGE_SYMBOLS_2D
             tag = getproperty(blk.boundary_tags, edge)
             tag === INTERFACE_TAG && continue
+            use_extrap = tag in _EXTRAP_TAGS
             if edge === :west || edge === :east
                 i_ghost = edge === :west ? ng      : ng + Nxp + 1
                 i_bd    = edge === :west ? ng + 1  : ng + Nxp
-                kernel = _copy_col_kernel_2d!(backend)
-                kernel(st.f, i_ghost, i_bd; ndrange=(Nye, 9))
+                if use_extrap
+                    i_inner = edge === :west ? ng + 2  : ng + Nxp - 1
+                    kernel = _extrap_col_kernel_2d!(backend)
+                    kernel(st.f, i_ghost, i_bd, i_inner; ndrange=(Nye, 9))
+                else
+                    kernel = _copy_col_kernel_2d!(backend)
+                    kernel(st.f, i_ghost, i_bd; ndrange=(Nye, 9))
+                end
             else
                 j_ghost = edge === :south ? ng     : ng + Nyp + 1
                 j_bd    = edge === :south ? ng + 1 : ng + Nyp
-                kernel = _copy_row_kernel_2d!(backend)
-                kernel(st.f, j_ghost, j_bd; ndrange=(Nxe, 9))
+                if use_extrap
+                    j_inner = edge === :south ? ng + 2  : ng + Nyp - 1
+                    kernel = _extrap_row_kernel_2d!(backend)
+                    kernel(st.f, j_ghost, j_bd, j_inner; ndrange=(Nxe, 9))
+                else
+                    kernel = _copy_row_kernel_2d!(backend)
+                    kernel(st.f, j_ghost, j_bd; ndrange=(Nxe, 9))
+                end
             end
         end
         KernelAbstractions.synchronize(backend)

@@ -73,6 +73,9 @@ include("kernels/boundary_rebuild.jl")
 # --- GPU-native drag reductions (replace host-side per-step transfers)
 include("kernels/drag_gpu.jl")
 
+# --- Analytic geometry derivatives for AD shape optimization ---
+include("kernels/enzyme_rules.jl")
+
 # --- Simulation drivers ---
 include("drivers/basic.jl")
 include("drivers/cylinder_libb.jl")
@@ -170,6 +173,7 @@ export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
 export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
+export dq_wall_dR_cylinder
 export precompute_q_wall_sphere_3d, compute_drag_libb_3d, run_sphere_libb_3d
 export precompute_q_wall_annulus
 export wall_velocity_rotating_cylinder, wall_velocity_rotating_inner
