@@ -262,3 +262,23 @@ function _other_endpoint(iface::Interface, query_id::Symbol)
     return nothing
 end
 
+const _TRANSPOSE_FACE = Dict(:west => :south, :east => :north,
+                              :south => :west, :north => :east)
+
+"""
+    transpose_multiblock(mbm::MultiBlockMesh2D) -> MultiBlockMesh2D
+
+Transpose every block (swap ξ↔η) and update interface face labels
+accordingly (west↔south, east↔north). Useful after `autoreorient_blocks`
+to move the outer boundary from north to east on O-grid topologies.
+"""
+function transpose_multiblock(mbm::MultiBlockMesh2D)
+    new_blocks = [reorient_block(b; transpose=true) for b in mbm.blocks]
+    new_ifaces = map(mbm.interfaces) do iface
+        f1 = (iface.from[1], _TRANSPOSE_FACE[iface.from[2]])
+        f2 = (iface.to[1],   _TRANSPOSE_FACE[iface.to[2]])
+        Interface(from=f1, to=f2)
+    end
+    return MultiBlockMesh2D(new_blocks; interfaces=new_ifaces)
+end
+

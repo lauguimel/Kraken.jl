@@ -76,26 +76,94 @@ function exchange_ghost_2d!(mbm::MultiBlockMesh2D,
         a_idx = mbm.block_by_id[iface.from[1]]
         b_idx = mbm.block_by_id[iface.to[1]]
         _exchange_pair_ghost_2d!(states[a_idx], states[b_idx],
-                                  iface.from[2], iface.to[2])
+                                  iface.from[2], iface.to[2];
+                                  mesh_a=mbm.blocks[a_idx].mesh,
+                                  mesh_b=mbm.blocks[b_idx].mesh)
     end
     return mbm
 end
 
 function _exchange_pair_ghost_2d!(state_a::BlockState2D, state_b::BlockState2D,
-                                    edge_a::Symbol, edge_b::Symbol)
-    if edge_a === :east && edge_b === :west
-        _fill_ghost_we!(state_a, state_b)
-    elseif edge_a === :west && edge_b === :east
-        _fill_ghost_we!(state_b, state_a)
-    elseif edge_a === :north && edge_b === :south
-        _fill_ghost_sn!(state_a, state_b)
-    elseif edge_a === :south && edge_b === :north
-        _fill_ghost_sn!(state_b, state_a)
-    else
-        error("_exchange_pair_ghost_2d!: unsupported edge pair $edge_a → $edge_b. " *
-              "MVP supports only opposite-normal aligned pairs " *
-              "(east↔west, north↔south).")
+                                    edge_a::Symbol, edge_b::Symbol;
+                                    mesh_a=nothing, mesh_b=nothing)
+    flip = _detect_flip(mesh_a, edge_a, mesh_b, edge_b)
+    _generic_ghost_fill_2d!(state_a, edge_a, state_b, edge_b; flip=flip)
+    _generic_ghost_fill_2d!(state_b, edge_b, state_a, edge_a; flip=flip)
+end
+
+function _edge_first_last(mesh, edge::Symbol)
+    X, Y = mesh.X, mesh.Y
+    if edge === :west;  return (X[1,1], Y[1,1]), (X[1,end], Y[1,end])
+    elseif edge === :east;  return (X[end,1], Y[end,1]), (X[end,end], Y[end,end])
+    elseif edge === :south; return (X[1,1], Y[1,1]), (X[end,1], Y[end,1])
+    elseif edge === :north; return (X[1,end], Y[1,end]), (X[end,end], Y[end,end])
     end
+end
+
+function _detect_flip(mesh_a, edge_a, mesh_b, edge_b)
+    (isnothing(mesh_a) || isnothing(mesh_b)) && return false
+    a1, a2 = _edge_first_last(mesh_a, edge_a)
+    b1, b2 = _edge_first_last(mesh_b, edge_b)
+    dist_same = (a1[1]-b1[1])^2 + (a1[2]-b1[2])^2
+    dist_flip = (a1[1]-b2[1])^2 + (a1[2]-b2[2])^2
+    return dist_flip < dist_same
+end
+
+# Edge descriptor: (fixed_axis, interior_idx, ghost_idx, run_range)
+#   fixed_axis: 1 (i-axis, west/east) or 2 (j-axis, south/north)
+#   interior_idx: index of the last physical row on this edge (source for neighbor ghost)
+#   ghost_idx: index of the ghost row on this edge (destination from neighbor)
+#   run_range: range along the other axis covering physical cells
+@inline function _edge_params(edge::Symbol, st::BlockState2D)
+    ng = st.n_ghost; Nξ = st.Nξ_phys; Nη = st.Nη_phys
+    if edge === :west
+        return (1, ng + 1, ng, (ng+1):(ng+Nη), Nη)
+    elseif edge === :east
+        return (1, ng + Nξ, ng + Nξ + 1, (ng+1):(ng+Nη), Nη)
+    elseif edge === :south
+        return (2, ng + 1, ng, (ng+1):(ng+Nξ), Nξ)
+    elseif edge === :north
+        return (2, ng + Nη, ng + Nη + 1, (ng+1):(ng+Nξ), Nξ)
+    end
+end
+
+# Fill dst_state's ghost at dst_edge from src_state's interior at src_edge.
+function _generic_ghost_fill_2d!(dst_state::BlockState2D, dst_edge::Symbol,
+                                   src_state::BlockState2D, src_edge::Symbol;
+                                   flip::Bool=false)
+    src_axis, src_int, _, src_range, src_len = _edge_params(src_edge, src_state)
+    dst_axis, _, dst_ghost, dst_range, dst_len = _edge_params(dst_edge, dst_state)
+    src_len == dst_len || error("_generic_ghost_fill_2d!: edge length mismatch ($src_len vs $dst_len)")
+
+    src_r = flip ? reverse(src_range) : src_range
+    f_src = src_state.f; f_dst = dst_state.f
+
+    if src_axis == dst_axis && !flip
+        if src_axis == 1
+            @inbounds view(f_dst, dst_ghost, dst_range, :) .= view(f_src, src_int, src_r, :)
+        else
+            @inbounds view(f_dst, dst_range, dst_ghost, :) .= view(f_src, src_r, src_int, :)
+        end
+    elseif src_axis == dst_axis && flip
+        if src_axis == 1
+            @inbounds for (jd, js) in zip(dst_range, src_r)
+                view(f_dst, dst_ghost, jd, :) .= view(f_src, src_int, js, :)
+            end
+        else
+            @inbounds for (id, is) in zip(dst_range, src_r)
+                view(f_dst, id, dst_ghost, :) .= view(f_src, is, src_int, :)
+            end
+        end
+    elseif src_axis == 1 && dst_axis == 2
+        @inbounds for (js, id) in zip(src_r, dst_range)
+            view(f_dst, id, dst_ghost, :) .= view(f_src, src_int, js, :)
+        end
+    else
+        @inbounds for (is, jd) in zip(src_r, dst_range)
+            view(f_dst, dst_ghost, jd, :) .= view(f_src, is, src_int, :)
+        end
+    end
+    return nothing
 end
 
 # West-east: state_left is the LEFT block (its :east edge is the
@@ -190,18 +258,49 @@ end
 
 function _exchange_pair_ghost_shared_node_2d!(state_a::BlockState2D, state_b::BlockState2D,
                                                 edge_a::Symbol, edge_b::Symbol)
-    if edge_a === :east && edge_b === :west
-        _fill_ghost_we_shared!(state_a, state_b)
-    elseif edge_a === :west && edge_b === :east
-        _fill_ghost_we_shared!(state_b, state_a)
-    elseif edge_a === :north && edge_b === :south
-        _fill_ghost_sn_shared!(state_a, state_b)
-    elseif edge_a === :south && edge_b === :north
-        _fill_ghost_sn_shared!(state_b, state_a)
-    else
-        error("_exchange_pair_ghost_shared_node_2d!: unsupported edge pair " *
-              "$edge_a → $edge_b. MVP supports only opposite-normal aligned pairs.")
+    _generic_ghost_fill_shared_2d!(state_a, edge_a, state_b, edge_b)
+    _generic_ghost_fill_shared_2d!(state_b, edge_b, state_a, edge_a)
+end
+
+# Shared-node variant: source index shifted by 1 past the shared column.
+@inline function _edge_params_shared(edge::Symbol, st::BlockState2D)
+    ng = st.n_ghost; Nξ = st.Nξ_phys; Nη = st.Nη_phys
+    if edge === :west
+        return (1, ng + 2, ng, (ng+1):(ng+Nη), Nη)
+    elseif edge === :east
+        return (1, ng + Nξ - 1, ng + Nξ + 1, (ng+1):(ng+Nη), Nη)
+    elseif edge === :south
+        return (2, ng + 2, ng, (ng+1):(ng+Nξ), Nξ)
+    elseif edge === :north
+        return (2, ng + Nη - 1, ng + Nη + 1, (ng+1):(ng+Nξ), Nξ)
     end
+end
+
+function _generic_ghost_fill_shared_2d!(dst_state::BlockState2D, dst_edge::Symbol,
+                                          src_state::BlockState2D, src_edge::Symbol)
+    src_axis, src_int, _, src_range, src_len = _edge_params_shared(src_edge, src_state)
+    dst_axis, _, dst_ghost, dst_range, dst_len = _edge_params_shared(dst_edge, dst_state)
+    src_len == dst_len || error("_generic_ghost_fill_shared_2d!: edge length mismatch ($src_len vs $dst_len)")
+
+    f_src = src_state.f; f_dst = dst_state.f
+    if src_axis == dst_axis
+        if src_axis == 1
+            @inbounds view(f_dst, dst_ghost, dst_range, :) .= view(f_src, src_int, src_range, :)
+        else
+            @inbounds view(f_dst, dst_range, dst_ghost, :) .= view(f_src, src_range, src_int, :)
+        end
+    else
+        if src_axis == 1 && dst_axis == 2
+            @inbounds for (js, id) in zip(src_range, dst_range)
+                view(f_dst, id, dst_ghost, :) .= view(f_src, src_int, js, :)
+            end
+        else
+            @inbounds for (is, jd) in zip(src_range, dst_range)
+                view(f_dst, dst_ghost, jd, :) .= view(f_src, is, src_int, :)
+            end
+        end
+    end
+    return nothing
 end
 
 function _fill_ghost_we_shared!(state_left::BlockState2D, state_right::BlockState2D)
