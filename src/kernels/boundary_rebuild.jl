@@ -141,6 +141,9 @@ abstract type AbstractBC end
 already applies halfway-BB at domain edges via PullHalfwayBB)."
 struct HalfwayBB <: AbstractBC end
 
+"Multi-block interface edge — no BC applied (ghost exchange handles it)."
+struct InterfaceBC <: AbstractBC end
+
 """
     ZouHeVelocity(profile)
 
@@ -201,8 +204,9 @@ BCSpec3D(; west::AbstractBC=HalfwayBB(), east::AbstractBC=HalfwayBB(),
 # 2D face kernels — Zou-He velocity, Zou-He pressure
 # ----------------------------------------------------------------------
 
-@kernel function _bc_west_zh_velocity_2d!(f_out, f_in, profile, s_p, s_m)
-    jm1 = @index(Global); j = jm1 + 1
+@kernel function _bc_west_zh_velocity_2d!(f_out, f_in, profile, s_p, s_m,
+                                           j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[1, j,   1]
@@ -224,8 +228,9 @@ BCSpec3D(; west::AbstractBC=HalfwayBB(), east::AbstractBC=HalfwayBB(),
     end
 end
 
-@kernel function _bc_east_zh_pressure_2d!(f_out, f_in, Nx, ρ_out, s_p, s_m)
-    jm1 = @index(Global); j = jm1 + 1
+@kernel function _bc_east_zh_pressure_2d!(f_out, f_in, Nx, ρ_out, s_p, s_m,
+                                           j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[Nx,   j,   1]
@@ -250,8 +255,9 @@ end
 # i=Nx; unknown populations after pull-stream are q=4,7,8. This enables
 # multi-block topologies (e.g. O-grid rings) where inlet/outlet migrate
 # from west/east after a transpose reorient.
-@kernel function _bc_east_zh_velocity_2d!(f_out, f_in, Nx, profile, s_p, s_m)
-    jm1 = @index(Global); j = jm1 + 1
+@kernel function _bc_east_zh_velocity_2d!(f_out, f_in, Nx, profile, s_p, s_m,
+                                           j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[Nx,   j,   1]
@@ -274,8 +280,9 @@ end
 end
 
 # West-face pressure BC, symmetric to east-pressure, for the mirror case.
-@kernel function _bc_west_zh_pressure_2d!(f_out, f_in, ρ_in, s_p, s_m)
-    jm1 = @index(Global); j = jm1 + 1
+@kernel function _bc_west_zh_pressure_2d!(f_out, f_in, ρ_in, s_p, s_m,
+                                           j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[1, j,   1]
@@ -297,30 +304,52 @@ end
 end
 
 # 2D dispatch per face. HalfwayBB is a no-op; other BCs call their kernel.
+# south_bc / north_bc: when the adjacent face is InterfaceBC, extend the
+# range to include the corner that would otherwise be skipped.
 @inline function _apply_bc_2d_west!(backend, f_out, f_in, ::HalfwayBB,
-                                     s_p, s_m, Nx, Ny) end
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing) end
+@inline function _apply_bc_2d_west!(backend, f_out, f_in, ::InterfaceBC,
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing) end
 @inline function _apply_bc_2d_west!(backend, f_out, f_in, bc::ZouHeVelocity,
-                                     s_p, s_m, Nx, Ny)
-    _bc_west_zh_velocity_2d!(backend)(f_out, f_in, bc.profile, s_p, s_m;
-                                       ndrange=(Ny - 2,))
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing)
+    j_lo = 2
+    j_hi = Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
+    _bc_west_zh_velocity_2d!(backend)(f_out, f_in, bc.profile, s_p, s_m,
+                                       j_lo - 1; ndrange=(count,))
 end
 @inline function _apply_bc_2d_west!(backend, f_out, f_in, bc::ZouHePressure,
-                                     s_p, s_m, Nx, Ny)
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing)
+    j_lo = 2
+    j_hi = Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
     _bc_west_zh_pressure_2d!(backend)(f_out, f_in, eltype(f_out)(bc.ρ_out),
-                                        s_p, s_m; ndrange=(Ny - 2,))
+                                        s_p, s_m, j_lo - 1; ndrange=(count,))
 end
 
 @inline function _apply_bc_2d_east!(backend, f_out, f_in, ::HalfwayBB,
-                                     s_p, s_m, Nx, Ny) end
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing) end
+@inline function _apply_bc_2d_east!(backend, f_out, f_in, ::InterfaceBC,
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing) end
 @inline function _apply_bc_2d_east!(backend, f_out, f_in, bc::ZouHePressure,
-                                     s_p, s_m, Nx, Ny)
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing)
+    j_lo = 2
+    j_hi = Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
     _bc_east_zh_pressure_2d!(backend)(f_out, f_in, Nx, eltype(f_out)(bc.ρ_out),
-                                        s_p, s_m; ndrange=(Ny - 2,))
+                                        s_p, s_m, j_lo - 1; ndrange=(count,))
 end
 @inline function _apply_bc_2d_east!(backend, f_out, f_in, bc::ZouHeVelocity,
-                                     s_p, s_m, Nx, Ny)
+                                     s_p, s_m, Nx, Ny; south_bc=nothing, north_bc=nothing)
+    j_lo = 2
+    j_hi = Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
     _bc_east_zh_velocity_2d!(backend)(f_out, f_in, Nx, bc.profile,
-                                        s_p, s_m; ndrange=(Ny - 2,))
+                                        s_p, s_m, j_lo - 1; ndrange=(count,))
 end
 
 # South / North wall bounce-back kernels.
@@ -352,8 +381,9 @@ end
 end
 
 # Local-tau variants: read sp/sm from 2D arrays at the face index
-@kernel function _bc_west_zh_velocity_local_2d!(f_out, f_in, profile, sp_field, sm_field)
-    jm1 = @index(Global); j = jm1 + 1
+@kernel function _bc_west_zh_velocity_local_2d!(f_out, f_in, profile, sp_field, sm_field,
+                                                  j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[1, j,   1]
@@ -376,8 +406,9 @@ end
     end
 end
 
-@kernel function _bc_east_zh_pressure_local_2d!(f_out, f_in, Nx, ρ_out, sp_field, sm_field)
-    jm1 = @index(Global); j = jm1 + 1
+@kernel function _bc_east_zh_pressure_local_2d!(f_out, f_in, Nx, ρ_out, sp_field, sm_field,
+                                                  j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[Nx,   j,   1]
@@ -400,8 +431,9 @@ end
 end
 
 @kernel function _bc_east_zh_velocity_local_2d!(f_out, f_in, Nx, profile,
-                                                    sp_field, sm_field)
-    jm1 = @index(Global); j = jm1 + 1
+                                                    sp_field, sm_field,
+                                                    j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[Nx,   j,   1]
@@ -425,8 +457,9 @@ end
 end
 
 @kernel function _bc_west_zh_pressure_local_2d!(f_out, f_in, ρ_in,
-                                                   sp_field, sm_field)
-    jm1 = @index(Global); j = jm1 + 1
+                                                   sp_field, sm_field,
+                                                   j_shift::Int=1)
+    jm1 = @index(Global); j = jm1 + j_shift
     T = eltype(f_out)
     @inbounds begin
         fp1 = f_in[1, j,   1]
@@ -449,53 +482,70 @@ end
 end
 
 @inline function _apply_bc_2d_west_local!(backend, f_out, f_in, ::HalfwayBB,
-                                           sp_field, sm_field, Nx, Ny) end
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing) end
+@inline function _apply_bc_2d_west_local!(backend, f_out, f_in, ::InterfaceBC,
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing) end
 @inline function _apply_bc_2d_west_local!(backend, f_out, f_in, bc::ZouHeVelocity,
-                                           sp_field, sm_field, Nx, Ny)
-    _bc_west_zh_velocity_local_2d!(backend)(f_out, f_in, bc.profile, sp_field, sm_field;
-                                             ndrange=(Ny - 2,))
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing)
+    j_lo = (south_bc isa InterfaceBC) ? 1 : 2
+    j_hi = (north_bc isa InterfaceBC) ? Ny : Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
+    _bc_west_zh_velocity_local_2d!(backend)(f_out, f_in, bc.profile, sp_field, sm_field,
+                                             j_lo - 1; ndrange=(count,))
 end
 @inline function _apply_bc_2d_west_local!(backend, f_out, f_in, bc::ZouHePressure,
-                                           sp_field, sm_field, Nx, Ny)
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing)
+    j_lo = (south_bc isa InterfaceBC) ? 1 : 2
+    j_hi = (north_bc isa InterfaceBC) ? Ny : Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
     _bc_west_zh_pressure_local_2d!(backend)(f_out, f_in, eltype(f_out)(bc.ρ_out),
-                                              sp_field, sm_field; ndrange=(Ny - 2,))
+                                              sp_field, sm_field, j_lo - 1; ndrange=(count,))
 end
 @inline function _apply_bc_2d_east_local!(backend, f_out, f_in, ::HalfwayBB,
-                                           sp_field, sm_field, Nx, Ny) end
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing) end
+@inline function _apply_bc_2d_east_local!(backend, f_out, f_in, ::InterfaceBC,
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing) end
 @inline function _apply_bc_2d_east_local!(backend, f_out, f_in, bc::ZouHeVelocity,
-                                           sp_field, sm_field, Nx, Ny)
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing)
+    j_lo = (south_bc isa InterfaceBC) ? 1 : 2
+    j_hi = (north_bc isa InterfaceBC) ? Ny : Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
     _bc_east_zh_velocity_local_2d!(backend)(f_out, f_in, Nx, bc.profile,
-                                              sp_field, sm_field; ndrange=(Ny - 2,))
+                                              sp_field, sm_field, j_lo - 1; ndrange=(count,))
 end
 @inline function _apply_bc_2d_east_local!(backend, f_out, f_in, bc::ZouHePressure,
-                                           sp_field, sm_field, Nx, Ny)
+                                           sp_field, sm_field, Nx, Ny;
+                                           south_bc=nothing, north_bc=nothing)
+    j_lo = (south_bc isa InterfaceBC) ? 1 : 2
+    j_hi = (north_bc isa InterfaceBC) ? Ny : Ny - 1
+    count = j_hi - j_lo + 1
+    count ≤ 0 && return nothing
     _bc_east_zh_pressure_local_2d!(backend)(f_out, f_in, Nx, eltype(f_out)(bc.ρ_out),
-                                              sp_field, sm_field; ndrange=(Ny - 2,))
+                                              sp_field, sm_field, j_lo - 1; ndrange=(count,))
 end
 
+@inline function _apply_bc_2d_south!(backend, f_out, f_in, ::InterfaceBC,
+                                      s_p, s_m, Nx, Ny;
+                                      west_bc=nothing, east_bc=nothing) end
 @inline function _apply_bc_2d_south!(backend, f_out, f_in, ::HalfwayBB,
                                       s_p, s_m, Nx, Ny;
-                                      west_bc=nothing, east_bc=nothing)
-    # Include i=1 if west is HalfwayBB (wall/interface); skip otherwise
-    # because ZouHe writers want to own the corner (legacy single-block
-    # behaviour). Same on i=Nx. When multi-block has east=:interface
-    # (HalfwayBB), the south BB must fire at i=Nx so the interface-wall
-    # corner matches what single-block would compute at the same x.
-    i_lo = (west_bc isa HalfwayBB || west_bc === nothing) ? 1 : 2
-    i_hi = (east_bc isa HalfwayBB || east_bc === nothing) ? Nx : Nx - 1
-    count = i_hi - i_lo + 1
-    count ≤ 0 && return nothing
-    _bc_south_halfwaybb_2d!(backend)(f_out, f_in, Ny, i_lo - 1; ndrange=(count,))
-end
+                                      west_bc=nothing, east_bc=nothing) end
+@inline function _apply_bc_2d_north!(backend, f_out, f_in, ::InterfaceBC,
+                                      s_p, s_m, Nx, Ny;
+                                      west_bc=nothing, east_bc=nothing) end
 @inline function _apply_bc_2d_north!(backend, f_out, f_in, ::HalfwayBB,
                                       s_p, s_m, Nx, Ny;
-                                      west_bc=nothing, east_bc=nothing)
-    i_lo = (west_bc isa HalfwayBB || west_bc === nothing) ? 1 : 2
-    i_hi = (east_bc isa HalfwayBB || east_bc === nothing) ? Nx : Nx - 1
-    count = i_hi - i_lo + 1
-    count ≤ 0 && return nothing
-    _bc_north_halfwaybb_2d!(backend)(f_out, f_in, Ny, i_lo - 1; ndrange=(count,))
-end
+                                      west_bc=nothing, east_bc=nothing) end
 
 """
     apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν, Nx, Ny;
@@ -520,11 +570,15 @@ function apply_bc_rebuild_2d!(f_out, f_in, bcspec::BCSpec2D, ν::Real,
     s_p_uni = T(s_p_r); s_m_uni = T(s_m_r)
 
     if isnothing(sp_field)
-        _apply_bc_2d_west!(backend, f_out, f_in, bcspec.west, s_p_uni, s_m_uni, Nx, Ny)
-        _apply_bc_2d_east!(backend, f_out, f_in, bcspec.east, s_p_uni, s_m_uni, Nx, Ny)
+        _apply_bc_2d_west!(backend, f_out, f_in, bcspec.west, s_p_uni, s_m_uni, Nx, Ny;
+                             south_bc=bcspec.south, north_bc=bcspec.north)
+        _apply_bc_2d_east!(backend, f_out, f_in, bcspec.east, s_p_uni, s_m_uni, Nx, Ny;
+                             south_bc=bcspec.south, north_bc=bcspec.north)
     else
-        _apply_bc_2d_west_local!(backend, f_out, f_in, bcspec.west, sp_field, sm_field, Nx, Ny)
-        _apply_bc_2d_east_local!(backend, f_out, f_in, bcspec.east, sp_field, sm_field, Nx, Ny)
+        _apply_bc_2d_west_local!(backend, f_out, f_in, bcspec.west, sp_field, sm_field, Nx, Ny;
+                                   south_bc=bcspec.south, north_bc=bcspec.north)
+        _apply_bc_2d_east_local!(backend, f_out, f_in, bcspec.east, sp_field, sm_field, Nx, Ny;
+                                   south_bc=bcspec.south, north_bc=bcspec.north)
     end
     _apply_bc_2d_south!(backend, f_out, f_in, bcspec.south, s_p_uni, s_m_uni, Nx, Ny;
                           west_bc=bcspec.west, east_bc=bcspec.east)
