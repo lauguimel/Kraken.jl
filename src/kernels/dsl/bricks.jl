@@ -53,6 +53,22 @@ emit_code(::PullSLBM) = quote
     fp9 = bilinear_f(f_in, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nx, Ny, periodic_ξ, periodic_η)
 end
 
+"Semi-Lagrangian pull D2Q9 with biquadratic (3×3 Lagrange) interpolation. O(Δx³) instead of O(Δx²) for bilinear — critical on stretched meshes where the interpolation error dominates the numerical diffusion."
+struct PullSLBMBiquad <: LBMBrick end
+required_args(::PullSLBMBiquad) = (:f_in, :is_solid, :i_dep, :j_dep, :Nx, :Ny, :periodic_ξ, :periodic_η)
+phase(::PullSLBMBiquad) = :pre_solid
+emit_code(::PullSLBMBiquad) = quote
+    fp1 = biquadratic_f(f_in, is_solid, i_dep[i, j, 1], j_dep[i, j, 1], 1, Nx, Ny, periodic_ξ, periodic_η)
+    fp2 = biquadratic_f(f_in, is_solid, i_dep[i, j, 2], j_dep[i, j, 2], 2, Nx, Ny, periodic_ξ, periodic_η)
+    fp3 = biquadratic_f(f_in, is_solid, i_dep[i, j, 3], j_dep[i, j, 3], 3, Nx, Ny, periodic_ξ, periodic_η)
+    fp4 = biquadratic_f(f_in, is_solid, i_dep[i, j, 4], j_dep[i, j, 4], 4, Nx, Ny, periodic_ξ, periodic_η)
+    fp5 = biquadratic_f(f_in, is_solid, i_dep[i, j, 5], j_dep[i, j, 5], 5, Nx, Ny, periodic_ξ, periodic_η)
+    fp6 = biquadratic_f(f_in, is_solid, i_dep[i, j, 6], j_dep[i, j, 6], 6, Nx, Ny, periodic_ξ, periodic_η)
+    fp7 = biquadratic_f(f_in, is_solid, i_dep[i, j, 7], j_dep[i, j, 7], 7, Nx, Ny, periodic_ξ, periodic_η)
+    fp8 = biquadratic_f(f_in, is_solid, i_dep[i, j, 8], j_dep[i, j, 8], 8, Nx, Ny, periodic_ξ, periodic_η)
+    fp9 = biquadratic_f(f_in, is_solid, i_dep[i, j, 9], j_dep[i, j, 9], 9, Nx, Ny, periodic_ξ, periodic_η)
+end
+
 "Non-equilibrium rescaling for SLBM on non-uniform meshes. After interpolation, the f_neq part is scaled for the departure cell tau. This brick corrects it to the arrival cell tau: f = f_eq + (τ_arr-0.5)/(τ_dep-0.5) * f_neq."
 struct RescaleNonEq <: LBMBrick end
 required_args(::RescaleNonEq) = (:s_plus, :i_dep, :j_dep, :Nx, :Ny, :periodic_ξ, :periodic_η)
@@ -199,6 +215,59 @@ emit_code(::CollideTRTLocalDirect) = quote
     f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6)
     f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9)
     f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7)
+end
+
+"""Regularized TRT collision with per-cell rates (Latt & Chopard 2006).
+Reconstructs f_neq from the physical stress tensor Π⁽¹⁾ only, filtering
+ghost modes that cause instability at τ→0.5. The TRT magic parameter
+is embedded in s_minus. Stable down to τ ≈ 0.5001."""
+struct CollideRegularizedTRTLocal <: LBMBrick end
+required_args(::CollideRegularizedTRTLocal) = (:f_out, :s_plus, :s_minus)
+emit_code(::CollideRegularizedTRTLocal) = quote
+    feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
+    feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
+    feq3 = feq_2d(Val(3), ρ, ux, uy, usq)
+    feq4 = feq_2d(Val(4), ρ, ux, uy, usq)
+    feq5 = feq_2d(Val(5), ρ, ux, uy, usq)
+    feq6 = feq_2d(Val(6), ρ, ux, uy, usq)
+    feq7 = feq_2d(Val(7), ρ, ux, uy, usq)
+    feq8 = feq_2d(Val(8), ρ, ux, uy, usq)
+    feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
+    sp_local = s_plus[i, j]
+    sm_local = s_minus[i, j]
+    # Stress tensor Π⁽¹⁾ = Σ_q c_qi c_qj (f_q - f_q^eq)
+    # D2Q9 velocities: q1=(0,0), q2=(1,0), q3=(0,1), q4=(-1,0), q5=(0,-1),
+    #                  q6=(1,1), q7=(-1,1), q8=(-1,-1), q9=(1,-1)
+    Pxx = (fp2-feq2) + (fp4-feq4) + (fp6-feq6) + (fp7-feq7) + (fp8-feq8) + (fp9-feq9)
+    Pyy = (fp3-feq3) + (fp5-feq5) + (fp6-feq6) + (fp7-feq7) + (fp8-feq8) + (fp9-feq9)
+    Pxy = (fp6-feq6) - (fp7-feq7) + (fp8-feq8) - (fp9-feq9)
+    # Reconstruct regularized f_neq from Π only (Latt 2006, Eq. 17)
+    # f_neq_reg[q] = w[q]/(2 cs⁴) × (c_qi c_qj - cs² δ_ij) Π_ij
+    # cs² = 1/3, cs⁴ = 1/9
+    # For q=1 (0,0): (-1/3 Pxx - 1/3 Pyy) × 4/9 / (2/9) = ...
+    # Simplified per-direction formulas:
+    inv2 = T(0.5)
+    fneq1 = -inv2 * T(2/9) * (Pxx + Pyy)
+    fneq2 =  inv2 * T(1/9) * (T(2)*Pxx - Pyy)
+    fneq3 =  inv2 * T(1/9) * (-Pxx + T(2)*Pyy)
+    fneq4 =  inv2 * T(1/9) * (T(2)*Pxx - Pyy)
+    fneq5 =  inv2 * T(1/9) * (-Pxx + T(2)*Pyy)
+    fneq6 =  inv2 * T(1/36) * (Pxx + Pyy) + T(1/4) * Pxy
+    fneq7 =  inv2 * T(1/36) * (Pxx + Pyy) - T(1/4) * Pxy
+    fneq8 =  inv2 * T(1/36) * (Pxx + Pyy) + T(1/4) * Pxy
+    fneq9 =  inv2 * T(1/36) * (Pxx + Pyy) - T(1/4) * Pxy
+    # TRT relaxation on regularized f_neq (symmetric/antisymmetric split)
+    a = (sp_local + sm_local) * T(0.5)
+    b = (sp_local - sm_local) * T(0.5)
+    f_out[i, j, 1] = feq1 + (one(T) - sp_local) * fneq1
+    f_out[i, j, 2] = feq2 + (one(T) - a) * fneq2 - b * fneq4
+    f_out[i, j, 4] = feq4 + (one(T) - a) * fneq4 - b * fneq2
+    f_out[i, j, 3] = feq3 + (one(T) - a) * fneq3 - b * fneq5
+    f_out[i, j, 5] = feq5 + (one(T) - a) * fneq5 - b * fneq3
+    f_out[i, j, 6] = feq6 + (one(T) - a) * fneq6 - b * fneq8
+    f_out[i, j, 8] = feq8 + (one(T) - a) * fneq8 - b * fneq6
+    f_out[i, j, 7] = feq7 + (one(T) - a) * fneq7 - b * fneq9
+    f_out[i, j, 9] = feq9 + (one(T) - a) * fneq9 - b * fneq7
 end
 
 "TRT collision, written directly to f_out[i, j, :]. Matches fused_trt_step_kernel!."

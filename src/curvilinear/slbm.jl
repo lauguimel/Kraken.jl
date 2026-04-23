@@ -943,6 +943,22 @@ const _SLBM_TRT_LIBB_LOCAL_SPEC_2D = LBMSpec(
     stencil = :D2Q9,
 )
 
+const _SLBM_TRT_LIBB_LOCAL_BIQUAD_SPEC_2D = LBMSpec(
+    PullSLBMBiquad(), SolidInert(),
+    ApplyLiBBPrePhase(),
+    Moments(), CollideTRTLocalDirect(),
+    WriteMoments();
+    stencil = :D2Q9,
+)
+
+const _SLBM_REG_LIBB_LOCAL_SPEC_2D = LBMSpec(
+    PullSLBM(), SolidInert(),
+    ApplyLiBBPrePhase(),
+    Moments(), CollideRegularizedTRTLocal(),
+    WriteMoments();
+    stencil = :D2Q9,
+)
+
 """
     slbm_trt_libb_step_local_2d!(f_out, f_in, ρ, ux, uy, is_solid,
                                   q_wall, uw_link_x, uw_link_y,
@@ -960,6 +976,44 @@ function slbm_trt_libb_step_local_2d!(f_out, f_in, ρ, ux, uy, is_solid,
                                         sp_field, sm_field)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = build_lbm_kernel(backend, _SLBM_TRT_LIBB_LOCAL_SPEC_2D)
+    kernel!(f_out, ρ, ux, uy, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y,
+            geom.i_dep, geom.j_dep,
+            geom.Nξ, geom.Nη,
+            sp_field, sm_field,
+            geom.periodic_ξ, geom.periodic_η;
+            ndrange=(geom.Nξ, geom.Nη))
+end
+
+"""
+    slbm_reg_libb_step_local_2d!(...)
+
+SLBM + Regularized TRT + LI-BB step (D2Q9). Uses Latt & Chopard (2006)
+regularization: reconstructs f_neq from the stress tensor Π⁽¹⁾ only,
+filtering ghost modes. Stable at τ→0.5 on stretched meshes where the
+standard TRT/BGK collision diverges.
+"""
+function slbm_reg_libb_step_local_2d!(f_out, f_in, ρ, ux, uy, is_solid,
+                                        q_wall, uw_link_x, uw_link_y,
+                                        geom::SLBMGeometry,
+                                        sp_field, sm_field)
+    backend = KernelAbstractions.get_backend(f_in)
+    kernel! = build_lbm_kernel(backend, _SLBM_REG_LIBB_LOCAL_SPEC_2D)
+    kernel!(f_out, ρ, ux, uy, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y,
+            geom.i_dep, geom.j_dep,
+            geom.Nξ, geom.Nη,
+            sp_field, sm_field,
+            geom.periodic_ξ, geom.periodic_η;
+            ndrange=(geom.Nξ, geom.Nη))
+end
+
+function slbm_trt_libb_step_local_biquad_2d!(f_out, f_in, ρ, ux, uy, is_solid,
+                                               q_wall, uw_link_x, uw_link_y,
+                                               geom::SLBMGeometry,
+                                               sp_field, sm_field)
+    backend = KernelAbstractions.get_backend(f_in)
+    kernel! = build_lbm_kernel(backend, _SLBM_TRT_LIBB_LOCAL_BIQUAD_SPEC_2D)
     kernel!(f_out, ρ, ux, uy, f_in, is_solid,
             q_wall, uw_link_x, uw_link_y,
             geom.i_dep, geom.j_dep,

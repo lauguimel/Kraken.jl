@@ -76,6 +76,67 @@ to ``\nu \geq 0.00175`` in lattice units.
 @show ν_min  # ≈ 0.00877
 ```
 
+## Why τ must be strictly greater than 1/2
+
+The relaxation time ``\tau`` is the single most important parameter in LBM.
+It controls the kinematic viscosity through the Chapman--Enskog relation:
+
+```math
+\nu = \frac{1}{3}\left(\tau - \frac{1}{2}\right) \Delta x^2 / \Delta t
+```
+
+On a standard lattice where ``\Delta x = \Delta t = 1``, this simplifies to
+``\nu = (\tau - 1/2)/3``.
+
+**Physical interpretation.** After streaming, the populations at each node
+are out of equilibrium. The collision step relaxes them toward ``f^{\text{eq}}``
+at a rate ``\omega = 1/\tau``. A large ``\tau`` means slow relaxation (high
+viscosity, strongly damped). A small ``\tau`` means fast relaxation (low
+viscosity, weakly damped).
+
+**The ``\tau = 1/2`` singularity.** At ``\tau = 1/2`` (``\omega = 2``),
+the collision step *overshoots* equilibrium and exactly mirrors the
+non-equilibrium part:
+
+```math
+f^{\star} = f - 2(f - f^{\text{eq}}) = 2f^{\text{eq}} - f
+```
+
+This is an involution (applying it twice returns to the original ``f``).
+There is no net dissipation — ``\nu = 0``. The simulation has zero viscosity,
+meaning even the smallest perturbation is never damped and grows until the
+low-Mach assumption breaks. In practice, ``\tau < 0.5`` gives **negative
+viscosity** (anti-diffusion, exponential blowup).
+
+**On non-uniform meshes.** When cells have different physical sizes
+``\Delta x_{\text{local}}``, maintaining a uniform target viscosity ``\nu``
+requires adjusting ``\tau`` per cell. For a global time step ``\Delta t``:
+
+```math
+\tau_{\text{local}} = \frac{3\nu \, \Delta t}{\Delta x_{\text{local}}^2} + \frac{1}{2}
+= \left(\frac{\Delta x_{\text{ref}}}{\Delta x_{\text{local}}}\right)^2 (\tau_{\text{ref}} - \tfrac{1}{2}) + \frac{1}{2}
+```
+
+Large cells (``\Delta x_{\text{local}} \gg \Delta x_{\text{ref}}``) push
+``\tau_{\text{local}} \to 1/2``, making those cells near-inviscid and
+numerically unstable. This is the fundamental challenge of the LBM on
+stretched meshes.
+
+**Mitigations:**
+
+| Strategy | Mechanism | Trade-off |
+|:---------|:----------|:----------|
+| ``\tau_{\text{floor}}`` clamp | Set ``\tau \geq 0.55`` everywhere | Adds numerical viscosity at large cells |
+| Limit stretching ratio | Keep ``\max(\Delta x) / \min(\Delta x) \leq 3`` | Limits mesh flexibility |
+| MRT / cumulant collision | Separate physical and ghost relaxation rates | More complex kernel, ~20% slower |
+| Regularized collision | Filter non-hydrodynamic modes before relaxation | Stable at ``\tau \to 0.5``, same cost |
+
+The regularized collision operator (Latt & Chopard 2006) is especially
+effective: it reconstructs the non-equilibrium part solely from the
+physical stress tensor ``\Pi^{(1)}``, discarding the higher-order
+ghost modes that cause instability. The viscosity relation is unchanged,
+so accuracy is preserved.
+
 ## Resolution requirements
 
 Under grid refinement, the key constraint is that all non-dimensional

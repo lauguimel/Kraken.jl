@@ -20,18 +20,32 @@ using KernelAbstractions
     fe7 = feq_2d(Val(7), ρ, ux, uy, usq)
     fe8 = feq_2d(Val(8), ρ, ux, uy, usq)
     fe9 = feq_2d(Val(9), ρ, ux, uy, usq)
-    a = (s_p + s_m) * T(0.5)
-    b = (s_p - s_m) * T(0.5)
+    # Regularized TRT: reconstruct f_neq from stress tensor Π only
+    Pxx = (f2-fe2) + (f4-fe4) + (f6-fe6) + (f7-fe7) + (f8-fe8) + (f9-fe9)
+    Pyy = (f3-fe3) + (f5-fe5) + (f6-fe6) + (f7-fe7) + (f8-fe8) + (f9-fe9)
+    Pxy = (f6-fe6) - (f7-fe7) + (f8-fe8) - (f9-fe9)
+    h = T(0.5)
+    fn1 = -h * T(2/9) * (Pxx + Pyy)
+    fn2 =  h * T(1/9) * (T(2)*Pxx - Pyy)
+    fn3 =  h * T(1/9) * (-Pxx + T(2)*Pyy)
+    fn4 =  fn2
+    fn5 =  fn3
+    fn6 =  h * T(1/36) * (Pxx + Pyy) + T(1/4) * Pxy
+    fn7 =  h * T(1/36) * (Pxx + Pyy) - T(1/4) * Pxy
+    fn8 =  fn6
+    fn9 =  fn7
+    a = (s_p + s_m) * h
+    b = (s_p - s_m) * h
     return (
-        f1 - s_p * (f1 - fe1),
-        f2 - a * (f2 - fe2) - b * (f4 - fe4),
-        f3 - a * (f3 - fe3) - b * (f5 - fe5),
-        f4 - a * (f4 - fe4) - b * (f2 - fe2),
-        f5 - a * (f5 - fe5) - b * (f3 - fe3),
-        f6 - a * (f6 - fe6) - b * (f8 - fe8),
-        f7 - a * (f7 - fe7) - b * (f9 - fe9),
-        f8 - a * (f8 - fe8) - b * (f6 - fe6),
-        f9 - a * (f9 - fe9) - b * (f7 - fe7),
+        fe1 + (one(T) - s_p) * fn1,
+        fe2 + (one(T) - a) * fn2 - b * fn4,
+        fe3 + (one(T) - a) * fn3 - b * fn5,
+        fe4 + (one(T) - a) * fn4 - b * fn2,
+        fe5 + (one(T) - a) * fn5 - b * fn3,
+        fe6 + (one(T) - a) * fn6 - b * fn8,
+        fe7 + (one(T) - a) * fn7 - b * fn9,
+        fe8 + (one(T) - a) * fn8 - b * fn6,
+        fe9 + (one(T) - a) * fn9 - b * fn7,
     )
 end
 
@@ -498,7 +512,8 @@ This is needed for SLBM on non-uniform meshes where τ varies per cell.
 """
 function apply_bc_rebuild_2d!(f_out, f_in, bcspec::BCSpec2D, ν::Real,
                                 Nx::Int, Ny::Int;
-                                sp_field=nothing, sm_field=nothing)
+                                sp_field=nothing, sm_field=nothing,
+                                ρ_out=nothing, ux_out=nothing, uy_out=nothing)
     backend = KernelAbstractions.get_backend(f_out)
     T = eltype(f_out)
     s_p_r, s_m_r = trt_rates(ν; Λ=3/16)
@@ -515,7 +530,58 @@ function apply_bc_rebuild_2d!(f_out, f_in, bcspec::BCSpec2D, ν::Real,
                           west_bc=bcspec.west, east_bc=bcspec.east)
     _apply_bc_2d_north!(backend, f_out, f_in, bcspec.north, s_p_uni, s_m_uni, Nx, Ny;
                           west_bc=bcspec.west, east_bc=bcspec.east)
+
+    if !isnothing(ρ_out)
+        _update_bc_moments_2d!(f_out, ρ_out, ux_out, uy_out, bcspec, Nx, Ny)
+    end
     return nothing
+end
+
+@kernel function _recompute_moments_row_2d!(f, ρ, ux, uy, i_fix::Int)
+    j = @index(Global)
+    @inbounds begin
+        f1=f[i_fix,j,1]; f2=f[i_fix,j,2]; f3=f[i_fix,j,3]
+        f4=f[i_fix,j,4]; f5=f[i_fix,j,5]; f6=f[i_fix,j,6]
+        f7=f[i_fix,j,7]; f8=f[i_fix,j,8]; f9=f[i_fix,j,9]
+        r = f1+f2+f3+f4+f5+f6+f7+f8+f9
+        ρ[i_fix,j] = r
+        inv_r = one(r) / r
+        ux[i_fix,j] = (f2-f4+f6-f7-f8+f9) * inv_r
+        uy[i_fix,j] = (f3-f5+f6+f7-f8-f9) * inv_r
+    end
+end
+
+@kernel function _recompute_moments_col_2d!(f, ρ, ux, uy, j_fix::Int)
+    i = @index(Global)
+    @inbounds begin
+        f1=f[i,j_fix,1]; f2=f[i,j_fix,2]; f3=f[i,j_fix,3]
+        f4=f[i,j_fix,4]; f5=f[i,j_fix,5]; f6=f[i,j_fix,6]
+        f7=f[i,j_fix,7]; f8=f[i,j_fix,8]; f9=f[i,j_fix,9]
+        r = f1+f2+f3+f4+f5+f6+f7+f8+f9
+        ρ[i,j_fix] = r
+        inv_r = one(r) / r
+        ux[i,j_fix] = (f2-f4+f6-f7-f8+f9) * inv_r
+        uy[i,j_fix] = (f3-f5+f6+f7-f8-f9) * inv_r
+    end
+end
+
+function _update_bc_moments_2d!(f_out, ρ, ux, uy, bcspec, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f_out)
+    k_row = _recompute_moments_row_2d!(backend)
+    k_col = _recompute_moments_col_2d!(backend)
+    if !(bcspec.west isa HalfwayBB)
+        k_row(f_out, ρ, ux, uy, 1; ndrange=Ny)
+    end
+    if !(bcspec.east isa HalfwayBB)
+        k_row(f_out, ρ, ux, uy, Nx; ndrange=Ny)
+    end
+    if !(bcspec.south isa HalfwayBB)
+        k_col(f_out, ρ, ux, uy, 1; ndrange=Nx)
+    end
+    if !(bcspec.north isa HalfwayBB)
+        k_col(f_out, ρ, ux, uy, Ny; ndrange=Nx)
+    end
+    KernelAbstractions.synchronize(backend)
 end
 
 # ----------------------------------------------------------------------
