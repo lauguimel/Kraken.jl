@@ -235,3 +235,66 @@ function _fill_ghost_sn_shared!(state_bot::BlockState2D, state_top::BlockState2D
     end
     return nothing
 end
+
+# =====================================================================
+# Ghost-corner fill (Phase B.2+).
+#
+# After edge exchange, the 4 corner ghost cells of each block's extended
+# array are still unfilled. For D2Q9, diagonal populations (q=6,7,8,9)
+# at a physical corner cell pull from these ghost corners. Unfilled
+# corners contain stale data from the previous step's kernel (which
+# wrote BB garbage there), causing exponential growth at interface
+# intersections.
+#
+# Fix: extrapolate each corner from the adjacent ghost edge cell
+# (zero-th order copy). This is called AFTER edge exchange so the
+# ghost edges already contain correct neighbor data.
+# =====================================================================
+
+"""
+    fill_ghost_corners_2d!(mbm::MultiBlockMesh2D,
+                            states::AbstractVector{<:BlockState2D})
+
+Fill the 4 ghost-corner cells of each block by copying from the nearest
+ghost-edge cell. Must be called AFTER edge exchange (both non-overlap
+and shared-node variants) and BEFORE `fill_physical_wall_ghost_2d!`.
+
+For a block of extended size `(Nxe, Nye)` with `ng=1`:
+- SW corner `f[1, 1, :]`       ← `f[2, 1, :]`  (from west ghost row at south ghost j)
+- SE corner `f[Nxe, 1, :]`     ← `f[Nxe-1, 1, :]`
+- NW corner `f[1, Nye, :]`     ← `f[2, Nye, :]`
+- NE corner `f[Nxe, Nye, :]`   ← `f[Nxe-1, Nye, :]`
+
+Fills corners where at least one adjacent edge is `:interface`
+(pure wall-wall corners are handled by `fill_physical_wall_ghost_2d!`).
+"""
+function fill_ghost_corners_2d!(mbm::MultiBlockMesh2D,
+                                  states::AbstractVector{<:BlockState2D})
+    for (k, blk) in enumerate(mbm.blocks)
+        st = states[k]
+        ng = st.n_ghost
+        Nxe, Nye = ext_dims(st)
+        tags = blk.boundary_tags
+        iW = tags.west  === INTERFACE_TAG
+        iE = tags.east  === INTERFACE_TAG
+        iS = tags.south === INTERFACE_TAG
+        iN = tags.north === INTERFACE_TAG
+        # SW corner: at least one of west/south is interface
+        if iW || iS
+            @inbounds st.f[ng, ng, :] .= st.f[ng + 1, ng, :]
+        end
+        # SE corner
+        if iE || iS
+            @inbounds st.f[Nxe - ng + 1, ng, :] .= st.f[Nxe - ng, ng, :]
+        end
+        # NW corner
+        if iW || iN
+            @inbounds st.f[ng, Nye - ng + 1, :] .= st.f[ng + 1, Nye - ng + 1, :]
+        end
+        # NE corner
+        if iE || iN
+            @inbounds st.f[Nxe - ng + 1, Nye - ng + 1, :] .= st.f[Nxe - ng, Nye - ng + 1, :]
+        end
+    end
+    return nothing
+end
