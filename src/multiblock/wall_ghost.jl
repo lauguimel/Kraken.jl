@@ -234,7 +234,6 @@ reflected populations with more accurate halfway-BB values.
 """
 function fill_slbm_wall_ghost_2d!(mbm::MultiBlockMesh2D,
                                     states::AbstractVector{<:BlockState2D})
-    _EXTRAP_TAGS = (:inlet, :outlet)
     for (k, blk) in enumerate(mbm.blocks)
         st = states[k]
         ng = st.n_ghost; Nxp = st.Nξ_phys; Nyp = st.Nη_phys
@@ -243,29 +242,20 @@ function fill_slbm_wall_ghost_2d!(mbm::MultiBlockMesh2D,
         for edge in EDGE_SYMBOLS_2D
             tag = getproperty(blk.boundary_tags, edge)
             tag === INTERFACE_TAG && continue
-            use_extrap = tag in _EXTRAP_TAGS
+            # Zeroth-order copy for all physical edges (wall, inlet, outlet).
+            # Linear extrapolation at inlet/outlet was unstable with SLBM
+            # because ZouHe-reconstructed boundary pops create non-physical
+            # gradients that the extrapolation amplifies.
             if edge === :west || edge === :east
                 i_ghost = edge === :west ? ng      : ng + Nxp + 1
                 i_bd    = edge === :west ? ng + 1  : ng + Nxp
-                if use_extrap
-                    i_inner = edge === :west ? ng + 2  : ng + Nxp - 1
-                    kernel = _extrap_col_kernel_2d!(backend)
-                    kernel(st.f, i_ghost, i_bd, i_inner; ndrange=(Nye, 9))
-                else
-                    kernel = _copy_col_kernel_2d!(backend)
-                    kernel(st.f, i_ghost, i_bd; ndrange=(Nye, 9))
-                end
+                kernel = _copy_col_kernel_2d!(backend)
+                kernel(st.f, i_ghost, i_bd; ndrange=(Nye, 9))
             else
                 j_ghost = edge === :south ? ng     : ng + Nyp + 1
                 j_bd    = edge === :south ? ng + 1 : ng + Nyp
-                if use_extrap
-                    j_inner = edge === :south ? ng + 2  : ng + Nyp - 1
-                    kernel = _extrap_row_kernel_2d!(backend)
-                    kernel(st.f, j_ghost, j_bd, j_inner; ndrange=(Nxe, 9))
-                else
-                    kernel = _copy_row_kernel_2d!(backend)
-                    kernel(st.f, j_ghost, j_bd; ndrange=(Nxe, 9))
-                end
+                kernel = _copy_row_kernel_2d!(backend)
+                kernel(st.f, j_ghost, j_bd; ndrange=(Nxe, 9))
             end
         end
         KernelAbstractions.synchronize(backend)
