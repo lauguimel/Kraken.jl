@@ -378,21 +378,22 @@ function fill_ghost_corners_2d!(mbm::MultiBlockMesh2D,
         iE = tags.east  === INTERFACE_TAG
         iS = tags.south === INTERFACE_TAG
         iN = tags.north === INTERFACE_TAG
-        # SW corner: at least one of west/south is interface
+        # Bilinear extrapolation: corner = edge_a + edge_b - interior
+        # SW corner
         if iW || iS
-            @inbounds st.f[ng, ng, :] .= st.f[ng + 1, ng, :]
+            @inbounds st.f[ng, ng, :] .= st.f[ng+1, ng, :] .+ st.f[ng, ng+1, :] .- st.f[ng+1, ng+1, :]
         end
         # SE corner
         if iE || iS
-            @inbounds st.f[Nxe - ng + 1, ng, :] .= st.f[Nxe - ng, ng, :]
+            @inbounds st.f[Nxe-ng+1, ng, :] .= st.f[Nxe-ng, ng, :] .+ st.f[Nxe-ng+1, ng+1, :] .- st.f[Nxe-ng, ng+1, :]
         end
         # NW corner
         if iW || iN
-            @inbounds st.f[ng, Nye - ng + 1, :] .= st.f[ng + 1, Nye - ng + 1, :]
+            @inbounds st.f[ng, Nye-ng+1, :] .= st.f[ng+1, Nye-ng+1, :] .+ st.f[ng, Nye-ng, :] .- st.f[ng+1, Nye-ng, :]
         end
         # NE corner
         if iE || iN
-            @inbounds st.f[Nxe - ng + 1, Nye - ng + 1, :] .= st.f[Nxe - ng, Nye - ng + 1, :]
+            @inbounds st.f[Nxe-ng+1, Nye-ng+1, :] .= st.f[Nxe-ng, Nye-ng+1, :] .+ st.f[Nxe-ng+1, Nye-ng, :] .- st.f[Nxe-ng, Nye-ng, :]
         end
     end
     return nothing
