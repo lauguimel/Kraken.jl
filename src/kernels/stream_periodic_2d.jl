@@ -6,6 +6,10 @@ using KernelAbstractions
     i, j = @index(Global, NTuple)
 
     @inbounds begin
+        # Clamped indices to avoid out-of-bounds in ifelse (both branches evaluated)
+        jm = max(j - 1, 1)
+        jp = min(j + 1, Ny)
+
         # Rest population (q=1): no movement
         fp1 = f_in[i, j, 1]
 
@@ -14,30 +18,30 @@ using KernelAbstractions
         fp2 = f_in[i_src, j, 2]
 
         # q=3: N (0,+1) — pull from (i, j-1), bounce-back at bottom wall
-        fp3 = ifelse(j > 1, f_in[i, j-1, 3], f_in[i, j, 5])
+        fp3 = ifelse(j > 1, f_in[i, jm, 3], f_in[i, j, 5])
 
         # q=4: W (-1,0) — pull from (i+1, j), periodic in x
         i_src = ifelse(i < Nx, i + 1, 1)
         fp4 = f_in[i_src, j, 4]
 
         # q=5: S (0,-1) — pull from (i, j+1), bounce-back at top wall
-        fp5 = ifelse(j < Ny, f_in[i, j+1, 5], f_in[i, j, 3])
+        fp5 = ifelse(j < Ny, f_in[i, jp, 5], f_in[i, j, 3])
 
         # q=6: NE (+1,+1) — pull from (i-1, j-1)
         i_src = ifelse(i > 1, i - 1, Nx)
-        fp6 = ifelse(j > 1, f_in[i_src, j-1, 6], f_in[i, j, 8])
+        fp6 = ifelse(j > 1, f_in[i_src, jm, 6], f_in[i, j, 8])
 
         # q=7: NW (-1,+1) — pull from (i+1, j-1)
         i_src = ifelse(i < Nx, i + 1, 1)
-        fp7 = ifelse(j > 1, f_in[i_src, j-1, 7], f_in[i, j, 9])
+        fp7 = ifelse(j > 1, f_in[i_src, jm, 7], f_in[i, j, 9])
 
         # q=8: SW (-1,-1) — pull from (i+1, j+1)
         i_src = ifelse(i < Nx, i + 1, 1)
-        fp8 = ifelse(j < Ny, f_in[i_src, j+1, 8], f_in[i, j, 6])
+        fp8 = ifelse(j < Ny, f_in[i_src, jp, 8], f_in[i, j, 6])
 
         # q=9: SE (+1,-1) — pull from (i-1, j+1)
         i_src = ifelse(i > 1, i - 1, Nx)
-        fp9 = ifelse(j < Ny, f_in[i_src, j+1, 9], f_in[i, j, 7])
+        fp9 = ifelse(j < Ny, f_in[i_src, jp, 9], f_in[i, j, 7])
 
         f_out[i,j,1] = fp1
         f_out[i,j,2] = fp2; f_out[i,j,3] = fp3

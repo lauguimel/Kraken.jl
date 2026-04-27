@@ -718,16 +718,6 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         @test_throws ArgumentError parse_kraken(bad_wall)
     end
 
-    @testset "Hagen-Poiseuille example parses" begin
-        setup = load_kraken(joinpath(EXAMPLES_DIR, "hagen_poiseuille.krk"))
-        @test setup.name == "hagen_poiseuille"
-        @test :axisymmetric in setup.modules
-        @test haskey(setup.physics.body_force, :Fz)
-        faces = Set(b.face for b in setup.boundaries)
-        @test :west in faces && :east in faces
-        @test :north in faces && :south in faces
-    end
-
     @testset "Output png parses" begin
         setup = parse_kraken("""
             Simulation test_png D2Q9

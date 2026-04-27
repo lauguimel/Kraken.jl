@@ -132,9 +132,8 @@ makedocs(;
         "Getting started" => "getting_started.md",
         "Concepts" => "concepts_index.md",
         "Capabilities" => "capabilities.md",
-        # v0.1.0 scope: single-phase LBM (2D/3D), thermal, grid refinement,
-        # spatial BCs, .krk DSL. Out-of-scope pages (phasefield, VOF/PLIC,
-        # rheology, viscoelastic, Shan-Chen, species) are excluded here.
+        # v0.1.0 scope: single-phase Newtonian LBM (2D/3D), thermal (DDF),
+        # spatial BCs, .krk DSL.
         "Theory" => [
             "theory/01_lbm_fundamentals.md",
             "theory/02_d2q9_lattice.md",
@@ -144,13 +143,10 @@ makedocs(;
             "theory/06_from_2d_to_3d.md",
             "theory/07_body_forces.md",
             "theory/08_thermal_ddf.md",
-            "theory/09_axisymmetric.md",
             "theory/10_limitations.md",
-            "theory/12_mrt.md",
-            "theory/18_grid_refinement.md",
             "theory/19_spatial_bcs.md",
         ],
-        "Examples-tutorials" => [
+        "Examples" => [
             "examples/01_poiseuille_2d.md",
             "examples/02_couette_2d.md",
             "examples/03_taylor_green_2d.md",
@@ -159,9 +155,7 @@ makedocs(;
             "examples/06_cylinder_2d.md",
             "examples/07_heat_conduction.md",
             "examples/08_rayleigh_benard.md",
-            "examples/09_hagen_poiseuille.md",
             "examples/10_krk_config.md",
-            "examples/20_grid_refinement_cavity.md",
         ],
         "Benchmarks" => [
             "benchmarks/performance.md",
@@ -188,7 +182,6 @@ makedocs(;
             "api/boundary.md",
             "api/macroscopic.md",
             "api/drivers.md",
-            "api/refinement.md",
             "api/io.md",
             "api/postprocess.md",
             "api/config.md",
