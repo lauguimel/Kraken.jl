@@ -132,6 +132,19 @@ y_norm     = [(j - 0.5) / N for j in 1:N]
 # confinement (walls at ``z = 1`` and ``z = N``) also modifies the flow
 # compared to the infinite-span 2D solution.
 #
+# ### Plot: Mid-plane velocity magnitude
+
+using CairoMakie
+
+fig = Figure(size=(600, 500))
+ax = Axis(fig[1, 1];
+    title  = "Velocity magnitude |u|/u_lid  (z = N/2)",
+    xlabel = "x", ylabel = "y", aspect = DataAspect())
+hm = heatmap!(ax, 1:N, 1:N, umag; colormap = :viridis)
+Colorbar(fig[1, 2], hm; label = "|u|/u_lid")
+save(joinpath(@__DIR__, "cavity_3d_umag.svg"), fig)
+fig
+
 # ![Velocity magnitude in the z = N/2 mid-plane of the 3D lid-driven cavity.  The primary vortex is visible with fast flow near the lid and a quiet core.  Resolution is N = 24 (coarse demonstration grid).](cavity_3d_umag.svg)
 #
 # ---
