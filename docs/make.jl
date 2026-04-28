@@ -200,5 +200,5 @@ makedocs(;
 
 deploydocs(
     repo = "github.com/lauguimel/Kraken.jl.git",
-    devbranch = "main",
+    devbranch = "release/v0.1.0",
 )
