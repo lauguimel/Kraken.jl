@@ -731,7 +731,7 @@ end
 function _mesh_drag_cylinder_crossing_mask(block::Block, edge::Symbol,
                                            cx, cy)
     nrun = edge_length(block, edge)
-    mask = falses(nrun, 9)
+    mask = fill(false, nrun, 9)
     epsn = 100 * eps(Float64)
     for r in 1:nrun
         i, j = _edge_node(block, edge, r)

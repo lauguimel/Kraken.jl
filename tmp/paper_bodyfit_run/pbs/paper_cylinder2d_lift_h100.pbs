@@ -1,5 +1,6 @@
 #!/bin/bash -l
 #PBS -N kraken_cyl2d_lift
+#PBS -q gpu_inter
 #PBS -l select=1:ncpus=4:ngpus=1:mem=64GB:gpu_id=H100
 #PBS -l walltime=01:00:00
 #PBS -j oe
