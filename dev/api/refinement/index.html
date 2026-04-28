@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Grid refinement · Kraken.jl</title><meta name="title" content="Grid refinement · Kraken.jl"/><meta property="og:title" content="Grid refinement · Kraken.jl"/><meta property="twitter:title" content="Grid refinement · Kraken.jl"/><meta name="description" content="Documentation for Kraken.jl."/><meta property="og:description" content="Documentation for Kraken.jl."/><meta property="twitter:description" content="Documentation for Kraken.jl."/><meta property="og:url" content="https://lauguimel.github.io/Kraken.jl/api/refinement/"/><meta property="twitter:url" content="https://lauguimel.github.io/Kraken.jl/api/refinement/"/><link rel="canonical" href="https://lauguimel.github.io/Kraken.jl/api/refinement/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Kraken.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../installation/">Installation</a></li><li><a class="tocitem" href="../../getting_started/">Getting started</a></li><li><a class="tocitem" href="../../concepts_index/">Concepts</a></li><li><a class="tocitem" href="../../capabilities/">Capabilities</a></li><li><span class="tocitem">Theory</span><ul><li><a class="tocitem" href="../../theory/01_lbm_fundamentals/">LBM Fundamentals</a></li><li><a class="tocitem" href="../../theory/02_d2q9_lattice/">The D2Q9 Lattice</a></li><li><a class="tocitem" href="../../theory/03_bgk_collision/">BGK Collision Operator</a></li><li><a class="tocitem" href="../../theory/04_streaming/">Streaming Step</a></li><li><a class="tocitem" href="../../theory/05_boundary_conditions/">Boundary Conditions</a></li><li><a class="tocitem" href="../../theory/06_from_2d_to_3d/">From 2D to 3D: the D3Q19 Lattice</a></li><li><a class="tocitem" href="../../theory/07_body_forces/">Body Forces: the Guo Forcing Scheme</a></li><li><a class="tocitem" href="../../theory/08_thermal_ddf/">Thermal LBM: Double Distribution Function</a></li><li><a class="tocitem" href="../../theory/10_limitations/">Limitations of Standard LBM</a></li><li><a class="tocitem" href="../../theory/19_spatial_bcs/">Spatial Boundary Conditions &amp; KrakenExpr</a></li></ul></li><li><span class="tocitem">Tutorials</span><ul><li><a class="tocitem" href="../../tutorials/01_first_simulation/">Tutorial 1 — Your First LBM Simulation</a></li><li><a class="tocitem" href="../../tutorials/02_body_forces/">Tutorial 2 — Adding Body Forces (Poiseuille Flow)</a></li><li><a class="tocitem" href="../../tutorials/03_obstacles/">Tutorial 3 — Flow Around Obstacles</a></li><li><a class="tocitem" href="../../tutorials/04_thermal/">Tutorial 4 — Thermal Flows</a></li></ul></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../examples/01_poiseuille_2d/">Poiseuille Flow (2D)</a></li><li><a class="tocitem" href="../../examples/02_couette_2d/">Couette Flow (2D)</a></li><li><a class="tocitem" href="../../examples/03_taylor_green_2d/">Taylor–Green Vortex (2D)</a></li><li><a class="tocitem" href="../../examples/04_cavity_2d/">Lid-Driven Cavity (2D) –- Re = 100</a></li><li><a class="tocitem" href="../../examples/05_cavity_3d/">Lid-Driven Cavity (3D) –- D3Q19</a></li><li><a class="tocitem" href="../../examples/06_cylinder_2d/">Flow Around a Cylinder (2D) –- Re = 20</a></li><li><a class="tocitem" href="../../examples/07_heat_conduction/">1D Heat Conduction</a></li><li><a class="tocitem" href="../../examples/08_rayleigh_benard/">Rayleigh–Bénard Convection (2D)</a></li><li><a class="tocitem" href="../../examples/10_krk_config/">Configuration Files (<code>.krk</code>)</a></li></ul></li><li><span class="tocitem">Benchmarks</span><ul><li><a class="tocitem" href="../../benchmarks/performance/">Performance: MLUPs throughput</a></li><li><a class="tocitem" href="../../benchmarks/accuracy/">Accuracy: mesh convergence</a></li><li><a class="tocitem" href="../../benchmarks/external/">External comparisons</a></li><li><a class="tocitem" href="../../benchmarks/hardware/">Hardware</a></li></ul></li><li><span class="tocitem">.krk DSL reference</span><ul><li><a class="tocitem" href="../../krk/overview/">The .krk DSL — overview</a></li><li><a class="tocitem" href="../../krk/directives/">Directives</a></li><li><a class="tocitem" href="../../krk/bc_types/">Boundary condition types</a></li><li><a class="tocitem" href="../../krk/modules/">Modules</a></li><li><a class="tocitem" href="../../krk/presets/">Presets</a></li><li><a class="tocitem" href="../../krk/helpers/">Setup helpers — non-dimensional parameters</a></li><li><a class="tocitem" href="../../krk/expressions/">Expressions — the KrakenExpr grammar</a></li><li><a class="tocitem" href="../../krk/sanity/">Sanity checks</a></li><li><a class="tocitem" href="../../krk/errors/">Error messages</a></li><li><a class="tocitem" href="../../krk/aliases/">Face name aliases</a></li></ul></li><li><span class="tocitem">Julia API reference</span><ul><li><a class="tocitem" href="../lattice/">Lattice</a></li><li><a class="tocitem" href="../collision/">Collision operators</a></li><li><a class="tocitem" href="../streaming/">Streaming</a></li><li><a class="tocitem" href="../boundary/">Boundary conditions</a></li><li><a class="tocitem" href="../macroscopic/">Macroscopic fields</a></li><li><a class="tocitem" href="../drivers/">Drivers</a></li><li><a class="tocitem" href="../io/">I/O and diagnostics</a></li><li><a class="tocitem" href="../postprocess/">Post-processing</a></li><li><a class="tocitem" href="../config/">Configuration and initialisation</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Grid refinement</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Grid refinement</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/lauguimel/Kraken.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Grid-refinement"><a class="docs-heading-anchor" href="#Grid-refinement">Grid refinement</a><a id="Grid-refinement-1"></a><a class="docs-heading-anchor-permalink" href="#Grid-refinement" title="Permalink"></a></h1><p>Kraken supports patch-based nested refinement (2:1 ratio) with Filippova-Hänel distribution rescaling across levels. A <code>RefinedDomain</code> bundles the coarse base grid with one or more <code>RefinementPatch</code>es; <code>advance_refined_step!</code> performs one coarse step plus the required fine sub-steps, including prolongation, restriction, and temporal interpolation at patch boundaries.</p><h2 id="Quick-reference"><a class="docs-heading-anchor" href="#Quick-reference">Quick reference</a><a id="Quick-reference-1"></a><a class="docs-heading-anchor-permalink" href="#Quick-reference" title="Permalink"></a></h2><table><tr><th style="text-align: right">Symbol</th><th style="text-align: right">Purpose</th></tr><tr><td style="text-align: right"><code>ThermalPatchArrays</code></td><td style="text-align: right">Per-patch thermal DDF arrays</td></tr><tr><td style="text-align: right"><code>create_thermal_patch_arrays</code></td><td style="text-align: right">Allocate thermal arrays for refined patches</td></tr><tr><td style="text-align: right"><code>advance_thermal_refined_step!</code></td><td style="text-align: right">Advance one refined thermal step</td></tr><tr><td style="text-align: right"><code>RefinementPatch</code></td><td style="text-align: right">Descriptor for one nested-refinement patch</td></tr><tr><td style="text-align: right"><code>RefinedDomain</code></td><td style="text-align: right">Container bundling coarse grid + patches</td></tr><tr><td style="text-align: right"><code>create_patch</code></td><td style="text-align: right">Build a <code>RefinementPatch</code> from a bounding box</td></tr><tr><td style="text-align: right"><code>create_refined_domain</code></td><td style="text-align: right">Assemble a <code>RefinedDomain</code> from multiple patches</td></tr><tr><td style="text-align: right"><code>rescaled_omega</code></td><td style="text-align: right">Filippova-Hänel τ rescaling across levels</td></tr><tr><td style="text-align: right"><code>rescaling_factor_c2f</code></td><td style="text-align: right">Distribution rescaling factor coarse→fine</td></tr><tr><td style="text-align: right"><code>rescaling_factor_f2c</code></td><td style="text-align: right">Distribution rescaling factor fine→coarse</td></tr><tr><td style="text-align: right"><code>prolongate_f_rescaled_2d!</code></td><td style="text-align: right">Interpolate f from coarse to fine (rescaled)</td></tr><tr><td style="text-align: right"><code>restrict_f_rescaled_2d!</code></td><td style="text-align: right">Average f from fine to coarse (rescaled)</td></tr><tr><td style="text-align: right"><code>temporal_interpolate_2d!</code></td><td style="text-align: right">Temporal interpolation at patch boundaries</td></tr><tr><td style="text-align: right"><code>copy_macroscopic_overlap_2d!</code></td><td style="text-align: right">Copy ρ, u in the overlap region</td></tr><tr><td style="text-align: right"><code>advance_refined_step!</code></td><td style="text-align: right">Advance one coarse step + nested fine sub-steps</td></tr></table><h2 id="Details"><a class="docs-heading-anchor" href="#Details">Details</a><a id="Details-1"></a><a class="docs-heading-anchor-permalink" href="#Details" title="Permalink"></a></h2><h3 id="RefinementPatch"><a class="docs-heading-anchor" href="#RefinementPatch"><code>RefinementPatch</code></a><a id="RefinementPatch-1"></a><a class="docs-heading-anchor-permalink" href="#RefinementPatch" title="Permalink"></a></h3><p><strong>Source:</strong> <code>src/refinement/refinement.jl</code></p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    RefinementPatch{T}
+
+A rectangular sub-domain at a given refinement level. Each patch is a
+self-contained uniform grid with its own LBM state arrays, allocated on the
+same GPU backend as the base grid. Existing kernels operate on patches without
+any modification.
+
+# Fields
+- `name`: human-readable label (matches .krk `Refine` block name)
+- `level`: refinement level (0 = base, 1 = first refinement, ...)
+- `ratio`: refinement ratio relative to parent (typically 2)
+- `Nx, Ny`: lattice dimensions including ghost cells
+- `Nx_inner, Ny_inner`: lattice dimensions excluding ghost cells
+- `dx`: physical grid spacing at this level
+- `x_min, y_min, x_max, y_max`: physical extent (inner region, no ghosts)
+- `parent_i_range, parent_j_range`: indices in parent grid covered by this patch
+- `n_ghost`: ghost layer width (2 for D2Q9)
+- `f_in, f_out`: distribution function arrays [Nx, Ny, Q]
+- `rho, ux, uy`: macroscopic fields [Nx, Ny]
+- `is_solid`: obstacle mask [Nx, Ny]
+- `omega`: relaxation parameter (rescaled from parent)
+&quot;&quot;&quot;
+struct RefinementPatch{T}
+    name::String
+    level::Int
+    ratio::Int
+    Nx::Int
+    Ny::Int
+    Nx_inner::Int
+    Ny_inner::Int
+    dx::T
+    x_min::T
+    y_min::T
+    x_max::T
+    y_max::T
+    parent_i_range::UnitRange{Int}
+    parent_j_range::UnitRange{Int}
+    n_ghost::Int
+    # LBM state (GPU arrays)
+    f_in::AbstractArray{T, 3}
+    f_out::AbstractArray{T, 3}
+    rho::AbstractMatrix{T}
+    ux::AbstractMatrix{T}
+    uy::AbstractMatrix{T}
+    is_solid::AbstractMatrix{Bool}
+    omega::T
+    # Temporal interpolation buffers (parent macroscopic at step n)
+    rho_prev::AbstractMatrix{T}
+    ux_prev::AbstractMatrix{T}
+    uy_prev::AbstractMatrix{T}
+    f_prev::AbstractArray{T, 3}
+end</code></pre><h3 id="RefinedDomain"><a class="docs-heading-anchor" href="#RefinedDomain"><code>RefinedDomain</code></a><a id="RefinedDomain-1"></a><a class="docs-heading-anchor-permalink" href="#RefinedDomain" title="Permalink"></a></h3><p><strong>Source:</strong> <code>src/refinement/refinement.jl</code></p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    RefinedDomain{T}
+
+Multi-level domain with a base grid and nested refinement patches.
+&quot;&quot;&quot;
+struct RefinedDomain{T}
+    base_Nx::Int
+    base_Ny::Int
+    base_dx::T
+    base_omega::T
+    patches::Vector{RefinementPatch{T}}
+    parent_of::Dict{Int, Int}      # patch index -&gt; parent patch index (0 = base)
+    children_of::Dict{Int, Vector{Int}}
+end</code></pre><h3 id="create_refined_domain"><a class="docs-heading-anchor" href="#create_refined_domain"><code>create_refined_domain</code></a><a id="create_refined_domain-1"></a><a class="docs-heading-anchor-permalink" href="#create_refined_domain" title="Permalink"></a></h3><p><strong>Source:</strong> <code>src/refinement/refinement.jl</code></p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    create_refined_domain(base_Nx, base_Ny, base_dx, base_omega, patches) -&gt; RefinedDomain
+
+Build a RefinedDomain from a base grid specification and a list of patches.
+Patches must be ordered by level (level 1 first, then level 2, etc.).
+&quot;&quot;&quot;
+function create_refined_domain(base_Nx::Int, base_Ny::Int, base_dx::Real,
+                               base_omega::Real,
+                               patches::Vector{RefinementPatch{T}};
+                               parent_map::Dict{Int, Int}=Dict{Int, Int}()) where T
+    # Default: all patches have the base grid as parent
+    parent_of = copy(parent_map)
+    for (idx, _) in enumerate(patches)
+        if !haskey(parent_of, idx)
+            parent_of[idx] = 0
+        end
+    end
+
+    # Build reverse mapping
+    children_of = Dict{Int, Vector{Int}}()
+    for (child, parent) in parent_of
+        if !haskey(children_of, parent)
+            children_of[parent] = Int[]
+        end
+        push!(children_of[parent], child)
+    end
+
+    return RefinedDomain{T}(
+        base_Nx, base_Ny, T(base_dx), T(base_omega),
+        patches, parent_of, children_of
+    )
+end</code></pre><h3 id="advance_refined_step!"><a class="docs-heading-anchor" href="#advance_refined_step!"><code>advance_refined_step!</code></a><a id="advance_refined_step!-1"></a><a class="docs-heading-anchor-permalink" href="#advance_refined_step!" title="Permalink"></a></h3><p><strong>Source:</strong> <code>src/refinement/time_stepping.jl</code></p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    advance_refined_step!(domain, f_in, f_out, rho, ux, uy, is_solid;
+                          stream_fn, collide_fn, macro_fn, bc_base_fn,
+                          bc_patch_fns)
+
+Advance the full refined domain by one coarse timestep with sub-cycling.
+
+# Algorithm
+1. Save coarse state at time n for each patch
+2. Advance coarse grid one step
+3. For each patch, sub-cycle `ratio` fine steps with temporal interpolation
+4. Restrict fine results back to coarse overlap
+
+Returns updated (f_in, f_out) for the base grid (swapped).
+&quot;&quot;&quot;
+function advance_refined_step!(domain::RefinedDomain{T},
+                               f_in, f_out, rho, ux, uy, is_solid;
+                               stream_fn,
+                               collide_fn,
+                               macro_fn,
+                               bc_base_fn=nothing,
+                               bc_patch_fns=nothing) where T
+    Nx = domain.base_Nx
+    Ny = domain.base_Ny
+
+    # 1. Save coarse state at time n for all patches
+    for patch in domain.patches
+        save_coarse_state!(patch, f_in, rho, ux, uy)
+    end
+
+    # 2. Advance coarse grid one step
+    stream_fn(f_out, f_in, Nx, Ny)
+    if bc_base_fn !== nothing
+        bc_base_fn(f_out)
+    end
+    collide_fn(f_out, is_solid)
+    macro_fn(rho, ux, uy, f_out)
+    f_in, f_out = f_out, f_in
+
+    # 3. Sub-cycle each patch
+    for (pidx, patch) in enumerate(domain.patches)
+        ratio = patch.ratio
+
+        for sub_step in 1:ratio
+            # Temporal interpolation: sub_step=1 -&gt; t_frac=0, sub_step=ratio -&gt; (ratio-1)/ratio
+            t_frac = T((sub_step - 1) / ratio)
+
+            if t_frac &gt; zero(T)
+                _fill_ghost_interpolated!(patch, f_in, rho, ux, uy,
+                                         Float64(domain.base_omega),
+                                         Nx, Ny, t_frac)
+            else
+                # First sub-step: use coarse state at time n
+                fill_ghost_from_coarse!(patch, f_in, rho, ux, uy,
+                                        Float64(domain.base_omega), Nx, Ny)
+            end
+
+            # Advance patch one fine step
+            bc_fn = bc_patch_fns !== nothing ? get(bc_patch_fns, pidx, nothing) : nothing
+            advance_patch!(patch;
+                          stream_fn=stream_fn,
+                          collide_fn=(f, is_s) -&gt; collide_2d!(f, is_s, patch.omega),
+                          macro_fn=compute_macroscopic_2d!,
+                          bc_fn=bc_fn)
+
+            # Copy f_out -&gt; f_in for next sub-step
+            copyto!(patch.f_in, patch.f_out)
+        end
+    end
+
+    # 4. Restrict fine results back to coarse
+    for patch in domain.patches
+        restrict_to_coarse!(patch, f_in, rho, ux, uy,
+                           Float64(domain.base_omega))
+    end
+
+    return f_in, f_out
+end</code></pre><h3 id="rescaled_omega"><a class="docs-heading-anchor" href="#rescaled_omega"><code>rescaled_omega</code></a><a id="rescaled_omega-1"></a><a class="docs-heading-anchor-permalink" href="#rescaled_omega" title="Permalink"></a></h3><p><strong>Source:</strong> <code>src/refinement/refinement.jl</code></p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    rescaled_omega(omega_parent, ratio) -&gt; Float64
+
+Compute the relaxation parameter at the fine level to preserve physical
+viscosity across refinement levels.
+
+    tau_fine = ratio * (tau_parent - 0.5) + 0.5
+    omega_fine = 1 / tau_fine
+&quot;&quot;&quot;
+function rescaled_omega(omega_parent::Real, ratio::Int)
+    tau_parent = 1.0 / omega_parent
+    tau_fine = ratio * (tau_parent - 0.5) + 0.5
+    return 1.0 / tau_fine
+end</code></pre></article><nav class="docs-footer"><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 28 April 2026 05:39">Tuesday 28 April 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
