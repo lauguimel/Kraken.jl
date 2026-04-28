@@ -45,6 +45,44 @@ function case_paths(case_root, Nx, Ny)
     return (; case, base, msh, krk)
 end
 
+function flow_tail_metrics(history; tail_fraction=0.25)
+    n = length(history)
+    if n == 0
+        return (;
+            Q_tail_start_step=NaN,
+            Q_tail_n=0,
+            Q_rel_tail_mean=NaN,
+            Q_rel_tail_mean_abs=NaN,
+            Q_rel_tail_rms=NaN,
+            Q_rel_tail_max_abs=NaN,
+        )
+    end
+    start = max(1, floor(Int, (1 - tail_fraction) * n) + 1)
+    signed_sum = 0.0
+    abs_sum = 0.0
+    sq_sum = 0.0
+    max_abs = 0.0
+    count = 0
+    for h in history[start:end]
+        denom = max(abs(Float64(h.Q_in)), eps(Float64))
+        signed = Float64(h.Q_out - h.Q_in) / denom
+        abs_signed = abs(signed)
+        signed_sum += signed
+        abs_sum += abs_signed
+        sq_sum += signed * signed
+        max_abs = max(max_abs, abs_signed)
+        count += 1
+    end
+    return (;
+        Q_tail_start_step=Float64(history[start].step),
+        Q_tail_n=count,
+        Q_rel_tail_mean=signed_sum / count,
+        Q_rel_tail_mean_abs=abs_sum / count,
+        Q_rel_tail_rms=sqrt(sq_sum / count),
+        Q_rel_tail_max_abs=max_abs,
+    )
+end
+
 function final_metrics(mbm, states, run)
     block = mbm.blocks[1]
     state = states[1]
@@ -53,7 +91,7 @@ function final_metrics(mbm, states, run)
     wall_top = edge_normal_velocity(block, state, :north)
     rho_min, rho_max = physical_density_bounds(states)
     data = physical_speeds(mbm, states)
-    return (;
+    return merge((;
         rho_min=Float64(rho_min),
         rho_max=Float64(rho_max),
         rho_span=Float64(rho_max - rho_min),
@@ -64,7 +102,7 @@ function final_metrics(mbm, states, run)
         max_wall_un=Float64(max(maximum(wall_bot), maximum(wall_top))),
         max_speed=Float64(maximum(data.speed)),
         elapsed_s=Float64(run.elapsed_s),
-    )
+    ), flow_tail_metrics(run.history))
 end
 
 function run_sweep_case(paths; Nx, Ny, steps, ng, ν, u_max,
@@ -111,6 +149,9 @@ function failed_row(paths; Nx, Ny, steps, ng, ν, u_max, L, H_in, H_out, err)
         dx_ref=NaN, status="failed", stable=false,
         rho_min=NaN, rho_max=NaN, rho_span=NaN,
         Q_in=NaN, Q_out=NaN, Q_rel_err=NaN, Q_out_rel_to_finest=NaN,
+        Q_tail_start_step=NaN, Q_tail_n=0, Q_rel_tail_mean=NaN,
+        Q_rel_tail_mean_abs=NaN, Q_rel_tail_rms=NaN,
+        Q_rel_tail_max_abs=NaN,
         max_wall_un=NaN, max_speed=NaN, elapsed_s=NaN,
         msh=relpath(paths.msh, pwd()), krk=relpath(paths.krk, pwd()),
         png="", error=sprint(showerror, err))
@@ -139,8 +180,8 @@ function write_sweep_plot(path, rows, history)
     ax_q = Axis(fig[1, 1], title="grid convergence vs finest",
                 xlabel="dx_ref", ylabel="rel |Qout - Qout(finest)|",
                 xscale=log10, yscale=log10)
-    ax_mass = Axis(fig[1, 2], title="mass balance",
-                   xlabel="dx_ref", ylabel="|Qout-Qin|/|Qin|",
+    ax_mass = Axis(fig[1, 2], title="mass balance tail RMS",
+                   xlabel="dx_ref", ylabel="tail RMS ((Qout-Qin)/Qin)",
                    xscale=log10, yscale=log10)
     ax_rho = Axis(fig[2, 1], title="density bounds over time",
                   xlabel="step", ylabel="rho")
@@ -150,7 +191,7 @@ function write_sweep_plot(path, rows, history)
 
     dx = [row.dx_ref for row in ok]
     qerr = [row.Q_out_rel_to_finest for row in ok]
-    merr = [row.Q_rel_err for row in ok]
+    merr = [row.Q_rel_tail_rms for row in ok]
     wun = [row.max_wall_un for row in ok]
     order = sortperm(dx; rev=true)
     lines!(ax_q, dx[order], max.(qerr[order], 1e-12); color=:black, linewidth=2)
@@ -178,7 +219,7 @@ function write_sweep_plot(path, rows, history)
     for row in ok
         text!(ax_q, row.dx_ref, max(row.Q_out_rel_to_finest, 1e-12);
               text="$(row.Nx)x$(row.Ny)", align=(:left, :bottom), fontsize=10)
-        text!(ax_mass, row.dx_ref, max(row.Q_rel_err, 1e-12);
+        text!(ax_mass, row.dx_ref, max(row.Q_rel_tail_rms, 1e-12);
               text="$(row.Nx)x$(row.Ny)", align=(:left, :bottom), fontsize=10)
     end
 
@@ -223,7 +264,8 @@ function main()
                                        rho_lo=rho_lo, rho_hi=rho_hi)
             push!(rows, row)
             append!(history, hist)
-            println("ok Qerr=$(fmt(row.Q_rel_err)) rho=[$(fmt(row.rho_min)), $(fmt(row.rho_max))]")
+            println("ok Qerr=$(fmt(row.Q_rel_err)) Qtail_rms=$(fmt(row.Q_rel_tail_rms)) " *
+                    "rho=[$(fmt(row.rho_min)), $(fmt(row.rho_max))]")
         catch err
             row = failed_row(paths; Nx=Nx, Ny=Ny, steps=steps, ng=ng,
                              ν=ν, u_max=u_max, L=L, H_in=H_in,
@@ -238,6 +280,8 @@ function main()
                :L, :H_in, :H_out, :dx_ref, :status, :stable,
                :rho_min, :rho_max, :rho_span,
                :Q_in, :Q_out, :Q_rel_err, :Q_out_rel_to_finest,
+               :Q_tail_start_step, :Q_tail_n, :Q_rel_tail_mean,
+               :Q_rel_tail_mean_abs, :Q_rel_tail_rms, :Q_rel_tail_max_abs,
                :max_wall_un, :max_speed, :elapsed_s,
                :msh, :krk, :png, :error)
     write_rows_csv(summary_csv, rows, columns)

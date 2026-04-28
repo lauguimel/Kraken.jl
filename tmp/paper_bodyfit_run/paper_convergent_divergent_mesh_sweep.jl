@@ -202,7 +202,7 @@ function final_metrics_cd(mbm, states, run)
     flows = tagged_vertical_flow_rates(mbm, states)
     rho_min, rho_max = physical_density_bounds(states)
     data = physical_speeds(mbm, states)
-    return (;
+    return merge((;
         rho_min=Float64(rho_min),
         rho_max=Float64(rho_max),
         rho_span=Float64(rho_max - rho_min),
@@ -213,7 +213,7 @@ function final_metrics_cd(mbm, states, run)
         max_wall_un=max_wall_normal_velocity(mbm, states),
         max_speed=Float64(maximum(data.speed)),
         elapsed_s=Float64(run.elapsed_s),
-    )
+    ), flow_tail_metrics(run.history))
 end
 
 function plot_cd(path, mbm, states, run; L=FT(4.0), H=FT(1.0),
@@ -393,7 +393,8 @@ function main()
                                           wall_ghost_mode=wall_ghost_mode)
             push!(rows, row)
             append!(history, hist)
-            println("ok Qerr=$(fmt(row.Q_rel_err)) rho=[$(fmt(row.rho_min)), $(fmt(row.rho_max))]")
+            println("ok Qerr=$(fmt(row.Q_rel_err)) Qtail_rms=$(fmt(row.Q_rel_tail_rms)) " *
+                    "rho=[$(fmt(row.rho_min)), $(fmt(row.rho_max))]")
         catch err
             row = failed_row(paths; Nx=Nx, Ny=Ny, steps=steps, ng=ng,
                              ν=ν, u_max=u_max, L=L, H_in=H,
@@ -408,6 +409,8 @@ function main()
                :L, :H_in, :H_out, :dx_ref, :status, :stable,
                :rho_min, :rho_max, :rho_span,
                :Q_in, :Q_out, :Q_rel_err, :Q_out_rel_to_finest,
+               :Q_tail_start_step, :Q_tail_n, :Q_rel_tail_mean,
+               :Q_rel_tail_mean_abs, :Q_rel_tail_rms, :Q_rel_tail_max_abs,
                :max_wall_un, :max_speed, :elapsed_s,
                :msh, :krk, :png, :error)
     write_rows_csv(summary_csv, rows, columns)

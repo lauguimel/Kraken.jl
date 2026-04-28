@@ -91,6 +91,12 @@ corner residuals in the signed boundary-flux diagnostic. The remaining `Q`
 gap at fine resolution decreases substantially between 20000 and 60000 steps
 while wall flux and interface jump stay near zero, so the next target is
 time/outlet convergence of the open-boundary closure, not another wall fix.
+The mesh-sweep CSVs therefore report both instantaneous `Q_rel_err` and
+tail-window metrics computed over the last quarter of the sampled history:
+`Q_rel_tail_mean_abs`, `Q_rel_tail_rms`, and `Q_rel_tail_max_abs`. Use the
+tail metrics for convergence/stability decisions; the instantaneous final
+`Q_rel_err` can be dominated by the phase of the weakly-compressible outlet
+oscillation.
 
 - `paper_gmsh_interpolation_exactness.jl`
   Exactness diagnostic for the interpolation space itself. It fills the
