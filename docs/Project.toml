@@ -1,23 +1,28 @@
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DocumenterCitations = "daee34ce-89f3-4625-b898-19384cb65244"
+DocumenterVitepress = "4710194d-e776-4893-9690-8d956a29c365"
+Gmsh = "705231aa-382f-11e9-3f0c-b7cb4346fdeb"
+Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
 JuliaSyntax = "70703baa-626e-46a2-a12c-08ffd08c73b4"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Kraken = "b9c8ae56-6711-4442-a2ee-93cdf3c40864"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
+Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
+NodeJS_20_jll = "c7aee132-11e1-519c-8219-0a43005e73c2"
 Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
 PlutoSliderServer = "2fc8631c-6f24-4c5b-bca7-cbb509c42db4"
 PlutoStaticHTML = "359b1769-a58e-495b-9770-312e911026ad"
 WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
 
 [sources]
-Kraken = {path = ".."}
+Kraken = {path = "/Users/guillaume/Documents/Recherche/Kraken.jl"}
 
 [compat]
 CairoMakie = "0.12, 0.13, 0.14, 0.15"
 Documenter = "1"
 DocumenterCitations = "1"
+DocumenterVitepress = "0.2"
 JuliaSyntax = "1"
 Literate = "2"

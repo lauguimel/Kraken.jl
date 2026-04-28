@@ -1,6 +1,8 @@
 using Documenter
 using DocumenterCitations
+using DocumenterVitepress
 using Literate
+using NodeJS_20_jll: node, npm
 using PlutoStaticHTML
 using Kraken
 
@@ -21,6 +23,10 @@ const LITERATE_DIRS = [
     "benchmarks",
     "tutorials",
 ]
+
+# Out-of-scope sources (not listed in `pages`) are skipped so Vitepress does
+# not try to build orphan pages that may reference missing assets.
+const LITERATE_EXCLUDE = Set{String}()
 
 # --- Living-doc preprocessing: expand @@EXTRACT path symbol@@ markers ---
 # Markers in Literate sources are replaced at build-time with a fenced
@@ -56,6 +62,7 @@ for dir in LITERATE_DIRS
     out_dir = joinpath(DOCS_SRC, dir)
     for file in sort(readdir(src_dir))
         endswith(file, ".jl") || continue
+        joinpath(dir, file) in LITERATE_EXCLUDE && continue
         Literate.markdown(
             joinpath(src_dir, file), out_dir;
             documenter = true,
@@ -118,79 +125,91 @@ makedocs(;
     sitename = "Kraken.jl",
     modules = [Kraken],
     plugins = [bib],
-    format = Documenter.HTML(
-        prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical = "https://lauguimel.github.io/Kraken.jl",
-        edit_link = "lbm",
-        repolink = "https://github.com/lauguimel/Kraken.jl",
-        mathengine = Documenter.MathJax3(),
-        size_threshold = nothing,
+    format = DocumenterVitepress.MarkdownVitepress(
+        repo = "https://github.com/lauguimel/Kraken.jl",
+        devurl = "dev",
+        devbranch = "release/v0.1.0",
+        deploy_url = "lauguimel.github.io/Kraken.jl",
+        build_vitepress = false,
     ),
     pages = [
         "Home" => "index.md",
-        "Installation" => "installation.md",
-        "Getting started" => "getting_started.md",
-        "Concepts" => "concepts_index.md",
-        "Capabilities" => "capabilities.md",
-        # v0.1.0 scope: single-phase Newtonian LBM (2D/3D), thermal (DDF),
-        # spatial BCs, .krk DSL.
+        "Getting Started" => [
+            "Installation" => "installation.md",
+            "Quick start" => "getting_started.md",
+            "Concepts" => "concepts_index.md",
+            "Capabilities" => "capabilities.md",
+        ],
         "Theory" => [
-            "theory/01_lbm_fundamentals.md",
-            "theory/02_d2q9_lattice.md",
-            "theory/03_bgk_collision.md",
-            "theory/04_streaming.md",
-            "theory/05_boundary_conditions.md",
-            "theory/06_from_2d_to_3d.md",
-            "theory/07_body_forces.md",
-            "theory/08_thermal_ddf.md",
-            "theory/10_limitations.md",
-            "theory/19_spatial_bcs.md",
+            "LBM fundamentals" => "theory/01_lbm_fundamentals.md",
+            "D2Q9 lattice" => "theory/02_d2q9_lattice.md",
+            "BGK collision" => "theory/03_bgk_collision.md",
+            "Streaming" => "theory/04_streaming.md",
+            "Boundary conditions" => "theory/05_boundary_conditions.md",
+            "From 2D to 3D" => "theory/06_from_2d_to_3d.md",
+            "Body forces" => "theory/07_body_forces.md",
+            "Thermal DDF" => "theory/08_thermal_ddf.md",
+            "Limitations" => "theory/10_limitations.md",
+            "Spatial BCs" => "theory/19_spatial_bcs.md",
         ],
         "Tutorials" => [
-            "tutorials/01_first_simulation.md",
-            "tutorials/02_body_forces.md",
-            "tutorials/03_obstacles.md",
-            "tutorials/04_thermal.md",
-        ],
-        "Examples" => [
-            "examples/01_poiseuille_2d.md",
-            "examples/02_couette_2d.md",
-            "examples/03_taylor_green_2d.md",
-            "examples/04_cavity_2d.md",
-            "examples/05_cavity_3d.md",
-            "examples/06_cylinder_2d.md",
-            "examples/07_heat_conduction.md",
-            "examples/08_rayleigh_benard.md",
-            "examples/10_krk_config.md",
+            "First Steps" => [
+                "Hello KRK" => "tutorials/first_steps/01_hello_krk.md",
+                "Build a KRK" => "tutorials/first_steps/02_build_a_krk.md",
+                "Cookbook" => "tutorials/first_steps/03_cookbook.md",
+            ],
+            "Simulations" => [
+                "Your first simulation" => "tutorials/01_first_simulation.md",
+                "Body forces" => "tutorials/02_body_forces.md",
+                "Obstacles" => "tutorials/03_obstacles.md",
+                "Thermal flows" => "tutorials/04_thermal.md",
+            ],
+            "Newtonian Flows" => [
+                "Poiseuille 2D" => "examples/01_poiseuille_2d.md",
+                "Couette 2D" => "examples/02_couette_2d.md",
+                "Taylor-Green 2D" => "examples/03_taylor_green_2d.md",
+                "Lid-driven cavity 2D" => "examples/04_cavity_2d.md",
+                "Lid-driven cavity 3D" => "examples/05_cavity_3d.md",
+                "Cylinder 2D" => "examples/06_cylinder_2d.md",
+            ],
+            "Thermal Flows" => [
+                "Heat conduction" => "examples/07_heat_conduction.md",
+                "Rayleigh-Bénard" => "examples/08_rayleigh_benard.md",
+            ],
+            "KRK Walk-through" => [
+                ".krk config reference" => "examples/10_krk_config.md",
+            ],
         ],
         "Benchmarks" => [
-            "benchmarks/performance.md",
-            "benchmarks/accuracy.md",
-            "benchmarks/external.md",
-            "benchmarks/hardware.md",
+            "Performance" => "benchmarks/performance.md",
+            "Accuracy" => "benchmarks/accuracy.md",
+            "External comparison" => "benchmarks/external.md",
+            "Hardware" => "benchmarks/hardware.md",
         ],
-        ".krk DSL reference" => [
-            "krk/overview.md",
-            "krk/directives.md",
-            "krk/bc_types.md",
-            "krk/modules.md",
-            "krk/presets.md",
-            "krk/helpers.md",
-            "krk/expressions.md",
-            "krk/sanity.md",
-            "krk/errors.md",
-            "krk/aliases.md",
-        ],
-        "Julia API reference" => [
-            "api/lattice.md",
-            "api/collision.md",
-            "api/streaming.md",
-            "api/boundary.md",
-            "api/macroscopic.md",
-            "api/drivers.md",
-            "api/io.md",
-            "api/postprocess.md",
-            "api/config.md",
+        "Reference" => [
+            ".krk DSL" => [
+                "Overview" => "krk/overview.md",
+                "Directives" => "krk/directives.md",
+                "BC types" => "krk/bc_types.md",
+                "Modules" => "krk/modules.md",
+                "Presets" => "krk/presets.md",
+                "Helpers" => "krk/helpers.md",
+                "Expressions" => "krk/expressions.md",
+                "Sanity" => "krk/sanity.md",
+                "Errors" => "krk/errors.md",
+                "Aliases" => "krk/aliases.md",
+            ],
+            "Julia API" => [
+                "Lattice" => "api/lattice.md",
+                "Collision" => "api/collision.md",
+                "Streaming" => "api/streaming.md",
+                "Boundary" => "api/boundary.md",
+                "Macroscopic" => "api/macroscopic.md",
+                "Drivers" => "api/drivers.md",
+                "IO" => "api/io.md",
+                "Postprocess" => "api/postprocess.md",
+                "Config" => "api/config.md",
+            ],
         ],
     ],
     remotes = nothing,
@@ -198,7 +217,41 @@ makedocs(;
     checkdocs = :none,
 )
 
-deploydocs(
+# --- Prune orphan pages, then invoke Vitepress build manually ---
+# DocumenterVitepress copies all of `docs/src/` into `build/.documenter/`, so
+# out-of-scope .md files (v0.1.0 excludes phasefield, VOF, rheology, etc.)
+# reach Vitepress and may fail on missing assets. Drop them before building.
+let vp_input = joinpath(@__DIR__, "build", ".documenter")
+    for rel in LITERATE_EXCLUDE
+        for ext in (".jl", ".md")
+            p = joinpath(vp_input, replace(rel, r"\.jl$" => ext))
+            isfile(p) && rm(p)
+        end
+    end
+
+    cd(@__DIR__) do
+        tmpl_pkg = joinpath(dirname(pathof(DocumenterVitepress)), "..", "template", "package.json")
+        pkg_json = joinpath(@__DIR__, "package.json")
+        cleanup_pkg = !isfile(pkg_json)
+        cleanup_pkg && cp(tmpl_pkg, pkg_json)
+        try
+            node(; adjust_PATH = true, adjust_LIBPATH = true) do _
+                run(`$(npm) install`)
+                run(`$(npm) run env -- vitepress build $(vp_input)`)
+            end
+        finally
+            if cleanup_pkg
+                rm(pkg_json; force = true)
+                rm(joinpath(@__DIR__, "package-lock.json"); force = true)
+            end
+        end
+    end
+end
+
+DocumenterVitepress.deploydocs(;
     repo = "github.com/lauguimel/Kraken.jl.git",
+    target = joinpath(@__DIR__, "build"),
     devbranch = "release/v0.1.0",
+    branch = "gh-pages",
+    push_preview = true,
 )

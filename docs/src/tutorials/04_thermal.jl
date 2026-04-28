@@ -91,8 +91,7 @@ Colorbar(fig[1, 2], hm; label = "T")
 save(joinpath(@__DIR__, "04_rb_temperature.svg"), fig)
 fig
 
-# ![Temperature field with hot plumes rising and cold plumes
-# sinking.](04_rb_temperature.svg)
+# Hot plumes rise from the bottom, cold plumes sink from the top.
 #
 # ---
 #
@@ -109,8 +108,7 @@ Colorbar(fig2[1, 2], hm2; label = "|u|")
 save(joinpath(@__DIR__, "04_rb_velocity.svg"), fig2)
 fig2
 
-# ![Velocity magnitude showing counter-rotating convection
-# rolls.](04_rb_velocity.svg)
+# Counter-rotating convection rolls are clearly visible.
 #
 # ---
 #

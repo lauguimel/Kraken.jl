@@ -136,6 +136,21 @@ compared to the linear conductive profile.
 Nx_dom, Ny_dom = size(Temp)
 ```
 
+### Plot: Temperature field
+
+```julia
+using CairoMakie
+
+fig = Figure(size=(800, 400))
+ax = Axis(fig[1, 1];
+    title  = "Temperature field — Ra = $(Int(Ra))",
+    xlabel = "x", ylabel = "y", aspect = DataAspect())
+hm = heatmap!(ax, 1:Nx_dom, 1:Ny_dom, Temp; colormap = :coolwarm)
+Colorbar(fig[1, 2], hm; label = "T")
+save(joinpath(@__DIR__, "rayleigh_benard_temperature.svg"), fig)
+fig
+```
+
 ![Temperature field at steady state.  The mushroom-shaped plumes are the
 hallmark of Rayleigh--Bénard convection.  Hot fluid rises (red), cold fluid
 sinks (blue).](rayleigh_benard_temperature.svg)
@@ -151,6 +166,19 @@ onset.
 
 ```julia
 umag = @. sqrt(ux^2 + uy^2)
+```
+
+### Plot: Velocity magnitude
+
+```julia
+fig2 = Figure(size=(800, 400))
+ax2 = Axis(fig2[1, 1];
+    title  = "Velocity magnitude — Ra = $(Int(Ra))",
+    xlabel = "x", ylabel = "y", aspect = DataAspect())
+hm2 = heatmap!(ax2, 1:Nx_dom, 1:Ny_dom, umag; colormap = :viridis)
+Colorbar(fig2[1, 2], hm2; label = "|u|")
+save(joinpath(@__DIR__, "rayleigh_benard_velocity.svg"), fig2)
+fig2
 ```
 
 ![Velocity magnitude showing the convection roll

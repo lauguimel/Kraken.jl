@@ -1,21 +1,61 @@
-# Kraken.jl
+```@raw html
+---
+layout: home
 
-**GPU-native Lattice Boltzmann Method (LBM) framework in Julia.**
+hero:
+  name: "Kraken.jl"
+  text: "GPU-native Lattice Boltzmann in Julia"
+  tagline: "Composable, multi-backend CFD — single-phase, thermal, axisymmetric, grid-refined."
+  image:
+    src: /assets/showcases/vonkarman_re200.gif
+    alt: Von Kármán vortex street at Re=200
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /getting_started
+    - theme: alt
+      text: Examples
+      link: /examples/04_cavity_2d
+    - theme: alt
+      text: View on GitHub
+      link: https://github.com/lauguimel/Kraken.jl
+
+features:
+  - icon: <img width="64" src="/assets/showcases/rayleigh_benard_ra1e5.gif"/>
+    title: Thermal convection
+    details: Rayleigh-Bénard natural convection with Boussinesq coupling, validated Ra=1e3–1e8.
+    link: /examples/08_rayleigh_benard
+  - icon: <img width="64" src="/assets/showcases/taylor_green_decay.gif"/>
+    title: Taylor-Green decay
+    details: Canonical vortex decay — spectral accuracy on structured grids.
+    link: /examples/03_taylor_green_2d
+  - icon: <img width="64" src="/assets/showcases/cavity_re1000.gif"/>
+    title: Lid-driven cavity
+    details: Reference benchmark at Re=100–10000, 2D and 3D drivers.
+    link: /examples/04_cavity_2d
+  - icon: <img width="64" src="/assets/showcases/vonkarman_re200.gif"/>
+    title: Flow past obstacles
+    details: Cylinder drag, STL bodies, moving boundaries via momentum exchange.
+    link: /examples/06_cylinder_2d
+---
+```
+
+## Why Kraken.jl?
 
 Kraken.jl provides a composable, high-performance LBM solver for incompressible
 flows with automatic GPU acceleration via
 [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl).
 
-## Key Features
-
-- **Multi-backend GPU**: write once, run on CUDA, Metal (Apple Silicon), AMD ROCm, and CPU
-- **D2Q9 & D3Q19 lattices**: standard lattice Boltzmann velocity sets
-- **BGK collision**: single-relaxation-time with Guo forcing scheme
-- **Boundary conditions**: bounce-back, Zou-He velocity/pressure, periodic
-- **Thermal LBM**: double distribution function with Boussinesq coupling
-- **Axisymmetric LBM**: cylindrical coordinates via Li et al. (2010) scheme
-- **Momentum exchange**: drag/lift computation for immersed bodies
-- **VTK output**: write fields to `.vti` / `.pvd` for ParaView visualization
+- **Multi-backend GPU** — write once, run on CUDA, Metal (Apple Silicon), AMD ROCm, and CPU
+- **D2Q9 & D3Q19 lattices** — standard lattice Boltzmann velocity sets
+- **BGK & MRT collision** — single- and multiple-relaxation-time with Guo forcing
+- **Boundary conditions** — bounce-back, Zou-He velocity/pressure, periodic, spatial/STL
+- **Thermal LBM** — double distribution function with Boussinesq coupling
+- **Axisymmetric LBM** — cylindrical coordinates via Li et al. (2010) scheme
+- **Grid refinement** — patch-based nested refinement with Filippova-Hanel rescaling
+- **Momentum exchange** — drag/lift computation for immersed bodies
+- **VTK output** — `.vti` / `.pvd` for ParaView visualization
+- **.krk DSL** — declarative, Gerris-like simulation config
 
 ## Quick Start
 
@@ -29,13 +69,7 @@ config = LBMConfig(D2Q9(); Nx=N, Ny=N, ν=ν, u_lid=0.1, max_steps=30000)
 result = run_cavity_2d(config)
 ```
 
-## Documentation
-
-- **[Installation](@ref)** — set up Kraken.jl and GPU backends
-- **Theory** — from kinetic theory to lattice Boltzmann (10 progressive chapters)
-- **Examples** — validated simulations with plots and convergence studies
-- **Benchmarks** — performance and accuracy measurements
-- **[API Reference](api/config.md)** — complete function reference
+See [Installation](installation.md) and [Getting Started](getting_started.md) for the full setup.
 
 ## Physics Capabilities
 

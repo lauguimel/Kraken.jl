@@ -180,6 +180,20 @@ u_ana   = [Fx / (2ν) * y * (H - y) for y in y_phys]
 u_num   = [ux[2, j] for j in j_fluid]       # numerical profile at x=2
 ```
 
+### Plot: velocity profile
+
+```julia
+using CairoMakie
+
+fig = Figure(size=(500, 400))
+ax = Axis(fig[1, 1], xlabel="y", ylabel="ux", title="Poiseuille — Ny = $Ny")
+lines!(ax, y_phys, u_ana, label="Analytical")
+scatter!(ax, y_phys, u_num, markersize=6, label="LBM")
+axislegend(ax, position=:ct)
+save(joinpath(@__DIR__, "poiseuille_profile.svg"), fig)
+fig
+```
+
 ![Poiseuille flow velocity profile at Ny = 32.  Blue line: analytical parabola ux(y) = Fx/(2 nu) y (H - y).  Orange dots: LBM simulation.  The agreement is excellent, with the numerical solution overlapping the analytical curve at every fluid node.  The profile is zero at both walls and reaches its maximum at the channel centreline y = H/2 = 15.5.](poiseuille_profile.svg)
 
 The LBM solution matches the analytical parabola to high accuracy.  At this
@@ -219,6 +233,20 @@ for Ny_i in Ny_list
     L2     = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
     push!(errors, L2)
 end
+```
+
+### Plot: convergence
+
+```julia
+fig2 = Figure(size=(500, 400))
+ax2 = Axis(fig2[1, 1], xlabel="Ny", ylabel="L₂ error",
+           title="Poiseuille convergence", xscale=log10, yscale=log10)
+scatterlines!(ax2, Float64.(Ny_list), errors, label="LBM")
+lines!(ax2, Float64.(Ny_list), errors[1] .* (Ny_list[1] ./ Ny_list).^2,
+       linestyle=:dash, color=:gray, label="slope 2")
+axislegend(ax2)
+save(joinpath(@__DIR__, "poiseuille_convergence.svg"), fig2)
+fig2
 ```
 
 ![Convergence of the Poiseuille flow simulation.  Log-log plot of relative L2 error vs grid resolution Ny.  Blue dots with solid line: LBM results.  Grey dashed line: reference slope of 2.  The LBM errors follow the slope-2 line closely, confirming second-order spatial convergence as predicted by the Chapman-Enskog analysis.](poiseuille_convergence.svg)

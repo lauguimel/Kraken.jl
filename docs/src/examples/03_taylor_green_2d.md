@@ -209,6 +209,15 @@ for s in steps_list
     end
     push!(E_ana, E0 * exp(-4ν * k^2 * s))
 end
+
+using CairoMakie
+fig = Figure(size=(500, 400))
+ax = Axis(fig[1, 1], xlabel="Time step", ylabel="Kinetic energy", title="Taylor–Green energy decay — N = $N")
+lines!(ax, collect(steps_list), E_ana, label="Analytical")
+scatter!(ax, collect(steps_list), E_num, markersize=6, label="LBM")
+axislegend(ax, position=:rt)
+save(joinpath(@__DIR__, "taylor_green_decay.svg"), fig)
+fig
 ```
 
 ![Taylor-Green vortex energy decay at N = 64.  Blue line: analytical exponential decay E(t) = E0 exp(-4 nu k^2 t).  Orange dots: LBM simulation measured at intervals of 200 time steps.  The numerical energy follows the analytical curve precisely, confirming that the BGK collision operator produces the correct effective viscosity nu = 0.01.  After 2000 steps, the energy has decayed to approximately 46 percent of its initial value.](taylor_green_decay.svg)
@@ -253,6 +262,13 @@ for j in 1:N, i in 1:N
     jp = mod1(j + 1, N); jm = mod1(j - 1, N)
     ωz[i, j] = 0.5 * (uy[ip, j] - uy[im, j]) - 0.5 * (ux[i, jp] - ux[i, jm])
 end
+
+fig2 = Figure(size=(500, 400))
+ax2 = Axis(fig2[1, 1], xlabel="x", ylabel="y", title="Vorticity ωz — t = $max_steps", aspect=DataAspect())
+hm = heatmap!(ax2, 1:N, 1:N, ωz, colormap=:RdBu)
+Colorbar(fig2[1, 2], hm, label="ωz")
+save(joinpath(@__DIR__, "taylor_green_vorticity.svg"), fig2)
+fig2
 ```
 
 ![Vorticity field at t = 2000 steps.  The balanced (red-blue) colour map shows the four counter-rotating vortices of the Taylor-Green pattern.  The spatial structure is identical to the initial condition --- the sinusoidal pattern is preserved exactly, only the amplitude has decreased due to viscous decay.  Red regions correspond to positive (counter-clockwise) vorticity, blue to negative (clockwise).  The smooth, symmetric pattern confirms that no spurious asymmetries or numerical artifacts have developed during the simulation.](taylor_green_vorticity.svg)

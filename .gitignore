@@ -6,6 +6,9 @@ Manifest.toml
 *.jl.mem
 deps/build.log
 docs/build/
+docs/node_modules/
+docs/package.json
+docs/package-lock.json
 
 # Local outputs and intermediate results
 output/

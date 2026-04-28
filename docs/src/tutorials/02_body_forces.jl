@@ -87,7 +87,6 @@ axislegend(ax; position = :ct)
 save(joinpath(@__DIR__, "02_poiseuille_profile.svg"), fig)
 fig
 
-# ![Poiseuille velocity profile.  The LBM solution (dots) overlaps the analytical parabola (line) at every fluid node.](02_poiseuille_profile.svg)
 #
 # ## 5. Convergence study
 #
@@ -122,7 +121,6 @@ axislegend(ax2)
 save(joinpath(@__DIR__, "02_poiseuille_convergence.svg"), fig2)
 fig2
 
-# ![Convergence of Poiseuille flow.  The LBM errors (blue) follow the slope-2 reference line (dashed grey), confirming second-order spatial accuracy.](02_poiseuille_convergence.svg)
 #
 # ---
 #

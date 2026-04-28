@@ -170,6 +170,21 @@ flow:
   the freestream velocity
 - The parabolic inlet profile is visible on the left boundary
 
+### Plot: Velocity magnitude field
+
+```julia
+using CairoMakie
+
+fig = Figure(size=(900, 300))
+ax = Axis(fig[1, 1];
+    title  = "Velocity magnitude |u|  — Re = $Re",
+    xlabel = "x", ylabel = "y", aspect = DataAspect())
+hm = heatmap!(ax, 1:Nx, 1:Ny, umag; colormap = :viridis)
+Colorbar(fig[1, 2], hm; label = "|u|")
+save(joinpath(@__DIR__, "cylinder_umag.svg"), fig)
+fig
+```
+
 ![Velocity magnitude field for flow around a cylinder at Re = 20.  The stagnation point is visible upstream, with accelerated flow above and below the cylinder and a symmetric closed wake downstream.](cylinder_umag.svg)
 
 ---
@@ -188,6 +203,19 @@ At ``N_y = 100`` (5 nodes per radius), the agreement is typically within
 2--5%.  Increasing the resolution improves the drag prediction because
 the bounce-back staircase approximation of the circular cylinder becomes
 smoother.
+
+### Plot: Drag coefficient comparison
+
+```julia
+fig2 = Figure(size=(500, 400))
+ax2 = Axis(fig2[1, 1];
+    title  = "Drag coefficient — Re = $Re",
+    ylabel = "Cd",
+    xticks = ([1, 2], ["Kraken (MEA)", "Schäfer–Turek"]))
+barplot!(ax2, [1, 2], [Cd, Cd_ref]; color = [:steelblue, :grey70])
+save(joinpath(@__DIR__, "cylinder_drag.svg"), fig2)
+fig2
+```
 
 ![Bar chart comparing the drag coefficient from the Kraken LBM simulation with the Schafer-Turek reference value at Re = 20.  The MEA-computed drag agrees with the benchmark to within a few percent.](cylinder_drag.svg)
 

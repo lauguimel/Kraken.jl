@@ -181,6 +181,21 @@ with positive values on the left (upward flow) and negative on the right
 The LBM results (solid lines) closely match the Ghia reference data (red
 circles) at ``N = 128``.
 
+```julia
+using CairoMakie
+fig = Figure(size=(900, 400))
+ax1 = Axis(fig[1, 1], xlabel="ux / u_lid", ylabel="y / N", title="Vertical centreline")
+lines!(ax1, ux_profile, y_norm, label="LBM")
+scatter!(ax1, ux_ghia, y_ghia, color=:red, markersize=6, label="Ghia et al.")
+axislegend(ax1, position=:lb)
+ax2 = Axis(fig[1, 2], xlabel="x / N", ylabel="uy / u_lid", title="Horizontal centreline")
+lines!(ax2, x_norm, uy_profile, label="LBM")
+scatter!(ax2, x_ghia, uy_ghia, color=:red, markersize=6, label="Ghia et al.")
+axislegend(ax2, position=:lb)
+save(joinpath(@__DIR__, "cavity_centerlines.svg"), fig)
+fig
+```
+
 ![Centreline velocity profiles for the lid-driven cavity at Re = 100.  Left: horizontal velocity along the vertical centreline compared with Ghia et al. (1982).  Right: vertical velocity along the horizontal centreline.  The LBM solution (N = 128) shows excellent agreement with the reference data.](cavity_centerlines.svg)
 
 ---
@@ -192,6 +207,16 @@ structure of the primary vortex.  The fastest flow is near the lid (top),
 and a thin boundary layer forms along the moving wall.  The vortex core
 is visible as a local minimum in velocity magnitude near the centre of
 the cavity.
+
+```julia
+umag = sqrt.(ux.^2 .+ uy.^2) ./ u_lid
+fig2 = Figure(size=(500, 450))
+ax3 = Axis(fig2[1, 1], xlabel="x", ylabel="y", title="Velocity magnitude |u| / u_lid — Re = $Re", aspect=DataAspect())
+hm = heatmap!(ax3, 1:N, 1:N, umag, colormap=:viridis)
+Colorbar(fig2[1, 2], hm, label="|u| / u_lid")
+save(joinpath(@__DIR__, "cavity_umag.svg"), fig2)
+fig2
+```
 
 ![Velocity magnitude field for the 2D lid-driven cavity at Re = 100.  The primary recirculation vortex is visible, with the highest velocities near the lid and a quiet core in the centre.](cavity_umag.svg)
 

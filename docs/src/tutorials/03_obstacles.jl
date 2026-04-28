@@ -101,9 +101,7 @@ Colorbar(fig[1, 2], hm; label = "|u|")
 save(joinpath(@__DIR__, "03_cylinder_umag.svg"), fig)
 fig
 
-# ![Velocity magnitude around the cylinder at Re = 20.  A stagnation
-# point is visible upstream, with accelerated flow above and below the
-# body and a steady symmetric wake downstream.](03_cylinder_umag.svg)
+# The wake is clearly visible downstream of the cylinder.
 #
 # ---
 #

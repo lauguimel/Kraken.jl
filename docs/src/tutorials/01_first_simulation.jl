@@ -115,7 +115,6 @@ Colorbar(fig[1, 2], hm; label = "|u| / u_lid")
 save(joinpath(@__DIR__, "01_cavity_umag.svg"), fig)
 fig
 
-# ![Velocity magnitude for the lid-driven cavity at Re = 100.](01_cavity_umag.svg)
 #
 # The primary recirculation vortex is clearly visible: fast flow near the
 # lid and a quiet core in the centre.
