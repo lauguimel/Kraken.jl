@@ -20,13 +20,13 @@
 #     axes. Edge tags are permuted accordingly
 #     (flip_ξ: west↔east; flip_η: south↔north).
 #
-#   `autoreorient_blocks(mbm)` — BFS on the interface graph: the first
-#     block is kept as-is, each subsequent block is tried in the 4
-#     {identity, flip_ξ, flip_η, flip_both} variants and the one that
-#     makes the parent-interface canonical (opposite-normal, aligned)
-#     is chosen. When several already-visited blocks constrain a
-#     target, we pick the first consistent flip and leave downstream
-#     mismatches for the sanity check to report.
+#   `autoreorient_blocks(mbm)` — BFS on the interface graph. Each block
+#     is tried in the 8 {transpose × flip_ξ × flip_η} variants and the
+#     one that makes the parent-interface canonical (opposite-normal,
+#     aligned) is chosen. Boundary tags with physical direction
+#     semantics (:inlet, :outlet, :wall_bot, :wall_top) are also kept on
+#     their canonical logical edges, so an interface-only choice cannot
+#     accidentally move an inlet from west to north.
 #
 # Transpose (swap ξ ↔ η) is not supported in the MVP — it changes the
 # block dimensions and requires rebuilding the underlying spline grid.
@@ -107,15 +107,39 @@ function reorient_block(block::Block{T, AT};
     return Block(block.id, new_mesh; west=w, east=e, south=s, north=n)
 end
 
+const _DEFAULT_PHYSICAL_TAG_EDGES = Dict{Symbol, Symbol}(
+    :inlet => :west,
+    :outlet => :east,
+    :wall_bot => :south,
+    :wall_bottom => :south,
+    :bottom => :south,
+    :wall_top => :north,
+    :wall_upper => :north,
+    :top => :north,
+)
+
 """
-    autoreorient_blocks(mbm::MultiBlockMesh2D; verbose=false)
+    autoreorient_blocks(mbm::MultiBlockMesh2D; verbose=false,
+                        respect_physical_tags=true)
         -> MultiBlockMesh2D
 
-Walk the interface graph starting from the first block (kept as-is)
-and flip every subsequent block so that every traversed `Interface`
-ends up as an aligned opposite-normal pair
+Walk the interface graph and orient each block so that every traversed
+`Interface` ends up as an aligned opposite-normal pair
 (`:east ↔ :west` or `:north ↔ :south`, with the edge coordinates
 running in the same direction on both sides).
+
+When `respect_physical_tags=true` (default), tags with established
+global direction semantics are constrained to their canonical logical
+edges:
+
+- `:inlet` → `:west`
+- `:outlet` → `:east`
+- `:wall_bot`, `:wall_bottom`, `:bottom` → `:south`
+- `:wall_top`, `:wall_upper`, `:top` → `:north`
+
+This avoids a subtle failure mode where the interface is canonical but
+a physical inlet/outlet migrated to a north/south logical edge, causing
+the boundary-condition rebuild to impose the wrong velocity component.
 
 The block indices and `id` symbols are preserved; only the underlying
 mesh arrays and `boundary_tags` of non-root blocks may change.
@@ -127,45 +151,31 @@ Returns a brand-new `MultiBlockMesh2D` (the input is not mutated).
 Raises `ErrorException` if no consistent flip assignment exists (the
 topology is genuinely twisted and needs a transpose or human review).
 """
-function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false)
+function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false,
+                              respect_physical_tags::Bool=true,
+                              physical_tag_edges=_DEFAULT_PHYSICAL_TAG_EDGES)
     blocks = collect(mbm.blocks)
     n_blocks = length(blocks)
     n_blocks == 0 && return mbm
+    orient_options = [(fξ, fη, tr) for tr in (false, true)
+                                   for fη in (false, true)
+                                   for fξ in (false, true)]
     # Per-block cumulative orientation state (flip_ξ, flip_η, transpose).
     # (false, false, false) = identity. Applied in order:
     # transpose → flip_ξ → flip_η, matching reorient_block.
     orient_state = fill((false, false, false), n_blocks)
-    # Force root block to have a positive Jacobian so validate_mesh
-    # accepts the extended mesh downstream. Left-handed parameterisations
-    # (J<0 everywhere) would be CONSISTENT on the interior but cause
-    # sign-change errors after mesh extension on curved boundaries. We
-    # flip ξ if the root's interior Jacobian (via finite differences at
-    # (i=2, j=2)) is negative; this orients the block so ξ-η is
-    # right-handed, which then propagates through the BFS to every
-    # downstream block via canonical interface pairing.
-    _J_at_22(blk) = begin
-        m = blk.mesh
-        m.Nξ < 3 || m.Nη < 3 ? zero(eltype(m.X)) : begin
-            dXξ = (m.X[3,2] - m.X[1,2]) / 2
-            dYξ = (m.Y[3,2] - m.Y[1,2]) / 2
-            dXη = (m.X[2,3] - m.X[2,1]) / 2
-            dYη = (m.Y[2,3] - m.Y[2,1]) / 2
-            dXξ * dYη - dXη * dYξ
-        end
-    end
-    if _J_at_22(blocks[1]) < 0
-        verbose && println("  autoreorient: root block :$(blocks[1].id) has J<0, " *
-                             "applying transpose to get right-handed orientation " *
-                             "(also migrates tags from south/north to west/east)")
-        blocks[1] = reorient_block(blocks[1]; transpose=true)
-        orient_state[1] = (false, false, true)
+    root_orient = _choose_root_orientation(blocks[1], orient_options;
+                                           respect_physical_tags=respect_physical_tags,
+                                           physical_tag_edges=physical_tag_edges)
+    if root_orient !== (false, false, false)
+        fξ, fη, tr = root_orient
+        verbose && println("  autoreorient: root block :$(blocks[1].id) orient=$(root_orient)")
+        blocks[1] = reorient_block(blocks[1]; flip_ξ=fξ, flip_η=fη, transpose=tr)
+        orient_state[1] = root_orient
     end
     visited = falses(n_blocks)
     visited[1] = true
     queue = [1]
-    orient_options = [(fξ, fη, tr) for tr in (false, true)
-                                   for fη in (false, true)
-                                   for fξ in (false, true)]
     while !isempty(queue)
         a_idx = popfirst!(queue)
         a_id = blocks[a_idx].id
@@ -182,6 +192,10 @@ function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false)
             for (fξ, fη, tr) in orient_options
                 candidate_b = reorient_block(blocks[b_idx];
                                                flip_ξ=fξ, flip_η=fη, transpose=tr)
+                if respect_physical_tags &&
+                   !_physical_tags_aligned(candidate_b, physical_tag_edges)
+                    continue
+                end
                 b_edge_after = _apply_orient_to_edge(b_edge_original, (fξ, fη, tr))
                 ok = _is_canonical_pair(blocks[a_idx], a_edge_current,
                                           candidate_b, b_edge_after)
@@ -216,6 +230,45 @@ function autoreorient_blocks(mbm::MultiBlockMesh2D; verbose::Bool=false)
                           to=(to_id,   _apply_orient_to_edge(to_edge,   orient_state[to_idx]))))
     end
     return MultiBlockMesh2D(blocks; interfaces=updated_ifaces)
+end
+
+function _physical_tags_aligned(block::Block, physical_tag_edges)
+    for edge in EDGE_SYMBOLS_2D
+        tag = getproperty(block.boundary_tags, edge)
+        preferred = get(physical_tag_edges, tag, nothing)
+        preferred === nothing && continue
+        preferred === edge || return false
+    end
+    return true
+end
+
+function _has_physical_tag_constraints(block::Block, physical_tag_edges)
+    for edge in EDGE_SYMBOLS_2D
+        haskey(physical_tag_edges, getproperty(block.boundary_tags, edge)) && return true
+    end
+    return false
+end
+
+function _choose_root_orientation(block::Block, orient_options;
+                                  respect_physical_tags::Bool,
+                                  physical_tag_edges)
+    if respect_physical_tags && _has_physical_tag_constraints(block, physical_tag_edges)
+        for (fξ, fη, tr) in orient_options
+            candidate = reorient_block(block; flip_ξ=fξ, flip_η=fη, transpose=tr)
+            minimum(candidate.mesh.J) > 0 || continue
+            _physical_tags_aligned(candidate, physical_tag_edges) || continue
+            return (fξ, fη, tr)
+        end
+        error("autoreorient_blocks: no positive-J orientation of root block " *
+              ":$(block.id) satisfies physical boundary tag directions")
+    end
+
+    minimum(block.mesh.J) > 0 && return (false, false, false)
+    for (fξ, fη, tr) in orient_options
+        candidate = reorient_block(block; flip_ξ=fξ, flip_η=fη, transpose=tr)
+        minimum(candidate.mesh.J) > 0 && return (fξ, fη, tr)
+    end
+    error("autoreorient_blocks: no positive-J orientation for root block :$(block.id)")
 end
 
 # Apply a (flip_ξ, flip_η, transpose) transformation to an edge symbol.
@@ -281,4 +334,3 @@ function transpose_multiblock(mbm::MultiBlockMesh2D)
     end
     return MultiBlockMesh2D(new_blocks; interfaces=new_ifaces)
 end
-

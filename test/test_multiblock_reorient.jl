@@ -105,6 +105,36 @@ using Kraken: INTERFACE_TAG
         b_edge = mbm2.interfaces[1].to[2]
         @test a_edge === :east
         @test b_edge === :west
+        @test mbm2.blocks[2].boundary_tags.east === :outlet
+    end
+
+    @testset "autoreorient keeps physical inlet/outlet on west/east" begin
+        mesh_A = cartesian_mesh(; x_min=0.0, x_max=2.0, y_min=0.0, y_max=1.0, Nx=5, Ny=5)
+        mesh_B = cartesian_mesh(; x_min=2.0, x_max=4.0, y_min=0.0, y_max=1.0, Nx=5, Ny=5)
+        blk_A = Block(:A, mesh_A; west=:inlet, east=:interface,
+                                south=:wall_bot, north=:wall_top)
+        blk_B = Block(:B, mesh_B; west=:interface, east=:outlet,
+                                south=:wall_bot, north=:wall_top)
+
+        # Simulate a Gmsh topological walk that loaded the left block with
+        # physical inlet on logical north and the interface on logical south.
+        blk_A_bad = reorient_block(blk_A; transpose=true, flip_η=true)
+        @test blk_A_bad.boundary_tags.north === :inlet
+        @test blk_A_bad.boundary_tags.south === :interface
+
+        mbm = MultiBlockMesh2D([blk_A_bad, blk_B];
+                                interfaces=[Interface(; from=(:A, :south), to=(:B, :west))])
+        mbm2 = autoreorient_blocks(mbm; verbose=false)
+        issues = sanity_check_multiblock(mbm2; verbose=false)
+        @test all(iss -> iss.severity !== :error, issues)
+        @test mbm2.blocks[1].boundary_tags.west === :inlet
+        @test mbm2.blocks[1].boundary_tags.east === :interface
+        @test mbm2.blocks[1].boundary_tags.south === :wall_bot
+        @test mbm2.blocks[1].boundary_tags.north === :wall_top
+        @test mbm2.blocks[2].boundary_tags.west === :interface
+        @test mbm2.blocks[2].boundary_tags.east === :outlet
+        @test mbm2.interfaces[1].from === (:A, :east)
+        @test mbm2.interfaces[1].to === (:B, :west)
     end
 
     # ---- BFS autoreorient: 3-block chain reorients all non-root blocks ----
