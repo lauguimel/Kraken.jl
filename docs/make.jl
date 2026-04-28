@@ -146,6 +146,12 @@ makedocs(;
             "theory/10_limitations.md",
             "theory/19_spatial_bcs.md",
         ],
+        "Tutorials" => [
+            "tutorials/01_first_simulation.md",
+            "tutorials/02_body_forces.md",
+            "tutorials/03_obstacles.md",
+            "tutorials/04_thermal.md",
+        ],
         "Examples" => [
             "examples/01_poiseuille_2d.md",
             "examples/02_couette_2d.md",
