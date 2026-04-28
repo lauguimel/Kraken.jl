@@ -148,6 +148,7 @@ function cfg_from_env()
         ogrid_specs=parse_ogrid_specs(get(ENV, "KRK_CYL_CONV_OGRID_SPECS", "20x16,28x20,36x24")),
         radial_progression=env_float("KRK_CYL_CONV_RADIAL_PROGRESSION", 0.92),
         bodyfit_reflect_ghost=env_float("KRK_CYL_CONV_BODYFIT_REFLECT_GHOST", 0.0),
+        bodyfit_cylinder_ghost_alpha=env_float("KRK_CYL_CONV_CYLINDER_GHOST_ALPHA", 0.10),
         ref_cd=env_float("KRK_CYL_CONV_REF_CD", 5.57953523384),
         ref_cl=env_float("KRK_CYL_CONV_REF_CL", 0.010618948146),
     )
@@ -350,7 +351,7 @@ function write_bodyfit_krk(case_dir, cfg, spec, mesh_paths)
         println(io, "Domain L = Lx x Ly  N = $(8 * spec.n_arc) x $(spec.n_radial)")
         println(io, "Mesh gmsh(file = \"$rel_mesh\", layout = topological, multiblock = true)")
         println(io)
-        println(io, "Physics Re = $(cfg.Re) u_max = U cx = cx cy = cy R = R avg_window = $(cfg.avg_window) sample_every = $(cfg.sample_every) check_every = $(cfg.check_every) bodyfit_reflect_ghost = $(cfg.bodyfit_reflect_ghost)")
+        println(io, "Physics Re = $(cfg.Re) u_max = U cx = cx cy = cy R = R avg_window = $(cfg.avg_window) sample_every = $(cfg.sample_every) check_every = $(cfg.check_every) bodyfit_reflect_ghost = $(cfg.bodyfit_reflect_ghost) bodyfit_cylinder_ghost_alpha = $(cfg.bodyfit_cylinder_ghost_alpha)")
         println(io)
         println(io, "Boundary west velocity(ux = U, uy = 0)")
         println(io, "Boundary east pressure(rho = 1.0)")
@@ -479,6 +480,30 @@ function write_convergence_plot(path, rows)
     return true
 end
 
+function write_coeff_plot(path, rows)
+    HAS_CAIRO || return false
+    rows = finite_rows(rows, (:D_eff, :Cd, :Cl))
+    isempty(rows) && return false
+    fig = Figure(size=(980, 440))
+    ax1 = Axis(fig[1, 1], xlabel="D_eff", ylabel="Cd",
+               title="Drag coefficient")
+    ax2 = Axis(fig[1, 2], xlabel="D_eff", ylabel="Cl",
+               title="Lift coefficient")
+    for method in unique([r.method for r in rows])
+        data = sort(filter(r -> r.method == method, rows), by=r -> r.D_eff)
+        lines!(ax1, [r.D_eff for r in data], [r.Cd for r in data],
+               linewidth=2.5, label=method)
+        scatter!(ax1, [r.D_eff for r in data], [r.Cd for r in data])
+        lines!(ax2, [r.D_eff for r in data], [r.Cl for r in data],
+               linewidth=2.5, label=method)
+        scatter!(ax2, [r.D_eff for r in data], [r.Cl for r in data])
+    end
+    axislegend(ax1, position=:rt, framevisible=false)
+    axislegend(ax2, position=:rt, framevisible=false)
+    save(path, fig)
+    return true
+end
+
 function write_history_plot(path, rows)
     HAS_CAIRO || return false
     rows = finite_rows(rows, (:step, :Cd, :Cl))
@@ -528,6 +553,8 @@ function read_summary_plot_rows(path)
         method=r[:method],
         resolution=r[:resolution],
         D_eff=_parse_float_cell(r[:D_eff]),
+        Cd=_parse_float_cell(r[:Cd]),
+        Cl=_parse_float_cell(r[:Cl]),
         Cd_abs_error=_parse_float_cell(r[:Cd_abs_error]),
         Cl_abs_error=_parse_float_cell(r[:Cl_abs_error]),
     ) for r in _read_csv_rows(path)]
@@ -547,15 +574,18 @@ function plot_existing_outputs(suffix)
     summary_csv = joinpath(TABLEDIR, "cylinder2d_convergence_compare$(suffix).csv")
     history_csv = joinpath(TABLEDIR, "cylinder2d_convergence_history$(suffix).csv")
     conv_plot_png = joinpath(PLOTDIR, "paper_cylinder2d_convergence_compare$(suffix).png")
+    coeff_plot_png = joinpath(PLOTDIR, "paper_cylinder2d_coefficients$(suffix).png")
     history_plot_png = joinpath(PLOTDIR, "paper_cylinder2d_force_history$(suffix).png")
     rows = read_summary_plot_rows(summary_csv)
     history = read_history_plot_rows(history_csv)
     made_conv_plot = write_convergence_plot(conv_plot_png, rows)
+    made_coeff_plot = write_coeff_plot(coeff_plot_png, rows)
     made_history_plot = write_history_plot(history_plot_png, history)
     println("Wrote:")
     made_conv_plot && println("  ", relpath(conv_plot_png, pwd()))
+    made_coeff_plot && println("  ", relpath(coeff_plot_png, pwd()))
     made_history_plot && println("  ", relpath(history_plot_png, pwd()))
-    return made_conv_plot || made_history_plot
+    return made_conv_plot || made_coeff_plot || made_history_plot
 end
 
 function main()
@@ -572,6 +602,7 @@ function main()
     println("=== Cylinder 2D convergence: body-fitted vs Cartesian LI-BB ===")
     println("backend=$(backend_info.label) precision=$(backend_info.T)")
     println("steps=$(cfg.steps) avg_window=$(cfg.avg_window) sample_every=$(cfg.sample_every)")
+    println("cy=$(cfg.cy) bodyfit_cylinder_ghost_alpha=$(cfg.bodyfit_cylinder_ghost_alpha)")
     cart_list = join(cfg.cart_deffs, ",")
     ogrid_list = join(["$(s.n_arc)x$(s.n_radial)" for s in cfg.ogrid_specs], ",")
     println("cartesian D_eff targets=$cart_list")
@@ -624,11 +655,13 @@ function main()
     history_csv = joinpath(TABLEDIR, "cylinder2d_convergence_history$(suffix).csv")
     summary_md = joinpath(TABLEDIR, "cylinder2d_convergence_compare$(suffix).md")
     conv_plot_png = joinpath(PLOTDIR, "paper_cylinder2d_convergence_compare$(suffix).png")
+    coeff_plot_png = joinpath(PLOTDIR, "paper_cylinder2d_coefficients$(suffix).png")
     history_plot_png = joinpath(PLOTDIR, "paper_cylinder2d_force_history$(suffix).png")
     write_summary_csv(summary_csv, rows)
     write_history_csv(history_csv, history)
     write_summary_md(summary_md, rows, cfg)
     made_conv_plot = write_convergence_plot(conv_plot_png, rows)
+    made_coeff_plot = write_coeff_plot(coeff_plot_png, rows)
     made_history_plot = write_history_plot(history_plot_png, history)
 
     println("Wrote:")
@@ -636,6 +669,7 @@ function main()
         println("  ", relpath(path, pwd()))
     end
     made_conv_plot && println("  ", relpath(conv_plot_png, pwd()))
+    made_coeff_plot && println("  ", relpath(coeff_plot_png, pwd()))
     made_history_plot && println("  ", relpath(history_plot_png, pwd()))
 end
 
