@@ -147,7 +147,10 @@ oscillation.
   Cartesian LI-BB on uniform grids versus the production
   `.krk -> Mesh gmsh(.msh) -> Module slbm_drag` O-grid body-fitted path.
   It writes `Cd/Cl` errors against Schaefer-Turek 2D-1 references and records
-  unstable body-fitted meshes instead of aborting the whole sweep.
+  unstable body-fitted meshes instead of aborting the whole sweep. When plots
+  are enabled, it writes both convergence-error and force-history PNGs. Set
+  `KRK_CYL_CONV_PLOT_ONLY=1` with the same `KRK_CYL_CONV_TAG` to regenerate
+  those figures locally from H100 CSVs without rerunning the solver.
 
 - `paper_make_ogrid_msh.jl`
   Generates `meshes/cylinder_ogrid_8block.geo` and

@@ -1,0 +1,38 @@
+#!/bin/bash -l
+#PBS -N kraken_cyl2d_conv
+#PBS -l select=1:ncpus=4:ngpus=1:mem=64GB:gpu_id=H100
+#PBS -l walltime=01:00:00
+#PBS -j oe
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS=1
+export KRK_CYL_CONV_BACKEND=cuda
+export KRK_CYL_CONV_FT="${KRK_CYL_CONV_FT:-Float64}"
+export KRK_CYL_CONV_STEPS="${KRK_CYL_CONV_STEPS:-10000}"
+export KRK_CYL_CONV_AVG_WINDOW="${KRK_CYL_CONV_AVG_WINDOW:-3000}"
+export KRK_CYL_CONV_SAMPLE_EVERY="${KRK_CYL_CONV_SAMPLE_EVERY:-50}"
+export KRK_CYL_CONV_CHECK_EVERY="${KRK_CYL_CONV_CHECK_EVERY:-500}"
+export KRK_CYL_CONV_CART_DEFFS="${KRK_CYL_CONV_CART_DEFFS:-20,30,40,50}"
+export KRK_CYL_CONV_OGRID_SPECS="${KRK_CYL_CONV_OGRID_SPECS:-20x16,28x20,36x24}"
+export KRK_CYL_CONV_RADIAL_PROGRESSION="${KRK_CYL_CONV_RADIAL_PROGRESSION:-0.92}"
+export KRK_CYL_CONV_TAG="${KRK_CYL_CONV_TAG:-cuda_float64_conv_fine}"
+export KRK_CYL_CONV_SKIP_PLOTS=1
+
+mkdir -p tmp/paper_bodyfit_run/aqua_logs
+mkdir -p tmp/paper_bodyfit_run/paper_tables
+mkdir -p tmp/paper_bodyfit_run/convergence_cases
+LOG_TAG="${KRK_CYL_CONV_TAG//[^A-Za-z0-9_\-]/_}"
+LOG_PATH="tmp/paper_bodyfit_run/aqua_logs/cylinder2d_convergence_h100_${LOG_TAG}.txt"
+LATEST_LOG="tmp/paper_bodyfit_run/aqua_logs/cylinder2d_convergence_h100.txt"
+
+nvidia-smi
+julia --project=. -e 'using CUDA; CUDA.functional() || error("CUDA not functional"); println("GPU: ", CUDA.name(CUDA.device()))'
+
+julia --project=. tmp/paper_bodyfit_run/paper_cylinder2d_convergence_compare.jl \
+  | tee "$LOG_PATH"
+cp "$LOG_PATH" "$LATEST_LOG"

@@ -88,7 +88,7 @@ function _override_max_steps(setup::SimulationSetup, new_max::Int)
         setup.user_vars, setup.regions, setup.boundaries, setup.initial,
         setup.modules, new_max,
         setup.outputs, setup.diagnostics, setup.refinements,
-        setup.velocity_field, setup.rheology)
+        setup.velocity_field, setup.rheology, setup.mesh)
 end
 
 """
@@ -109,7 +109,15 @@ function run_simulation(setup::SimulationSetup;
     sanity_check(setup)
 
     # --- Dispatch to specialized runners based on modules ---
-    if :advection_only in setup.modules
+    if setup.mesh !== nothing
+        if :slbm_drag in setup.modules
+            return _run_gmsh_slbm_drag(setup; backend=backend, T=T,
+                                       callback=callback,
+                                       callback_every=callback_every)
+        end
+        error("Mesh directive is present, but no mesh-capable runner was selected. " *
+              "For Gmsh cylinder drag use `Module slbm_drag`.")
+    elseif :advection_only in setup.modules
         return _run_advection_only(setup; backend=backend, T=T)
     elseif :twophase_vof in setup.modules
         return _run_twophase_vof(setup; backend=backend, T=T)
@@ -257,6 +265,585 @@ function run_simulation(setup::SimulationSetup;
         result = merge(result, (tau_field=Array(tau_field),))
     end
     return result
+end
+
+# --- Gmsh multi-block SLBM drag runner ---
+
+function _setup_number(setup::SimulationSetup, keys, default)
+    key_tuple = keys isa Tuple ? keys : (keys,)
+    for key in key_tuple
+        haskey(setup.physics.params, key) && return setup.physics.params[key]
+        haskey(setup.user_vars, key) && return setup.user_vars[key]
+    end
+    return default
+end
+
+function _copy_to_backend(backend, ::Type{T}, host::AbstractArray) where T
+    dev = KernelAbstractions.allocate(backend, T, size(host)...)
+    copyto!(dev, T.(host))
+    return dev
+end
+
+function _copy_bool_to_backend(backend, host::AbstractArray{Bool})
+    dev = KernelAbstractions.allocate(backend, Bool, size(host)...)
+    copyto!(dev, host)
+    return dev
+end
+
+function _allocate_block_state_as(block::Block, ::Type{T}, backend, ng::Int) where T
+    nx = block.mesh.Nξ + 2 * ng
+    ny = block.mesh.Nη + 2 * ng
+    f = KernelAbstractions.allocate(backend, T, nx, ny, 9); fill!(f, zero(T))
+    rho = KernelAbstractions.allocate(backend, T, nx, ny); fill!(rho, one(T))
+    ux = KernelAbstractions.allocate(backend, T, nx, ny); fill!(ux, zero(T))
+    uy = KernelAbstractions.allocate(backend, T, nx, ny); fill!(uy, zero(T))
+    return BlockState2D{T, typeof(f), typeof(rho)}(f, rho, ux, uy,
+                                                    block.mesh.Nξ, block.mesh.Nη, ng)
+end
+
+@inline function _edge_node(block::Block, edge::Symbol, r::Int)
+    edge === :west  && return 1, r
+    edge === :east  && return block.mesh.Nξ, r
+    edge === :south && return r, 1
+    edge === :north && return r, block.mesh.Nη
+    error("unknown edge $edge")
+end
+
+function _parabolic_channel_u(y, Ly, u_max)
+    yy = clamp(Float64(y), 0.0, Float64(Ly))
+    return 4.0 * Float64(u_max) * yy * (Float64(Ly) - yy) / Float64(Ly)^2
+end
+
+function _edge_profile_host(block::Block, edge::Symbol, ::Type{T}, Ly, u_max) where T
+    n = edge_length(block, edge)
+    profile = zeros(T, n)
+    for r in 1:n
+        i, j = _edge_node(block, edge, r)
+        profile[r] = T(_parabolic_channel_u(block.mesh.Y[i, j], Ly, u_max))
+    end
+    return profile
+end
+
+function _physical_normal_from_tag(tag::Symbol)
+    tag === :inlet && return :west
+    tag === :outlet && return :east
+    tag in (:wall_bot, :wall_bottom, :bottom) && return :south
+    tag in (:wall_top, :wall_upper, :top) && return :north
+    return :auto
+end
+
+function _mesh_drag_bc(block::Block, edge::Symbol, tag::Symbol,
+                       setup::SimulationSetup, backend, ::Type{T},
+                       Ly, u_max, rho_out) where T
+    tag === INTERFACE_TAG && return InterfaceBC()
+    if tag === :inlet
+        profile = _copy_to_backend(backend, T,
+                                   _edge_profile_host(block, edge, T, Ly, u_max))
+        return ZouHeVelocity(profile, _physical_normal_from_tag(tag))
+    elseif tag === :outlet
+        return ZouHePressure(T(rho_out), _physical_normal_from_tag(tag))
+    end
+    return HalfwayBB()
+end
+
+function _mesh_drag_bcspec(block::Block, setup::SimulationSetup,
+                           backend, ::Type{T}, Ly, u_max, rho_out) where T
+    tags = block.boundary_tags
+    return BCSpec2D(;
+        west=_mesh_drag_bc(block, :west, tags.west, setup, backend, T,
+                           Ly, u_max, rho_out),
+        east=_mesh_drag_bc(block, :east, tags.east, setup, backend, T,
+                           Ly, u_max, rho_out),
+        south=_mesh_drag_bc(block, :south, tags.south, setup, backend, T,
+                            Ly, u_max, rho_out),
+        north=_mesh_drag_bc(block, :north, tags.north, setup, backend, T,
+                            Ly, u_max, rho_out))
+end
+
+function _mesh_drag_noop_bcspec(block::Block)
+    function bc_for(tag::Symbol)
+        (tag === INTERFACE_TAG || tag === :interface) && return InterfaceBC()
+        return HalfwayBB()
+    end
+    tags = block.boundary_tags
+    return BCSpec2D(;
+        west=bc_for(tags.west),
+        east=bc_for(tags.east),
+        south=bc_for(tags.south),
+        north=bc_for(tags.north))
+end
+
+_edge_code_2d(edge::Symbol) =
+    edge === :west ? 1 :
+    edge === :east ? 2 :
+    edge === :south ? 3 :
+    edge === :north ? 4 :
+    error("unknown edge $edge")
+
+_normal_code_2d(normal::Symbol) =
+    normal === :west ? 1 :
+    normal === :east ? 2 :
+    normal === :south ? 3 :
+    normal === :north ? 4 :
+    error("unknown physical normal $normal")
+
+@kernel function _mesh_drag_physnorm_velocity_edge_2d!(f, edge_code::Int,
+                                                       normal_code::Int,
+                                                       profile, Nx::Int,
+                                                       Ny::Int)
+    r = @index(Global)
+    T = eltype(f)
+    i = edge_code == 1 ? 1  :
+        edge_code == 2 ? Nx :
+        r
+    j = edge_code == 3 ? 1  :
+        edge_code == 4 ? Ny :
+        r
+    @inbounds begin
+        f1 = f[i, j, 1]; f2 = f[i, j, 2]; f3 = f[i, j, 3]
+        f4 = f[i, j, 4]; f5 = f[i, j, 5]; f6 = f[i, j, 6]
+        f7 = f[i, j, 7]; f8 = f[i, j, 8]; f9 = f[i, j, 9]
+        u = profile[r]
+        if normal_code == 1
+            rho = (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / (one(T) - u)
+            f2 = f4 + T(2 / 3) * rho * u
+            f6 = f8 - T(0.5) * (f3 - f5) + T(1 / 6) * rho * u
+            f9 = f7 + T(0.5) * (f3 - f5) + T(1 / 6) * rho * u
+        elseif normal_code == 2
+            rho = (f1 + f3 + f5 + T(2) * (f2 + f6 + f9)) / (one(T) + u)
+            f4 = f2 - T(2 / 3) * rho * u
+            f7 = f9 - T(0.5) * (f3 - f5) - T(1 / 6) * rho * u
+            f8 = f6 + T(0.5) * (f3 - f5) - T(1 / 6) * rho * u
+        elseif normal_code == 3
+            rho = (f1 + f2 + f4 + T(2) * (f5 + f8 + f9)) / (one(T) - u)
+            f3 = f5 + T(2 / 3) * rho * u
+            f6 = f8 + T(0.5) * (f4 - f2) + T(1 / 6) * rho * u
+            f7 = f9 + T(0.5) * (f2 - f4) + T(1 / 6) * rho * u
+        else
+            rho = (f1 + f2 + f4 + T(2) * (f3 + f6 + f7)) / (one(T) + u)
+            f5 = f3 - T(2 / 3) * rho * u
+            f8 = f6 + T(0.5) * (f2 - f4) - T(1 / 6) * rho * u
+            f9 = f7 + T(0.5) * (f4 - f2) - T(1 / 6) * rho * u
+        end
+        f[i, j, 1] = f1; f[i, j, 2] = f2; f[i, j, 3] = f3
+        f[i, j, 4] = f4; f[i, j, 5] = f5; f[i, j, 6] = f6
+        f[i, j, 7] = f7; f[i, j, 8] = f8; f[i, j, 9] = f9
+    end
+end
+
+@kernel function _mesh_drag_physnorm_pressure_edge_2d!(f, edge_code::Int,
+                                                       normal_code::Int,
+                                                       rho_out, Nx::Int,
+                                                       Ny::Int)
+    r = @index(Global)
+    T = eltype(f)
+    i = edge_code == 1 ? 1  :
+        edge_code == 2 ? Nx :
+        r
+    j = edge_code == 3 ? 1  :
+        edge_code == 4 ? Ny :
+        r
+    rho = T(rho_out)
+    @inbounds begin
+        f1 = f[i, j, 1]; f2 = f[i, j, 2]; f3 = f[i, j, 3]
+        f4 = f[i, j, 4]; f5 = f[i, j, 5]; f6 = f[i, j, 6]
+        f7 = f[i, j, 7]; f8 = f[i, j, 8]; f9 = f[i, j, 9]
+        if normal_code == 1
+            u = one(T) - (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / rho
+            f2 = f4 + T(2 / 3) * rho * u
+            f6 = f8 - T(0.5) * (f3 - f5) + T(1 / 6) * rho * u
+            f9 = f7 + T(0.5) * (f3 - f5) + T(1 / 6) * rho * u
+        elseif normal_code == 2
+            u = -one(T) + (f1 + f3 + f5 + T(2) * (f2 + f6 + f9)) / rho
+            f4 = f2 - T(2 / 3) * rho * u
+            f7 = f9 - T(0.5) * (f3 - f5) - T(1 / 6) * rho * u
+            f8 = f6 + T(0.5) * (f3 - f5) - T(1 / 6) * rho * u
+        elseif normal_code == 3
+            u = one(T) - (f1 + f2 + f4 + T(2) * (f5 + f8 + f9)) / rho
+            f3 = f5 + T(2 / 3) * rho * u
+            f6 = f8 + T(0.5) * (f4 - f2) + T(1 / 6) * rho * u
+            f7 = f9 + T(0.5) * (f2 - f4) + T(1 / 6) * rho * u
+        else
+            u = -one(T) + (f1 + f2 + f4 + T(2) * (f3 + f6 + f7)) / rho
+            f5 = f3 - T(2 / 3) * rho * u
+            f8 = f6 + T(0.5) * (f2 - f4) - T(1 / 6) * rho * u
+            f9 = f7 + T(0.5) * (f4 - f2) - T(1 / 6) * rho * u
+        end
+        f[i, j, 1] = f1; f[i, j, 2] = f2; f[i, j, 3] = f3
+        f[i, j, 4] = f4; f[i, j, 5] = f5; f[i, j, 6] = f6
+        f[i, j, 7] = f7; f[i, j, 8] = f8; f[i, j, 9] = f9
+    end
+end
+
+function _apply_mesh_drag_physical_normal_edge_2d!(f, edge::Symbol,
+                                                   bc::ZouHeVelocity,
+                                                   Nx::Int, Ny::Int)
+    bc.physical_dir === :auto && return nothing
+    backend = KernelAbstractions.get_backend(f)
+    nrun = edge in (:west, :east) ? Ny : Nx
+    _mesh_drag_physnorm_velocity_edge_2d!(backend)(
+        f, _edge_code_2d(edge), _normal_code_2d(bc.physical_dir),
+        bc.profile, Nx, Ny; ndrange=(nrun,))
+    return nothing
+end
+
+function _apply_mesh_drag_physical_normal_edge_2d!(f, edge::Symbol,
+                                                   bc::ZouHePressure,
+                                                   Nx::Int, Ny::Int)
+    bc.physical_dir === :auto && return nothing
+    backend = KernelAbstractions.get_backend(f)
+    nrun = edge in (:west, :east) ? Ny : Nx
+    _mesh_drag_physnorm_pressure_edge_2d!(backend)(
+        f, _edge_code_2d(edge), _normal_code_2d(bc.physical_dir),
+        eltype(f)(bc.ρ_out), Nx, Ny; ndrange=(nrun,))
+    return nothing
+end
+
+function _apply_mesh_drag_physical_normal_edge_2d!(f, edge::Symbol,
+                                                   bc::AbstractBC,
+                                                   Nx::Int, Ny::Int)
+    return nothing
+end
+
+function _apply_mesh_drag_physical_normal_bcs_2d!(f, bcspec::BCSpec2D,
+                                                  Nx::Int, Ny::Int)
+    _apply_mesh_drag_physical_normal_edge_2d!(f, :west, bcspec.west, Nx, Ny)
+    _apply_mesh_drag_physical_normal_edge_2d!(f, :east, bcspec.east, Nx, Ny)
+    _apply_mesh_drag_physical_normal_edge_2d!(f, :south, bcspec.south, Nx, Ny)
+    _apply_mesh_drag_physical_normal_edge_2d!(f, :north, bcspec.north, Nx, Ny)
+    return nothing
+end
+
+function _circle_solid_field(block::Block, cx, cy, radius)
+    solid = zeros(Bool, block.mesh.Nξ, block.mesh.Nη)
+    r2 = Float64(radius)^2
+    tol = max(1e-14, 1e-10 * max(1.0, r2))
+    for j in 1:block.mesh.Nη, i in 1:block.mesh.Nξ
+        dx = Float64(block.mesh.X[i, j]) - Float64(cx)
+        dy = Float64(block.mesh.Y[i, j]) - Float64(cy)
+        solid[i, j] = dx * dx + dy * dy <= r2 + tol
+    end
+    return solid
+end
+
+function _mesh_curved_edges(block::Block)
+    edges = Symbol[]
+    for edge in EDGE_SYMBOLS_2D
+        getproperty(block.boundary_tags, edge) === :cylinder && push!(edges, edge)
+    end
+    return Tuple(edges)
+end
+
+function _edge_inner_node(block::Block, edge::Symbol, r::Int)
+    edge === :west  && return min(2, block.mesh.Nξ), r
+    edge === :east  && return max(block.mesh.Nξ - 1, 1), r
+    edge === :south && return r, min(2, block.mesh.Nη)
+    edge === :north && return r, max(block.mesh.Nη - 1, 1)
+    error("unknown edge $edge")
+end
+
+function _compute_bodyfit_cylinder_force_2d(mbm::MultiBlockMesh2D, states,
+                                            cx, cy, radius, nu, ng::Int)
+    Fx = 0.0
+    Fy = 0.0
+    inv_cs2_den = 1.0 / 3.0
+    epsd = eps(Float64)
+
+    for (block, st) in zip(mbm.blocks, states)
+        rho_h = Array(st.ρ)
+        ux_h = Array(st.ux)
+        uy_h = Array(st.uy)
+        for edge in EDGE_SYMBOLS_2D
+            getproperty(block.boundary_tags, edge) === :cylinder || continue
+            nedge = edge_length(block, edge)
+            nedge < 2 && continue
+            for r in 1:(nedge - 1)
+                ib0, jb0 = _edge_node(block, edge, r)
+                ib1, jb1 = _edge_node(block, edge, r + 1)
+                ii0, ji0 = _edge_inner_node(block, edge, r)
+                ii1, ji1 = _edge_inner_node(block, edge, r + 1)
+
+                x0 = Float64(block.mesh.X[ib0, jb0])
+                y0 = Float64(block.mesh.Y[ib0, jb0])
+                x1 = Float64(block.mesh.X[ib1, jb1])
+                y1 = Float64(block.mesh.Y[ib1, jb1])
+                xm = 0.5 * (x0 + x1)
+                ym = 0.5 * (y0 + y1)
+                ds = hypot(x1 - x0, y1 - y0)
+
+                nx = xm - Float64(cx)
+                ny = ym - Float64(cy)
+                nrm = max(hypot(nx, ny), epsd)
+                nx /= nrm
+                ny /= nrm
+                tx = -ny
+                ty = nx
+
+                r0 = rho_h[ii0 + ng, ji0 + ng]
+                r1 = rho_h[ii1 + ng, ji1 + ng]
+                ux0 = ux_h[ii0 + ng, ji0 + ng]
+                ux1 = ux_h[ii1 + ng, ji1 + ng]
+                uy0 = uy_h[ii0 + ng, ji0 + ng]
+                uy1 = uy_h[ii1 + ng, ji1 + ng]
+                rho = 0.5 * (Float64(r0) + Float64(r1))
+                ux = 0.5 * (Float64(ux0) + Float64(ux1))
+                uy = 0.5 * (Float64(uy0) + Float64(uy1))
+
+                xi0 = Float64(block.mesh.X[ii0, ji0])
+                yi0 = Float64(block.mesh.Y[ii0, ji0])
+                xi1 = Float64(block.mesh.X[ii1, ji1])
+                yi1 = Float64(block.mesh.Y[ii1, ji1])
+                dist0 = abs((xi0 - x0) * nx + (yi0 - y0) * ny)
+                dist1 = abs((xi1 - x1) * nx + (yi1 - y1) * ny)
+                wall_dist = max(0.5 * (dist0 + dist1), epsd)
+
+                # The constant pressure part cancels on a closed boundary;
+                # subtracting rho=1 reduces quadrature error on coarse O-grids.
+                p = (rho - 1.0) * inv_cs2_den
+                ut = ux * tx + uy * ty
+                tau = rho * Float64(nu) * ut / wall_dist
+                Fx += (-p * nx + tau * tx) * ds
+                Fy += (-p * ny + tau * ty) * ds
+            end
+        end
+    end
+    return (; Fx, Fy)
+end
+
+function _check_block_density(states, step::Int, label::AbstractString)
+    rho_min = Inf
+    rho_max = -Inf
+    for st in states
+        rho_h = Array(st.ρ)
+        ng = st.n_ghost
+        phys = @view rho_h[(ng + 1):(ng + st.Nξ_phys),
+                           (ng + 1):(ng + st.Nη_phys)]
+        any(!isfinite, phys) && error("non-finite density in $label at step $step")
+        rho_min = min(rho_min, minimum(phys))
+        rho_max = max(rho_max, maximum(phys))
+    end
+    return Float64(rho_min), Float64(rho_max)
+end
+
+function _run_gmsh_slbm_drag(setup::SimulationSetup;
+                             backend=KernelAbstractions.CPU(), T=Float64,
+                             callback::Union{Nothing,Function}=nothing,
+                             callback_every::Int=100)
+    mesh_setup = setup.mesh
+    mesh_setup === nothing && error("Gmsh SLBM drag runner requires setup.mesh")
+    mesh_setup.kind === :gmsh || error("slbm_drag only supports Mesh gmsh(...); got $(mesh_setup.kind)")
+    mesh_setup.multiblock || error("slbm_drag currently expects multiblock = true")
+    isfile(mesh_setup.file) || error("Gmsh mesh file not found: $(mesh_setup.file)")
+
+    mbm_raw, _ = load_gmsh_multiblock_2d(mesh_setup.file;
+                                         FT=Float64,
+                                         layout=mesh_setup.layout)
+    mbm = autoreorient_blocks(mbm_raw; verbose=false,
+                              respect_physical_tags=false)
+    issues = sanity_check_multiblock(mbm; verbose=false)
+    errors = filter(issue -> issue.severity === :error, issues)
+    isempty(errors) || error("Gmsh multi-block mesh failed sanity checks:\n" *
+                             join(string.(errors), "\n"))
+
+    steps = setup.max_steps
+    ng = max(1, round(Int, _setup_number(setup, :ng, 1.0)))
+    sample_every = max(1, round(Int, _setup_number(setup, :sample_every, 10.0)))
+    avg_window = max(1, min(steps, round(Int,
+        _setup_number(setup, :avg_window, min(1000.0, Float64(steps))))))
+    check_every = max(1, round(Int, _setup_number(setup, :check_every, 250.0)))
+
+    Lx = _setup_number(setup, (:Lx, :lx), setup.domain.Lx)
+    Ly = _setup_number(setup, (:Ly, :ly, :H), setup.domain.Ly)
+    cx = _setup_number(setup, (:cx, :c_x), 0.25 * Lx)
+    cy = _setup_number(setup, (:cy, :c_y), 0.5 * Ly)
+    radius = _setup_number(setup, (:R, :radius), 0.05 * min(Lx, Ly))
+    u_max = _setup_number(setup, (:u_max, :U, :umax), 0.04)
+    u_ref = _setup_number(setup, (:u_ref, :U_ref), (2.0 / 3.0) * u_max)
+    rho_out = _setup_number(setup, (:rho_out, :rho), 1.0)
+    Re = _setup_number(setup, (:Re, :reynolds), NaN)
+    embedded_solid = _setup_number(setup, (:embedded_solid, :use_libb_cutlinks), 0.0) > 0.5
+    cylinder_reflect_ghost =
+        !embedded_solid &&
+        _setup_number(setup, (:cylinder_reflect_ghost, :bodyfit_reflect_ghost), 0.0) > 0.5
+
+    dx_ref = minimum(block.mesh.dx_ref for block in mbm.blocks)
+    D_eff = 2.0 * Float64(radius) / Float64(dx_ref)
+    nu = if haskey(setup.physics.params, :nu)
+        setup.physics.params[:nu]
+    elseif !isnan(Re)
+        Float64(u_ref) * D_eff / Float64(Re)
+    else
+        error("slbm_drag needs either Physics nu = ... or Physics Re = ...")
+    end
+    isnan(Re) && (Re = Float64(u_ref) * D_eff / Float64(nu))
+
+    n_blocks = length(mbm.blocks)
+    states = [_allocate_block_state_as(block, T, backend, ng)
+              for block in mbm.blocks]
+    geom_ext = Vector{Any}(undef, n_blocks)
+    sp_ext = Vector{Any}(undef, n_blocks)
+    sm_ext = Vector{Any}(undef, n_blocks)
+    sp_int = Vector{Any}(undef, n_blocks)
+    sm_int = Vector{Any}(undef, n_blocks)
+    solid_ext = Vector{Any}(undef, n_blocks)
+    qwall_ext = Vector{Any}(undef, n_blocks)
+    uwx_ext = Vector{Any}(undef, n_blocks)
+    uwy_ext = Vector{Any}(undef, n_blocks)
+    solid_cells = 0
+
+    for (k, block) in enumerate(mbm.blocks)
+        curved_edges = _mesh_curved_edges(block)
+        mesh_ext, geom_h = build_block_slbm_geometry_extended(block;
+            n_ghost=ng, local_cfl=false, dx_ref=dx_ref,
+            curved_edges=curved_edges,
+            curved_center=(Float64(cx), Float64(cy)))
+        geom_t = SLBMGeometry{T, Array{T,3}}(
+            T.(geom_h.i_dep), T.(geom_h.j_dep),
+            geom_h.Nξ, geom_h.Nη,
+            geom_h.periodic_ξ, geom_h.periodic_η,
+            T(geom_h.dx_ref))
+        geom_ext[k] = transfer_slbm_geometry(geom_t, backend)
+
+        sp_h, sm_h = compute_local_omega_2d(mesh_ext; ν=nu,
+                                            scaling=:quadratic,
+                                            τ_floor=0.51)
+        sp_ext[k] = _copy_to_backend(backend, T, sp_h)
+        sm_ext[k] = _copy_to_backend(backend, T, sm_h)
+        sp_int[k] = _copy_to_backend(backend, T,
+            sp_h[(ng + 1):(ng + block.mesh.Nξ),
+                 (ng + 1):(ng + block.mesh.Nη)])
+        sm_int[k] = _copy_to_backend(backend, T,
+            sm_h[(ng + 1):(ng + block.mesh.Nξ),
+                 (ng + 1):(ng + block.mesh.Nη)])
+
+        # For a Gmsh O-grid the cylinder is the physical mesh boundary, not an
+        # immersed obstacle. Marking boundary nodes as solid activates the
+        # embedded LI-BB/cut-link path and corrupts the body-fitted wall model.
+        solid_int = embedded_solid ? _circle_solid_field(block, cx, cy, radius) :
+                    falses(block.mesh.Nξ, block.mesh.Nη)
+        solid_cells += count(identity, solid_int)
+        qwall_h, uwx_h, uwy_h = if embedded_solid
+            precompute_q_wall_slbm_cylinder_2d(
+                block.mesh, solid_int, cx, cy, radius; FT=Float64)
+        else
+            (zeros(Float64, block.mesh.Nξ, block.mesh.Nη, 9),
+             zeros(Float64, block.mesh.Nξ, block.mesh.Nη, 9),
+             zeros(Float64, block.mesh.Nξ, block.mesh.Nη, 9))
+        end
+
+        solid_ext[k] = _copy_bool_to_backend(backend,
+            extend_interior_field_2d(solid_int, ng))
+        qwall_ext[k] = _copy_to_backend(backend, T,
+            extend_interior_field_2d(qwall_h, ng))
+        uwx_ext[k] = _copy_to_backend(backend, T,
+            extend_interior_field_2d(uwx_h, ng))
+        uwy_ext[k] = _copy_to_backend(backend, T,
+            extend_interior_field_2d(uwy_h, ng))
+
+        f_init = zeros(T, block.mesh.Nξ, block.mesh.Nη, 9)
+        for j in 1:block.mesh.Nη, i in 1:block.mesh.Nξ, q in 1:9
+            u = solid_int[i, j] ? zero(T) :
+                T(_parabolic_channel_u(block.mesh.Y[i, j], Ly, u_max))
+            f_init[i, j, q] = T(equilibrium(D2Q9(), one(T), u, zero(T), q))
+        end
+        copyto!(interior_f(states[k]), f_init)
+    end
+
+    f_out = [KernelAbstractions.allocate(backend, T, size(st.f)...)
+             for st in states]
+    for buf in f_out
+        fill!(buf, zero(T))
+    end
+    physical_bcspecs = [_mesh_drag_bcspec(block, setup, backend, T,
+                                          Ly, u_max, rho_out)
+                        for block in mbm.blocks]
+    rebuild_bcspecs = [_mesh_drag_noop_bcspec(block) for block in mbm.blocks]
+
+    cd_samples = Float64[]
+    cl_samples = Float64[]
+    history = NamedTuple[]
+    Fx_sum = 0.0
+    Fy_sum = 0.0
+    n_avg = 0
+    rho_min, rho_max = _check_block_density(states, 0, setup.name)
+    t0 = time()
+
+    for step in 1:steps
+        exchange_ghost_shared_node_2d!(mbm, states)
+        fill_ghost_corners_2d!(mbm, states)
+        fill_slbm_wall_ghost_2d!(mbm, states)
+        fill_physical_wall_ghost_2d!(mbm, states)
+        cylinder_reflect_ghost && fill_tagged_reflection_ghost_2d!(mbm, states, :cylinder)
+
+        for k in 1:n_blocks
+            slbm_trt_libb_step_local_2d!(f_out[k], states[k].f,
+                states[k].ρ, states[k].ux, states[k].uy,
+                solid_ext[k], qwall_ext[k], uwx_ext[k], uwy_ext[k],
+                geom_ext[k], sp_ext[k], sm_ext[k])
+        end
+
+        for k in 1:n_blocks
+            nxp = states[k].Nξ_phys
+            nyp = states[k].Nη_phys
+            int_out = view(f_out[k], (ng + 1):(ng + nxp),
+                           (ng + 1):(ng + nyp), :)
+            int_in = view(states[k].f, (ng + 1):(ng + nxp),
+                          (ng + 1):(ng + nyp), :)
+            apply_bc_rebuild_2d!(int_out, int_in, rebuild_bcspecs[k], nu, nxp, nyp;
+                                 sp_field=sp_int[k], sm_field=sm_int[k])
+            _apply_mesh_drag_physical_normal_bcs_2d!(int_out, physical_bcspecs[k],
+                                                     nxp, nyp)
+        end
+
+        for k in 1:n_blocks
+            states[k].f, f_out[k] = f_out[k], states[k].f
+        end
+
+        if step > steps - avg_window && (step % sample_every == 0 || step == steps)
+            drag = _compute_bodyfit_cylinder_force_2d(mbm, states, cx, cy,
+                                                      radius, nu, ng)
+            Fx = Float64(drag.Fx)
+            Fy = Float64(drag.Fy)
+            Cd = 2.0 * Fx / (Float64(u_ref)^2 * D_eff)
+            Cl = 2.0 * Fy / (Float64(u_ref)^2 * D_eff)
+            push!(cd_samples, Cd)
+            push!(cl_samples, Cl)
+            push!(history, (; step=step, Cd=Cd, Cl=Cl, Fx=Fx, Fy=Fy))
+            Fx_sum += Fx
+            Fy_sum += Fy
+            n_avg += 1
+        end
+
+        if step % check_every == 0 || step == steps
+            rho_min, rho_max = _check_block_density(states, step, setup.name)
+        end
+        if callback !== nothing && step % callback_every == 0
+            Cd_now = isempty(cd_samples) ? NaN : cd_samples[end]
+            Cl_now = isempty(cl_samples) ? NaN : cl_samples[end]
+            callback(step, (; Cd=Cd_now, Cl=Cl_now,
+                            rho_min=rho_min, rho_max=rho_max,
+                            setup=setup))
+        end
+    end
+
+    KernelAbstractions.synchronize(backend)
+    elapsed = time() - t0
+    Fx_avg = Fx_sum / max(n_avg, 1)
+    Fy_avg = Fy_sum / max(n_avg, 1)
+    Cd = 2.0 * Fx_avg / (Float64(u_ref)^2 * D_eff)
+    Cl = 2.0 * Fy_avg / (Float64(u_ref)^2 * D_eff)
+    total_nodes = sum(block.mesh.Nξ * block.mesh.Nη for block in mbm.blocks)
+
+    return (;
+        Cd=Cd, Cl=Cl, Fx=Fx_avg, Fy=Fy_avg,
+        Cd_samples=cd_samples, Cl_samples=cl_samples, history=history,
+        setup=setup, mesh=mbm, mesh_file=mesh_setup.file,
+        blocks=n_blocks, nodes=total_nodes, solid_cells=solid_cells,
+        dx_ref=Float64(dx_ref), D_eff=D_eff, Re=Float64(Re),
+        u_max=Float64(u_max), u_ref=Float64(u_ref), nu=Float64(nu),
+        steps=steps, avg_window=avg_window, sample_every=sample_every,
+        rho_min=rho_min, rho_max=rho_max, elapsed_s=elapsed,
+        MLUPs=total_nodes * steps / max(elapsed, eps()) / 1e6)
 end
 
 # --- Internal helpers ---
