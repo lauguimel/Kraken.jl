@@ -147,6 +147,7 @@ function cfg_from_env()
         cart_deffs=parse_float_list(get(ENV, "KRK_CYL_CONV_CART_DEFFS", "20,30,40,50")),
         ogrid_specs=parse_ogrid_specs(get(ENV, "KRK_CYL_CONV_OGRID_SPECS", "20x16,28x20,36x24")),
         radial_progression=env_float("KRK_CYL_CONV_RADIAL_PROGRESSION", 0.92),
+        bodyfit_reflect_ghost=env_float("KRK_CYL_CONV_BODYFIT_REFLECT_GHOST", 0.0),
         ref_cd=env_float("KRK_CYL_CONV_REF_CD", 5.57953523384),
         ref_cl=env_float("KRK_CYL_CONV_REF_CL", 0.010618948146),
     )
@@ -349,7 +350,7 @@ function write_bodyfit_krk(case_dir, cfg, spec, mesh_paths)
         println(io, "Domain L = Lx x Ly  N = $(8 * spec.n_arc) x $(spec.n_radial)")
         println(io, "Mesh gmsh(file = \"$rel_mesh\", layout = topological, multiblock = true)")
         println(io)
-        println(io, "Physics Re = $(cfg.Re) u_max = U cx = cx cy = cy R = R avg_window = $(cfg.avg_window) sample_every = $(cfg.sample_every) check_every = $(cfg.check_every)")
+        println(io, "Physics Re = $(cfg.Re) u_max = U cx = cx cy = cy R = R avg_window = $(cfg.avg_window) sample_every = $(cfg.sample_every) check_every = $(cfg.check_every) bodyfit_reflect_ghost = $(cfg.bodyfit_reflect_ghost)")
         println(io)
         println(io, "Boundary west velocity(ux = U, uy = 0)")
         println(io, "Boundary east pressure(rho = 1.0)")
@@ -411,11 +412,16 @@ function write_summary_csv(path, rows)
 end
 
 function write_history_csv(path, rows)
+    extra(r, key) = key in propertynames(r) ? getproperty(r, key) : NaN
     open(path, "w") do io
-        println(io, "method,resolution,step,Cd,Cl,Fx,Fy")
+        println(io, "method,resolution,step,Cd,Cl,Fx,Fy,Fx_pressure,Fy_pressure,Fx_viscous,Fy_viscous")
         for r in rows
             println(io, join((r.method, r.resolution, r.step, fmt6(r.Cd),
-                              fmt6(r.Cl), fmt6(r.Fx), fmt6(r.Fy)), ','))
+                              fmt6(r.Cl), fmt6(r.Fx), fmt6(r.Fy),
+                              fmt6(extra(r, :Fx_pressure)),
+                              fmt6(extra(r, :Fy_pressure)),
+                              fmt6(extra(r, :Fx_viscous)),
+                              fmt6(extra(r, :Fy_viscous))), ','))
         end
     end
 end

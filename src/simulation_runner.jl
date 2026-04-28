@@ -514,6 +514,59 @@ function _apply_mesh_drag_physical_normal_bcs_2d!(f, bcspec::BCSpec2D,
     return nothing
 end
 
+@kernel function _mesh_drag_physnorm_halfway_edge_2d!(f_out, f_in,
+                                                      edge_code::Int,
+                                                      normal_code::Int,
+                                                      Nx::Int, Ny::Int)
+    r = @index(Global)
+    i = edge_code == 1 ? 1  :
+        edge_code == 2 ? Nx :
+        r
+    j = edge_code == 3 ? 1  :
+        edge_code == 4 ? Ny :
+        r
+    @inbounds begin
+        if normal_code == 1
+            f_out[i, j, 2] = f_in[i, j, 4]
+            f_out[i, j, 6] = f_in[i, j, 8]
+            f_out[i, j, 9] = f_in[i, j, 7]
+        elseif normal_code == 2
+            f_out[i, j, 4] = f_in[i, j, 2]
+            f_out[i, j, 7] = f_in[i, j, 9]
+            f_out[i, j, 8] = f_in[i, j, 6]
+        elseif normal_code == 3
+            f_out[i, j, 3] = f_in[i, j, 5]
+            f_out[i, j, 6] = f_in[i, j, 8]
+            f_out[i, j, 7] = f_in[i, j, 9]
+        else
+            f_out[i, j, 5] = f_in[i, j, 3]
+            f_out[i, j, 8] = f_in[i, j, 6]
+            f_out[i, j, 9] = f_in[i, j, 7]
+        end
+    end
+end
+
+function _mesh_drag_is_channel_wall_tag(tag::Symbol)
+    return tag in (:wall, :wall_top, :wall_upper, :top,
+                   :wall_bot, :wall_bottom, :bottom)
+end
+
+function _apply_mesh_drag_physical_wall_bcs_2d!(f_out, f_in, tags,
+                                                Nx::Int, Ny::Int)
+    backend = KernelAbstractions.get_backend(f_out)
+    for edge in EDGE_SYMBOLS_2D
+        tag = getproperty(tags, edge)
+        _mesh_drag_is_channel_wall_tag(tag) || continue
+        normal = _physical_normal_from_tag(tag)
+        normal === :auto && continue
+        nrun = edge in (:west, :east) ? Ny : Nx
+        _mesh_drag_physnorm_halfway_edge_2d!(backend)(
+            f_out, f_in, _edge_code_2d(edge), _normal_code_2d(normal),
+            Nx, Ny; ndrange=(nrun,))
+    end
+    return nothing
+end
+
 function _circle_solid_field(block::Block, cx, cy, radius)
     solid = zeros(Bool, block.mesh.Nξ, block.mesh.Nη)
     r2 = Float64(radius)^2
@@ -543,9 +596,11 @@ function _edge_inner_node(block::Block, edge::Symbol, r::Int)
 end
 
 function _compute_bodyfit_cylinder_force_2d(mbm::MultiBlockMesh2D, states,
-                                            cx, cy, radius, nu, ng::Int)
-    Fx = 0.0
-    Fy = 0.0
+                                            cx, cy, radius, nu, dx_ref, ng::Int)
+    Fx_pressure = 0.0
+    Fy_pressure = 0.0
+    Fx_viscous = 0.0
+    Fy_viscous = 0.0
     inv_cs2_den = 1.0 / 3.0
     epsd = eps(Float64)
 
@@ -579,12 +634,15 @@ function _compute_bodyfit_cylinder_force_2d(mbm::MultiBlockMesh2D, states,
                 tx = -ny
                 ty = nx
 
+                rb0 = rho_h[ib0 + ng, jb0 + ng]
+                rb1 = rho_h[ib1 + ng, jb1 + ng]
                 r0 = rho_h[ii0 + ng, ji0 + ng]
                 r1 = rho_h[ii1 + ng, ji1 + ng]
                 ux0 = ux_h[ii0 + ng, ji0 + ng]
                 ux1 = ux_h[ii1 + ng, ji1 + ng]
                 uy0 = uy_h[ii0 + ng, ji0 + ng]
                 uy1 = uy_h[ii1 + ng, ji1 + ng]
+                rho_wall = 0.5 * (Float64(rb0) + Float64(rb1))
                 rho = 0.5 * (Float64(r0) + Float64(r1))
                 ux = 0.5 * (Float64(ux0) + Float64(ux1))
                 uy = 0.5 * (Float64(uy0) + Float64(uy1))
@@ -599,15 +657,24 @@ function _compute_bodyfit_cylinder_force_2d(mbm::MultiBlockMesh2D, states,
 
                 # The constant pressure part cancels on a closed boundary;
                 # subtracting rho=1 reduces quadrature error on coarse O-grids.
-                p = (rho - 1.0) * inv_cs2_den
+                p = (rho_wall - 1.0) * inv_cs2_den
                 ut = ux * tx + uy * ty
                 tau = rho * Float64(nu) * ut / wall_dist
-                Fx += (-p * nx + tau * tx) * ds
-                Fy += (-p * ny + tau * ty) * ds
+                # Pressure is a lattice stress integrated over a boundary
+                # length in lattice units. The viscous term below already
+                # cancels dx_ref through du/dn_lattice * ds_lattice.
+                ds_lattice = ds / Float64(dx_ref)
+                Fx_pressure += (-p * nx) * ds_lattice
+                Fy_pressure += (-p * ny) * ds_lattice
+                Fx_viscous += (tau * tx) * ds
+                Fy_viscous += (tau * ty) * ds
             end
         end
     end
-    return (; Fx, Fy)
+    return (;
+        Fx=Fx_pressure + Fx_viscous,
+        Fy=Fy_pressure + Fy_viscous,
+        Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous)
 end
 
 function _check_block_density(states, step::Int, label::AbstractString)
@@ -791,6 +858,9 @@ function _run_gmsh_slbm_drag(setup::SimulationSetup;
                           (ng + 1):(ng + nyp), :)
             apply_bc_rebuild_2d!(int_out, int_in, rebuild_bcspecs[k], nu, nxp, nyp;
                                  sp_field=sp_int[k], sm_field=sm_int[k])
+            _apply_mesh_drag_physical_wall_bcs_2d!(int_out, int_in,
+                                                   mbm.blocks[k].boundary_tags,
+                                                   nxp, nyp)
             _apply_mesh_drag_physical_normal_bcs_2d!(int_out, physical_bcspecs[k],
                                                      nxp, nyp)
         end
@@ -801,14 +871,18 @@ function _run_gmsh_slbm_drag(setup::SimulationSetup;
 
         if step > steps - avg_window && (step % sample_every == 0 || step == steps)
             drag = _compute_bodyfit_cylinder_force_2d(mbm, states, cx, cy,
-                                                      radius, nu, ng)
+                                                      radius, nu, dx_ref, ng)
             Fx = Float64(drag.Fx)
             Fy = Float64(drag.Fy)
             Cd = 2.0 * Fx / (Float64(u_ref)^2 * D_eff)
             Cl = 2.0 * Fy / (Float64(u_ref)^2 * D_eff)
             push!(cd_samples, Cd)
             push!(cl_samples, Cl)
-            push!(history, (; step=step, Cd=Cd, Cl=Cl, Fx=Fx, Fy=Fy))
+            push!(history, (; step=step, Cd=Cd, Cl=Cl, Fx=Fx, Fy=Fy,
+                            Fx_pressure=Float64(drag.Fx_pressure),
+                            Fy_pressure=Float64(drag.Fy_pressure),
+                            Fx_viscous=Float64(drag.Fx_viscous),
+                            Fy_viscous=Float64(drag.Fy_viscous)))
             Fx_sum += Fx
             Fy_sum += Fy
             n_avg += 1
