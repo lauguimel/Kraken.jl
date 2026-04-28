@@ -12,7 +12,7 @@ include(joinpath(@__DIR__, "..", "gen_ogrid_rect_8block.jl"))
         geo = joinpath(mesh_dir, "cylinder_ogrid.geo")
         msh = joinpath(mesh_dir, "cylinder_ogrid.msh")
         write_ogrid_rect_8block_geo(geo; Lx=2.2, Ly=0.41,
-            cx_p=0.2, cy_p=0.2, R_in=0.05,
+            cx_p=0.2, cy_p=0.205, R_in=0.05,
             N_arc=4, N_radial=6, radial_progression=0.9)
 
         gmsh.initialize()
@@ -31,7 +31,7 @@ include(joinpath(@__DIR__, "..", "gen_ogrid_rect_8block.jl"))
         Module slbm_drag
         Domain L = 2.2 x 0.41 N = 40 x 40
         Mesh gmsh(file = "meshes/cylinder_ogrid.msh", layout = topological, multiblock = true)
-        Physics Re = 20 u_max = 0.04 cx = 0.2 cy = 0.2 R = 0.05 avg_window = 2 sample_every = 1 check_every = 1
+        Physics Re = 20 u_max = 0.04 cx = 0.2 cy = 0.205 R = 0.05 avg_window = 2 sample_every = 1 check_every = 1
         Boundary west velocity(ux = 0.04, uy = 0)
         Boundary east pressure(rho = 1.0)
         Boundary south wall
@@ -48,6 +48,7 @@ include(joinpath(@__DIR__, "..", "gen_ogrid_rect_8block.jl"))
         @test result.nodes == 192
         @test isfinite(result.Cd)
         @test isfinite(result.Cl)
+        @test abs(result.Cl) < 1e-8
         @test !isempty(result.history)
         @test isfinite(result.rho_min)
         @test isfinite(result.rho_max)

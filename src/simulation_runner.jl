@@ -700,6 +700,104 @@ function _apply_mesh_drag_physical_wall_ghost_bcs_2d!(mbm::MultiBlockMesh2D,
     return nothing
 end
 
+@kernel function _mesh_drag_cylinder_radial_ghost_col_2d!(f, mask,
+                                                          i_ghost::Int,
+                                                          i_bd::Int,
+                                                          ng::Int,
+                                                          alpha)
+    r, q = @index(Global, NTuple)
+    if @inbounds mask[r, q]
+        j = ng + r
+        @inbounds f[i_ghost, j, q] =
+            (1 - alpha) * f[i_ghost, j, q] +
+            alpha * f[i_bd, j, _mesh_drag_qopp_2d(q)]
+    end
+end
+
+@kernel function _mesh_drag_cylinder_radial_ghost_row_2d!(f, mask,
+                                                          j_ghost::Int,
+                                                          j_bd::Int,
+                                                          ng::Int,
+                                                          alpha)
+    r, q = @index(Global, NTuple)
+    if @inbounds mask[r, q]
+        i = ng + r
+        @inbounds f[i, j_ghost, q] =
+            (1 - alpha) * f[i, j_ghost, q] +
+            alpha * f[i, j_bd, _mesh_drag_qopp_2d(q)]
+    end
+end
+
+function _mesh_drag_cylinder_crossing_mask(block::Block, edge::Symbol,
+                                           cx, cy)
+    nrun = edge_length(block, edge)
+    mask = falses(nrun, 9)
+    epsn = 100 * eps(Float64)
+    for r in 1:nrun
+        i, j = _edge_node(block, edge, r)
+        nx = Float64(block.mesh.X[i, j]) - Float64(cx)
+        ny = Float64(block.mesh.Y[i, j]) - Float64(cy)
+        nrm = hypot(nx, ny)
+        nrm <= epsn && continue
+        nx /= nrm
+        ny /= nrm
+        for q in 1:9
+            dot = _MESH_DRAG_CX_2D[q] * nx + _MESH_DRAG_CY_2D[q] * ny
+            mask[r, q] = dot > epsn
+        end
+    end
+    return mask
+end
+
+function _mesh_drag_cylinder_ghost_masks(block::Block, backend, cx, cy)
+    function mask_for(edge)
+        getproperty(block.boundary_tags, edge) === :cylinder || return nothing
+        return _copy_bool_to_backend(backend,
+            _mesh_drag_cylinder_crossing_mask(block, edge, cx, cy))
+    end
+    return (;
+        west=mask_for(:west),
+        east=mask_for(:east),
+        south=mask_for(:south),
+        north=mask_for(:north))
+end
+
+function _apply_mesh_drag_cylinder_radial_ghost_bcs_2d!(mbm::MultiBlockMesh2D,
+                                                        states,
+                                                        masks,
+                                                        alpha)
+    for (block, st, block_masks) in zip(mbm.blocks, states, masks)
+        ng = st.n_ghost
+        Nxp = st.Nξ_phys
+        Nyp = st.Nη_phys
+        backend = KernelAbstractions.get_backend(st.f)
+        for edge in EDGE_SYMBOLS_2D
+            mask = getproperty(block_masks, edge)
+            mask === nothing && continue
+            nrun = edge_length(block, edge)
+            if edge === :west || edge === :east
+                i_bd = edge === :west ? ng + 1 : ng + Nxp
+                kernel = _mesh_drag_cylinder_radial_ghost_col_2d!(backend)
+                for g in 1:ng
+                    i_ghost = edge === :west ? ng + 1 - g : ng + Nxp + g
+                    kernel(st.f, mask, i_ghost, i_bd, ng,
+                           eltype(st.f)(alpha); ndrange=(nrun, 9))
+                end
+            else
+                j_bd = edge === :south ? ng + 1 : ng + Nyp
+                kernel = _mesh_drag_cylinder_radial_ghost_row_2d!(backend)
+                for g in 1:ng
+                    j_ghost = edge === :south ? ng + 1 - g : ng + Nyp + g
+                    kernel(st.f, mask, j_ghost, j_bd, ng,
+                           eltype(st.f)(alpha); ndrange=(nrun, 9))
+                end
+            end
+        end
+        KernelAbstractions.synchronize(backend)
+    end
+    return nothing
+end
+
 function _circle_solid_field(block::Block, cx, cy, radius)
     solid = zeros(Bool, block.mesh.Nξ, block.mesh.Nη)
     r2 = Float64(radius)^2
@@ -865,6 +963,8 @@ function _run_gmsh_slbm_drag(setup::SimulationSetup;
     cylinder_reflect_ghost =
         !embedded_solid &&
         _setup_number(setup, (:cylinder_reflect_ghost, :bodyfit_reflect_ghost), 0.0) > 0.5
+    cylinder_ghost_alpha = clamp(_setup_number(setup,
+        (:bodyfit_cylinder_ghost_alpha, :cylinder_ghost_alpha), 0.10), 0.0, 1.0)
 
     dx_ref = minimum(block.mesh.dx_ref for block in mbm.blocks)
     D_eff = 2.0 * Float64(radius) / Float64(dx_ref)
@@ -958,6 +1058,9 @@ function _run_gmsh_slbm_drag(setup::SimulationSetup;
                                           Ly, u_max, rho_out)
                         for block in mbm.blocks]
     rebuild_bcspecs = [_mesh_drag_noop_bcspec(block) for block in mbm.blocks]
+    cylinder_ghost_masks = [_mesh_drag_cylinder_ghost_masks(block, backend,
+                                                            cx, cy)
+                            for block in mbm.blocks]
 
     cd_samples = Float64[]
     cl_samples = Float64[]
@@ -972,7 +1075,9 @@ function _run_gmsh_slbm_drag(setup::SimulationSetup;
         exchange_ghost_shared_node_2d!(mbm, states)
         fill_ghost_corners_2d!(mbm, states)
         fill_slbm_wall_ghost_2d!(mbm, states)
-        fill_physical_wall_ghost_2d!(mbm, states)
+        _apply_mesh_drag_cylinder_radial_ghost_bcs_2d!(mbm, states,
+                                                       cylinder_ghost_masks,
+                                                       cylinder_ghost_alpha)
         _apply_mesh_drag_physical_wall_ghost_bcs_2d!(mbm, states)
         cylinder_reflect_ghost && fill_tagged_reflection_ghost_2d!(mbm, states, :cylinder)
 
@@ -1030,7 +1135,10 @@ function _run_gmsh_slbm_drag(setup::SimulationSetup;
             Cl_now = isempty(cl_samples) ? NaN : cl_samples[end]
             callback(step, (; Cd=Cd_now, Cl=Cl_now,
                             rho_min=rho_min, rho_max=rho_max,
-                            setup=setup))
+                            setup=setup, mbm=mbm, states=states,
+                            ng=ng, cx=cx, cy=cy, radius=radius,
+                            dx_ref=dx_ref, D_eff=D_eff, u_ref=u_ref,
+                            nu=nu))
         end
     end
 
