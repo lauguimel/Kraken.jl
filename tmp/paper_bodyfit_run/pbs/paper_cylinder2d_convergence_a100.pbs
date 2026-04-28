@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-cd "$PBS_O_WORKDIR"
+cd "${KRK_REPO_DIR:-$PBS_O_WORKDIR}"
 
 export PATH="$HOME/.juliaup/bin:$PATH"
 export JULIA_CUDA_USE_COMPAT=false

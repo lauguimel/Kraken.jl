@@ -567,6 +567,139 @@ function _apply_mesh_drag_physical_wall_bcs_2d!(f_out, f_in, tags,
     return nothing
 end
 
+const _MESH_DRAG_CX_2D = (0, 1, 0, -1, 0, 1, -1, -1, 1)
+const _MESH_DRAG_CY_2D = (0, 0, 1, 0, -1, 1, 1, -1, -1)
+
+@inline function _mesh_drag_qopp_2d(q::Int)
+    q == 1 && return 1
+    q == 2 && return 4
+    q == 3 && return 5
+    q == 4 && return 2
+    q == 5 && return 3
+    q == 6 && return 8
+    q == 7 && return 9
+    q == 8 && return 6
+    return 7
+end
+
+@kernel function _mesh_drag_physnorm_wall_ghost_col_2d!(f,
+                                                        i_ghost::Int,
+                                                        i_bd::Int,
+                                                        pop1::Int,
+                                                        pop2::Int,
+                                                        pop3::Int,
+                                                        shift1::Int,
+                                                        shift2::Int,
+                                                        shift3::Int,
+                                                        j_lo::Int,
+                                                        j_hi::Int)
+    idx, p = @index(Global, NTuple)
+    q, shift = p == 1 ? (pop1, shift1) :
+               p == 2 ? (pop2, shift2) :
+                         (pop3, shift3)
+    jsrc = idx + shift
+    jsrc = jsrc < j_lo ? j_lo : (jsrc > j_hi ? j_hi : jsrc)
+    @inbounds f[i_ghost, idx, q] = f[i_bd, jsrc, _mesh_drag_qopp_2d(q)]
+end
+
+@kernel function _mesh_drag_physnorm_wall_ghost_row_2d!(f,
+                                                        j_ghost::Int,
+                                                        j_bd::Int,
+                                                        pop1::Int,
+                                                        pop2::Int,
+                                                        pop3::Int,
+                                                        shift1::Int,
+                                                        shift2::Int,
+                                                        shift3::Int,
+                                                        i_lo::Int,
+                                                        i_hi::Int)
+    idx, p = @index(Global, NTuple)
+    q, shift = p == 1 ? (pop1, shift1) :
+               p == 2 ? (pop2, shift2) :
+                         (pop3, shift3)
+    isrc = idx + shift
+    isrc = isrc < i_lo ? i_lo : (isrc > i_hi ? i_hi : isrc)
+    @inbounds f[idx, j_ghost, q] = f[isrc, j_bd, _mesh_drag_qopp_2d(q)]
+end
+
+function _mesh_drag_physical_wall_pops(normal::Symbol)
+    normal === :west  && return (2, 6, 9)
+    normal === :east  && return (4, 7, 8)
+    normal === :south && return (3, 6, 7)
+    normal === :north && return (5, 8, 9)
+    error("unknown physical normal $normal")
+end
+
+function _edge_tangent_sign_for_normal(block::Block, edge::Symbol,
+                                       normal::Symbol)
+    nedge = edge_length(block, edge)
+    i0, j0 = _edge_node(block, edge, 1)
+    i1, j1 = _edge_node(block, edge, nedge)
+    dx = Float64(block.mesh.X[i1, j1]) - Float64(block.mesh.X[i0, j0])
+    dy = Float64(block.mesh.Y[i1, j1]) - Float64(block.mesh.Y[i0, j0])
+    component = normal in (:west, :east) ? dy : dx
+    return component < 0 ? -1 : 1
+end
+
+function _mesh_drag_wall_ghost_shifts(block::Block, edge::Symbol,
+                                      normal::Symbol, pops)
+    sgn = _edge_tangent_sign_for_normal(block, edge, normal)
+    if normal in (:west, :east)
+        return ntuple(k -> sgn * _MESH_DRAG_CY_2D[pops[k]], 3)
+    end
+    return ntuple(k -> sgn * _MESH_DRAG_CX_2D[pops[k]], 3)
+end
+
+function _apply_mesh_drag_physical_wall_ghost_edge_2d!(block::Block,
+                                                       st::BlockState2D,
+                                                       edge::Symbol,
+                                                       normal::Symbol)
+    ng = st.n_ghost
+    Nxp = st.Nξ_phys
+    Nyp = st.Nη_phys
+    Nxe = Nxp + 2 * ng
+    Nye = Nyp + 2 * ng
+    pops = _mesh_drag_physical_wall_pops(normal)
+    shifts = _mesh_drag_wall_ghost_shifts(block, edge, normal, pops)
+    backend = KernelAbstractions.get_backend(st.f)
+    if edge === :west || edge === :east
+        i_bd = edge === :west ? ng + 1 : ng + Nxp
+        kernel = _mesh_drag_physnorm_wall_ghost_col_2d!(backend)
+        for g in 1:ng
+            i_ghost = edge === :west ? ng + 1 - g : ng + Nxp + g
+            kernel(st.f, i_ghost, i_bd, pops[1], pops[2], pops[3],
+                   shifts[1], shifts[2], shifts[3],
+                   ng + 1, ng + Nyp; ndrange=(Nye, 3))
+        end
+    else
+        j_bd = edge === :south ? ng + 1 : ng + Nyp
+        kernel = _mesh_drag_physnorm_wall_ghost_row_2d!(backend)
+        for g in 1:ng
+            j_ghost = edge === :south ? ng + 1 - g : ng + Nyp + g
+            kernel(st.f, j_ghost, j_bd, pops[1], pops[2], pops[3],
+                   shifts[1], shifts[2], shifts[3],
+                   ng + 1, ng + Nxp; ndrange=(Nxe, 3))
+        end
+    end
+    KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+function _apply_mesh_drag_physical_wall_ghost_bcs_2d!(mbm::MultiBlockMesh2D,
+                                                      states)
+    for (block, st) in zip(mbm.blocks, states)
+        for edge in EDGE_SYMBOLS_2D
+            tag = getproperty(block.boundary_tags, edge)
+            _mesh_drag_is_channel_wall_tag(tag) || continue
+            normal = _physical_normal_from_tag(tag)
+            normal === :auto && continue
+            _apply_mesh_drag_physical_wall_ghost_edge_2d!(block, st,
+                                                          edge, normal)
+        end
+    end
+    return nothing
+end
+
 function _circle_solid_field(block::Block, cx, cy, radius)
     solid = zeros(Bool, block.mesh.Nξ, block.mesh.Nη)
     r2 = Float64(radius)^2
@@ -840,6 +973,7 @@ function _run_gmsh_slbm_drag(setup::SimulationSetup;
         fill_ghost_corners_2d!(mbm, states)
         fill_slbm_wall_ghost_2d!(mbm, states)
         fill_physical_wall_ghost_2d!(mbm, states)
+        _apply_mesh_drag_physical_wall_ghost_bcs_2d!(mbm, states)
         cylinder_reflect_ghost && fill_tagged_reflection_ghost_2d!(mbm, states, :cylinder)
 
         for k in 1:n_blocks
