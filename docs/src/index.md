@@ -7,7 +7,7 @@ hero:
   text: ".krk-first Lattice Boltzmann simulations in Julia"
   tagline: "Run reproducible LBM cases from small text files, then drop into Julia when you need direct control."
   image:
-    src: /assets/showcases/vonkarman_re200.gif
+    src: assets/showcases/vonkarman_re200.gif
     alt: Vortex street simulation
   actions:
     - theme: brand
@@ -21,19 +21,19 @@ hero:
       link: /api/public_api
 
 features:
-  - icon: <img width="64" src="/assets/showcases/cavity_re1000.gif"/>
+  - icon: <img width="64" src="assets/showcases/cavity_re1000.gif"/>
     title: Reproducible cases
     details: Each public example is backed by a checked-in .krk file.
     link: /examples/04_cavity_2d
-  - icon: <img width="64" src="/assets/showcases/taylor_green_decay.gif"/>
+  - icon: <img width="64" src="assets/showcases/taylor_green_decay.gif"/>
     title: Verified convergence
     details: Poiseuille and Taylor-Green convergence are rerun locally and CSV-backed.
     link: /benchmarks/accuracy
-  - icon: <img width="64" src="/assets/showcases/rayleigh_benard_ra1e5.gif"/>
+  - icon: <img width="64" src="assets/showcases/rayleigh_benard_ra1e5.gif"/>
     title: Thermal DDF
     details: Heat conduction and Boussinesq natural convection are in the v0.1.0 scope.
     link: /examples/08_rayleigh_benard
-  - icon: <img width="64" src="/assets/showcases/vonkarman_re200.gif"/>
+  - icon: <img width="64" src="assets/showcases/vonkarman_re200.gif"/>
     title: Agent context
     details: A compact llms.txt is shipped for LLM-assisted work.
     link: /llms

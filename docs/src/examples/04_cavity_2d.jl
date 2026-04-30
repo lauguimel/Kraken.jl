@@ -7,7 +7,7 @@
 # **Validates against:** Ghia, Ghia, Shin (1982)
 # [`10.1016/0021-9991(82)90058-4`](https://doi.org/10.1016/0021-9991(82)90058-4)
 #
-# **Download:** <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a>
+# **Download:** <a href="../assets/krk/cavity.krk" download><code>cavity.krk</code></a>
 #
 # **Hardware:** local CPU baseline, ~30s wall-clock at N = 128×128
 #

@@ -6,7 +6,7 @@
 # **Validates against:** Ku, Hirsh & Taylor (1987) — centerline profiles
 # [`10.1016/0021-9991(87)90193-8`](https://doi.org/10.1016/0021-9991(87)90193-8)
 #
-# **Download:** <a href="/assets/krk/cavity_3d.krk" download><code>cavity_3d.krk</code></a>
+# **Download:** <a href="../assets/krk/cavity_3d.krk" download><code>cavity_3d.krk</code></a>
 #
 # **Hardware:** local CPU baseline, ~5 min wall-clock at N = 64³ (CPU) /
 # NVIDIA H100, ~30s at N = 64³

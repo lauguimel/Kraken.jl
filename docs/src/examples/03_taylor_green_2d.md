@@ -10,7 +10,7 @@ EditURL = "03_taylor_green_2d.jl"
 **Validates against:** analytical exponential decay
 ``u(t) = u_0\,\exp(-2\nu k^2 t)``
 
-**Download:** <a href="/assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
+**Download:** <a href="../assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
 
 **Hardware:** local CPU baseline, ~5s wall-clock at N = 64×64
 
@@ -134,7 +134,7 @@ regime where numerical dissipation is most visible.
 
 ## Simulation File
 
-Download: <a href="/assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
+Download: <a href="../assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
 
 ```
 # Taylor-Green vortex decay in a fully periodic domain

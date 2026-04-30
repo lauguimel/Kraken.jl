@@ -6,7 +6,7 @@
 # **Validates against:** tutorial example — no quantitative validation target.
 # Each .krk in this tutorial is a working case covered by other example pages.
 #
-# **Download:** <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a> (and the other .krk files
+# **Download:** <a href="../assets/krk/cavity.krk" download><code>cavity.krk</code></a> (and the other .krk files
 # linked from their respective example pages)
 #
 # **Hardware:** n/a (tutorial, cases run from other pages)
@@ -72,7 +72,7 @@
 #
 # ## Example 1 — Lid-driven cavity
 #
-# Download: <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a>
+# Download: <a href="../assets/krk/cavity.krk" download><code>cavity.krk</code></a>
 
 # ```
 # Simulation cavity D2Q9
@@ -100,7 +100,7 @@ nothing #hide
 #
 # ## Example 2 — Poiseuille flow (body force)
 #
-# Download: <a href="/assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
+# Download: <a href="../assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
 
 # ```
 # Simulation poiseuille D2Q9
@@ -122,7 +122,7 @@ nothing #hide
 #
 # ## Example 3 — Cylinder with parabolic inlet
 #
-# Download: <a href="/assets/krk/cylinder.krk" download><code>cylinder.krk</code></a>
+# Download: <a href="../assets/krk/cylinder.krk" download><code>cylinder.krk</code></a>
 
 # ```
 # Simulation cylinder D2Q9
@@ -157,7 +157,7 @@ nothing #hide
 #
 # ## Example 4 — Couette flow
 #
-# Download: <a href="/assets/krk/couette.krk" download><code>couette.krk</code></a>
+# Download: <a href="../assets/krk/couette.krk" download><code>couette.krk</code></a>
 
 # ```
 # Simulation couette D2Q9

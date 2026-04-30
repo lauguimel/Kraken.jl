@@ -12,7 +12,7 @@ EditURL = "01_poiseuille_2d.jl"
 **Validates against:** analytical parabolic profile
 ``u_x(y) = \frac{F_x}{2\nu}\, y\,(L_y - y)``
 
-**Download:** <a href="/assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
+**Download:** <a href="../assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
 
 **Hardware:** local CPU baseline, ~10s wall-clock at N = 4×32
 
@@ -121,7 +121,7 @@ resulting velocity remains much less than the lattice speed of sound
 
 ## Simulation File
 
-Download: <a href="/assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
+Download: <a href="../assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
 
 ```
 # Poiseuille flow driven by body force

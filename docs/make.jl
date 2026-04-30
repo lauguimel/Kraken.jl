@@ -120,7 +120,6 @@ makedocs(;
         repo = "github.com/lauguimel/Kraken.jl",
         devurl = "dev",
         devbranch = "release/v0.1.0",
-        deploy_url = "lauguimel.github.io/Kraken.jl",
         build_vitepress = false,
     ),
     pages = [

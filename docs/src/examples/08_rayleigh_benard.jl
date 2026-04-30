@@ -6,7 +6,7 @@
 # **Validates against:** De Vahl Davis (1983) — Nusselt number vs Rayleigh
 # [`10.1002/fld.1650030305`](https://doi.org/10.1002/fld.1650030305)
 #
-# **Download:** <a href="/assets/krk/rayleigh_benard.krk" download><code>rayleigh_benard.krk</code></a>
+# **Download:** <a href="../assets/krk/rayleigh_benard.krk" download><code>rayleigh_benard.krk</code></a>
 #
 # **Hardware:** local CPU baseline, ~90s wall-clock at 128×64 (Ra = 10⁵)
 #

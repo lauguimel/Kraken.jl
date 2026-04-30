@@ -6,7 +6,7 @@
 # **Validates against:** Schäfer & Turek (1996) benchmark 2D-1
 # [`10.1007/978-3-322-89849-4_39`](https://doi.org/10.1007/978-3-322-89849-4_39)
 #
-# **Download:** <a href="/assets/krk/cylinder.krk" download><code>cylinder.krk</code></a>
+# **Download:** <a href="../assets/krk/cylinder.krk" download><code>cylinder.krk</code></a>
 #
 # **Hardware:** local CPU baseline, ~45s wall-clock at 200×50
 #

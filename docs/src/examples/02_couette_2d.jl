@@ -6,7 +6,7 @@
 # **Validates against:** analytical linear profile
 # ``u_x(y) = u_\text{wall}\, y / L_y``
 #
-# **Download:** <a href="/assets/krk/couette.krk" download><code>couette.krk</code></a>
+# **Download:** <a href="../assets/krk/couette.krk" download><code>couette.krk</code></a>
 #
 # **Hardware:** local CPU baseline, ~10s wall-clock at N = 4×32
 #
@@ -120,7 +120,7 @@
 #
 # ## Simulation File
 #
-# Download: <a href="/assets/krk/couette.krk" download><code>couette.krk</code></a>
+# Download: <a href="../assets/krk/couette.krk" download><code>couette.krk</code></a>
 #
 # ```
 # # Couette flow: linear velocity profile

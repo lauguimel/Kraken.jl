@@ -10,7 +10,7 @@ EditURL = "07_heat_conduction.jl"
 **Validates against:** analytical 1D steady-state profile
 ``T(x) = 1 - x/L``
 
-**Download:** <a href="/assets/krk/heat_conduction.krk" download><code>heat_conduction.krk</code></a>
+**Download:** <a href="../assets/krk/heat_conduction.krk" download><code>heat_conduction.krk</code></a>
 
 **Hardware:** local CPU baseline, ~15s wall-clock at 128×32
 
