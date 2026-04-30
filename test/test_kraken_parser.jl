@@ -1,3 +1,4 @@
+using Logging
 using Test
 
 # Use Kraken if available, otherwise include directly for standalone testing
@@ -387,7 +388,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 100 steps
         """
         io = IOBuffer()
-        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+        Logging.with_logger(Logging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
@@ -451,7 +452,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 100 steps
         """
         io = IOBuffer()
-        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+        Logging.with_logger(Logging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
@@ -634,7 +635,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 10 steps
         """
         io = IOBuffer()
-        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+        Logging.with_logger(Logging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
@@ -654,7 +655,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 10 steps
         """
         io = IOBuffer()
-        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
+        Logging.with_logger(Logging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
