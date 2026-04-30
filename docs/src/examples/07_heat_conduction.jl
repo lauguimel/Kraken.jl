@@ -6,9 +6,9 @@
 # **Validates against:** analytical 1D steady-state profile
 # ``T(x) = 1 - x/L``
 #
-# **Download:** [`heat_conduction.krk`](../assets/krk/heat_conduction.krk)
+# **Download:** <a href="/assets/krk/heat_conduction.krk" download><code>heat_conduction.krk</code></a>
 #
-# **Hardware:** Apple M2, ~15s wall-clock at 128×32
+# **Hardware:** local CPU baseline, ~15s wall-clock at 128×32
 #
 # ![Heat conduction profile](../assets/figures/heat_profile.png)
 #

@@ -1,86 +1,77 @@
 # Kraken.jl benchmark suite
 
-Single-command benchmarks for the v0.1.0 in-scope physics
-(single-phase LBM, thermal, grid refinement). Every benchmark writes
-a timestamped CSV into `benchmarks/results/` so the documentation
-figures stay in sync with the reported numbers.
+Benchmark scripts write timestamped CSV files into `benchmarks/results/`.
+Documentation should cite only numbers that can be traced to those CSVs.
+
+The public v0.1.0 benchmark scope is conservative:
+
+- single-phase BGK flows;
+- thermal DDF checks;
+- CPU baseline plus H100 once fresh H100 throughput CSVs are committed.
+
+Grid refinement, VOF, rheology, viscoelasticity and SLBM/body-fitted work are
+development-branch topics and should not be mixed into this branch's public
+benchmark tables.
 
 ## Quick start
 
 ```bash
-# Fast subset (~5 min CPU, laptop)
-julia --project benchmarks/run_all.jl --quick
+# Fast/default CPU-oriented run
+julia --project=. benchmarks/run_all.jl --quick --hardware-id=my_machine
 
 # Full CPU sweep
-julia --project benchmarks/run_all.jl
+julia --project=. benchmarks/run_all.jl --hardware-id=my_machine
 
-# Full CPU + GPU sweep (requires CUDA.jl or Metal.jl functional)
-julia --project benchmarks/run_all.jl --gpu --hardware-id=apple_m2
+# GPU sweep, after selecting a real hardware id from hardware.toml
+julia --project=. benchmarks/run_all.jl --gpu --hardware-id=aqua_h100
 ```
 
 ## Flags
 
-| Flag                      | Purpose                                         |
-|---------------------------|-------------------------------------------------|
-| `--quick`                 | Reduced subset (skip slow convergence + GPU)    |
-| `--gpu`                   | Run GPU benchmarks on top of CPU                |
-| `--hardware-id=<key>`     | Label matching `benchmarks/hardware.toml`       |
-| `--skip-existing`         | Skip cases whose CSV already exists             |
-| `--output-dir=<path>`     | Override `benchmarks/results`                   |
+| Flag | Purpose |
+|---|---|
+| `--quick` | Reduced subset |
+| `--gpu` | Run GPU benchmarks when the backend is available |
+| `--hardware-id=<key>` | Label matching `benchmarks/hardware.toml` |
+| `--skip-existing` | Skip cases whose CSV already exists |
+| `--output-dir=<path>` | Override `benchmarks/results` |
 
-## Hardware declarations
+## Hardware ids
 
-Each result CSV carries a `hardware_id` column matching a section in
-`benchmarks/hardware.toml`. The shipped declarations are:
+Declared hardware currently includes:
 
-- `apple_m2` — Guillaume's laptop (CPU baseline)
-- `aqua_h100` — QUT Aqua H100 GPU node (submit via `hpc/aqua_perf_h100.pbs`)
-- `aqua_a100` — QUT Aqua A100 GPU node
+- `apple_m3max` — local Metal development artifact;
+- `aqua_h100` — QUT Aqua H100 GPU node;
+- `aqua_a100` — QUT Aqua A100 GPU node.
 
-Add your own section to `hardware.toml` when running on a new machine,
-then pass `--hardware-id=<your_key>` to `run_all.jl`.
-
-## Running on Aqua (HPC)
-
-```bash
-# From your laptop
-scp hpc/aqua_perf_h100.pbs maitreje@aqua.qut.edu.au:~/Kraken.jl/hpc/
-ssh maitreje@aqua.qut.edu.au 'cd ~/Kraken.jl && qsub hpc/aqua_perf_h100.pbs'
-
-# After the job finishes, pull the CSV back
-scp 'maitreje@aqua.qut.edu.au:~/Kraken.jl/benchmarks/results/*.csv' benchmarks/results/
-```
+Some old CSVs still use `apple_m2`. Keep them as historical raw data, but do
+not make them the public benchmark story.
 
 ## Scripts
 
-| Script                            | What it measures                        |
-|-----------------------------------|-----------------------------------------|
-| `convergence_poiseuille.jl`       | L2 error vs N, spatial order            |
-| `convergence_taylor_green.jl`     | Temporal decay vs analytical            |
-| `convergence_cavity.jl`           | Ghia 1982 centerline error vs N         |
-| `convergence_thermal.jl`          | Nu vs Ra (Rayleigh-Benard)              |
-| `perf_mlups.jl`                   | MLUPS vs N, CPU + GPU                   |
-| `perf_gpu_physics.jl`             | Physics-specific GPU MLUPS breakdown    |
-| `perf_optimizations.jl`           | BGK vs AA vs fused on GPU               |
-
-Out-of-scope (multiphase, VOF, rheology, viscoelastic) lives on the
-`dev` branch and is not covered here.
+| Script | What it measures | Publication status |
+|---|---|---|
+| `convergence_poiseuille.jl` | L2 error vs grid size | verified locally, CSV-backed |
+| `convergence_taylor_green.jl` | Periodic vortex decay | verified locally |
+| `convergence_thermal.jl` | Heat conduction and `Ra=1e3` natural convection | verified locally |
+| `convergence_cavity.jl` | Ghia centerline error | rerun before citing |
+| `perf_mlups.jl` | BGK throughput | cite only committed CSVs |
+| `perf_gpu_physics.jl` | Advanced physics throughput | out of v0.1.0 public scope |
+| `perf_optimizations.jl` | Optimization experiments | development artifact |
 
 ## CSV schema
 
-Convergence files use:
+Convergence files should include at least:
 
-```
-case, N, error_L1, error_L2, error_max, observed_order, hardware_id
-```
-
-Performance files use:
-
-```
-case, N, backend, precision, mlups, walltime_s, steps, hardware_id
+```text
+case,N,error_L2,observed_order,hardware_id
 ```
 
-Every CSV filename follows the pattern
-`<name>_<hardware_id>_<timestamp>.csv` so successive runs accumulate
-rather than overwrite. The documentation pipeline picks the most recent
-file matching a given prefix.
+Performance files should include at least:
+
+```text
+case,N,backend,precision,mlups,hardware_id
+```
+
+Before adding a number to the docs, record the command, hardware id, commit,
+date and CSV filename in the relevant benchmark page or validation note.

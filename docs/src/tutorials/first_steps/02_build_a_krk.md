@@ -15,7 +15,7 @@ Kraken config file and understand why each one is there.
 
 Every `.krk` file begins by naming the run and picking a lattice:
 
-```krk
+```text
 Simulation poiseuille D2Q9
 ```
 
@@ -30,7 +30,7 @@ No other lattice families are accepted in v0.1.0; see
 
 Give the solver a physical extent and a grid:
 
-```krk
+```text
 Domain L = 0.125 x 1.0   N = 4 x 32
 ```
 
@@ -46,7 +46,7 @@ effectively 1D.
 
 Set kinematic viscosity and body force:
 
-```krk
+```text
 Physics nu = 0.1  Fx = 1e-5
 ```
 
@@ -62,7 +62,7 @@ Mach number exceeds 0.1 (incompressibility breakdown).
 
 Boundary conditions follow the face names of the domain:
 
-```krk
+```text
 Boundary x     periodic
 Boundary south wall
 Boundary north wall
@@ -80,7 +80,7 @@ Face aliases (`south`, `north`, `east`, `west`, …) are listed in the
 
 Pick how long to integrate:
 
-```krk
+```text
 Run 10000 steps
 ```
 
@@ -91,7 +91,7 @@ $L_y = 32$ and $\nu = 0.1$ that's ~10 000 steps — hence the choice.
 
 Declare what to dump and how often:
 
-```krk
+```text
 Output vtk every 2000 [rho, ux, uy]
 ```
 
@@ -107,7 +107,7 @@ custom field names.
 
 Put it all together:
 
-```krk
+```text
 # examples/poiseuille.krk
 Simulation poiseuille D2Q9
 Domain  L = 0.125 x 1.0  N = 4 x 32

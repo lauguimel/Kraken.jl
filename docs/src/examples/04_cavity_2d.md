@@ -11,9 +11,9 @@ EditURL = "04_cavity_2d.jl"
 **Validates against:** Ghia, Ghia, Shin (1982)
 [`10.1016/0021-9991(82)90058-4`](https://doi.org/10.1016/0021-9991(82)90058-4)
 
-**Download:** [`cavity.krk`](../assets/krk/cavity.krk)
+**Download:** <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a>
 
-**Hardware:** Apple M2, ~30s wall-clock at N = 128×128
+**Hardware:** local CPU baseline, ~30s wall-clock at N = 128×128
 
 ![Cavity centerline profiles](../assets/figures/cavity_centerlines.png)
 

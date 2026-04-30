@@ -10,7 +10,7 @@ EditURL = "10_krk_config.jl"
 **Validates against:** tutorial example — no quantitative validation target.
 Each .krk in this tutorial is a working case covered by other example pages.
 
-**Download:** [`cavity.krk`](../assets/krk/cavity.krk) (and the other .krk files
+**Download:** <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a> (and the other .krk files
 linked from their respective example pages)
 
 **Hardware:** n/a (tutorial, cases run from other pages)
@@ -76,7 +76,7 @@ Time-dependent BCs like `ux = 0.1*sin(2*pi*t/5000)` are re-evaluated each step.
 
 ## Example 1 — Lid-driven cavity
 
-Download: [`cavity.krk`](../assets/krk/cavity.krk)
+Download: <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a>
 
 ```
 Simulation cavity D2Q9
@@ -106,7 +106,7 @@ post-processing.
 
 ## Example 2 — Poiseuille flow (body force)
 
-Download: [`poiseuille.krk`](../assets/krk/poiseuille.krk)
+Download: <a href="/assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
 
 ```
 Simulation poiseuille D2Q9
@@ -128,7 +128,7 @@ forcing scheme.
 
 ## Example 3 — Cylinder with parabolic inlet
 
-Download: [`cylinder.krk`](../assets/krk/cylinder.krk)
+Download: <a href="/assets/krk/cylinder.krk" download><code>cylinder.krk</code></a>
 
 ```
 Simulation cylinder D2Q9
@@ -163,7 +163,7 @@ The west boundary uses a **spatial** Zou--He profile: the expression
 
 ## Example 4 — Couette flow
 
-Download: [`couette.krk`](../assets/krk/couette.krk)
+Download: <a href="/assets/krk/couette.krk" download><code>couette.krk</code></a>
 
 ```
 Simulation couette D2Q9
@@ -201,10 +201,11 @@ Obstacle cylinder { (x - 5)^2 + (y - Ly/2)^2 <= 0.3^2 }
 
 ---
 
-## STL geometry import
+## Parser-only: STL geometry syntax
 
-Complex geometries can be imported from STL files (binary or ASCII).
-The mesh is voxelized onto the LBM grid using ray casting.
+The parser can read `stl(...)` parameters, but the v0.1.0 runner in this
+branch does not voxelize STL geometry. Use expression-based `Obstacle`
+regions for public examples.
 
 ### Syntax
 
@@ -222,12 +223,7 @@ Obstacle body stl(file = "geometry.stl", scale = 0.001, translate = [1.0, 0.5, 0
 | `translate` | `[0,0,0]` | Translation vector ``(t_x, t_y, t_z)`` (applied after scale) |
 | `z_slice` | `0.0`   | z-plane for 2D cross-section (only for D2Q9) |
 
-For **2D simulations** (D2Q9), the STL is sliced at `z = z_slice` to extract
-a 2D contour, then voxelized via 2D ray casting.
-For **3D simulations** (D3Q19), full volumetric ray casting along the z-axis
-is used.
-
-### Example: airfoil from STL
+### Reserved syntax
 
 ```
 Simulation airfoil D2Q9
@@ -245,9 +241,8 @@ Run 50000 steps
 Output vtk every 1000 [rho, ux, uy]
 ```
 
-!!! note "Watertight meshes"
-    The STL surface must be closed (watertight) for the ray-casting voxelization
-    to produce correct inside/outside classification.
+This syntax is reserved for development branches until the runner and
+validation artifacts are present in this branch.
 
 ---
 

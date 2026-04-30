@@ -1,118 +1,89 @@
-# Accuracy: mesh convergence
+# Accuracy and convergence
 
-The BGK lattice Boltzmann method is formally second-order accurate in space,
-``\mathcal{O}(\Delta x^2)``.  We verify this on four canonical flows by
-measuring the error against known analytical or reference solutions at
-increasing resolution.
+This page reports only checks that were rerun locally on 2026-04-30 or are
+backed by CSV artifacts in `benchmarks/results/`.
 
-All runs use single-relaxation-time (BGK) collision on a D2Q9 lattice.
-Hardware: Apple M2 (CPU); see the [Hardware](@ref) page.
+The convergence concern is real: several development-branch features in
+`slbm-paper` had bugs, and many old documentation claims were ahead of this
+branch. Those claims are not repeated here.
 
-## 1. Poiseuille channel flow
+## Poiseuille channel
 
-Parabolic profile driven by a uniform body force ``F_x`` between two
-no-slip walls (half-way bounce-back):
-
-```math
-u_x(y) = \frac{F_x}{2\nu}\,y\,(H - y)
-```
-
-| ``N_y`` | ``L_2`` error | Order (local) |
-|--------:|--------------:|--------------:|
-|      16 |      1.5e-3   |       —       |
-|      32 |      3.8e-4   |      2.0      |
-|      64 |      9.5e-5   |      2.0      |
-|     128 |      2.3e-5   |      2.0      |
-
-Measured convergence order: **2.00** (least-squares fit over Ny = 16–128).
-
-![Poiseuille error convergence](../assets/figures/poiseuille_error.png)
-
-![Poiseuille convergence log-log](../assets/figures/convergence_poiseuille.png)
-
-### Reproduce
-
-```bash
-julia --project benchmarks/convergence_poiseuille.jl
-```
-
-## 2. Taylor-Green vortex decay
-
-Doubly periodic vortex with analytical decay
-``e^{-2\nu k^2 t}``, ``k = 2\pi/N``:
+Plane Poiseuille flow is driven by a uniform body force between two no-slip
+walls. The analytical half-way bounce-back profile is
 
 ```math
-u_x(x,y,t) = -u_0\,\cos(kx)\,\sin(ky)\,e^{-2\nu k^2 t}
+u_x(y) = \frac{F_x}{2\nu}(y - 1/2)(H + 1/2 - y).
 ```
 
-| ``N`` | ``L_2`` error | Order (local) |
-|------:|--------------:|--------------:|
-|    16 |      2.5e-2   |       —       |
-|    32 |      6.3e-3   |      2.0      |
-|    64 |      1.6e-3   |      2.0      |
-|   128 |      4.0e-4   |      2.0      |
-
-Measured convergence order: **2.00**.
-
-![Taylor-Green convergence](../assets/figures/taylor_green_convergence.png)
-
-![Taylor-Green convergence log-log](../assets/figures/convergence_taylor_green.png)
-
-### Reproduce
+Local rerun:
 
 ```bash
-julia --project benchmarks/convergence_taylor_green.jl
+julia --project=. benchmarks/convergence_poiseuille.jl
 ```
 
-## 3. Thermal conduction (half-way bounce-back limit)
+| `Ny` | `L2` error | Order |
+|---:|---:|---:|
+| 16 | 1.4977e-03 | - |
+| 32 | 3.7442e-04 | 2.00 |
+| 64 | 9.3605e-05 | 2.00 |
+| 128 | 2.3401e-05 | 2.00 |
 
-Steady 1D heat conduction between two isothermal walls using the
-double-distribution-function (DDF) thermal model.
+CSV artifacts:
 
-The half-way bounce-back boundary introduces a geometric error of exactly
-half a lattice spacing, giving:
+- `benchmarks/results/convergence_poiseuille_apple_m2_20260410_115121.csv`
+- `benchmarks/results/convergence_poiseuille_aqua_h100_20260410_115434.csv`
 
-```math
-L_\infty = \frac{1}{2N}
-```
+Both CSVs match the local rerun values.
 
-This is an ``\mathcal{O}(1/N)`` bound — **first-order**, not second —
-which is the expected behaviour for the half-way BB thermal condition.
-Higher-order thermal boundary schemes (e.g. anti-bounce-back) would recover
-second-order convergence but are not yet implemented.
+## Taylor-Green vortex
 
-| ``N`` | ``L_\infty`` (measured) | ``1/(2N)`` (theory) |
-|------:|------------------------:|--------------------:|
-|    16 |               3.13e-2   |           3.13e-2   |
-|    32 |               1.56e-2   |           1.56e-2   |
-|    64 |               7.81e-3   |           7.81e-3   |
-|   128 |               3.91e-3   |           3.91e-3   |
+Taylor-Green vortex decay checks the effective viscosity in a fully periodic
+domain.
 
-The measured error matches the theoretical bound to machine precision,
-confirming a correct implementation.
-
-### Reproduce
+Local rerun:
 
 ```bash
-julia --project benchmarks/convergence_thermal.jl
+julia --project=. benchmarks/convergence_taylor_green.jl
 ```
 
-## 4. Natural convection (Rayleigh-Bénard)
+| `N` | `L2` error | Order |
+|---:|---:|---:|
+| 16 | 2.5419e-02 | - |
+| 32 | 6.3782e-03 | 1.99 |
+| 64 | 1.5897e-03 | 2.00 |
+| 128 | 3.9755e-04 | 2.00 |
 
-Nusselt number on a differentially heated square cavity at Rayleigh number
-``\text{Ra} = 10^3``, validated against the reference solution of
-De Vahl Davis (1983).
+## Thermal conduction
 
-| ``N`` | ``\text{Nu}_{\text{Kraken}}`` | ``\text{Nu}_{\text{ref}}`` | Relative error |
-|------:|------------------------------:|---------------------------:|---------------:|
-|    64 |                         1.093 |                      1.117 |         2.17 % |
+The current fixed-temperature wall treatment has a half-cell geometric error,
+so first-order convergence in `L_inf` is expected here.
 
-The 2.17 % error at N = 64 is consistent with published LBM results at
-this resolution. Higher resolutions and Rayleigh numbers will be added in
-a future benchmark campaign.
-
-### Reproduce
+Local rerun:
 
 ```bash
-julia --project benchmarks/convergence_cavity.jl
+julia --project=. benchmarks/convergence_thermal.jl
 ```
+
+| `Ny` | `L_inf` error | Order |
+|---:|---:|---:|
+| 8 | 6.2500e-02 | - |
+| 16 | 3.1250e-02 | 1.00 |
+| 32 | 1.5625e-02 | 1.00 |
+| 64 | 7.8125e-03 | 1.00 |
+| 128 | 3.9062e-03 | 1.00 |
+
+This is not a second-order thermal boundary result. Do not describe it as
+such unless the boundary scheme changes.
+
+## Natural convection
+
+For the De Vahl Davis `Ra = 1e3`, `Pr = 0.71` square-cavity reference:
+
+| `N` | `Nu_Kraken` | `Nu_ref` | Relative error |
+|---:|---:|---:|---:|
+| 64 | 1.1423 | 1.1180 | 2.17% |
+
+This is a useful smoke validation for the 2D thermal path. Higher Rayleigh
+numbers, 3D natural convection, refinement and body-fitted cases should be
+rerun and CSV-backed before being documented as benchmark results.

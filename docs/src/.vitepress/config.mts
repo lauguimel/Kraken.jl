@@ -60,7 +60,7 @@ export default defineConfig({
   lastUpdated: true,
   cleanUrls: true,
   outDir: 'REPLACE_ME_DOCUMENTER_VITEPRESS',
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: false,
   head: [
     ['link', { rel: 'icon', href: 'REPLACE_ME_DOCUMENTER_VITEPRESS_FAVICON' }],
     ['script', {src: `${getBaseRepository(baseTemp.base)}versions.js`}],

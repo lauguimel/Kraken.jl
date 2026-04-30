@@ -6,9 +6,9 @@
 # **Validates against:** analytical exponential decay
 # ``u(t) = u_0\,\exp(-2\nu k^2 t)``
 #
-# **Download:** [`taylor_green.krk`](../assets/krk/taylor_green.krk)
+# **Download:** <a href="/assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
 #
-# **Hardware:** Apple M2, ~5s wall-clock at N = 64×64
+# **Hardware:** local CPU baseline, ~5s wall-clock at N = 64×64
 #
 # ![Taylor-Green vorticity](../assets/figures/taylor_green_vorticity.png)
 #
@@ -130,7 +130,7 @@
 #
 # ## Simulation File
 #
-# Download: [`taylor_green.krk`](../assets/krk/taylor_green.krk)
+# Download: <a href="/assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
 #
 # ```
 # # Taylor-Green vortex decay in a fully periodic domain

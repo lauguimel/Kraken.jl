@@ -27,7 +27,7 @@ const EXPR_BUILTIN_VARS = Set{Symbol}([
 
 User variables declared with `Define` are substituted at parse time:
 
-```krk
+```text
 Define Re = 1000
 Define U  = 0.1
 Physics nu = U * 1.0 / Re           # = 1e-4, computed at parse time
@@ -81,7 +81,7 @@ ArgumentError: Function 'rand' is not allowed in expressions.
 
 ### Parabolic Poiseuille profile
 
-```krk
+```text
 Boundary west velocity(
     ux = 0.1 * (1 - ((y - Ly/2) / (Ly/2))^2),
     uy = 0
@@ -90,7 +90,7 @@ Boundary west velocity(
 
 ### Logarithmic ABL profile
 
-```krk
+```text
 Define u_star = 0.02
 Define z0     = 0.001
 Boundary west velocity(
@@ -101,7 +101,7 @@ Boundary west velocity(
 
 ### Time-pulsed inlet
 
-```krk
+```text
 Define Uavg = 0.05
 Boundary west velocity(
     ux = Uavg * (1 + 0.1*sin(2*pi*t / 500)),
@@ -111,14 +111,14 @@ Boundary west velocity(
 
 ### Geometry condition (obstacle)
 
-```krk
+```text
 Obstacle disk wall { (x - 0.5)^2 + (y - 0.5)^2 < 0.01 }
 Obstacle wedge    { (x > 0.4) & (x < 0.6) & (y < 0.2*(x - 0.4)) }
 ```
 
 ### Taylor–Green initial condition
 
-```krk
+```text
 Initial {
     ux = 0.05 * sin(2*pi*x) * cos(2*pi*y)
     uy = -0.05 * cos(2*pi*x) * sin(2*pi*y)

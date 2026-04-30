@@ -1,11 +1,9 @@
 # Macroscopic fields
 
-These helpers reconstruct the hydrodynamic moments ρ and u (and
-pressure p = cs² ρ) from the distribution `f`. The `_forced`
-variants include the half-step body-force correction required by
-Guo's scheme, and the `_pressure` helper materialises the pressure
-field for VTK output. They are the last step of every time loop,
-just before I/O.
+These helpers reconstruct the hydrodynamic moments ρ and u from the
+distribution `f`. The `_forced` variants include the half-step body-force
+correction required by Guo's scheme. They are the last step of every time
+loop, just before I/O.
 
 
 ## Quick reference
@@ -16,7 +14,7 @@ just before I/O.
 | `compute_macroscopic_3d!` | ρ, u from f — 3D |
 | `compute_macroscopic_forced_2d!` | ρ, u from f with body-force correction — 2D |
 | `compute_macroscopic_forced_3d!` | ρ, u from f with body-force correction — 3D |
-| `compute_macroscopic_pressure_2d!` | Pressure from ρ (cs² ρ) — 2D |
+| `compute_macroscopic_pressure_2d!` | internal two-phase helper, not exported in this branch |
 
 ## Details
 
@@ -65,7 +63,7 @@ end
 ```
 
 
-### `compute_macroscopic_pressure_2d!`
+### Internal: `compute_macroscopic_pressure_2d!`
 
 **Source:** `src/kernels/macroscopic.jl`
 
@@ -91,5 +89,4 @@ function compute_macroscopic_pressure_2d!(p, ux, uy, f, C, Fx, Fy;
     KernelAbstractions.synchronize(backend)
 end
 ```
-
 

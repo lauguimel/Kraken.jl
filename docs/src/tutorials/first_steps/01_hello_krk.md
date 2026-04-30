@@ -9,7 +9,7 @@ A Kraken config file (`.krk`) is a declarative description of a simulation —
 domain, physics, boundary conditions, run length, outputs. It looks like
 this:
 
-```krk
+```text
 Simulation cavity D2Q9
 Domain  L = 1.0 x 1.0  N = 128 x 128
 Physics nu = 0.128

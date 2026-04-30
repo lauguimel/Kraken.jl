@@ -1,0 +1,57 @@
+# Kraken.jl agent context
+
+Project: Kraken.jl, Julia Lattice Boltzmann solver.
+Branch scope: v0.1.0 public docs for this checkout.
+
+Primary workflow:
+1. Start from a `.krk` file.
+2. Run with `using Kraken; result = run_simulation("examples/cavity.krk")`.
+3. Parse/inspect with `setup = load_kraken("examples/cavity.krk")`.
+4. Run parsed setup with `run_simulation(setup)`.
+5. Use direct Julia drivers only for scripting, benchmarks, callbacks, or custom post-processing.
+
+Important API detail:
+- `run_simulation("file.krk"; max_steps=100, Nx=64, Ny=64)` accepts parser overrides.
+- `run_simulation(setup; max_steps=100)` is invalid in this branch.
+
+Public physics in this branch:
+- D2Q9 and D3Q19.
+- BGK collision.
+- Guo body forcing.
+- Wall, velocity, pressure and periodic boundaries with documented limits.
+- Expression-based `.krk` obstacles/fluid regions.
+- Thermal DDF.
+- Boussinesq natural convection.
+- VTK/PVD, PNG and GIF outputs.
+
+Do not claim as public for this branch:
+- MRT.
+- Axisymmetric LBM / Hagen-Poiseuille.
+- Grid refinement.
+- VOF / PLIC.
+- Phase-field.
+- Shan-Chen.
+- Species transport.
+- Non-Newtonian rheology.
+- Viscoelasticity.
+- SLBM/body-fitted curvilinear methods from `slbm-paper`.
+- H100 MLUPS headline numbers unless a matching CSV is present.
+
+Verified local checks on 2026-04-30:
+- `julia --project=. benchmarks/convergence_poiseuille.jl`: order 2.00 over Ny 16,32,64,128.
+- `julia --project=. benchmarks/convergence_taylor_green.jl`: orders 1.99,2.00,2.00 over N 16,32,64,128.
+- `julia --project=. benchmarks/convergence_thermal.jl`: heat conduction order 1.00; natural convection Ra=1e3 gives Nu=1.1423 vs 1.118, error 2.17%.
+- `run_simulation("examples/cavity.krk"; max_steps=10)` runs and returns nonzero velocity fields.
+
+Docs:
+- Getting started: /getting_started
+- Capabilities: /capabilities
+- Integration roadmap: /integration_roadmap
+- `.krk` overview: /krk/overview
+- Public API inventory: /api/public_api
+- Accuracy: /benchmarks/accuracy
+- Performance: /benchmarks/performance
+- Julia docs map: /julia_docs
+
+Rule for answers:
+Prefer `.krk` examples first. Mark parser-only/development features explicitly. Do not infer support from parser structs alone; `run_simulation` behavior is authoritative.

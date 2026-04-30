@@ -1,89 +1,95 @@
 # Documentation Coverage Matrix
 
-Last updated: 2026-04-03
+Last updated: 2026-04-30
 
-## Theory Pages
+This matrix covers the public `release/v0.1.0` documentation scope. Planned
+integrations from `slbm-paper` or other development branches are tracked in
+`docs/src/integration_roadmap.md`.
 
-| # | Module | Source kernel | Theory page | Status |
-|---|--------|-------------|-------------|--------|
-| 01 | LBM fundamentals | — | `theory/01_lbm_fundamentals` | Done |
-| 02 | D2Q9 lattice | `lattice/d2q9.jl` | `theory/02_d2q9_lattice` | Done |
-| 03 | BGK collision | `collide_stream_2d.jl` | `theory/03_bgk_collision` | Done |
-| 04 | Streaming | `collide_stream_2d.jl` | `theory/04_streaming` | Done |
-| 05 | Boundary conditions | `boundary_2d.jl` | `theory/05_boundary_conditions` | Done |
-| 06 | 2D to 3D | `collide_stream_3d.jl` | `theory/06_from_2d_to_3d` | Done |
-| 07 | Body forces (Guo) | `collide_guo_2d.jl` | `theory/07_body_forces` | Done |
-| 08 | Thermal DDF | `thermal_2d.jl` | `theory/08_thermal_ddf` | Done |
-| 09 | Axisymmetric | `simulation.jl` | `theory/09_axisymmetric` | Done |
-| 10 | Limitations | — | `theory/10_limitations` | Done |
-| 11 | Phase-field | `phasefield_2d.jl` | `theory/11_phasefield` | Done |
-| 12 | MRT collision | `collide_mrt_2d.jl` | `theory/12_mrt` | Done |
-| 13 | VOF-PLIC | `vof_2d.jl` | `theory/13_vof_plic` | Done |
-| 14 | Rheology (GNF) | `rheology/*.jl` | `theory/14_rheology` | Done |
-| 15 | Viscoelastic | `viscoelastic_2d.jl` | `theory/15_viscoelastic` | Done |
-| 16 | Shan-Chen | `multiphase_2d.jl` | `theory/16_shan_chen` | Done |
-| 17 | Species transport | `species_2d.jl` | `theory/17_species` | Done |
-| 18 | Grid refinement | `refinement/*.jl` | `theory/18_grid_refinement` | Done |
-| 19 | Spatial BCs | `boundary_spatial_2d.jl` | `theory/19_spatial_bcs` | Done |
+## Public scope and navigation
 
-## Examples
+| Page | Status |
+|---|---|
+| `docs/src/index.md` | current |
+| `docs/src/getting_started.md` | current `.krk` first path |
+| `docs/src/concepts_index.md` | current |
+| `docs/src/capabilities.md` | current branch source of truth |
+| `docs/src/integration_roadmap.md` | current planned integration ledger |
+| `docs/src/llms.md` | current agent-facing summary |
+| `docs/src/public/llms.txt` | current compact agent context |
 
-| # | Example | Source kernel | Page | Status |
-|---|---------|-------------|------|--------|
-| 01 | Poiseuille 2D | `collide_guo_2d.jl` | `examples/01_poiseuille_2d` | Done |
-| 02 | Couette 2D | `collide_stream_2d.jl` | `examples/02_couette_2d` | Done |
-| 03 | Taylor-Green 2D | `collide_stream_2d.jl` | `examples/03_taylor_green_2d` | Done |
-| 04 | Cavity 2D | `boundary_2d.jl` | `examples/04_cavity_2d` | Done |
-| 05 | Cavity 3D | `boundary_3d.jl` | `examples/05_cavity_3d` | Done |
-| 06 | Cylinder 2D | `boundary_2d.jl` | `examples/06_cylinder_2d` | Done |
-| 07 | Heat conduction | `thermal_2d.jl` | `examples/07_heat_conduction` | Done |
-| 08 | Rayleigh-Bénard | `thermal_2d.jl` | `examples/08_rayleigh_benard` | Done |
-| 09 | Hagen-Poiseuille | axisym kernel | `examples/09_hagen_poiseuille` | Done |
-| 10 | .krk config | `kraken_parser.jl` | `examples/10_krk_config` | Done |
-| 11 | Zalesak disk | `advect_prescribed_2d.jl` | `examples/11_zalesak_disk` | Done |
-| 12 | Reversed vortex | `advect_prescribed_2d.jl` | `examples/12_reversed_vortex` | Done |
-| 13 | Capillary wave | `vof_2d.jl` | `examples/13_capillary_wave` | Done |
-| 14 | Static droplet | `vof_2d.jl` | `examples/14_static_droplet` | Done |
-| 15 | Rayleigh-Plateau | `vof_2d.jl` | `examples/15_rp_axisym` | Done |
-| 16 | CIJ jet | `phasefield_2d.jl` | `examples/16_cij_jet` | Done |
-| 17 | Rheology Poiseuille | `collide_rheology_2d.jl` | `examples/17_poiseuille_rheology` | Done |
-| 18 | Shan-Chen spinodal | `multiphase_2d.jl` | `examples/18_shan_chen_spinodal` | Done |
-| 19 | Species diffusion | `species_2d.jl` | `examples/19_species_diffusion` | Done |
-| 20 | Grid refinement cavity | `refinement/*.jl` | `examples/20_grid_refinement_cavity` | Done |
-| 21 | Viscoelastic channel | `viscoelastic_2d.jl` | `examples/21_viscoelastic_channel` | Done |
+## Public theory pages
+
+| Area | Page | Status |
+|---|---|---|
+| LBM fundamentals | `docs/src/theory/01_lbm_fundamentals.md` | current |
+| D2Q9 lattice | `docs/src/theory/02_d2q9_lattice.md` | current |
+| BGK collision | `docs/src/theory/03_bgk_collision.md` | current |
+| Streaming | `docs/src/theory/04_streaming.md` | current |
+| Boundary conditions | `docs/src/theory/05_boundary_conditions.md` | current |
+| From 2D to 3D | `docs/src/theory/06_from_2d_to_3d.md` | current |
+| Body forces | `docs/src/theory/07_body_forces.md` | current |
+| Thermal DDF | `docs/src/theory/08_thermal_ddf.md` | current |
+| Limitations | `docs/src/theory/10_limitations.md` | current |
+| Spatial BCs | `docs/src/theory/19_spatial_bcs.md` | current |
+
+## Public examples
+
+| Example | Backing `.krk` | Status |
+|---|---|---|
+| Poiseuille 2D | `examples/poiseuille.krk` | current |
+| Couette 2D | `examples/couette.krk` | current |
+| Taylor-Green 2D | `examples/taylor_green.krk` | current |
+| Lid-driven cavity 2D | `examples/cavity.krk` | current |
+| Lid-driven cavity 3D | `examples/cavity_3d.krk` | current |
+| Cylinder 2D | `examples/cylinder.krk` | current |
+| Heat conduction | `examples/heat_conduction.krk` | current |
+| Rayleigh-Benard | `examples/rayleigh_benard.krk` | current |
+| `.krk` config walk-through | docs page only | current |
+
+## API pages
+
+| Page | Status |
+|---|---|
+| `docs/src/api/public_api.md` | current export inventory |
+| `docs/src/api/lattice.md` | current |
+| `docs/src/api/collision.md` | corrected to v0.1.0 scope |
+| `docs/src/api/streaming.md` | corrected to v0.1.0 scope |
+| `docs/src/api/boundary.md` | needs more examples |
+| `docs/src/api/macroscopic.md` | current |
+| `docs/src/api/drivers.md` | corrected to v0.1.0 scope |
+| `docs/src/api/io.md` | needs review for unsupported refined/STL wording |
+| `docs/src/api/postprocess.md` | current |
+| `docs/src/api/config.md` | current |
 
 ## Benchmarks
 
-| Benchmark | Page | Status |
-|-----------|------|--------|
-| MLUPs CPU/GPU | `benchmarks/mlups_cpu_gpu` | Done |
-| Mesh convergence | `benchmarks/mesh_convergence` | Done |
-| Comparison OpenFOAM | `benchmarks/comparison_openfoam` | Done |
-| Rheology vs RheoTool | — | **Missing** |
-| Multiphase vs Basilisk | — | **Missing** |
-| Thermal convergence | — | **Missing** |
-| GPU performance scaling | — | **Missing** |
+| Check | Status |
+|---|---|
+| Poiseuille convergence | rerun locally 2026-04-30, CSV-backed |
+| Taylor-Green convergence | rerun locally 2026-04-30 |
+| Thermal conduction | rerun locally 2026-04-30; first-order with current wall treatment |
+| Natural convection `Ra=1e3` | rerun locally 2026-04-30 |
+| H100 throughput | not published until matching CSV is committed |
+| External comparisons | draft only |
 
-## Test Coverage
+See `benchmarks/results/VALIDATION_2026-04-30.md`.
 
-| Kernel file | Test file(s) | Status |
-|-------------|-------------|--------|
-| `collide_stream_2d.jl` | test_lbm_basic, test_cavity | OK |
-| `collide_stream_3d.jl` | test_cavity_3d | OK |
-| `collide_guo_2d.jl` | test_poiseuille | OK |
-| `collide_guo_3d.jl` | test_poiseuille_3d | OK |
-| `collide_mrt_2d.jl` | test_mrt | OK |
-| `collide_rheology_2d.jl` | test_rheology | OK |
-| `collide_twophase_rheology_2d.jl` | test_twophase_rheology | OK |
-| `thermal_2d.jl` | test_thermal | OK |
-| `fused_thermal_2d.jl` | test_thermal (indirect) | Partial |
-| `species_2d.jl` | test_species | OK |
-| `multiphase_2d.jl` | test_multiphase | OK |
-| `vof_2d.jl` | test_vof | OK |
-| `phasefield_2d.jl` | test_phasefield | OK |
-| `viscoelastic_2d.jl` | test_viscoelastic | OK |
-| `boundary_spatial_2d.jl` | test_simulation_runner (indirect) | Partial |
-| `advect_prescribed_2d.jl` | test_advection_prescribed | OK |
-| `refinement_exchange_2d.jl` | test_refinement | OK |
-| `dualgrid_2d.jl` | test_vof (partial) | Partial |
-| `postprocess.jl` | test_postprocess | OK |
+## Explicitly out of public scope
+
+The following topics must not be marked "Done" for this branch:
+
+- axisymmetric LBM;
+- MRT collision;
+- grid refinement;
+- VOF/PLIC;
+- phase-field;
+- Shan-Chen;
+- species transport;
+- rheology;
+- viscoelasticity;
+- SLBM/body-fitted curvilinear methods.
+
+If they are documented later, update the code path, tests, benchmark
+provenance, `docs/src/integration_roadmap.md`, and public documentation links
+in the same PR.

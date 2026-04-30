@@ -8,7 +8,7 @@ them to build richer simulations without reading the full [DSL reference](../../
 
 A cylinder at `(cx, cy)` with radius `R`:
 
-```krk
+```text
 Define cx = 2.5
 Define cy = 1.25
 Define R  = 0.5
@@ -23,7 +23,7 @@ full grammar.
 
 ## Load an STL body
 
-```krk
+```text
 Obstacle wing stl(file = "assets/wing.stl", scale = 1e-3, translate = [1.0, 0.5, 0.0])
 ```
 
@@ -35,7 +35,7 @@ Obstacle wing stl(file = "assets/wing.stl", scale = 1e-3, translate = [1.0, 0.5,
 
 Replace the inlet `Boundary` with a spatial expression:
 
-```krk
+```text
 Define U = 0.05
 Define H = 1.0
 
@@ -48,7 +48,7 @@ standard math functions (`sin`, `cos`, `exp`, `sqrt`, …). See
 
 ## Turn on thermal coupling
 
-```krk
+```text
 Module thermal
 Physics nu = 0.01  Pr = 0.71  Ra = 1e5
 
@@ -66,7 +66,7 @@ temperature profile on a wall is on the roadmap.
 Presets expand into canonical directive stacks. Run Rayleigh-Bénard at a
 different Rayleigh number without rewriting the domain:
 
-```krk
+```text
 Preset rayleigh_benard_2d
 Physics nu = 0.005  Pr = 0.71  Ra = 1e6
 
@@ -82,7 +82,7 @@ replace what the preset wrote). The five presets are `cavity_2d`,
 
 Useful for periodic channels and natural convection side-cases:
 
-```krk
+```text
 Physics nu = 0.1  Fx = 1e-5
 Physics nu = 0.1  Fx = 0  Fy = -9.81*beta*(T - T_ref)
 ```
@@ -90,21 +90,21 @@ Physics nu = 0.1  Fx = 0  Fy = -9.81*beta*(T - T_ref)
 `Fx`, `Fy`, `Fz` accept any expression — constants, functions of
 `(x, y, T, …)`, etc.
 
-## Add a grid refinement patch
+## Parser-only: grid refinement patch
 
-```krk
+```text
 Refine nearwall { region = [0.0, 0.0, 1.0, 0.1], ratio = 2 }
 Refine tip      { region = [0.4, 0.0, 0.6, 0.1], ratio = 2, parent = nearwall }
 ```
 
 `region = [x0, y0, x1, y1]` is axis-aligned. `ratio = 2` doubles
-resolution; `parent` chains nested levels. See
-[Theory → Grid refinement](../../theory/18_grid_refinement.md) for the
-Filippova-Hanel rescaling details.
+resolution; `parent` chains nested levels. In this branch the parser accepts
+the directive, but `run_simulation` rejects refinement at runtime. Treat this
+syntax as reserved for the development branch.
 
 ## Initial condition with an expression
 
-```krk
+```text
 Initial { ux = 0.05*sin(2*pi*x) uy = -0.05*cos(2*pi*y) T = 0.5 }
 ```
 
@@ -112,7 +112,7 @@ Fields not listed inherit their zero/uniform default.
 
 ## Log diagnostics during the run
 
-```krk
+```text
 Diagnostics every 100 [step, time, KE, uMax, drag, lift]
 ```
 
@@ -123,13 +123,13 @@ runner's registered diagnostics — see [Postprocess](../../api/postprocess.md).
 
 Instead of hand-picking `nu`, express the setup physically:
 
-```krk
+```text
 Setup reynolds = 1000  L_ref = 1.0  U_ref = 0.1
 ```
 
 Kraken back-computes `nu = U_ref * L_ref / reynolds`. For thermal:
 
-```krk
+```text
 Setup rayleigh = 1e5  prandtl = 0.71  L_ref = 1.0
 ```
 
@@ -148,7 +148,7 @@ issue after 60 000 steps.
 
 ## Run a parameter sweep
 
-```krk
+```text
 Sweep nu = [0.1, 0.05, 0.02, 0.01]
 ```
 

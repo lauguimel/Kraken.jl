@@ -1,79 +1,30 @@
 # Streaming
 
-Streaming propagates post-collision distributions to their
-neighbours along the discrete velocities. Kraken provides standard
-streaming for 2D/3D, as well as periodic and axisymmetric variants
-used by channel, Taylor-Green, and pipe drivers. GPU-safe index
-clamping is handled inside the kernels (see the LBM patterns memo
-on the `ifelse` fix for `stream_2d!`).
+Streaming propagates post-collision distributions to neighboring lattice
+nodes. The public streaming API in this branch covers the standard 2D/3D
+paths plus the periodic variants used by the canonical examples.
 
+Axisymmetric streaming functions are not exported by this branch.
 
 ## Quick reference
 
 | Symbol | Purpose |
-|--------|---------|
-| `stream_2d!` | Standard streaming step — 2D |
-| `stream_3d!` | Standard streaming step — 3D |
-| `stream_periodic_x_wall_y_2d!` | Streaming with periodic-x / wall-y — 2D |
-| `stream_fully_periodic_2d!` | Streaming with doubly periodic BCs — 2D |
-| `stream_periodic_x_axisym_2d!` | Streaming for axisymmetric runs with periodic x |
-| `stream_axisym_inlet_2d!` | Streaming for axisymmetric inlet problems |
+|---|---|
+| `stream_2d!` | Standard D2Q9 streaming |
+| `stream_3d!` | Standard D3Q19 streaming |
+| `stream_periodic_x_wall_y_2d!` | Periodic in x, wall in y; used by channel flows |
+| `stream_fully_periodic_2d!` | Periodic in both 2D directions; used by Taylor-Green |
 
-## Details
-
-### `stream_2d!`
-
-**Source:** `src/kernels/collide_stream_2d.jl`
+## Core signatures
 
 ```julia
-function stream_2d!(f_out, f_in, Nx, Ny; sync=true)
-    backend = KernelAbstractions.get_backend(f_in)
-    kernel! = stream_2d_kernel!(backend)
-    kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    sync && KernelAbstractions.synchronize(backend)
-end
+stream_2d!(f_out, f_in, Nx, Ny; sync=true)
+stream_3d!(f_out, f_in, Nx, Ny, Nz)
+stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
 ```
 
-
-### `stream_3d!`
-
-**Source:** `src/kernels/collide_stream_3d.jl`
-
-```julia
-function stream_3d!(f_out, f_in, Nx, Ny, Nz)
-    backend = KernelAbstractions.get_backend(f_in)
-    kernel! = stream_3d_kernel!(backend)
-    kernel!(f_out, f_in, Nx, Ny, Nz; ndrange=(Nx, Ny, Nz))
-    KernelAbstractions.synchronize(backend)
-end
-```
-
-
-### `stream_periodic_x_wall_y_2d!`
-
-**Source:** `src/kernels/stream_periodic_2d.jl`
-
-```julia
-function stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
-    backend = KernelAbstractions.get_backend(f_in)
-    kernel! = stream_periodic_x_wall_y_2d_kernel!(backend)
-    kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
-end
-```
-
-
-### `stream_fully_periodic_2d!`
-
-**Source:** `src/kernels/stream_periodic_2d.jl`
-
-```julia
-function stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
-    backend = KernelAbstractions.get_backend(f_in)
-    kernel! = stream_fully_periodic_2d_kernel!(backend)
-    kernel!(f_out, f_in, Nx, Ny; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
-end
-```
-
-
+The `.krk` runner chooses the streaming path from the parsed boundaries:
+fully periodic cases use the periodic kernel, channel-style periodic-x cases
+use `stream_periodic_x_wall_y_2d!`, and closed-box cases use the standard
+wall-aware path.

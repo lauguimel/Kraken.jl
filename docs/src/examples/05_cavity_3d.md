@@ -10,9 +10,9 @@ EditURL = "05_cavity_3d.jl"
 **Validates against:** Ku, Hirsh & Taylor (1987) — centerline profiles
 [`10.1016/0021-9991(87)90193-8`](https://doi.org/10.1016/0021-9991(87)90193-8)
 
-**Download:** [`cavity_3d.krk`](../assets/krk/cavity_3d.krk)
+**Download:** <a href="/assets/krk/cavity_3d.krk" download><code>cavity_3d.krk</code></a>
 
-**Hardware:** Apple M2, ~5 min wall-clock at N = 64³ (CPU) /
+**Hardware:** local CPU baseline, ~5 min wall-clock at N = 64³ (CPU) /
 NVIDIA H100, ~30s at N = 64³
 
 ![Cavity 3D streamlines](../assets/figures/cavity_3d_umag.png)

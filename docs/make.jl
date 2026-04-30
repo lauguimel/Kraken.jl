@@ -26,7 +26,11 @@ const LITERATE_DIRS = [
 
 # Out-of-scope sources (not listed in `pages`) are skipped so Vitepress does
 # not try to build orphan pages that may reference missing assets.
-const LITERATE_EXCLUDE = Set{String}()
+const LITERATE_EXCLUDE = Set{String}([
+    # Replaced by curated, CSV-backed benchmark pages in this branch.
+    "benchmarks/mesh_convergence.jl",
+    "benchmarks/mlups_cpu_gpu.jl",
+])
 
 # --- Living-doc preprocessing: expand @@EXTRACT path symbol@@ markers ---
 # Markers in Literate sources are replaced at build-time with a fenced
@@ -76,20 +80,7 @@ for dir in LITERATE_DIRS
     end
 end
 
-# --- Phase 4.1A proof-of-concept: build _helpers/_test_helpers.jl ---
-# Only the `_test_helpers.jl` file in docs/src/_helpers/ is a Literate page;
-# the other .jl files there are plain Julia helper modules loaded above.
-let helpers_dir = joinpath(DOCS_SRC, "_helpers"),
-    test_file  = joinpath(helpers_dir, "_test_helpers.jl")
-    if isfile(test_file)
-        Literate.markdown(
-            test_file, helpers_dir;
-            documenter = true,
-            credit = false,
-            execute = true,
-        )
-    end
-end
+# `_helpers/` contains build helpers, not public documentation pages.
 
 # --- Process Pluto notebooks (interactive tutorials with WGLMakie) ---
 
@@ -126,7 +117,7 @@ makedocs(;
     modules = [Kraken],
     plugins = [bib],
     format = DocumenterVitepress.MarkdownVitepress(
-        repo = "https://github.com/lauguimel/Kraken.jl",
+        repo = "github.com/lauguimel/Kraken.jl",
         devurl = "dev",
         devbranch = "release/v0.1.0",
         deploy_url = "lauguimel.github.io/Kraken.jl",
@@ -139,6 +130,8 @@ makedocs(;
             "Quick start" => "getting_started.md",
             "Concepts" => "concepts_index.md",
             "Capabilities" => "capabilities.md",
+            "Integration roadmap" => "integration_roadmap.md",
+            "LLM / agent context" => "llms.md",
         ],
         "Theory" => [
             "LBM fundamentals" => "theory/01_lbm_fundamentals.md",
@@ -200,6 +193,7 @@ makedocs(;
                 "Aliases" => "krk/aliases.md",
             ],
             "Julia API" => [
+                "Public API inventory" => "api/public_api.md",
                 "Lattice" => "api/lattice.md",
                 "Collision" => "api/collision.md",
                 "Streaming" => "api/streaming.md",
@@ -210,10 +204,11 @@ makedocs(;
                 "Postprocess" => "api/postprocess.md",
                 "Config" => "api/config.md",
             ],
+            "Julia ecosystem docs" => "julia_docs.md",
         ],
     ],
     remotes = nothing,
-    warnonly = true,
+    warnonly = false,
     checkdocs = :none,
 )
 
@@ -222,6 +217,18 @@ makedocs(;
 # out-of-scope .md files (v0.1.0 excludes phasefield, VOF, rheology, etc.)
 # reach Vitepress and may fail on missing assets. Drop them before building.
 let vp_input = joinpath(@__DIR__, "build", ".documenter")
+    rm(joinpath(vp_input, "_helpers"); recursive=true, force=true)
+    # DocumenterVitepress rewrites `../assets/...` links inside `examples/`
+    # to `assets/...`. Mirror downloadable .krk files at that rewritten path
+    # so VitePress dead-link checks stay strict.
+    krk_src = joinpath(vp_input, "assets", "krk")
+    krk_dst = joinpath(vp_input, "examples", "assets", "krk")
+    if isdir(krk_src)
+        mkpath(krk_dst)
+        for file in readdir(krk_src; join=true)
+            endswith(file, ".krk") && cp(file, joinpath(krk_dst, basename(file)); force=true)
+        end
+    end
     for rel in LITERATE_EXCLUDE
         for ext in (".jl", ".md")
             p = joinpath(vp_input, replace(rel, r"\.jl$" => ext))

@@ -1,12 +1,8 @@
 # Getting started
 
-This page walks you through your first Kraken.jl simulation end-to-end:
-installing the package, running the classic 2D lid-driven cavity, looking
-at the result, and then pointing you to the parts of the documentation
-that match your interests.
-
-If you already know Julia but have never touched a Lattice Boltzmann
-solver, this is the right place to start.
+This page starts from the public Kraken workflow: run a checked-in `.krk`
+case, inspect the parsed setup, then use the Julia API only where direct
+control is useful.
 
 ## 1. Install Kraken.jl
 
@@ -57,6 +53,16 @@ println("max |u| = ", maximum(umag), "   mean |u| = ", mean(umag))
 
 If this prints a non-zero maximum speed without errors, your install is
 working.
+
+For quick smoke tests, override the step count from the file path:
+
+```julia
+run_simulation("examples/cavity.krk"; max_steps=100)
+```
+
+`max_steps` is a file-path convenience keyword. If you already have a parsed
+`SimulationSetup`, edit the file/kwargs first or call `run_simulation(setup)`
+without that keyword.
 
 To run on a GPU instead, pass the backend explicitly:
 
@@ -114,9 +120,9 @@ populations.
 - Interested in thermal / buoyant flows?
   [Heat conduction](examples/07_heat_conduction.md),
   [Rayleigh–Bénard convection](examples/08_rayleigh_benard.md).
-- Need localized resolution?
-  [Grid refinement on the cavity](examples/10_krk_config.md) shows the
-  Filippova–Hänel patch mechanism.
 - Want to write your own case? Every example in the tutorial corpus is
   built from a `.krk` file, and the DSL is documented inline in the
   example pages.
+- Need the exact supported feature list? Read the
+  [capabilities matrix](capabilities.md). It marks parser-only and
+  development-branch features explicitly.

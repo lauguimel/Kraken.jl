@@ -22,7 +22,7 @@ Unknown keys trigger a Levenshtein suggestion (`Reynolds` → `reynolds`).
 
 You can override either one explicitly:
 
-```krk
+```text
 Setup reynolds = 1000 L_ref = 128 U_ref = 0.1
 ```
 
@@ -39,7 +39,7 @@ also specified (conflict).
 
 **Example**
 
-```krk
+```text
 Simulation cavity D2Q9
 Domain L = 1.0 x 1.0  N = 128 x 128
 Setup reynolds = 1000        # U_ref picked up from the lid velocity
@@ -80,7 +80,7 @@ gβΔT   = Ra · ν · α / L_ref³
 
 **Example**
 
-```krk
+```text
 Module thermal
 Domain L = 2.0 x 1.0  N = 256 x 128
 Setup rayleigh = 1e6 prandtl = 0.71
@@ -117,7 +117,7 @@ Override the reference scales used by `reynolds` and `rayleigh` computations.
 Useful when the "natural" defaults are wrong (e.g. a channel where the
 relevant length is the half-height, not `min(Nx, Ny)`).
 
-```krk
+```text
 Setup reynolds = 400 L_ref = 64 U_ref = 0.05
 ```
 

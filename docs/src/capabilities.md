@@ -1,269 +1,134 @@
 # Capabilities matrix
 
-This page is the single-source-of-truth for **what Kraken.jl can do today**,
-what is partially implemented, and what is out of scope for v0.1.0. Every
-entry links to the theory page that derives it, the example that exercises
-it, and the API or .krk reference that documents how to call it.
+This page is the source of truth for the public documentation of this branch.
+It separates what the current code can run from what is only parsed, planned,
+or present in another development branch.
 
-If a row says **in v0.1.0** it is part of the shipped feature set. Rows
-marked **code present, v0.2.0** exist in the codebase (and in some cases are
-fully tested) but are deliberately excluded from the v0.1.0 publication
-scope — they will be documented and validated in a later release.
+For the planned integration path and the version where each future feature can
+be checked as available, see the [integration roadmap](integration_roadmap.md).
 
-Legend: ✓ = works and tested · ~ = implemented, partial validation ·
-— = not applicable · ✗ = not yet
+Status legend:
 
----
+- **supported**: present in `src/`, reachable from the public Julia API or
+  `.krk` runner, and covered by examples or tests in this branch.
+- **parser-only**: the `.krk` parser accepts the syntax, but the v0.1.0 runner
+  rejects or ignores it.
+- **not in this branch**: do not document as usable here.
 
-## 1. Core LBM
+## Supported workflow
 
-| Capability | 2D | 3D | GPU | .krk | Theory | Example | API |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| D2Q9 / D3Q19 lattice | ✓ | ✓ | ✓ | ✓ | [01](theory/01_lbm_fundamentals.md), [02](theory/02_d2q9_lattice.md), [06](theory/06_from_2d_to_3d.md) | [Poiseuille 2D](examples/01_poiseuille_2d.md), [Cavity 3D](examples/05_cavity_3d.md) | [lattice](api/lattice.md) |
-| BGK collision | ✓ | ✓ | ✓ | ✓ | [03](theory/03_bgk_collision.md) | [Cavity 2D](examples/04_cavity_2d.md) | [collision](api/collision.md) |
-| MRT collision | ✓ | ✗ | ✓ | ✓ | [12](theory/12_mrt.md) | — | [collision](api/collision.md) |
-| Streaming (periodic/wall) | ✓ | ✓ | ✓ | ✓ | [04](theory/04_streaming.md) | [Couette](examples/02_couette_2d.md) | [streaming](api/streaming.md) |
-| Macroscopic recovery (ρ, u) | ✓ | ✓ | ✓ | — | [01](theory/01_lbm_fundamentals.md) | — | [macroscopic](api/macroscopic.md) |
-| Body force (Guo forcing) | ✓ | ✓ | ✓ | ✓ | [07](theory/07_body_forces.md) | [Poiseuille 2D](examples/01_poiseuille_2d.md) | [collision](api/collision.md) |
-| Axisymmetric (z, r) | ✓ | — | ✓ | ✓ | [09](theory/09_axisymmetric.md) | [Hagen–Poiseuille](examples/09_hagen_poiseuille.md) | [drivers](api/drivers.md) |
+The recommended user path is:
 
-**Limitations:** MRT is D2Q9 only in v0.1.0. D3Q27 not implemented.
+1. Write or copy a `.krk` file.
+2. Run it with `run_simulation("case.krk")`.
+3. Inspect VTK/PNG/GIF outputs.
+4. Move to the Julia API only when scripting, callbacks, or custom
+   post-processing are needed.
 
-## 2. Boundary conditions
+## Core LBM
 
-| BC type | 2D | 3D | Spatial f(x,y,z) | Time f(t) | .krk syntax |
+| Capability | 2D | 3D | GPU path | `.krk` runner | Reference |
 |---|:-:|:-:|:-:|:-:|---|
-| Wall (bounce-back) | ✓ | ✓ | — | — | `Boundary north wall` |
-| Velocity (Zou-He) | ✓ | ✓ | ✓ | ✓ | `Boundary west velocity(ux=4*U*y*(H-y)/H^2)` |
-| Pressure/density outlet | ✓ | ✓ | ~ | ✓ | `Boundary east pressure(rho=1.0)` |
-| Periodic | ✓ | ✓ | — | — | `Boundary x periodic` |
-| Fixed temperature (Dirichlet) | ✓ | ✓ | ✗ | ✗ | `Boundary west wall(T=1.0)` |
-| Adiabatic (zero-flux) | ✓ | ✓ | — | — | default when no `T=` specified |
-| Outflow / Neumann / symmetry | ~ | ~ | — | — | recognized, partial |
+| D2Q9 lattice | supported | - | supported | supported | [Lattice](api/lattice.md) |
+| D3Q19 lattice | - | supported | supported | cavity-style runs | [From 2D to 3D](theory/06_from_2d_to_3d.md) |
+| BGK collision | supported | supported | supported | supported | [BGK](theory/03_bgk_collision.md), [Collision API](api/collision.md) |
+| Guo body forcing | supported | supported | supported | supported for constant `Fx`, `Fy`, `Fz` | [Body forces](theory/07_body_forces.md) |
+| MRT collision | not in this branch | not in this branch | - | - | planned/development |
+| Axisymmetric LBM | not public in this branch | - | - | parser rejects at runner | planned/development |
+| Grid refinement | parser-only | parser-only | - | rejected by runner | planned/development |
 
-- Theory: [05 BCs](theory/05_boundary_conditions.md), [19 spatial BCs](theory/19_spatial_bcs.md)
-- .krk: [BC types](krk/bc_types.md), [Expressions](krk/expressions.md)
-- Expression whitelist: arithmetic, `sin/cos/tan/exp/log/sqrt/abs/clamp`,
-  variables `x, y, z, t, Lx, Ly, Lz, Nx, Ny, Nz, dx, dy, dz` + `Define`d vars.
+## Boundary conditions
 
-**Limitations:** thermal BCs are scalar only in v0.1.0 (no `T = f(x,y,t)`).
-Outflow/Neumann/symmetry are recognized by the parser but kernels are
-minimal — use with caution.
+| Boundary | 2D | 3D | Spatial expression | Time expression | Notes |
+|---|:-:|:-:|:-:|:-:|---|
+| Wall / bounce-back | supported | supported | - | - | no-slip walls |
+| Velocity / Zou-He | supported | supported | west/south/north in 2D | limited | east velocity is not a general public path |
+| Pressure outlet | east in 2D | east/top in 3D | limited | limited | use conservatively |
+| Periodic | supported | supported | - | - | axis shorthand accepted |
+| Fixed temperature | supported | supported | scalar only | scalar only | thermal module |
+| Symmetry/outflow | parser-recognized | parser-recognized | - | - | not a validated public BC |
 
-## 3. Thermal
+See [Boundary conditions](theory/05_boundary_conditions.md),
+[Spatial BCs](theory/19_spatial_bcs.md), and [BC types](krk/bc_types.md).
 
-| Capability | 2D | 3D | Refined | GPU | .krk | Theory / Example |
-|---|:-:|:-:|:-:|:-:|:-:|---|
-| Passive scalar transport (DDF) | ✓ | ✓ | ✓ | ✓ | `Module thermal` | [08 thermal DDF](theory/08_thermal_ddf.md) |
-| Boussinesq buoyancy | ✓ | ✓ | ✓ | ✓ | auto when hot/cold BCs set | [Rayleigh-Bénard](examples/08_rayleigh_benard.md) |
-| Heat conduction (pure) | ✓ | ✓ | — | ✓ | ✓ | [Heat conduction](examples/07_heat_conduction.md) |
-| Natural convection (cavity) | ✓ | ✓ | ✓ | ✓ | ✓ | driver `run_natural_convection_2d/3d` |
-| ν(T) Arrhenius (kernel) | ✓ | ✗ | ✗ | ✓ | ✗ | code: `collide_boussinesq_vt_2d!` |
-| ν(T) modified Arrhenius (Rc) | ✓ | ✗ | ✗ | ✓ | ✗ | driver via `Rc` keyword |
-| α(T), κ(T) variable diffusivity | ✗ | ✗ | — | — | ✗ | v0.2.0 |
-| Validation vs De Vahl Davis (Ra=1e3) | ✓ 1.4% | — | ✓ 1.4% | ✓ | — | Nu = 1.118 ref |
-| Validation vs Fusegi (3D Ra=1e3) | — | ~ 5% | pending AQUA | ✓ | — | Nu = 1.085 ref |
+## Thermal
 
-**Limitations in v0.1.0:**
-- ν(T) is wired at the **driver** level (`run_natural_convection_2d(; Rc=5)`)
-  but **not yet dispatched from .krk**. Adding `Rc = 5` in `Physics {}` does
-  not activate the variable-viscosity kernel. Workaround: call the Julia
-  API directly. Fix planned for v0.2.0.
-- No custom `ν(x, y, z, t, γ̇, T)` user-defined function inlined into
-  kernels — this requires a parser extension (planned v0.2.0).
-- Thermal BCs are scalar only; `T = sin(π*y)*t/T_max` is not supported yet.
-
-## 4. Grid refinement
-
-| Capability | 2D | 3D | Thermal | GPU | .krk | Theory / API |
-|---|:-:|:-:|:-:|:-:|:-:|---|
-| Filippova–Hanel patch-based refinement | ✓ | ✓ | ✓ | ✓ | `Refine name { region, ratio }` | [18 grid refinement](theory/18_grid_refinement.md) |
-| Temporal sub-cycling (ratio 2, 4, …) | ✓ | ✓ | ✓ | ✓ | auto | [refinement](api/refinement.md) |
-| Ghost-layer bilinear/trilinear prolongation | ✓ | ✓ | ✓ | ✓ | — | [refinement](api/refinement.md) |
-| Block-average restriction (ratio²/ratio³) | ✓ | ✓ | ✓ | ✓ | — | [refinement](api/refinement.md) |
-| Automatic τ rescaling on fine grid | ✓ | ✓ | ✓ | ✓ | — | sanity check reports τ_fine |
-| Full-domain wall patches | ✓ | ✗ (natconv) | ✓ (conduction) | ✓ | ✓ | 3D natconv unstable, see note |
-| Cost-vs-accuracy win on integrated quantities (Nu, Cd) | ✗ | ✗ | ✗ | — | — | See [refinement showcase](benchmarks/refinement_showcase.md) — v0.2.0 |
-| Unified .krk dispatch (no driver) | ✓ | ✓ | ✓ | ✓ | ✓ | [Refine block](krk/directives.md) |
-| Multi-level (patch inside patch) | ✓ | ✓ | ~ | ~ | ✓ | parser supports, partially tested |
-| Geometry on fine patches | ✓ | ✓ | — | ✓ | ✓ | `_apply_patch_geometry!` |
-
-**Key design:** refinement has **no dedicated driver**. A `Refine {}` block
-in any .krk file routes automatically to `_run_refined` (2D) or
-`_run_refined_3d` (3D), which in turn dispatch the thermal branch when
-`Module thermal` is active.
-
-**Limitations (3D natconv refined — known issue):**
-
-AQUA H100 validation (2026-04-14, Ra=1e3, N=24 and N=32) shows:
-- **Pure conduction with full-domain wall patch: PASSES** (T error ≈ 0.012).
-- **Boussinesq natconv with full-domain wall patches: DIVERGES** to NaN
-  after ~2500–3500 sub-cycled steps on both N=24 and N=32.
-- **.krk dispatch (full-domain patches)**: stable but Nu ≈ 1.87 vs
-  Fusegi reference 1.085 (~72% over-prediction).
-
-Root cause: the FH f_neq interaction with Boussinesq coupling at the
-domain-boundary rows of 3D patches creates a feedback loop that 2D does
-not exhibit (D2Q9 has only 9 pops and 4-point bilinear stencil, while
-D3Q19 has 19 pops and 8-point trilinear stencil with 5 boundary faces).
-
-Workaround for v0.1.0: use **partial-domain 3D thermal patches**
-(2–3-cell margin from non-thermal walls). Ongoing investigation tracked
-as a v0.2.0 follow-up.
-
-2D full-domain wall patches work without issue (Nu err ~1.4%).
-
-## 5. Geometry and obstacles
-
-| Capability | Status | .krk syntax | Notes |
-|---|:-:|---|---|
-| Implicit condition (circle, box, sphere) | ✓ | `Obstacle cyl { (x-cx)^2 + (y-cy)^2 <= R^2 }` | any boolean expression |
-| STL import (binary + ASCII) | ✓ | `Obstacle body stl(file="geom.stl", scale=0.5)` | auto-detect format |
-| 3D voxelization (Möller–Trumbore ray casting) | ✓ | — | requires watertight mesh |
-| 2D voxelization (slice at z_slice) | ✓ | `stl(file=..., z_slice=0.0)` | — |
-| Named primitives `circle()`, `box()`, `sphere()` | ✗ | planned v0.2.0 | ergonomic sugar for common shapes |
-| Multiple obstacles | ✓ | repeat `Obstacle` block | — |
-| Fluid region (inverse logic) | ✓ | `Fluid inside { x < L/2 }` | — |
-
-- Theory: — (voxelization is implementation detail, not LBM theory)
-- API: [io](api/io.md) — `read_stl`, `voxelize_2d`, `voxelize_3d`
-
-**Limitation:** no named primitives yet. Users must spell out
-`(x-cx)^2 + (y-cy)^2 <= R^2`. Planned for v0.2.0:
-```
-Obstacle cyl circle(center=[0.5, 0.5], radius=0.1)
-Obstacle box rectangle(xmin=0.2, xmax=0.8, ymin=0.3, ymax=0.7)
-Obstacle sph sphere(center=[0.5, 0.5, 0.5], radius=0.1)
-```
-
-## 6. Sanity checks (parameter validation)
-
-Running `sanity_check(setup)` — and the check that `run_simulation` does
-automatically — covers the following:
-
-| Check | Level | What it verifies |
+| Capability | Status | Entry point |
 |---|---|---|
-| Relaxation τ = 3ν + 0.5 | error/warn | τ < 0.5 unstable; τ < 0.51 marginal; τ > 10 over-diffusive |
-| Compressibility | error/warn | U_ref (Ma = U/c_s); Ma > 0.1 flags compressibility error |
-| Spatial resolution | warn | N < 10, N/Re < 1 (boundary layer under-resolved) |
-| Thermal τ_α = 3α + 0.5 | error/warn | same bounds as flow τ |
-| Prandtl number | warn | Pr < 0.1 or > 10 extreme for SRT thermal |
-| Rheology τ_min | warn | from `nu_min` in GNF models |
-| **Fine-grid τ (refinement)** | warn | Filippova-Hanel rescaled τ on each patch |
-| **Fine-grid τ_α (refinement)** | warn | thermal τ on fine grids (added in 3f05d79) |
-| **Fine-grid N/Re** | warn | boundary layer resolution on refined patch |
-| Two-phase density/viscosity ratio | warn | code present, v0.2.0 |
+| Passive thermal DDF | supported | `collide_thermal_2d!`, `collide_thermal_3d!` |
+| Fixed-temperature walls | supported | `.krk` wall `T = ...`, thermal boundary kernels |
+| Boussinesq natural convection 2D | supported | `run_natural_convection_2d`, `run_rayleigh_benard_2d` |
+| Natural convection 3D | public Julia API, limited validation | `run_natural_convection_3d` |
+| Temperature-dependent viscosity (`Rc`) | Julia API only | `run_natural_convection_2d(; Rc=...)` |
+| Thermal grid refinement | not public in this branch | development branch only |
 
-- .krk: [Sanity checks](krk/sanity.md)
-- Parameter summary is printed at run-time with 2D/3D tag.
+Locally rerun checks on 2026-04-30:
 
-**Limitations / planned:**
-- No Ra-vs-N thermal BL resolution check (planned — ~ Ra^{1/4} minimum N).
-- No CFL check for prescribed-velocity advection (VOF is v0.2.0 anyway).
-- Custom user checks not yet exposed in .krk.
+- Poiseuille convergence: order 2.00 over `Ny = 16, 32, 64, 128`.
+- Taylor-Green convergence: order 1.99/2.00/2.00 over `N = 16, 32, 64, 128`.
+- Thermal conduction: order 1.00 with the current fixed-temperature wall
+  treatment, matching the documented half-cell boundary error.
+- Natural convection at `Ra = 1e3`, `N = 64`: `Nu = 1.1423` versus
+  De Vahl Davis `1.118`, relative error `2.17%`.
 
-## 7. KRK DSL
+## `.krk` DSL
 
 | Feature | Status | Reference |
-|---|:-:|---|
-| `.krk` extension + VSCode highlighting | ✓ | [overview](krk/overview.md) |
-| Core directives (Simulation, Domain, Physics, Run, Output) | ✓ | [directives](krk/directives.md) |
-| Boundary / Initial / Obstacle / Fluid / Velocity blocks | ✓ | [directives](krk/directives.md) |
-| Modules: `thermal`, `axisymmetric` | ✓ | [modules](krk/modules.md) |
-| Rheology block (GNF + VE parsing) | ✓ | code present, v0.2.0 scope |
-| Refine block (2D and 3D) | ✓ | [directives](krk/directives.md) |
-| Define user variables | ✓ | [expressions](krk/expressions.md) |
-| Expressions (math + `x, y, z, t`) | ✓ | [expressions](krk/expressions.md) |
-| **Greek letters** (ν/nu, ρ/rho, σ/sigma, τ/tau …) | ✓ | [aliases](krk/aliases.md) |
-| ASCII aliases (`nu` → `ν`) | ✓ | [aliases](krk/aliases.md) |
-| **CLI wrapper** (`krk sim.krk`) | ✓ | installed bin: `bin/krk` |
-| Preset templates (cavity_2d, etc.) | ✓ | [presets](krk/presets.md) |
-| Setup helpers (`Setup reynolds = 100`) | ✓ | [helpers](krk/helpers.md) |
-| Sweep (parametric studies) | ✓ | [directives](krk/directives.md) |
+|---|---|---|
+| `Simulation`, `Domain`, `Physics`, `Run` | supported | [Directives](krk/directives.md) |
+| `Define` and kwarg overrides | supported | [Directives](krk/directives.md) |
+| `Boundary` | supported with the limits above | [BC types](krk/bc_types.md) |
+| `Obstacle` / `Fluid` with expressions | supported | [Directives](krk/directives.md) |
+| STL syntax | parser-only in this branch | [Directives](krk/directives.md) |
+| `Initial` and `Velocity` expressions | supported for the generic 2D runner | [Expressions](krk/expressions.md) |
+| `Module thermal` | supported | [Modules](krk/modules.md) |
+| `Module axisymmetric` | parser-visible but runner rejects | [Modules](krk/modules.md) |
+| `Refine` | parser-only; runner rejects | [Directives](krk/directives.md) |
+| `Rheology` | parser-only; runner rejects | planned/development |
+| `Sweep` | parser-supported | [Directives](krk/directives.md) |
 
-**Limitations:**
-- No `include` directive for reusable .krk fragments.
-- No conditional blocks (`if Re > 100 { ... }`).
-- Sweeps are Cartesian product; no Latin hypercube.
+## Output and diagnostics
 
-## 8. GPU support
+| Output | Status | Syntax/API |
+|---|---|---|
+| VTK/PVD | supported | `Output vtk every 1000 [rho, ux, uy]` |
+| PNG snapshots | supported when CairoMakie extension is loaded | `Output png every 500 [ux]` |
+| GIF animations | supported when CairoMakie extension is loaded | `Output gif every 100 [ux] fps=15` |
+| Diagnostics logging | supported | `Diagnostics every 100 [step, KE, uMax]` |
+| ParaView helper | supported | `open_paraview("output/"; name="case")` |
 
-| Backend | Status | File type | Notes |
-|---|:-:|---|---|
-| CPU (KernelAbstractions) | ✓ | Float32/Float64 | reference |
-| Metal (Apple Silicon) | ✓ | Float32 recommended | M3 Max validated |
-| CUDA (NVIDIA) | ✓ | Float32/Float64 | H100 + A100 validated |
-| ROCm (AMD) | ✗ | — | KA supports it, not tested |
-| oneAPI (Intel) | ✗ | — | — |
+## Hardware and benchmarks
 
-- All kernels use `KernelAbstractions.@kernel` → single source, multi-backend.
-- **Fix a82957c:** `unsafe_trunc` instead of `trunc(Int, ...)` in all
-  refinement and dualgrid kernels (required for Metal; allocated on GPU).
+The public benchmark story for this branch should use CPU baseline plus H100
+only after the corresponding CSV files are present in `benchmarks/results/`.
 
-**Performance reference (H100):** 7675 MLUPS BGK D2Q9 at N=1024, 24k MLUPS
-with AA+Float32 kernels (see [MLUPS CPU vs GPU](benchmarks/mlups_cpu_gpu.md)).
+Current traceable artifacts:
 
-## 9. Rheology (v0.2.0 scope)
+- Poiseuille convergence CSVs exist for `apple_m2` and `aqua_h100`; both match
+  the local rerun exactly.
+- CPU throughput CSVs exist for a legacy `apple_m2` label.
+- Metal/M3 Max throughput exists as a local artifact, but should not be used
+  as the headline comparison.
+- H100 throughput numbers previously shown in the docs are not backed by a
+  matching CSV in this branch and are therefore not published here.
 
-The following are **implemented in code and tested** but excluded from v0.1.0
-publication scope. They will be documented in v0.2.0.
+See [Accuracy](benchmarks/accuracy.md), [Performance](benchmarks/performance.md),
+and [Hardware](benchmarks/hardware.md).
 
-| Model | 2D | 3D | GPU | Thermal coupling |
-|---|:-:|:-:|:-:|:-:|
-| Newtonian | ✓ | ✓ | ✓ | Arrhenius / WLF |
-| Power-law | ✓ | ✗ | ✓ | Arrhenius / WLF |
-| Carreau-Yasuda | ✓ | ✗ | ✓ | Arrhenius / WLF |
-| Cross | ✓ | ✗ | ✓ | Arrhenius / WLF |
-| Bingham (Papanastasiou) | ✓ | ✗ | ✓ | Arrhenius / WLF |
-| Herschel–Bulkley | ✓ | ✗ | ✓ | Arrhenius / WLF |
-| Oldroyd-B (log-conf) | ✓ | ✗ | ✓ | Arrhenius / WLF |
-| FENE-P | ✓ | ✗ | ✓ | Arrhenius / WLF |
-| Saramito (EVP) | ✓ | ✗ | ✓ | Arrhenius / WLF |
+## Not public in this branch
 
-Effective viscosity dispatches at compile-time (zero-cost abstraction
-via Julia's JIT). See `src/rheology/` (models, viscosity, strain_rate).
+Do not present the following as usable v0.1.0 features in this documentation:
 
-## 10. Output and diagnostics
+- MRT collision.
+- Axisymmetric Hagen-Poiseuille.
+- Grid refinement / FH patches.
+- Multiphase VOF / PLIC.
+- Phase-field.
+- Shan-Chen.
+- Species transport.
+- Non-Newtonian rheology.
+- Viscoelasticity.
+- SLBM/body-fitted curvilinear work from `slbm-paper`.
 
-| Output | Status | .krk syntax |
-|---|:-:|---|
-| VTK (+ PVD time series) | ✓ | `Output vtk every 1000 [rho, ux, uy]` |
-| PNG snapshots (CairoMakie) | ✓ | `Output png every 500 [uy]` |
-| GIF animations | ✓ | `Output gif every 100 [ux] fps=15` |
-| Diagnostics CSV | ✓ | `Diagnostics every 100 [step, drag, lift]` |
-| ParaView-ready layout | ✓ | — (VTK pvd files) |
-
-- API: [io](api/io.md), [postprocess](api/postprocess.md)
-- Helper: `open_paraview(result)` opens the latest output in ParaView.
-
----
-
-## Out-of-scope for v0.1.0
-
-These features exist in the codebase (tests often pass) but are
-deliberately not documented in v0.1.0:
-
-- **Multiphase (VOF + PLIC)** — see `src/kernels/vof_2d.jl`,
-  `src/kernels/pressure_vof_2d.jl` · v0.2.0
-- **Phase-field (Allen-Cahn)** — `src/kernels/phasefield_2d.jl` · v0.2.0
-- **Shan–Chen spinodal** — `src/drivers/multiphase.jl` · v0.2.0
-- **Species transport** — `src/kernels/species_2d.jl` · v0.2.0
-- **Viscoelastic cylinder** — `src/drivers/viscoelastic.jl` · v0.2.0
-- **3D rheology** — kernels 2D only · v0.2.0 or later
-- **3D MRT** — D3Q19 BGK only · v0.2.0 or later
-
----
-
-## Quick decision helper
-
-| I want to… | I need… |
-|---|---|
-| lid-driven cavity 2D | BGK + wall BCs + velocity BC. [Example](examples/04_cavity_2d.md) |
-| flow past a cylinder | BGK + inlet parabolic BC + obstacle (`Obstacle { ... }`). [Example](examples/06_cylinder_2d.md) |
-| natural convection in a cavity | `Module thermal` + two `wall(T=...)` BCs. [Example](examples/08_rayleigh_benard.md) |
-| refine near a wall | add `Refine name { region=[...], ratio=2 }` block. [20](examples/20_grid_refinement_cavity.md) |
-| run on H100/A100 | `backend = CUDABackend(); run_simulation(...; backend=backend)` |
-| vary the viscosity with temperature | call `run_natural_convection_2d(; Rc=10)` directly (not via .krk yet) |
-| use an STL geometry | `Obstacle body stl(file="geom.stl")` |
-| sweep parameters | `Sweep Re = [100, 200, 400]` |
-| run from the terminal | `krk sim.krk` (CLI wrapper) |
+Those items may exist in another branch or design document, but they need
+separate validation and their own documentation pass before being advertised.

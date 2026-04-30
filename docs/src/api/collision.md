@@ -1,116 +1,50 @@
 # Collision operators
 
-Collision kernels relax the distribution `f` toward its local
-equilibrium. Kraken exports a plain BGK operator, a Guo forced
-variant (for body forces without spurious terms), MRT for
-higher-Reynolds cavities, and thermal/Boussinesq operators used by
-the natural-convection drivers. Every kernel is written to run on
-CPU via `@threads` and on GPU via KernelAbstractions with the same
-source.
+Collision kernels relax the distribution `f` toward local equilibrium. The
+public collision model in this branch is BGK, with Guo forcing for body-force
+terms and thermal/Boussinesq variants for the thermal DDF path.
 
+MRT and axisymmetric collision kernels are not exported by this branch and are
+not part of the v0.1.0 public API.
 
 ## Quick reference
 
 | Symbol | Purpose |
-|--------|---------|
-| `collide_2d!` | Plain BGK collision — 2D |
-| `collide_3d!` | Plain BGK collision — 3D |
-| `collide_guo_2d!` | Guo body-force collision — 2D |
-| `collide_guo_field_2d!` | Guo forcing collision, per-cell force field — 2D |
-| `collide_guo_3d!` | Guo body-force collision — 3D |
-| `collide_guo_field_3d!` | Guo forcing collision, per-cell force field — 3D |
-| `collide_thermal_2d!` | Advection-diffusion collision for temperature DDF — 2D |
-| `collide_boussinesq_2d!` | Boussinesq thermal collision — 2D |
-| `collide_boussinesq_vt_2d!` | Boussinesq collision (velocity/temperature) — 2D |
-| `collide_boussinesq_vt_modified_2d!` | Boussinesq collision (velocity/temperature, modified) — 2D |
-| `collide_axisymmetric_2d!` | Axisymmetric BGK collision — 2D |
-| `collide_li_axisym_2d!` | Li et al. axisymmetric BGK — 2D |
-| `collide_mrt_2d!` | Multiple-Relaxation-Time collision — 2D |
+|---|---|
+| `collide_2d!` | Plain BGK collision, D2Q9 |
+| `collide_3d!` | Plain BGK collision, D3Q19 |
+| `collide_guo_2d!` | BGK with constant Guo body force, 2D |
+| `collide_guo_field_2d!` | BGK with per-cell Guo force field, 2D |
+| `collide_guo_3d!` | BGK with constant Guo body force, 3D |
+| `collide_guo_field_3d!` | BGK with per-cell Guo force field, 3D |
+| `collide_thermal_2d!` | Temperature DDF collision, 2D |
+| `collide_thermal_3d!` | Temperature DDF collision, 3D |
+| `collide_boussinesq_2d!` | Boussinesq force coupling, 2D |
+| `collide_boussinesq_vt_2d!` | Boussinesq with temperature-dependent viscosity, 2D |
+| `collide_boussinesq_vt_modified_2d!` | Modified Arrhenius Boussinesq path, 2D |
+| `collide_boussinesq_3d!` | Boussinesq force coupling, 3D |
 
-## Details
+## Notes
 
-### `collide_2d!`
+- All public kernels are written with KernelAbstractions and can run on CPU or
+  compatible GPU backends.
+- `collide_boussinesq_vt_2d!` and
+  `collide_boussinesq_vt_modified_2d!` are lower-level kernels. The usual
+  user entry point is `run_natural_convection_2d(; Rc=...)`.
+- The `.krk` runner uses the standard BGK or thermal paths. It does not
+  dispatch MRT, axisymmetric or rheology kernels in this branch.
 
-**Source:** `src/kernels/collide_stream_2d.jl`
-
-```julia
-function collide_2d!(f, is_solid, ω; sync=true)
-    backend = KernelAbstractions.get_backend(f)
-    Nx, Ny = size(f, 1), size(f, 2)
-    kernel! = collide_2d_kernel!(backend)
-    kernel!(f, is_solid, ω; ndrange=(Nx, Ny))
-    sync && KernelAbstractions.synchronize(backend)
-end
-```
-
-
-### `collide_guo_2d!`
-
-**Source:** `src/kernels/collide_guo_2d.jl`
+## Core signatures
 
 ```julia
-function collide_guo_2d!(f, is_solid, ω, Fx, Fy)
-    backend = KernelAbstractions.get_backend(f)
-    Nx, Ny = size(f, 1), size(f, 2)
-    kernel! = collide_guo_2d_kernel!(backend)
-    kernel!(f, is_solid, ω, Fx, Fy; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
-end
+collide_2d!(f, is_solid, omega; sync=true)
+collide_3d!(f, is_solid, omega)
+
+collide_guo_2d!(f, is_solid, omega, Fx, Fy)
+collide_guo_3d!(f, is_solid, omega, Fx, Fy, Fz)
+
+collide_thermal_2d!(g, ux, uy, omega_T)
+collide_thermal_3d!(g, ux, uy, uz, omega_T)
 ```
 
-
-### `collide_mrt_2d!`
-
-**Source:** `src/kernels/collide_mrt_2d.jl`
-
-```julia
-"""
-    collide_mrt_2d!(f, is_solid, ν; s_e=1.4, s_eps=1.4, s_q=1.2)
-
-MRT collision for D2Q9 (Lallemand & Luo, 2000).
-The stress relaxation rate s_ν = 1/(3ν + 0.5) is computed from viscosity.
-Other rates (s_e, s_eps, s_q) can be tuned for stability (default values from literature).
-"""
-function collide_mrt_2d!(f, is_solid, ν; s_e=1.4, s_eps=1.4, s_q=1.2)
-    backend = KernelAbstractions.get_backend(f)
-    Nx, Ny = size(f, 1), size(f, 2)
-    T = eltype(f)
-    s_nu = T(1.0 / (3.0 * ν + 0.5))
-    kernel! = collide_mrt_2d_kernel!(backend)
-    kernel!(f, is_solid, T(s_e), T(s_eps), T(s_q), s_nu; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
-end
-```
-
-
-### `collide_thermal_2d!`
-
-**Source:** `src/kernels/thermal_2d.jl`
-
-```julia
-function collide_thermal_2d!(g, ux, uy, ω_T)
-    backend = KernelAbstractions.get_backend(g)
-    Nx, Ny = size(g, 1), size(g, 2)
-    kernel! = collide_thermal_2d_kernel!(backend)
-    kernel!(g, ux, uy, ω_T; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
-end
-```
-
-
-### `collide_boussinesq_2d!`
-
-**Source:** `src/kernels/thermal_2d.jl`
-
-```julia
-function collide_boussinesq_2d!(f, Temp, is_solid, ω, β_g, T_ref)
-    backend = KernelAbstractions.get_backend(f)
-    Nx, Ny = size(f, 1), size(f, 2)
-    T = eltype(f)
-    kernel! = collide_boussinesq_2d_kernel!(backend)
-    kernel!(f, Temp, is_solid, ω, T(β_g), T(T_ref); ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
-end
-```
-
-
+See the [public API inventory](public_api.md) for the complete export list.

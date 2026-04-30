@@ -10,9 +10,9 @@ Boussinesq coupling
 **Validates against:** De Vahl Davis (1983) — Nusselt number vs Rayleigh
 [`10.1002/fld.1650030305`](https://doi.org/10.1002/fld.1650030305)
 
-**Download:** [`rayleigh_benard.krk`](../assets/krk/rayleigh_benard.krk)
+**Download:** <a href="/assets/krk/rayleigh_benard.krk" download><code>rayleigh_benard.krk</code></a>
 
-**Hardware:** Apple M2, ~90s wall-clock at 128×64 (Ra = 10⁵)
+**Hardware:** local CPU baseline, ~90s wall-clock at 128×64 (Ra = 10⁵)
 
 ![Rayleigh-Benard temperature field](../assets/figures/rayleigh_benard_temperature.png)
 
@@ -217,8 +217,8 @@ thermal boundary layers; in the bulk, the profile is nearly flat.
 | ``\mathrm{Pr} \neq 1`` handling | yes |
 
 This example confirms that Kraken correctly couples the thermal and flow
-solvers.  The next step in complexity is
-[Hagen--Poiseuille flow](09_hagen_poiseuille.md), which introduces axisymmetric geometry.
+solvers. For the exact public scope of this branch, see the
+[capabilities matrix](../capabilities.md).
 
 
 ## References

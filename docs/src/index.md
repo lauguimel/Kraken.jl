@@ -4,84 +4,93 @@ layout: home
 
 hero:
   name: "Kraken.jl"
-  text: "GPU-native Lattice Boltzmann in Julia"
-  tagline: "Composable, multi-backend CFD — single-phase, thermal, axisymmetric, grid-refined."
+  text: ".krk-first Lattice Boltzmann simulations in Julia"
+  tagline: "Run reproducible LBM cases from small text files, then drop into Julia when you need direct control."
   image:
     src: /assets/showcases/vonkarman_re200.gif
-    alt: Von Kármán vortex street at Re=200
+    alt: Vortex street simulation
   actions:
     - theme: brand
-      text: Get Started
+      text: Run a .krk file
       link: /getting_started
     - theme: alt
-      text: Examples
-      link: /examples/04_cavity_2d
+      text: .krk reference
+      link: /krk/overview
     - theme: alt
-      text: View on GitHub
-      link: https://github.com/lauguimel/Kraken.jl
+      text: Julia API
+      link: /api/public_api
 
 features:
-  - icon: <img width="64" src="/assets/showcases/rayleigh_benard_ra1e5.gif"/>
-    title: Thermal convection
-    details: Rayleigh-Bénard natural convection with Boussinesq coupling, validated Ra=1e3–1e8.
-    link: /examples/08_rayleigh_benard
-  - icon: <img width="64" src="/assets/showcases/taylor_green_decay.gif"/>
-    title: Taylor-Green decay
-    details: Canonical vortex decay — spectral accuracy on structured grids.
-    link: /examples/03_taylor_green_2d
   - icon: <img width="64" src="/assets/showcases/cavity_re1000.gif"/>
-    title: Lid-driven cavity
-    details: Reference benchmark at Re=100–10000, 2D and 3D drivers.
+    title: Reproducible cases
+    details: Each public example is backed by a checked-in .krk file.
     link: /examples/04_cavity_2d
+  - icon: <img width="64" src="/assets/showcases/taylor_green_decay.gif"/>
+    title: Verified convergence
+    details: Poiseuille and Taylor-Green convergence are rerun locally and CSV-backed.
+    link: /benchmarks/accuracy
+  - icon: <img width="64" src="/assets/showcases/rayleigh_benard_ra1e5.gif"/>
+    title: Thermal DDF
+    details: Heat conduction and Boussinesq natural convection are in the v0.1.0 scope.
+    link: /examples/08_rayleigh_benard
   - icon: <img width="64" src="/assets/showcases/vonkarman_re200.gif"/>
-    title: Flow past obstacles
-    details: Cylinder drag, STL bodies, moving boundaries via momentum exchange.
-    link: /examples/06_cylinder_2d
+    title: Agent context
+    details: A compact llms.txt is shipped for LLM-assisted work.
+    link: /llms
 ---
 ```
 
-## Why Kraken.jl?
+## Start from a `.krk` file
 
-Kraken.jl provides a composable, high-performance LBM solver for incompressible
-flows with automatic GPU acceleration via
-[KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl).
+Kraken.jl's public workflow starts with a small declarative case file:
 
-- **Multi-backend GPU** — write once, run on CUDA, Metal (Apple Silicon), AMD ROCm, and CPU
-- **D2Q9 & D3Q19 lattices** — standard lattice Boltzmann velocity sets
-- **BGK & MRT collision** — single- and multiple-relaxation-time with Guo forcing
-- **Boundary conditions** — bounce-back, Zou-He velocity/pressure, periodic, spatial/STL
-- **Thermal LBM** — double distribution function with Boussinesq coupling
-- **Axisymmetric LBM** — cylindrical coordinates via Li et al. (2010) scheme
-- **Grid refinement** — patch-based nested refinement with Filippova-Hanel rescaling
-- **Momentum exchange** — drag/lift computation for immersed bodies
-- **VTK output** — `.vti` / `.pvd` for ParaView visualization
-- **.krk DSL** — declarative, Gerris-like simulation config
+```text
+Simulation cavity D2Q9
+Domain     L = 1.0 x 1.0   N = 128 x 128
+Setup      reynolds = 100 L_ref = 128 U_ref = 0.1
+Boundary   north velocity(ux = 0.1, uy = 0)
+Boundary   south wall
+Boundary   east  wall
+Boundary   west  wall
+Run        10000 steps
+Output     vtk every 1000 [rho, ux, uy]
+```
 
-## Quick Start
+Run it from Julia:
 
 ```julia
 using Kraken
 
-# Lid-driven cavity at Re = 100 on a 128×128 grid
-N = 128
-ν = 0.1 * N / 100  # ν = u_lid · N / Re
-config = LBMConfig(D2Q9(); Nx=N, Ny=N, ν=ν, u_lid=0.1, max_steps=30000)
-result = run_cavity_2d(config)
+result = run_simulation("examples/cavity.krk"; max_steps=1000)
 ```
 
-See [Installation](installation.md) and [Getting Started](getting_started.md) for the full setup.
+Or parse first when you want to inspect or override the setup:
 
-## Physics Capabilities
+```julia
+setup = load_kraken("examples/cavity.krk"; Nx=256, Ny=256)
+result = run_simulation(setup)
+```
 
-| Capability | Lattice | Driver |
-|:-----------|:--------|:-------|
-| Lid-driven cavity | D2Q9, D3Q19 | `run_cavity_2d`, `run_cavity_3d` |
-| Channel flow (Poiseuille) | D2Q9 | `run_poiseuille_2d` |
-| Couette flow | D2Q9 | `run_couette_2d` |
-| Taylor-Green vortex | D2Q9 | `run_taylor_green_2d` |
-| Cylinder drag | D2Q9 | `run_cylinder_2d` |
-| Thermal convection | D2Q9 | `run_rayleigh_benard_2d` |
-| Axisymmetric pipe flow | D2Q9 | `run_hagen_poiseuille_2d` |
+## v0.1.0 scope
+
+The documentation for this branch is intentionally conservative. It covers
+features that are present in `src/`, exercised by examples or tests, and
+described by the `.krk` parser/runner in this branch.
+
+| Area | Public status |
+|---|---|
+| D2Q9 / D3Q19 lattices | Supported |
+| BGK collision | Supported |
+| Guo body forcing | Supported |
+| Wall, velocity, pressure, periodic BCs | Supported, with documented limits |
+| Expression-based `.krk` geometry | Supported |
+| Thermal DDF and Boussinesq coupling | Supported |
+| VTK, PNG and GIF outputs | Supported |
+| MRT, axisymmetric, grid refinement, VOF, rheology, viscoelasticity | Not public in this branch |
+
+See the [capabilities matrix](capabilities.md) for the exact status, the
+[integration roadmap](integration_roadmap.md) for planned features, and the
+[LLM context page](llms.md) for the compact machine-readable summary.
 
 ## References
 

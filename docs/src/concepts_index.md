@@ -1,138 +1,96 @@
 # Concepts index
 
-This page is a map of the Lattice Boltzmann concepts implemented in
-Kraken.jl v0.1.0. Each entry briefly states what the concept is and why
-it matters, links to the theory page that derives it, and points to
-example-tutorials that exercise it. If you are looking for a specific
-topic, this is the fastest route in.
+This page maps the concepts that are public in Kraken.jl v0.1.0. It is
+deliberately narrower than the development branches: if a feature is not
+listed here, do not assume it is usable from this branch.
 
-If you are brand new to LBM, start at
-[Getting started](getting_started.md) first, then come back here.
+If you are brand new to the package, start with
+[Getting started](getting_started.md), then return here for the theory links.
 
-## Core LBM
+## `.krk` files
 
-### Lattices and equilibrium
+A `.krk` file is the primary user-facing description of a simulation: domain,
+physics, boundaries, initial conditions, outputs and diagnostics live in one
+small text file.
 
-LBM evolves discrete populations `f_i(x, t)` on a stencil of velocities.
-In 2D Kraken uses the nine-velocity D2Q9 stencil; in 3D it uses D3Q19.
-Equilibrium is a Mach-expanded Maxwell–Boltzmann distribution that
-recovers Navier–Stokes in the hydrodynamic limit.
+- Reference: [.krk overview](krk/overview.md), [Directives](krk/directives.md)
+- Example: [.krk configuration](examples/10_krk_config.md)
+
+## Lattices and equilibrium
+
+LBM evolves discrete populations `f_i(x, t)` on a finite set of velocities.
+Kraken uses D2Q9 in 2D and D3Q19 in 3D. Equilibrium is a low-Mach expansion
+that recovers incompressible Navier-Stokes in the hydrodynamic limit.
 
 - Theory: [LBM fundamentals](theory/01_lbm_fundamentals.md),
-  [D2Q9 lattice](theory/02_d2q9_lattice.md)
+  [D2Q9 lattice](theory/02_d2q9_lattice.md),
+  [From 2D to 3D](theory/06_from_2d_to_3d.md)
 - Examples: [Poiseuille 2D](examples/01_poiseuille_2d.md),
-  [Taylor–Green vortex](examples/03_taylor_green_2d.md)
+  [Lid-driven cavity 3D](examples/05_cavity_3d.md)
 
-### Streaming
+## BGK collision
 
-The advection step: post-collision populations are shifted to their
-neighbor along each lattice direction. This is the only non-local part
-of the algorithm.
-
-- Theory: [Streaming](theory/04_streaming.md)
-- Examples: [Couette flow](examples/02_couette_2d.md),
-  [Lid-driven cavity 2D](examples/04_cavity_2d.md)
-
-### Collision (BGK)
-
-A single-relaxation-time model that drives the populations toward their
-local equilibrium. The relaxation parameter `τ` is set by the kinematic
-viscosity.
+BGK is the public collision model in this branch. The relaxation parameter
+sets the kinematic viscosity, and the same conceptual model is used in 2D and
+3D.
 
 - Theory: [BGK collision](theory/03_bgk_collision.md)
 - Examples: [Lid-driven cavity 2D](examples/04_cavity_2d.md),
-  [Flow past a cylinder](examples/06_cylinder_2d.md)
+  [Taylor-Green vortex](examples/03_taylor_green_2d.md)
 
-### MRT collision
+## Streaming
 
-Multiple-relaxation-time collision relaxes each moment of the
-distribution at its own rate. It is more stable than BGK at high
-Reynolds number and removes some of BGK's viscosity-dependent boundary
-errors.
+Streaming shifts post-collision populations to neighboring nodes along each
+lattice direction. This is the non-local part of each LBM step.
 
-- Theory: [MRT](theory/12_mrt.md)
-- Examples: [Lid-driven cavity 2D](examples/04_cavity_2d.md),
-  [Flow past a cylinder](examples/06_cylinder_2d.md)
+- Theory: [Streaming](theory/04_streaming.md)
+- Examples: [Couette flow](examples/02_couette_2d.md),
+  [Poiseuille 2D](examples/01_poiseuille_2d.md)
 
 ## Boundary conditions
 
-### Zou–He, bounce-back, periodic
+The public boundary set covers bounce-back walls, Zou-He velocity/pressure
+forms, periodic axes, and scalar fixed-temperature walls for thermal runs.
+Spatial expressions are supported on selected 2D velocity/pressure paths.
 
-Zou–He reconstructs unknown populations from prescribed macroscopic
-moments (velocity or pressure). Bounce-back is the simplest no-slip
-wall. Periodic BCs connect opposite faces without any reconstruction.
-
-- Theory: [Boundary conditions](theory/05_boundary_conditions.md)
-- Examples: [Poiseuille 2D](examples/01_poiseuille_2d.md),
-  [Lid-driven cavity 2D](examples/04_cavity_2d.md)
-
-### Spatially varying BCs
-
-For non-trivial inlet profiles, temperature patches, or moving walls,
-Kraken lets you attach a function `f(x, y)` or a STL region to a face
-via the `.krk` DSL.
-
-- Theory: [Spatial BCs](theory/19_spatial_bcs.md)
-- Examples: [Flow past a cylinder](examples/06_cylinder_2d.md),
-  [.krk configuration](examples/10_krk_config.md)
+- Theory: [Boundary conditions](theory/05_boundary_conditions.md),
+  [Spatial BCs](theory/19_spatial_bcs.md)
+- Reference: [BC types](krk/bc_types.md)
+- Examples: [Cylinder 2D](examples/06_cylinder_2d.md),
+  [Heat conduction](examples/07_heat_conduction.md)
 
 ## Body forces
 
-### Guo forcing
-
-Guo et al.'s scheme adds a body force to the LBM step in a way that
-stays consistent with the Chapman–Enskog expansion — no spurious
-second-order error. Kraken uses it for buoyancy in thermal cases and
-for driven periodic flows.
+Guo forcing is used for body-force-driven channels and for Boussinesq thermal
+coupling.
 
 - Theory: [Body forces](theory/07_body_forces.md)
-- Examples: [Hagen–Poiseuille](examples/09_hagen_poiseuille.md),
-  [Rayleigh–Bénard convection](examples/08_rayleigh_benard.md)
+- Examples: [Poiseuille 2D](examples/01_poiseuille_2d.md),
+  [Rayleigh-Benard convection](examples/08_rayleigh_benard.md)
 
 ## Thermal coupling
 
-### Double distribution function, Boussinesq
-
-Temperature is evolved with a second LBM distribution on the same
-lattice. The temperature field couples back into the flow via a
-Boussinesq body force on the velocity populations.
+The thermal model uses a second distribution function for temperature. The
+temperature field can be passive or coupled back to the velocity field through
+Boussinesq buoyancy.
 
 - Theory: [Thermal DDF](theory/08_thermal_ddf.md)
 - Examples: [Heat conduction](examples/07_heat_conduction.md),
-  [Rayleigh–Bénard convection](examples/08_rayleigh_benard.md)
+  [Rayleigh-Benard convection](examples/08_rayleigh_benard.md)
 
-## Axisymmetric LBM
+## Outputs and post-processing
 
-For pipe flow and other rotationally symmetric problems, Kraken
-implements the axisymmetric source-term formulation on a 2D `(r, z)`
-grid, avoiding a full 3D run.
+Kraken writes VTK/PVD files for ParaView and can produce image/GIF outputs
+through the CairoMakie extension. Post-processing helpers extract lines,
+probe fields and compute error metrics.
 
-- Theory: [Axisymmetric LBM](theory/09_axisymmetric.md)
-- Examples: [Hagen–Poiseuille](examples/09_hagen_poiseuille.md)
+- API: [IO](api/io.md), [Postprocess](api/postprocess.md)
 
-## Grid refinement
+## Explicitly not public here
 
-### Filippova–Hänel patches
+MRT, axisymmetric LBM, grid refinement, VOF, phase-field, Shan-Chen, species
+transport, rheology, viscoelasticity and SLBM/body-fitted work are not public
+features of this branch. Some are present in other branches, especially
+`slbm-paper`, but they require their own validation and documentation pass.
 
-Nested rectangular patches at a 2× finer resolution, with population
-rescaling across the interface so viscosity stays consistent between
-coarse and fine levels.
-
-- Theory: [Grid refinement](theory/18_grid_refinement.md)
-- Examples: [.krk configuration](examples/10_krk_config.md)
-
-## From 2D to 3D
-
-The D2Q9 → D3Q19 step is mostly mechanical (same collision, same
-streaming, bigger stencil), but the memory footprint and the boundary
-bookkeeping grow quickly. This page explains what changes and what
-does not.
-
-- Theory: [From 2D to 3D](theory/06_from_2d_to_3d.md)
-- Examples: [Lid-driven cavity 3D](examples/05_cavity_3d.md)
-
-## Limitations
-
-For the honest list of what is and is not in v0.1.0 — including
-multiphase, non-Newtonian, and high density-ratio flows, all of which
-are deferred — see [Limitations](theory/10_limitations.md).
+See [Capabilities](capabilities.md) for the precise status matrix.

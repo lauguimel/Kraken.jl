@@ -8,9 +8,9 @@
 # **Validates against:** analytical parabolic profile
 # ``u_x(y) = \frac{F_x}{2\nu}\, y\,(L_y - y)``
 #
-# **Download:** [`poiseuille.krk`](../assets/krk/poiseuille.krk)
+# **Download:** <a href="/assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
 #
-# **Hardware:** Apple M2, ~10s wall-clock at N = 4×32
+# **Hardware:** local CPU baseline, ~10s wall-clock at N = 4×32
 #
 # ![Poiseuille velocity profile](../assets/figures/poiseuille_profile.png)
 #
@@ -117,7 +117,7 @@
 #
 # ## Simulation File
 #
-# Download: [`poiseuille.krk`](../assets/krk/poiseuille.krk)
+# Download: <a href="/assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
 #
 # ```
 # # Poiseuille flow driven by body force

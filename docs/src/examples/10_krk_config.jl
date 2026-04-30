@@ -6,7 +6,7 @@
 # **Validates against:** tutorial example — no quantitative validation target.
 # Each .krk in this tutorial is a working case covered by other example pages.
 #
-# **Download:** [`cavity.krk`](../assets/krk/cavity.krk) (and the other .krk files
+# **Download:** <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a> (and the other .krk files
 # linked from their respective example pages)
 #
 # **Hardware:** n/a (tutorial, cases run from other pages)
@@ -72,7 +72,7 @@
 #
 # ## Example 1 — Lid-driven cavity
 #
-# Download: [`cavity.krk`](../assets/krk/cavity.krk)
+# Download: <a href="/assets/krk/cavity.krk" download><code>cavity.krk</code></a>
 
 # ```
 # Simulation cavity D2Q9
@@ -100,7 +100,7 @@ nothing #hide
 #
 # ## Example 2 — Poiseuille flow (body force)
 #
-# Download: [`poiseuille.krk`](../assets/krk/poiseuille.krk)
+# Download: <a href="/assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
 
 # ```
 # Simulation poiseuille D2Q9
@@ -122,7 +122,7 @@ nothing #hide
 #
 # ## Example 3 — Cylinder with parabolic inlet
 #
-# Download: [`cylinder.krk`](../assets/krk/cylinder.krk)
+# Download: <a href="/assets/krk/cylinder.krk" download><code>cylinder.krk</code></a>
 
 # ```
 # Simulation cylinder D2Q9
@@ -157,7 +157,7 @@ nothing #hide
 #
 # ## Example 4 — Couette flow
 #
-# Download: [`couette.krk`](../assets/krk/couette.krk)
+# Download: <a href="/assets/krk/couette.krk" download><code>couette.krk</code></a>
 
 # ```
 # Simulation couette D2Q9
@@ -195,10 +195,11 @@ nothing #hide
 
 # ---
 #
-# ## STL geometry import
+# ## Parser-only: STL geometry syntax
 #
-# Complex geometries can be imported from STL files (binary or ASCII).
-# The mesh is voxelized onto the LBM grid using ray casting.
+# The parser can read `stl(...)` parameters, but the v0.1.0 runner in this
+# branch does not voxelize STL geometry. Use expression-based `Obstacle`
+# regions for public examples.
 #
 # ### Syntax
 #
@@ -216,12 +217,7 @@ nothing #hide
 # | `translate` | `[0,0,0]` | Translation vector ``(t_x, t_y, t_z)`` (applied after scale) |
 # | `z_slice` | `0.0`   | z-plane for 2D cross-section (only for D2Q9) |
 #
-# For **2D simulations** (D2Q9), the STL is sliced at `z = z_slice` to extract
-# a 2D contour, then voxelized via 2D ray casting.
-# For **3D simulations** (D3Q19), full volumetric ray casting along the z-axis
-# is used.
-#
-# ### Example: airfoil from STL
+# ### Reserved syntax
 #
 # ```
 # Simulation airfoil D2Q9
@@ -239,9 +235,8 @@ nothing #hide
 # Output vtk every 1000 [rho, ux, uy]
 # ```
 #
-# !!! note "Watertight meshes"
-#     The STL surface must be closed (watertight) for the ray-casting voxelization
-#     to produce correct inside/outside classification.
+# This syntax is reserved for development branches until the runner and
+# validation artifacts are present in this branch.
 #
 # ---
 #

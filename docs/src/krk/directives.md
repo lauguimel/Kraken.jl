@@ -21,7 +21,7 @@ Unknown keywords trigger a Levenshtein-based *did you mean?* suggestion.
 
 **Example**
 
-```krk
+```text
 Simulation cavity_2d D2Q9
 ```
 
@@ -48,7 +48,7 @@ Values can be numeric literals or identifiers previously declared with
 
 **Example**
 
-```krk
+```text
 Define N = 128
 Domain L = 1.0 x 1.0   N = N x N
 Domain L = 2.0 x 1.0 x 1.0  N = 128 x 64 x 64
@@ -72,7 +72,7 @@ Common keys: `nu` (kinematic viscosity, lattice units), `Pr` (Prandtl), `Ra`
 
 **Example**
 
-```krk
+```text
 Define Re = 1000
 Physics nu = 0.01 Pr = 0.71 Ra = 1e5
 Physics nu = 0.1 Fx = 1e-5
@@ -90,7 +90,7 @@ file value.
 
 **Example**
 
-```krk
+```text
 Define Re  = 1000
 Define N   = 128
 Define Lid = 0.1
@@ -110,16 +110,16 @@ Boundary <axis> periodic                   # shorthand: axis ∈ {x, y, z}
 ```
 
 `<face>` is one of `north`, `south`, `east`, `west` (2D) or additionally
-`top`, `bottom` (3D only). Axisymmetric runs can use `z`, `wall`, `axis` —
-see [Aliases](aliases.md). `<type>` is one of `wall`, `velocity`, `pressure`,
-`periodic`, `symmetry` — see [BC types](bc_types.md).
+`top`, `bottom` (3D only). Some parser aliases are reserved for development
+modules; see [Aliases](aliases.md). `<type>` is one of `wall`, `velocity`,
+`pressure`, `periodic`, `symmetry` — see [BC types](bc_types.md).
 
 The `Boundary x periodic` shorthand expands to a pair of `:periodic`
 BoundarySetup entries for the east/west (or north/south) faces.
 
 **Example**
 
-```krk
+```text
 Boundary north velocity(ux = 0.1, uy = 0)
 Boundary south wall
 Boundary x     periodic
@@ -140,9 +140,13 @@ Refine <name> { region = [x0, y0, x1, y1], ratio = 2, parent = <name> }
 Declare a nested refinement patch over an axis-aligned box. `ratio` defaults
 to `2`; `parent` defaults to `""` (the base grid).
 
+**Status in this branch:** parser-only. `run_simulation` rejects non-empty
+`setup.refinements` in v0.1.0. Keep this directive for reading/development
+compatibility, but do not use it as a public runtime feature here.
+
 **Example**
 
-```krk
+```text
 Refine nearwall { region = [0.0, 0.0, 1.0, 0.1], ratio = 2 }
 Refine tip     { region = [0.4, 0.0, 0.6, 0.1], ratio = 2, parent = nearwall }
 ```
@@ -160,7 +164,7 @@ some runners to impose a frozen background flow).
 
 **Example**
 
-```krk
+```text
 Initial  { ux = 0.05*sin(2*pi*x) uy = -0.05*cos(2*pi*y) }
 Velocity { ux = 0.1*(1 - (y/Ly)^2) uy = 0 }
 ```
@@ -171,15 +175,14 @@ Velocity { ux = 0.1*(1 - (y/Ly)^2) uy = 0 }
 
 **Syntax:** `Module <name>`
 
-Activate an optional physics module. Known modules: `thermal`,
-`axisymmetric`. See the [Modules](modules.md) page for what each one enables
-(thermal BC kwargs, face aliases, etc.).
+Activate an optional physics module. `thermal` is public in this branch.
+Other advanced names may parse but are rejected by the runner. See
+[Modules](modules.md).
 
 **Example**
 
-```krk
+```text
 Module thermal
-Module axisymmetric
 ```
 
 **Parser:** `_parse_module`.
@@ -193,7 +196,7 @@ tail is ignored.
 
 **Example**
 
-```krk
+```text
 Run 10000 steps
 ```
 
@@ -209,7 +212,7 @@ in time steps; the bracket list enumerates fields (`ux`, `uy`, `rho`, `T`,
 
 **Example**
 
-```krk
+```text
 Output vtk every 500 [ux, uy, rho, T]
 ```
 
@@ -224,7 +227,7 @@ to stdout and/or CSV.
 
 **Example**
 
-```krk
+```text
 Diagnostics every 100 [step, time, KE, uMax, Nu]
 ```
 
@@ -241,15 +244,17 @@ Fluid    <name> { <condition> }
 ```
 
 Declare a solid obstacle or a fluid region by a condition expression
-`(x, y [, z]) -> Bool`, or by reference to an STL file. The optional
-`wall(...)` block attaches boundary-condition values to the obstacle (e.g.
-temperature). See `_parse_geometry_region` / `_parse_stl_params`.
+`(x, y [, z]) -> Bool`. The optional `wall(...)` block attaches
+boundary-condition values to the obstacle (for example temperature).
+
+The parser also understands `stl(...)` parameters, but STL voxelization is not
+implemented by the v0.1.0 runner in this branch. Use expression-based geometry
+for public examples.
 
 **Example**
 
-```krk
+```text
 Obstacle disk wall(T = 1.0) { (x - 0.5)^2 + (y - 0.5)^2 < 0.01 }
-Obstacle cyl  stl(file = "cylinder.stl", scale = 1e-3, translate = [0, 0, 0])
 Fluid    jet  { y < 0.2 }
 ```
 
@@ -263,7 +268,7 @@ back-computation formulas. Known keys: `reynolds`, `rayleigh`, `prandtl`,
 
 **Example**
 
-```krk
+```text
 Setup reynolds = 1000
 Setup rayleigh = 1e5 prandtl = 0.71
 ```
@@ -280,7 +285,7 @@ expansions.
 
 **Example**
 
-```krk
+```text
 Preset cavity_2d
 ```
 
@@ -296,7 +301,7 @@ Cartesian-product parameter sweep. Each combination produces one
 
 **Example**
 
-```krk
+```text
 Sweep Re = [100, 400, 1000]
 Sweep N  = [64, 128, 256]
 ```
@@ -313,7 +318,7 @@ Per-phase non-Newtonian constitutive model. `phase` is `liquid`, `gas`, or
 
 **Example**
 
-```krk
+```text
 Rheology power_law { K = 0.1 n = 0.5 }
 Rheology liquid carreau { eta_0 = 1.0 eta_inf = 0.01 lambda = 1.0 a = 2.0 n = 0.5 }
 ```

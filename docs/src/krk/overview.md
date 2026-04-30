@@ -27,7 +27,7 @@ Kraken exposes two equivalent entry points to the LBM solver:
 
 ## Minimal example
 
-```krk
+```text
 # 2D lid-driven cavity at Re = 100
 Simulation cavity D2Q9
 Domain     L = 1.0 x 1.0   N = 128 x 128
@@ -44,7 +44,7 @@ Run it from Julia:
 ```julia
 using Kraken
 setup = load_kraken("cavity.krk")
-run_krk(setup)                          # or the file path directly
+run_simulation(setup)                    # or run_simulation("cavity.krk")
 ```
 
 Override parameters without editing the file (parametric studies):
@@ -68,7 +68,7 @@ The rest of this section documents every piece of the DSL:
 
 - [Directives](directives.md) — all top-level keywords
 - [Boundary condition types](bc_types.md) — `wall`, `velocity`, `pressure`, …
-- [Modules](modules.md) — `thermal`, `axisymmetric`
+- [Modules](modules.md) — public and parser-only modules
 - [Presets](presets.md) — 5 built-in canonical cases
 - [Setup helpers](helpers.md) — `reynolds`, `rayleigh`, `prandtl`
 - [Expressions](expressions.md) — the KrakenExpr grammar

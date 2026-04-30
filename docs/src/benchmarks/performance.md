@@ -1,60 +1,63 @@
-# Performance: MLUPs throughput
+# Performance
 
-The standard metric for LBM codes is **Mega Lattice Updates Per Second**
-(MLUPs):
+The standard throughput metric for LBM codes is **Mega Lattice Updates Per
+Second** (MLUPs):
 
 ```math
 \text{MLUPs} = \frac{N_x \times N_y \times N_{\text{steps}}}{t_{\text{wall}} \times 10^6}
 ```
 
-We benchmark Kraken's BGK D2Q9 lid-driven cavity solver across grid sizes
-on CPU (Apple M2, single-thread) and GPU (NVIDIA H100 80 GB PCIe on the
-QUT AQUA cluster). Hardware details are on the [Hardware](@ref) page.
+This page only publishes numbers that are traceable to files in
+`benchmarks/results/`. Older headline H100 throughput numbers were removed
+from this branch's docs because the matching CSV artifact is not present.
 
-## Results
+## Current traceable throughput artifacts
 
-| Grid (N×N) | CPU MLUPs | GPU MLUPs | GPU / CPU speedup |
-|:-----------|----------:|----------:|------------------:|
-| 64×64      |        34 |       134 |               3×  |
-| 128×128    |        36 |       534 |              15×  |
-| 256×256    |        40 |     2 090 |              52×  |
-| 512×512    |        36 |     5 810 |             164×  |
-| 1024×1024  |        32 |     7 675 |             236×  |
+| File | Hardware id | Backend | Precision | Status |
+|---|---|---|---|---|
+| `perf_mlups_cpu_apple_m2_20260410_115127.csv` | `apple_m2` | CPU | Float64 | legacy local CPU baseline |
+| `perf_mlups_metal_apple_m3max_final.csv` | `apple_m3max` | Metal | Float32 | local artifact, not headline benchmark |
 
-CPU throughput stays in the 26--44 MLUPs range regardless of grid size,
-consistent with the memory-bandwidth limit of a single M2 core.
-On the H100, throughput climbs steeply up to N = 512 as the GPU fills its
-streaming multiprocessors, then plateaus around 7 700 MLUPs for N = 1024.
+The public benchmark narrative should be CPU baseline plus H100 once a fresh
+H100 throughput CSV is committed. Until then, H100 is only used here for the
+Poiseuille convergence artifact, not for MLUPS claims.
 
-## Discussion
+## CPU baseline artifact
 
-**Scaling regime.** The GPU advantage is negligible at N = 64 (kernel launch
-overhead dominates) and exceeds two orders of magnitude at N = 1024.
-For production runs the grid should contain at least ~100 k nodes to amortise
-launch costs.
+| Grid | MLUPs |
+|---:|---:|
+| 64 x 64 | 31.896 |
+| 128 x 128 | 31.854 |
+| 256 x 256 | 26.542 |
 
-**Optimisation headroom.** The numbers above use the baseline BGK kernel with
-`Float64` arrays and a standard pull-stream pattern.  Prior experiments with
-the AA-pattern and `Float32` storage reached ~24 000 MLUPs on the same H100
-hardware (a 3× improvement), but those optimisations are not yet merged into
-the default driver. A dedicated benchmark run will be published once the
-AA-pattern is validated on all test cases.
+Source: `benchmarks/results/perf_mlups_cpu_apple_m2_20260410_115127.csv`.
 
-**Memory.** Each D2Q9 node stores 9 distribution values plus macroscopic
-fields.  At `Float64`, the 1024×1024 benchmark allocates ~75 MB of
-distribution arrays — well within the H100's 80 GB HBM3.
+## Local Metal artifact
 
-## Reproduce this benchmark
+| Grid | MLUPs |
+|---:|---:|
+| 64 x 64 | 6.8 |
+| 128 x 128 | 20.7 |
+| 256 x 256 | 81.8 |
+| 512 x 512 | 257.3 |
+| 1024 x 1024 | 572.7 |
+| 2048 x 2048 | 838.4 |
+| 4096 x 4096 | 920.5 |
+
+Source: `benchmarks/results/perf_mlups_metal_apple_m3max_final.csv`.
+
+This table is useful for development tracking but should not be presented as
+the main performance story.
+
+## Reproduce
 
 ```bash
-# CPU only (any machine)
-julia --project benchmarks/run_all.jl --suite=perf --hardware-id=my_machine
+# CPU only
+julia --project=. benchmarks/perf_mlups.jl
 
-# GPU (requires CUDA.jl)
-julia --project benchmarks/run_all.jl --suite=perf --gpu --hardware-id=my_gpu
+# Full benchmark harness, tagged with a hardware id
+julia --project=. benchmarks/run_all.jl --suite=perf --hardware-id=my_machine
 ```
 
-Results are written to `benchmarks/results/` as CSV files tagged with the
-hardware ID and timestamp. Add your hardware to
-[`benchmarks/hardware.toml`](https://github.com/lauguimel/Kraken.jl/blob/lbm/benchmarks/hardware.toml)
-before running so the results are traceable.
+Before publishing a new number, add the hardware entry to
+`benchmarks/hardware.toml` and commit the CSV result with the docs update.

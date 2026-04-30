@@ -32,7 +32,7 @@ Typos trigger a Levenshtein suggestion:
 
 Lid-driven cavity at `Re = 10` (`U = 0.1`, `L = 128`, `nu = 0.01`).
 
-```krk
+```text
 Simulation cavity_2d D2Q9
 Domain L = 1.0 x 1.0  N = 128 x 128
 Physics nu = 0.01
@@ -45,7 +45,7 @@ Run 10000 steps
 
 **Override example**
 
-```krk
+```text
 Preset cavity_2d
 Physics nu = 0.001      # shadows the preset's nu = 0.01 → Re = 100
 Run 50000 steps         # shadows the preset's Run
@@ -55,7 +55,7 @@ Run 50000 steps         # shadows the preset's Run
 
 Periodic channel driven by a body force `Fx = 1e-5`.
 
-```krk
+```text
 Simulation poiseuille_2d D2Q9
 Domain L = 4.0 x 1.0  N = 64 x 32
 Physics nu = 0.1 Fx = 1e-5
@@ -69,7 +69,7 @@ Run 10000 steps
 
 Plane Couette flow, top plate moving at `ux = 0.05`.
 
-```krk
+```text
 Simulation couette_2d D2Q9
 Domain L = 1.0 x 1.0  N = 32 x 64
 Physics nu = 0.1
@@ -83,7 +83,7 @@ Run 5000 steps
 
 Doubly periodic decaying Taylor–Green vortex with analytic initial condition.
 
-```krk
+```text
 Simulation taylor_green_2d D2Q9
 Domain L = 1.0 x 1.0  N = 64 x 64
 Physics nu = 0.01
@@ -98,7 +98,7 @@ Run 5000 steps
 Rayleigh–Bénard convection at `Ra = 1e5`, `Pr = 0.71`, thermal module active,
 hot bottom / cold top.
 
-```krk
+```text
 Simulation rayleigh_benard_2d D2Q9
 Domain L = 2.0 x 1.0  N = 128 x 64
 Physics nu = 0.02 Pr = 0.71 Ra = 1e5
@@ -117,7 +117,7 @@ earlier entries for the **same** directive kind (second `Physics nu = ...`
 wins, second `Run N steps` wins, etc.). Use this to build parametric
 variants:
 
-```krk
+```text
 Preset rayleigh_benard_2d
 Physics nu = 0.01 Pr = 0.71 Ra = 1e6    # harder case
 Diagnostics every 100 [step, Nu, KE]    # add diagnostics absent from preset
