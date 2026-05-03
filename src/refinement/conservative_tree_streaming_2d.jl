@@ -666,6 +666,58 @@ function conservative_tree_hysteresis_patch_range_2d(
     return (i_range=current_i, j_range=current_j)
 end
 
+function conservative_tree_velocity_gradient_patch_range_2d(
+        coarse_F::AbstractArray{T,3},
+        patch::ConservativeTreePatch2D{T};
+        threshold::Real,
+        volume_leaf::T=T(0.25),
+        force_x::T=zero(T),
+        force_y::T=zero(T),
+        pad_leaf::Int=0,
+        pad_parent::Int=0,
+        shrink_margin::Int=1) where T
+    _check_composite_coarse_layout(coarse_F, patch)
+    pad_leaf >= 0 || throw(ArgumentError("pad_leaf must be nonnegative"))
+    pad_parent >= 0 || throw(ArgumentError("pad_parent must be nonnegative"))
+
+    velocity = composite_leaf_velocity_field_2d(
+        coarse_F, patch; volume_leaf=volume_leaf, force_x=force_x, force_y=force_y)
+    indicator = conservative_tree_gradient_indicator_2d(velocity.ux)
+    leaf_ranges = conservative_tree_indicator_patch_range_2d(
+        indicator; threshold=threshold, pad=pad_leaf)
+
+    nx = size(coarse_F, 1)
+    ny = size(coarse_F, 2)
+    i_min = max(1, cld(first(leaf_ranges.i_range), 2) - pad_parent)
+    i_max = min(nx, cld(last(leaf_ranges.i_range), 2) + pad_parent)
+    j_min = max(1, cld(first(leaf_ranges.j_range), 2) - pad_parent)
+    j_max = min(ny, cld(last(leaf_ranges.j_range), 2) + pad_parent)
+    return conservative_tree_hysteresis_patch_range_2d(
+        patch.parent_i_range, patch.parent_j_range, i_min:i_max, j_min:j_max;
+        shrink_margin=shrink_margin)
+end
+
+function adapt_conservative_tree_patch_to_velocity_gradient_2d(
+        coarse_F::AbstractArray{T,3},
+        patch::ConservativeTreePatch2D{T};
+        threshold::Real,
+        volume_leaf::T=T(0.25),
+        force_x::T=zero(T),
+        force_y::T=zero(T),
+        pad_leaf::Int=0,
+        pad_parent::Int=0,
+        shrink_margin::Int=1) where T
+    ranges = conservative_tree_velocity_gradient_patch_range_2d(
+        coarse_F, patch; threshold=threshold, volume_leaf=volume_leaf,
+        force_x=force_x, force_y=force_y, pad_leaf=pad_leaf,
+        pad_parent=pad_parent, shrink_margin=shrink_margin)
+    patch_out = create_conservative_tree_patch_2d(
+        ranges.i_range, ranges.j_range; T=T)
+    coarse_out = similar(coarse_F)
+    regrid_conservative_tree_patch_direct_F_2d!(coarse_out, patch_out, coarse_F, patch)
+    return (coarse_F=coarse_out, patch=patch_out)
+end
+
 function adapt_conservative_tree_patch_to_solid_mask_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},

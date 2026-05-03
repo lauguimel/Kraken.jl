@@ -651,6 +651,33 @@ end
         @test ranges.j_range == 3:7
     end
 
+    @testset "velocity gradient adaptation regrids conservatively" begin
+        nx, ny = 6, 5
+        volume_leaf = 0.25
+        coarse = zeros(Float64, nx, ny, 9)
+        patch = create_conservative_tree_patch_2d(1:nx, 1:ny)
+        ux_ref = zeros(Float64, 2 * nx, 2 * ny)
+        ux_ref[7:8, 4:6] .= 0.04
+        for j in axes(patch.fine_F, 2), i in axes(patch.fine_F, 1)
+            fill_equilibrium_integrated_D2Q9!(
+                @view(patch.fine_F[i, j, :]), volume_leaf, 1.0, ux_ref[i, j], 0.0)
+        end
+        pop0 = active_population_sums_F(coarse, patch)
+
+        ranges = conservative_tree_velocity_gradient_patch_range_2d(
+            coarse, patch; threshold=0.015, volume_leaf=volume_leaf)
+        adapted = adapt_conservative_tree_patch_to_velocity_gradient_2d(
+            coarse, patch; threshold=0.015, volume_leaf=volume_leaf)
+
+        @test ranges == (i_range=3:5, j_range=2:4)
+        @test adapted.patch.parent_i_range == 3:5
+        @test adapted.patch.parent_j_range == 2:4
+        @test isapprox(active_population_sums_F(adapted.coarse_F, adapted.patch),
+                       pop0; atol=1e-11, rtol=0)
+        @test_throws ArgumentError conservative_tree_velocity_gradient_patch_range_2d(
+            coarse, patch; threshold=1.0, volume_leaf=volume_leaf)
+    end
+
     @testset "mask-driven patch adaptation conserves active populations" begin
         nx, ny = 10, 9
         patch = create_conservative_tree_patch_2d(2:4, 2:4)
