@@ -472,6 +472,34 @@ end
         end
     end
 
+    @testset "open x route smoke applies composite Zou-He closures" begin
+        nx, ny = 8, 6
+        volume_coarse = 1.0
+        volume_fine = 0.25
+        patch = create_conservative_tree_patch_2d(3:5, 2:5)
+        patch_next = create_conservative_tree_patch_2d(3:5, 2:5)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch)
+        coarse = zeros(Float64, nx, ny, 9)
+        coarse_next = similar(coarse)
+        fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, 1.0, 0.0, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, 1.0, 0.0, 0.0)
+
+        stream_composite_routes_zou_he_x_wall_y_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology;
+            u_in=0.03, rho_out=1.0,
+            volume_coarse=volume_coarse, volume_fine=volume_fine)
+
+        for j in 1:ny
+            west = @view coarse_next[1, j, :]
+            east = @view coarse_next[nx, j, :]
+            rho_west = mass_F(west) / volume_coarse
+            ux_west = (momentum_F(west)[1] / volume_coarse) / rho_west
+            @test isapprox(ux_west, 0.03; atol=1e-14, rtol=0)
+            @test isapprox(mass_F(east) / volume_coarse, 1.0; atol=1e-14, rtol=0)
+        end
+        @test active_mass_F(coarse_next, patch_next) > 0
+    end
+
     @testset "route native Couette runner has Phase-P profile gates" begin
         result = run_conservative_tree_couette_route_native_2d()
 

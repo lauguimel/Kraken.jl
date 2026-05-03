@@ -293,15 +293,18 @@ function _stream_composite_routes_F_2d!(
             src_cell = topology.cells[route.src]
             is_solid !== nothing && _cell_is_solid_2d(src_cell, is_solid) && continue
             boundary_policy in (
-                :periodic_x, :periodic_x_wall_y, :periodic_x_moving_wall_y) ||
+                :periodic_x, :periodic_x_wall_y, :periodic_x_moving_wall_y,
+                :open_x_wall_y) ||
                 throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
             handled = false
-            if boundary_policy in (:periodic_x_wall_y, :periodic_x_moving_wall_y)
+            if boundary_policy in (
+                    :periodic_x_wall_y, :periodic_x_moving_wall_y, :open_x_wall_y)
                 handled = _stream_wall_y_boundary_route_2d!(
                     coarse_out, patch_out, coarse_in, patch_in,
                     topology, route, ny, u_south, u_north, rho_wall,
                     volume_coarse, volume_fine)
             end
+            boundary_policy == :open_x_wall_y && continue
             handled || _stream_periodic_x_boundary_route_2d!(
                 coarse_out, patch_out, coarse_in, patch_in,
                 topology, cell_id_by_coord, route, nx, ny)
@@ -425,6 +428,31 @@ function stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
                                           rho_wall=rho_wall,
                                           volume_coarse=volume_coarse,
                                           volume_fine=volume_fine)
+end
+
+function stream_composite_routes_zou_he_x_wall_y_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D;
+        u_in=0,
+        rho_out=1,
+        rho_wall=1,
+        volume_coarse=1,
+        volume_fine=0.25,
+        clear::Bool=true)
+    _stream_composite_routes_F_2d!(coarse_out, patch_out,
+                                   coarse_in, patch_in,
+                                   topology, :open_x_wall_y, clear;
+                                   rho_wall=rho_wall,
+                                   volume_coarse=volume_coarse,
+                                   volume_fine=volume_fine)
+    apply_composite_zou_he_west_F_2d!(
+        coarse_out, patch_out, u_in, volume_coarse, volume_fine)
+    apply_composite_zou_he_pressure_east_F_2d!(
+        coarse_out, patch_out, volume_coarse, volume_fine; rho_out=rho_out)
+    return coarse_out, patch_out
 end
 
 function stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
