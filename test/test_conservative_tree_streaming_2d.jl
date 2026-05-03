@@ -530,6 +530,16 @@ end
         @test maximum(abs.(left[1:ncmp] .- right[1:ncmp])) < 3e-3
     end
 
+    @testset "route native open channel smoke remains bounded" begin
+        result = run_conservative_tree_open_channel_route_native_2d()
+
+        @test result.flow == :open_channel_route_native
+        @test result.steps == 160
+        @test isfinite(result.mass_drift)
+        @test abs(result.mass_drift) / result.mass_initial < 0.2
+        @test result.ux_mean > 0.005
+    end
+
     @testset "route native Phase P validation compares oracle runners" begin
         report = validate_conservative_tree_route_native_phase_p_2d(; steps=1000)
 

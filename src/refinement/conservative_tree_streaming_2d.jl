@@ -812,6 +812,17 @@ struct ConservativeTreeSolidAdaptiveRun2D{T}
     regrid_count::Int
 end
 
+struct ConservativeTreeOpenChannelRun2D{T}
+    flow::Symbol
+    coarse_F::Array{T,3}
+    patch::ConservativeTreePatch2D{T}
+    ux_mean::T
+    mass_initial::T
+    mass_final::T
+    mass_drift::T
+    steps::Int
+end
+
 function run_conservative_tree_couette_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -903,6 +914,60 @@ function run_conservative_tree_poiseuille_route_native_2d(;
 
     return ConservativeTreeMacroFlow2D{T}(
         :poiseuille_route_native, coarse, patch, profile, analytic, l2, linf,
+        mass_initial, mass_final, mass_final - mass_initial, steps)
+end
+
+function run_conservative_tree_open_channel_route_native_2d(;
+        Nx::Int=18,
+        Ny::Int=10,
+        patch_i_range::UnitRange{Int}=7:12,
+        patch_j_range::UnitRange{Int}=3:8,
+        u_in=0.01,
+        rho_out=1.0,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=160,
+        T::Type{<:Real}=Float64)
+    steps > 0 || throw(ArgumentError("steps must be positive"))
+    u_in = T(u_in)
+    rho_out = T(rho_out)
+    omega = T(omega)
+    rho = T(rho)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, u_in, zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, u_in, zero(T))
+    apply_composite_zou_he_west_F_2d!(
+        coarse, patch, u_in, volume_coarse, volume_fine)
+    apply_composite_zou_he_pressure_east_F_2d!(
+        coarse, patch, volume_coarse, volume_fine; rho_out=rho_out)
+    mass_initial = active_mass_F(coarse, patch)
+
+    for _ in 1:steps
+        collide_BGK_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
+                                    omega, omega)
+        stream_composite_routes_zou_he_x_wall_y_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology;
+            u_in=u_in, rho_out=rho_out,
+            volume_coarse=volume_coarse, volume_fine=volume_fine)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    mass_final = active_mass_F(coarse, patch)
+    ux_mean = sum(composite_leaf_mean_ux_profile(coarse, patch;
+                                                 volume_leaf=volume_fine)) /
+              T(2 * Ny)
+
+    return ConservativeTreeOpenChannelRun2D{T}(
+        :open_channel_route_native, coarse, patch, ux_mean,
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
