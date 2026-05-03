@@ -33,6 +33,18 @@ end
     return nothing
 end
 
+@inline function _cell_view_2d(coarse_F::AbstractArray{<:Any,3},
+                               patch::ConservativeTreePatch2D,
+                               cell::ConservativeTreeCell2D)
+    if cell.level == 0
+        return @view coarse_F[cell.i, cell.j, :]
+    else
+        i0 = 2 * first(patch.parent_i_range) - 1
+        j0 = 2 * first(patch.parent_j_range) - 1
+        return @view patch.fine_F[cell.i - i0 + 1, cell.j - j0 + 1, :]
+    end
+end
+
 function _check_route_stream_topology_layout(topology::ConservativeTreeTopology2D,
                                              coarse_F::AbstractArray{<:Any,3},
                                              patch::ConservativeTreePatch2D)
@@ -59,6 +71,37 @@ function _check_route_stream_topology_layout(topology::ConservativeTreeTopology2
     return nothing
 end
 
+function _check_route_solid_mask_layout(topology::ConservativeTreeTopology2D,
+                                        coarse_F::AbstractArray{<:Any,3},
+                                        patch::ConservativeTreePatch2D,
+                                        is_solid::AbstractArray{Bool,2})
+    size(is_solid) == (2 * size(coarse_F, 1), 2 * size(coarse_F, 2)) ||
+        throw(ArgumentError("is_solid must have size (2*Nx, 2*Ny)"))
+
+    @inbounds for id in topology.active_cells
+        cell = topology.cells[id]
+        cell.level == 1 && continue
+
+        i0 = 2 * cell.i - 1
+        j0 = 2 * cell.j - 1
+        s11 = is_solid[i0, j0]
+        s21 = is_solid[i0 + 1, j0]
+        s12 = is_solid[i0, j0 + 1]
+        s22 = is_solid[i0 + 1, j0 + 1]
+        (s11 == s21 == s12 == s22) ||
+            throw(ArgumentError("active coarse cells cannot be partially solid"))
+    end
+    return nothing
+end
+
+@inline function _cell_is_solid_2d(cell::ConservativeTreeCell2D,
+                                   is_solid::AbstractArray{Bool,2})
+    if cell.level == 0
+        return is_solid[2 * cell.i - 1, 2 * cell.j - 1]
+    end
+    return is_solid[cell.i, cell.j]
+end
+
 function _cell_id_by_coord_2d(topology::ConservativeTreeTopology2D)
     cell_id_by_coord = Dict{Tuple{Int,Int,Int},Int}()
     @inbounds for (id, cell) in pairs(topology.cells)
@@ -77,6 +120,28 @@ end
                                            weight)
     packet = _cell_Fq_2d(coarse_in, patch_in, src_cell, q)
     _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, q, weight * packet)
+    return nothing
+end
+
+@inline function _scatter_solid_route_packet_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        src_cell::ConservativeTreeCell2D,
+        dst_cell::ConservativeTreeCell2D,
+        q::Int,
+        weight,
+        is_solid::AbstractArray{Bool,2})
+    _cell_is_solid_2d(src_cell, is_solid) && return nothing
+
+    packet = _cell_Fq_2d(coarse_in, patch_in, src_cell, q)
+    if _cell_is_solid_2d(dst_cell, is_solid)
+        _add_cell_Fq_2d!(coarse_out, patch_out, src_cell,
+                         d2q9_opposite(q), weight * packet)
+    else
+        _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, q, weight * packet)
+    end
     return nothing
 end
 
@@ -201,10 +266,14 @@ function _stream_composite_routes_F_2d!(
         u_north=0,
         rho_wall=1,
         volume_coarse=1,
-        volume_fine=0.25)
+        volume_fine=0.25,
+        is_solid=nothing)
     _check_composite_pair_layout(coarse_out, patch_out, coarse_in, patch_in)
     _check_route_stream_topology_layout(topology, coarse_in, patch_in)
     _check_route_stream_topology_layout(topology, coarse_out, patch_out)
+    if is_solid !== nothing
+        _check_route_solid_mask_layout(topology, coarse_in, patch_in, is_solid)
+    end
 
     if clear
         coarse_out .= 0
@@ -221,6 +290,8 @@ function _stream_composite_routes_F_2d!(
     @inbounds for route in topology.routes
         if route.kind == ROUTE_BOUNDARY
             boundary_policy == :skip && continue
+            src_cell = topology.cells[route.src]
+            is_solid !== nothing && _cell_is_solid_2d(src_cell, is_solid) && continue
             boundary_policy in (
                 :periodic_x, :periodic_x_wall_y, :periodic_x_moving_wall_y) ||
                 throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
@@ -239,8 +310,14 @@ function _stream_composite_routes_F_2d!(
 
         src_cell = topology.cells[route.src]
         dst_cell = topology.cells[route.dst]
-        _scatter_route_packet_2d!(coarse_out, patch_out, coarse_in, patch_in,
-                                   src_cell, dst_cell, route.q, route.weight)
+        if is_solid === nothing
+            _scatter_route_packet_2d!(coarse_out, patch_out, coarse_in, patch_in,
+                                      src_cell, dst_cell, route.q, route.weight)
+        else
+            _scatter_solid_route_packet_2d!(
+                coarse_out, patch_out, coarse_in, patch_in,
+                src_cell, dst_cell, route.q, route.weight, is_solid)
+        end
     end
     coalesce_patch_to_shadow_F_2d!(patch_out)
     return coarse_out, patch_out
@@ -350,6 +427,46 @@ function stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
                                           volume_fine=volume_fine)
 end
 
+function stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        is_solid::AbstractArray{Bool,2};
+        clear::Bool=true)
+    return _stream_composite_routes_F_2d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          topology, :periodic_x_wall_y, clear;
+                                          is_solid=is_solid)
+end
+
+function collide_Guo_composite_solid_F_2d!(
+        coarse_F::AbstractArray{<:Any,3},
+        patch::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        is_solid::AbstractArray{Bool,2},
+        volume_coarse,
+        volume_fine,
+        omega_coarse,
+        omega_fine,
+        Fx,
+        Fy)
+    _check_route_stream_topology_layout(topology, coarse_F, patch)
+    _check_route_solid_mask_layout(topology, coarse_F, patch, is_solid)
+
+    @inbounds for id in topology.active_cells
+        cell = topology.cells[id]
+        _cell_is_solid_2d(cell, is_solid) && continue
+        volume = cell.level == 0 ? volume_coarse : volume_fine
+        omega = cell.level == 0 ? omega_coarse : omega_fine
+        collide_Guo_integrated_D2Q9!(_cell_view_2d(coarse_F, patch, cell),
+                                     volume, omega, Fx, Fy)
+    end
+    coalesce_patch_to_shadow_F_2d!(patch)
+    return coarse_F, patch
+end
+
 function run_conservative_tree_couette_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -441,5 +558,61 @@ function run_conservative_tree_poiseuille_route_native_2d(;
 
     return ConservativeTreeMacroFlow2D{T}(
         :poiseuille_route_native, coarse, patch, profile, analytic, l2, linf,
+        mass_initial, mass_final, mass_final - mass_initial, steps)
+end
+
+function run_conservative_tree_square_obstacle_route_native_2d(;
+        Nx::Int=24,
+        Ny::Int=14,
+        patch_i_range::UnitRange{Int}=8:17,
+        patch_j_range::UnitRange{Int}=4:11,
+        obstacle_i_range::UnitRange{Int}=22:27,
+        obstacle_j_range::UnitRange{Int}=12:17,
+        Fx=2e-5,
+        Fy=0.0,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=1200,
+        T::Type{<:Real}=Float64)
+    Fx = T(Fx)
+    Fy = T(Fy)
+    omega = T(omega)
+    rho = T(rho)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    is_solid = square_solid_mask_leaf_2d(2 * Nx, 2 * Ny,
+                                         obstacle_i_range, obstacle_j_range)
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    leaf = zeros(T, 2 * Nx, 2 * Ny, 9)
+
+    _check_route_solid_mask_layout(topology, coarse, patch, is_solid)
+
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_initial = _leaf_fluid_mass_F(leaf, is_solid)
+
+    for _ in 1:steps
+        collide_Guo_composite_solid_F_2d!(
+            coarse, patch, topology, is_solid,
+            volume_coarse, volume_fine, omega, omega, Fx, Fy)
+        stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology, is_solid)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_final = _leaf_fluid_mass_F(leaf, is_solid)
+    ux_mean, uy_mean = _leaf_fluid_mean_velocity_F(
+        leaf, is_solid; volume=volume_fine, force_x=Fx, force_y=Fy)
+
+    return ConservativeTreeSolidFlowResult2D{T}(
+        :square_obstacle_route_native, coarse, patch, is_solid, ux_mean, uy_mean,
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end

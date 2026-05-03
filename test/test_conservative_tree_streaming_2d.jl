@@ -49,6 +49,17 @@ end
 _stream_moving_wall_delta(volume, rho_wall, wall_u, q) =
     volume * rho_wall * wall_u * d2q9_cx(q) / 6
 
+function _stream_composite_fluid_mass(coarse_F, patch, is_solid)
+    leaf = zeros(Float64, size(is_solid, 1), size(is_solid, 2), 9)
+    composite_to_leaf_F_2d!(leaf, coarse_F, patch)
+    total = 0.0
+    for q in 1:9, j in axes(leaf, 2), i in axes(leaf, 1)
+        is_solid[i, j] && continue
+        total += leaf[i, j, q]
+    end
+    return total
+end
+
 @testset "Conservative tree route streaming 2D" begin
     Nx, Ny = 9, 10
     patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
@@ -426,5 +437,51 @@ _stream_moving_wall_delta(volume, rho_wall, wall_u, q) =
         @test result.ux_profile[center] > result.ux_profile[2] + 0.005
         @test result.ux_profile[center] > result.ux_profile[end-1] + 0.005
         @test maximum(abs.(left[1:ncmp] .- right[1:ncmp])) < 3e-3
+    end
+
+    @testset "solid route bounces fine packets at obstacle links" begin
+        nx, ny = 8, 8
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch_in)
+        coarse_in = zeros(Float64, nx, ny, 9)
+        coarse_out = similar(coarse_in)
+        is_solid = falses(2 * nx, 2 * ny)
+        is_solid[7, 8] = true
+        patch_in.fine_F[2, 2, 2] = 5.0
+
+        stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology, is_solid)
+
+        @test patch_out.fine_F[2, 2, d2q9_opposite(2)] == 5.0
+        @test patch_out.fine_F[3, 2, 2] == 0.0
+        @test isapprox(_stream_composite_fluid_mass(coarse_out, patch_out, is_solid),
+                       _stream_composite_fluid_mass(coarse_in, patch_in, is_solid);
+                       atol=1e-14, rtol=0)
+    end
+
+    @testset "solid layout rejects partially solid active coarse cells" begin
+        nx, ny = 8, 8
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch_in)
+        coarse_in = zeros(Float64, nx, ny, 9)
+        coarse_out = similar(coarse_in)
+        is_solid = falses(2 * nx, 2 * ny)
+        is_solid[1, 1] = true
+
+        @test_throws ArgumentError stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology, is_solid)
+    end
+
+    @testset "route native square obstacle macroflow is conservative" begin
+        result = run_conservative_tree_square_obstacle_route_native_2d(; steps=700)
+
+        @test result.flow == :square_obstacle_route_native
+        @test result.steps == 700
+        @test abs(result.mass_drift) < 1e-8
+        @test result.ux_mean > 0
+        @test abs(result.uy_mean) < 1e-10
+        @test sum(result.is_solid_leaf) > 0
     end
 end
