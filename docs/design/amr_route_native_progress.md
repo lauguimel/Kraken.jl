@@ -11,6 +11,7 @@ macro-flow.
 
 ```bash
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_streaming_2d.jl")'
+julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_gpu_pack_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_subcycling_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_adaptation_2d.jl"); include("test/test_conservative_tree_multipatch_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_topology_2d.jl"); include("test/test_conservative_tree_2d.jl")'
@@ -212,17 +213,36 @@ Exit gate:
 
 ## 7. GPU 2D
 
-Status: not started.
+Status: GPU-ready route packing and CPU parity canaries started; no device
+kernel yet.
 
-Prerequisites:
+Implemented:
 
-- packed route arrays must be the only topology input in the hot loop;
-- boundary route types must be explicit;
-- no hash lookup or allocation in route streaming kernels.
+- `ConservativeTreeGPURoutePack2D` structure-of-arrays route pack;
+- primitive route arrays for source/destination packed cell, `q`, route kind
+  and weight;
+- primitive block and cell metadata arrays;
+- packed route weight-sum canary helper;
+- CPU replay path driven only by the packed arrays for interior routes.
+
+Validated by:
+
+- primitive array types are `Int32`, `UInt8` and typed route weights;
+- packed route source/destination ids match logical topology routes;
+- route categories match direct/interface/boundary topology categories;
+- every packed source/orientation route sum remains one;
+- packed CPU replay matches logical route-native interior streaming exactly.
+
+Still required before implementation:
+
+- transfer this pack to CUDA/Metal arrays;
+- write the no-allocation device kernel for interior routes;
+- add boundary route kernels after open-boundary hardening;
+- compare CPU/GPU route-native Poiseuille on a small fixed patch.
 
 First target:
 
-- CPU/GPU parity for one small route packet canary, then one small
+- device parity for one small packed route packet canary, then one small
   route-native Poiseuille run.
 
 ## 8. Topologie Et Primitives 3D

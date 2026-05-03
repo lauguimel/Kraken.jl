@@ -108,6 +108,7 @@ include("refinement/conservative_tree_streaming_3d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
 include("refinement/conservative_tree_adaptation_2d.jl")
 include("refinement/conservative_tree_subcycling_2d.jl")
+include("refinement/conservative_tree_gpu_pack_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
@@ -390,6 +391,10 @@ export conservative_tree_subcycle_accumulate_fine_to_coarse_face_2d!
 export conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!
 export conservative_tree_subcycle_orientation_sums_2d
 export conservative_tree_subcycle_total_sums_2d
+export ConservativeTreeGPURoutePack2D
+export pack_conservative_tree_gpu_routes_2d
+export conservative_tree_gpu_route_weight_sums_2d
+export stream_conservative_tree_gpu_pack_interior_F_2d!
 export ConservativeTreeAdaptiveRun2D
 export ConservativeTreeSolidAdaptiveRun2D
 export ConservativeTreeOpenChannelRun2D
