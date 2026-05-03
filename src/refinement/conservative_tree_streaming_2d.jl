@@ -932,6 +932,88 @@ function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
         steps, regrid_every, regrid_count)
 end
 
+function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
+        Nx::Int=18,
+        Ny::Int=14,
+        patch_i_range::UnitRange{Int}=7:12,
+        patch_j_range::UnitRange{Int}=5:10,
+        regrid_every::Int=80,
+        gradient_threshold=1.5e-2,
+        pad_leaf::Int=1,
+        pad_parent::Int=1,
+        shrink_margin::Int=1,
+        Fx=5e-5,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=320,
+        T::Type{<:Real}=Float64)
+    steps > 0 || throw(ArgumentError("steps must be positive"))
+    regrid_every > 0 || throw(ArgumentError("regrid_every must be positive"))
+
+    Fx = T(Fx)
+    omega = T(omega)
+    rho = T(rho)
+    gradient_threshold = T(gradient_threshold)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
+    mass_initial = active_mass_F(coarse, patch)
+
+    patch_history = Tuple{UnitRange{Int},UnitRange{Int}}[
+        (patch.parent_i_range, patch.parent_j_range)
+    ]
+    regrid_count = 0
+
+    for step in 1:steps
+        collide_Guo_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
+                                    omega, omega, Fx, zero(T))
+        stream_composite_routes_periodic_x_wall_y_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+
+        if step < steps && step % regrid_every == 0
+            ranges = conservative_tree_velocity_gradient_patch_range_2d(
+                coarse, patch; threshold=gradient_threshold,
+                volume_leaf=volume_fine, force_x=Fx, pad_leaf=pad_leaf,
+                pad_parent=pad_parent, shrink_margin=shrink_margin)
+            if ranges.i_range != patch.parent_i_range ||
+                    ranges.j_range != patch.parent_j_range
+                new_patch = create_conservative_tree_patch_2d(
+                    ranges.i_range, ranges.j_range; T=T)
+                new_coarse = similar(coarse)
+                regrid_conservative_tree_patch_direct_F_2d!(
+                    new_coarse, new_patch, coarse, patch)
+                coarse = new_coarse
+                patch = new_patch
+                patch_next = create_conservative_tree_patch_2d(
+                    ranges.i_range, ranges.j_range; T=T)
+                coarse_next = similar(coarse)
+                topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+                regrid_count += 1
+                push!(patch_history, (patch.parent_i_range, patch.parent_j_range))
+            end
+        end
+    end
+
+    mass_final = active_mass_F(coarse, patch)
+    ux_mean = sum(composite_leaf_mean_ux_profile(coarse, patch;
+                                                 volume_leaf=volume_fine,
+                                                 force_x=Fx)) / T(2 * Ny)
+
+    return ConservativeTreeAdaptiveRun2D{T}(
+        :poiseuille_gradient_adaptive_route_native, coarse, patch, patch_history,
+        ux_mean, mass_initial, mass_final, mass_final - mass_initial,
+        steps, regrid_every, regrid_count)
+end
+
 function validate_conservative_tree_route_native_phase_p_2d(;
         steps::Int=1000,
         T::Type{<:Real}=Float64)

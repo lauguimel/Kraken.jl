@@ -111,6 +111,7 @@ Implemented:
 - pure gradient-magnitude indicator field;
 - composite AMR leaf velocity field for indicator input;
 - velocity-gradient patch decision with direct conservative regrid;
+- short route-native Poiseuille macro-flow driven by velocity-gradient regrid;
 - range-level hysteresis primitive for grow/shrink decisions;
 - prescribed adaptive Poiseuille route-native canary.
 
@@ -124,6 +125,8 @@ Validated by:
   local-speed patch;
 - velocity-gradient adaptation regrids that patch while conserving population
   sums;
+- gradient-driven adaptive Poiseuille regrids conservatively over a short
+  route-native run;
 - adaptive Poiseuille keeps mass drift bounded.
 
 Not done yet:
@@ -135,8 +138,8 @@ Not done yet:
 
 Next surgical patch:
 
-- use the velocity-gradient decision inside a short route-native macro-flow
-  only after the surgical regrid canary remains green.
+- run the same gradient-driven adaptation on square obstacle or VFS before any
+  larger adaptive claim.
 
 ## 6. Sous-Cycling Temporel 2D
 

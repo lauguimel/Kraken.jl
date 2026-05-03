@@ -751,4 +751,18 @@ end
         @test abs(result.mass_drift) < 1e-9
         @test result.ux_mean > 0
     end
+
+    @testset "gradient adaptive route native Poiseuille regrids conservatively" begin
+        result = run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d()
+
+        @test result.flow == :poiseuille_gradient_adaptive_route_native
+        @test result.steps == 320
+        @test result.regrid_every == 80
+        @test result.regrid_count == 2
+        @test result.patch_history[1] == (7:12, 5:10)
+        @test result.patch_history[2] == (4:15, 3:12)
+        @test result.patch_history[3] == (1:18, 1:14)
+        @test abs(result.mass_drift) < 1e-9
+        @test result.ux_mean > 0
+    end
 end
