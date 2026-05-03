@@ -103,6 +103,7 @@ include("refinement/conservative_tree_2d.jl")
 include("refinement/conservative_tree_3d.jl")
 include("refinement/conservative_tree_topology_2d.jl")
 include("refinement/conservative_tree_topology_3d.jl")
+include("refinement/conservative_tree_streaming_3d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
@@ -297,6 +298,9 @@ export mass_F_3d, momentum_F_3d, moments_F_3d
 export fill_equilibrium_integrated_D3Q19!
 export conservative_tree_parent_index
 export conservative_tree_parent_index_3d
+export coalesce_patch_to_shadow_F_3d!, explode_shadow_to_patch_uniform_F_3d!
+export active_population_sums_F_3d, active_mass_F_3d
+export active_momentum_F_3d, active_moments_F_3d
 export split_coarse_to_fine_vertical_F_2d!, coalesce_fine_to_coarse_vertical_F
 export split_coarse_to_fine_face_F_2d!, coalesce_fine_to_coarse_face_F
 export split_coarse_to_fine_corner_F_2d!, coalesce_fine_to_coarse_corner_F
@@ -340,6 +344,7 @@ export COALESCE_FACE_3D, COALESCE_EDGE_3D, ROUTE_BOUNDARY_3D
 export ConservativeTreeCell3D, ConservativeTreeLink3D, ConservativeTreeRoute3D
 export ConservativeTreeTopology3D, create_conservative_tree_topology_3d
 export active_volume, morton_key_2d
+export stream_composite_routes_interior_F_3d!
 export stream_composite_routes_interior_F_2d!
 export stream_composite_routes_periodic_x_F_2d!
 export stream_composite_routes_periodic_x_wall_y_F_2d!

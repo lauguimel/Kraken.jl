@@ -232,6 +232,149 @@ function _check_conservative_tree_patch_layout(patch::ConservativeTreePatch3D)
     return nothing
 end
 
+function coalesce_patch_to_shadow_F_3d!(patch::ConservativeTreePatch3D)
+    _check_conservative_tree_patch_layout(patch)
+
+    nx_parent = length(patch.parent_i_range)
+    ny_parent = length(patch.parent_j_range)
+    nz_parent = length(patch.parent_k_range)
+    @inbounds for kp in 1:nz_parent, jp in 1:ny_parent, ip in 1:nx_parent
+        i0 = 2 * ip - 1
+        j0 = 2 * jp - 1
+        k0 = 2 * kp - 1
+        Fp = @view patch.coarse_shadow_F[ip, jp, kp, :]
+        Fc = @view patch.fine_F[i0:i0+1, j0:j0+1, k0:k0+1, :]
+        coalesce_F_3d!(Fp, Fc)
+    end
+    return patch
+end
+
+function explode_shadow_to_patch_uniform_F_3d!(patch::ConservativeTreePatch3D)
+    _check_conservative_tree_patch_layout(patch)
+
+    nx_parent = length(patch.parent_i_range)
+    ny_parent = length(patch.parent_j_range)
+    nz_parent = length(patch.parent_k_range)
+    @inbounds for kp in 1:nz_parent, jp in 1:ny_parent, ip in 1:nx_parent
+        i0 = 2 * ip - 1
+        j0 = 2 * jp - 1
+        k0 = 2 * kp - 1
+        Fc = @view patch.fine_F[i0:i0+1, j0:j0+1, k0:k0+1, :]
+        Fp = @view patch.coarse_shadow_F[ip, jp, kp, :]
+        explode_uniform_F_3d!(Fc, Fp)
+    end
+    return patch
+end
+
+function _check_composite_coarse_layout_3d(coarse_F::AbstractArray{<:Any,4},
+                                           patch::ConservativeTreePatch3D)
+    _check_conservative_tree_patch_layout(patch)
+    size(coarse_F, 4) == 19 ||
+        throw(ArgumentError("coarse_F must have 19 D3Q19 populations in dimension 4"))
+    first(patch.parent_i_range) >= first(axes(coarse_F, 1)) ||
+        throw(ArgumentError("patch.parent_i_range starts outside coarse_F"))
+    last(patch.parent_i_range) <= last(axes(coarse_F, 1)) ||
+        throw(ArgumentError("patch.parent_i_range ends outside coarse_F"))
+    first(patch.parent_j_range) >= first(axes(coarse_F, 2)) ||
+        throw(ArgumentError("patch.parent_j_range starts outside coarse_F"))
+    last(patch.parent_j_range) <= last(axes(coarse_F, 2)) ||
+        throw(ArgumentError("patch.parent_j_range ends outside coarse_F"))
+    first(patch.parent_k_range) >= first(axes(coarse_F, 3)) ||
+        throw(ArgumentError("patch.parent_k_range starts outside coarse_F"))
+    last(patch.parent_k_range) <= last(axes(coarse_F, 3)) ||
+        throw(ArgumentError("patch.parent_k_range ends outside coarse_F"))
+    return nothing
+end
+
+function _check_composite_pair_layout_3d(coarse_out::AbstractArray{<:Any,4},
+                                         patch_out::ConservativeTreePatch3D,
+                                         coarse_in::AbstractArray{<:Any,4},
+                                         patch_in::ConservativeTreePatch3D)
+    size(coarse_out) == size(coarse_in) ||
+        throw(ArgumentError("coarse_out and coarse_in must have the same size"))
+    patch_out.parent_i_range == patch_in.parent_i_range ||
+        throw(ArgumentError("patch_out and patch_in must have the same parent_i_range"))
+    patch_out.parent_j_range == patch_in.parent_j_range ||
+        throw(ArgumentError("patch_out and patch_in must have the same parent_j_range"))
+    patch_out.parent_k_range == patch_in.parent_k_range ||
+        throw(ArgumentError("patch_out and patch_in must have the same parent_k_range"))
+    size(patch_out.fine_F) == size(patch_in.fine_F) ||
+        throw(ArgumentError("patch_out and patch_in fine arrays must have the same size"))
+    _check_composite_coarse_layout_3d(coarse_in, patch_in)
+    _check_composite_coarse_layout_3d(coarse_out, patch_out)
+    return nothing
+end
+
+function active_mass_F_3d(coarse_F::AbstractArray{<:Any,4},
+                          patch::ConservativeTreePatch3D)
+    _check_composite_coarse_layout_3d(coarse_F, patch)
+
+    total = zero(coarse_F[begin, begin, begin, 1] +
+                 patch.fine_F[begin, begin, begin, 1])
+    @inbounds for q in 1:19, k in axes(coarse_F, 3), j in axes(coarse_F, 2), i in axes(coarse_F, 1)
+        _inside_range_3d(i, j, k,
+                         patch.parent_i_range,
+                         patch.parent_j_range,
+                         patch.parent_k_range) && continue
+        total += coarse_F[i, j, k, q]
+    end
+    return total + mass_F_3d(patch.fine_F)
+end
+
+function active_population_sums_F_3d(coarse_F::AbstractArray{<:Any,4},
+                                     patch::ConservativeTreePatch3D)
+    _check_composite_coarse_layout_3d(coarse_F, patch)
+
+    totals = zeros(promote_type(eltype(coarse_F), eltype(patch.fine_F)), 19)
+    @inbounds for q in 1:19
+        for k in axes(coarse_F, 3), j in axes(coarse_F, 2), i in axes(coarse_F, 1)
+            _inside_range_3d(i, j, k,
+                             patch.parent_i_range,
+                             patch.parent_j_range,
+                             patch.parent_k_range) && continue
+            totals[q] += coarse_F[i, j, k, q]
+        end
+        totals[q] += sum(@view patch.fine_F[:, :, :, q])
+    end
+    return totals
+end
+
+function active_momentum_F_3d(coarse_F::AbstractArray{<:Any,4},
+                              patch::ConservativeTreePatch3D)
+    _check_composite_coarse_layout_3d(coarse_F, patch)
+
+    mx = zero(coarse_F[begin, begin, begin, 1] +
+              patch.fine_F[begin, begin, begin, 1])
+    my = zero(coarse_F[begin, begin, begin, 1] +
+              patch.fine_F[begin, begin, begin, 1])
+    mz = zero(coarse_F[begin, begin, begin, 1] +
+              patch.fine_F[begin, begin, begin, 1])
+    @inbounds for q in 1:19
+        cx = d3q19_cx(q)
+        cy = d3q19_cy(q)
+        cz = d3q19_cz(q)
+        for k in axes(coarse_F, 3), j in axes(coarse_F, 2), i in axes(coarse_F, 1)
+            _inside_range_3d(i, j, k,
+                             patch.parent_i_range,
+                             patch.parent_j_range,
+                             patch.parent_k_range) && continue
+            fq = coarse_F[i, j, k, q]
+            mx += cx * fq
+            my += cy * fq
+            mz += cz * fq
+        end
+    end
+    fmx, fmy, fmz = momentum_F_3d(patch.fine_F)
+    return mx + fmx, my + fmy, mz + fmz
+end
+
+function active_moments_F_3d(coarse_F::AbstractArray{<:Any,4},
+                             patch::ConservativeTreePatch3D)
+    m = active_mass_F_3d(coarse_F, patch)
+    mx, my, mz = active_momentum_F_3d(coarse_F, patch)
+    return m, mx, my, mz
+end
+
 @inline function conservative_tree_parent_index_3d(i_f::Int, j_f::Int, k_f::Int)
     i_f >= 1 || throw(ArgumentError("i_f must be >= 1"))
     j_f >= 1 || throw(ArgumentError("j_f must be >= 1"))

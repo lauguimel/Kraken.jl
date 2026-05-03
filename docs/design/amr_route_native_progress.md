@@ -181,7 +181,7 @@ First target:
 
 ## 8. Topologie Et Primitives 3D
 
-Status: primitive and active-topology canaries started.
+Status: primitive, active-topology and interior-streaming canaries started.
 
 Existing 3D refinement utilities are not yet the complete conservative-tree
 D3Q19 route topology. The first accepted 3D slice is deliberately small:
@@ -198,6 +198,7 @@ Validated canaries:
 
 - `test/test_conservative_tree_3d.jl`
 - `test/test_conservative_tree_topology_3d.jl`
+- `test/test_conservative_tree_streaming_3d.jl`
 - D3Q19 integer accessors match the lattice constants;
 - 8-child coalesce preserves every oriented population, mass and momentum;
 - uniform explode followed by coalesce conserves the parent;
@@ -213,6 +214,10 @@ Validated canaries:
 - edge packets split over two edge-adjacent children and coalesce from the
   same child set;
 - every logical 3D link has route weights summing to one;
+- route-native 3D interior streaming moves direct packets, splits
+  coarse-to-fine face/edge packets, coalesces fine-to-coarse face/edge packets
+  by accumulation, and conserves active D3Q19 population sums when boundary
+  sources are zeroed;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.
 
@@ -220,7 +225,7 @@ Exit gate:
 
 - orientation-wise conservation for every D3Q19 route primitive;
 - active mass and momentum agree before and after projection/restriction;
-- 3D route-native streaming canary passes on a tiny fixed patch.
+- 3D periodic or wall boundary transport canaries pass on a tiny fixed patch.
 
 ## Publication-P Milestone Gate
 
@@ -246,4 +251,4 @@ Next commits should continue in this order:
 2. BFS route-native macro-flow after those patch tests;
 3. pure indicator and hysteresis tests for dynamic 2D adaptation;
 4. multi-patch ownership tests;
-5. 3D route-native streaming canary built on the D3Q19 topology.
+5. 3D periodic/wall transport canaries built on the D3Q19 topology.
