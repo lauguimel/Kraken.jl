@@ -183,6 +183,51 @@ end
         @test isapprox(active_mass_F_3d(coarse_out, patch_out), 2.75; atol=1e-14, rtol=0)
     end
 
+    @testset "periodic x wall yz bounces coarse wall packets" begin
+        patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        patch_out = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        coarse_in = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_out = similar(coarse_in)
+        coarse_in[3, 1, 2, 5] = 2.0
+
+        stream_composite_routes_periodic_x_wall_yz_F_3d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[3, 1, 2, 4] == 2.0
+        @test isapprox(active_mass_F_3d(coarse_out, patch_out), 2.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wall yz bounces fine wall packets" begin
+        patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 1:2)
+        patch_out = create_conservative_tree_patch_3d(3:4, 4:5, 1:2)
+        topology_z = create_conservative_tree_topology_3d(Nx, Ny, Nz, patch_in)
+        coarse_in = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_out = similar(coarse_in)
+        patch_in.fine_F[1, 1, 1, 7] = 3.0
+
+        stream_composite_routes_periodic_x_wall_yz_F_3d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology_z)
+
+        @test patch_out.fine_F[1, 1, 1, 6] == 3.0
+        @test isapprox(active_mass_F_3d(coarse_out, patch_out), 3.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wall yz keeps x wrapping and prioritizes walls at corners" begin
+        patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        patch_out = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        coarse_in = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_out = similar(coarse_in)
+        coarse_in[1, 4, 2, 3] = 1.25
+        coarse_in[1, 1, 2, 11] = 4.5
+
+        stream_composite_routes_periodic_x_wall_yz_F_3d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[Nx, 4, 2, 3] == 1.25
+        @test coarse_out[1, 1, 2, 8] == 4.5
+        @test isapprox(active_mass_F_3d(coarse_out, patch_out), 5.75; atol=1e-14, rtol=0)
+    end
+
     @testset "layout checks catch mismatched patch" begin
         patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
         wrong_patch = create_conservative_tree_patch_3d(4:5, 4:5, 2:3)

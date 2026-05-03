@@ -174,6 +174,36 @@ function _stream_periodic_x_boundary_route_3d!(
     return true
 end
 
+function _stream_wall_yz_boundary_route_3d!(
+        coarse_out::AbstractArray{<:Any,4},
+        patch_out::ConservativeTreePatch3D,
+        coarse_in::AbstractArray{<:Any,4},
+        patch_in::ConservativeTreePatch3D,
+        topology::ConservativeTreeTopology3D,
+        route::ConservativeTreeRoute3D,
+        ny::Int,
+        nz::Int)
+    src_cell = topology.cells[route.src]
+    q = route.q
+    cy = d3q19_cy(q)
+    cz = d3q19_cz(q)
+
+    if src_cell.level == 0
+        j_raw = src_cell.j + cy
+        k_raw = src_cell.k + cz
+        (j_raw < 1 || j_raw > ny || k_raw < 1 || k_raw > nz) || return false
+    else
+        j_raw = src_cell.j + cy
+        k_raw = src_cell.k + cz
+        (j_raw < 1 || j_raw > 2 * ny || k_raw < 1 || k_raw > 2 * nz) || return false
+    end
+
+    packet = _cell_Fq_3d(coarse_in, patch_in, src_cell, q)
+    _add_cell_Fq_3d!(coarse_out, patch_out, src_cell, d3q19_opposite(q),
+                     route.weight * packet)
+    return true
+end
+
 function _stream_composite_routes_F_3d!(
         coarse_out::AbstractArray{<:Any,4},
         patch_out::ConservativeTreePatch3D,
@@ -195,15 +225,21 @@ function _stream_composite_routes_F_3d!(
     nx = size(coarse_in, 1)
     ny = size(coarse_in, 2)
     nz = size(coarse_in, 3)
-    cell_id_by_coord = boundary_policy == :periodic_x ?
+    cell_id_by_coord = boundary_policy in (:periodic_x, :periodic_x_wall_yz) ?
         _cell_id_by_coord_3d(topology) : nothing
 
     @inbounds for route in topology.routes
         if route.kind == ROUTE_BOUNDARY_3D
             boundary_policy == :skip && continue
-            boundary_policy == :periodic_x ||
+            boundary_policy in (:periodic_x, :periodic_x_wall_yz) ||
                 throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
-            _stream_periodic_x_boundary_route_3d!(
+            handled = false
+            if boundary_policy == :periodic_x_wall_yz
+                handled = _stream_wall_yz_boundary_route_3d!(
+                    coarse_out, patch_out, coarse_in, patch_in,
+                    topology, route, ny, nz)
+            end
+            handled || _stream_periodic_x_boundary_route_3d!(
                 coarse_out, patch_out, coarse_in, patch_in, topology,
                 cell_id_by_coord, route, nx, ny, nz)
             continue
@@ -252,4 +288,16 @@ function stream_composite_routes_periodic_x_F_3d!(
     return _stream_composite_routes_F_3d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
                                           topology, :periodic_x, clear)
+end
+
+function stream_composite_routes_periodic_x_wall_yz_F_3d!(
+        coarse_out::AbstractArray{<:Any,4},
+        patch_out::ConservativeTreePatch3D,
+        coarse_in::AbstractArray{<:Any,4},
+        patch_in::ConservativeTreePatch3D,
+        topology::ConservativeTreeTopology3D;
+        clear::Bool=true)
+    return _stream_composite_routes_F_3d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          topology, :periodic_x_wall_yz, clear)
 end

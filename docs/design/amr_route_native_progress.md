@@ -221,6 +221,9 @@ Validated canaries:
 - periodic-x 3D transport wraps coarse boundary packets, wraps coarse packets
   into a fine patch touching the periodic seam, and wraps fine boundary packets
   back to active coarse cells;
+- periodic-x plus stationary wall-y/z 3D transport bounces coarse and fine wall
+  packets, keeps periodic x wrapping, and gives y/z walls priority at corner
+  exits;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.
 
@@ -228,7 +231,7 @@ Exit gate:
 
 - orientation-wise conservation for every D3Q19 route primitive;
 - active mass and momentum agree before and after projection/restriction;
-- 3D wall boundary transport canaries pass on a tiny fixed patch.
+- D3Q19 collision and a tiny transport+collision 3D fixed-patch canary pass.
 
 ## Publication-P Milestone Gate
 
@@ -254,4 +257,4 @@ Next commits should continue in this order:
 2. BFS route-native macro-flow after those patch tests;
 3. pure indicator and hysteresis tests for dynamic 2D adaptation;
 4. multi-patch ownership tests;
-5. 3D wall transport canaries built on the D3Q19 topology.
+5. 3D integrated BGK/Guo collision canary built on the D3Q19 topology.
