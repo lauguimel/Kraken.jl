@@ -562,6 +562,42 @@ function conservative_tree_solid_mask_patch_range_2d(
     return (i_range=i_min:i_max, j_range=j_min:j_max)
 end
 
+function conservative_tree_indicator_patch_range_2d(
+        indicator::AbstractArray{<:Real,2};
+        threshold::Real,
+        pad::Int=1)
+    nx = size(indicator, 1)
+    ny = size(indicator, 2)
+    nx > 0 && ny > 0 || throw(ArgumentError("indicator must be nonempty"))
+    isfinite(threshold) || throw(ArgumentError("threshold must be finite"))
+    threshold >= 0 || throw(ArgumentError("threshold must be nonnegative"))
+    pad >= 0 || throw(ArgumentError("pad must be nonnegative"))
+
+    i_min_hit = typemax(Int)
+    i_max_hit = typemin(Int)
+    j_min_hit = typemax(Int)
+    j_max_hit = typemin(Int)
+    hit = false
+    @inbounds for j in axes(indicator, 2), i in axes(indicator, 1)
+        value = indicator[i, j]
+        isfinite(value) || throw(ArgumentError("indicator contains non-finite values"))
+        if abs(value) > threshold
+            hit = true
+            i_min_hit = min(i_min_hit, i)
+            i_max_hit = max(i_max_hit, i)
+            j_min_hit = min(j_min_hit, j)
+            j_max_hit = max(j_max_hit, j)
+        end
+    end
+    hit || throw(ArgumentError("indicator has no cells above threshold"))
+
+    i_min = max(1, i_min_hit - pad)
+    i_max = min(nx, i_max_hit + pad)
+    j_min = max(1, j_min_hit - pad)
+    j_max = min(ny, j_max_hit + pad)
+    return (i_range=i_min:i_max, j_range=j_min:j_max)
+end
+
 function conservative_tree_hysteresis_patch_range_2d(
         current_i_range::AbstractUnitRange{<:Integer},
         current_j_range::AbstractUnitRange{<:Integer},

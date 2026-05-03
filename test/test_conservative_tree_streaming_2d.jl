@@ -571,6 +571,42 @@ end
             4:10, 3:8, 5:9, 4:7; shrink_margin=-1)
     end
 
+    @testset "scalar indicator selects padded patch range" begin
+        indicator = zeros(Float64, 10, 9)
+        indicator[6:8, 4:5] .= 0.75
+        indicator[4, 6] = -0.9
+
+        ranges = conservative_tree_indicator_patch_range_2d(
+            indicator; threshold=0.5, pad=1)
+        tight = conservative_tree_indicator_patch_range_2d(
+            indicator; threshold=0.5, pad=0)
+
+        @test ranges.i_range == 3:9
+        @test ranges.j_range == 3:7
+        @test tight.i_range == 4:8
+        @test tight.j_range == 4:6
+
+        border = zeros(Float64, 10, 9)
+        border[1, 9] = 1.0
+        clamped = conservative_tree_indicator_patch_range_2d(
+            border; threshold=0.5, pad=3)
+        @test clamped.i_range == 1:4
+        @test clamped.j_range == 6:9
+
+        bad = copy(indicator)
+        bad[2, 2] = NaN
+        @test_throws ArgumentError conservative_tree_indicator_patch_range_2d(
+            indicator; threshold=1.0)
+        @test_throws ArgumentError conservative_tree_indicator_patch_range_2d(
+            indicator; threshold=-0.1)
+        @test_throws ArgumentError conservative_tree_indicator_patch_range_2d(
+            indicator; threshold=Inf)
+        @test_throws ArgumentError conservative_tree_indicator_patch_range_2d(
+            indicator; threshold=0.5, pad=-1)
+        @test_throws ArgumentError conservative_tree_indicator_patch_range_2d(
+            bad; threshold=0.5)
+    end
+
     @testset "mask-driven patch adaptation conserves active populations" begin
         nx, ny = 10, 9
         patch = create_conservative_tree_patch_2d(2:4, 2:4)

@@ -107,6 +107,7 @@ Implemented:
 - direct conservative patch regrid;
 - mask-driven patch adaptation for solid proximity;
 - pure solid-mask patch indicator;
+- pure scalar-threshold patch indicator;
 - range-level hysteresis primitive for grow/shrink decisions;
 - prescribed adaptive Poiseuille route-native canary.
 
@@ -114,6 +115,8 @@ Validated by:
 
 - direct regrid equals leaf-oracle regrid for grow, shrink and shift;
 - population sums are conserved through regrid;
+- indicator and hysteresis functions are tested without mutating transport
+  state;
 - adaptive Poiseuille keeps mass drift bounded.
 
 Not done yet:
@@ -125,8 +128,8 @@ Not done yet:
 
 Next surgical patch:
 
-- attach a velocity-gradient or vorticity indicator to the pure range selector,
-  still without mutating transport state.
+- build the velocity-gradient or vorticity scalar field that feeds the pure
+  range selector, still without mutating transport state.
 
 ## 6. Sous-Cycling Temporel 2D
 
