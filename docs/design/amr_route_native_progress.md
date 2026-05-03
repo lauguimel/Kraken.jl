@@ -11,6 +11,7 @@ macro-flow.
 
 ```bash
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_streaming_2d.jl")'
+julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_subcycling_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_adaptation_2d.jl"); include("test/test_conservative_tree_multipatch_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_topology_2d.jl"); include("test/test_conservative_tree_2d.jl")'
 ```
@@ -178,13 +179,31 @@ Next surgical patch:
 
 ## 6. Sous-Cycling Temporel 2D
 
-Status: not started.
+Status: conservative packet ledger started; no time integrator yet.
 
-Required before implementation:
+Implemented:
 
-- define the conservative ledger for one coarse step and two fine steps;
-- add packet tests for half-step interface transfers;
-- prove that no packet is streamed twice or dropped on a full cycle.
+- `ConservativeTreeSubcycleLedger2D` for one coarse step and two fine
+  half-steps;
+- coarse-to-fine face and corner packet deposits split in time;
+- fine-to-coarse face and corner packet accumulation by half-step;
+- orientation and total packet sums for cycle-level canaries;
+- reset helper for repeated canary cycles.
+
+Validated by:
+
+- a face packet is consumed once across two half-steps;
+- a corner packet is split only in time, not spatially duplicated;
+- fine-to-coarse half-step packets accumulate to the expected orientation sum;
+- a symmetric full-cycle ledger preserves expected orientation and total sums;
+- unsupported ratio, invalid face/corner direction, wrong block shape and bad
+  substep are rejected.
+
+Still required before implementation:
+
+- wire the ledger into route-native coarse/fine streaming;
+- define the collision ordering for coarse step and two fine steps;
+- compare subcycled and non-subcycled Couette/Poiseuille short runs.
 
 Exit gate:
 

@@ -107,6 +107,7 @@ include("refinement/conservative_tree_topology_3d.jl")
 include("refinement/conservative_tree_streaming_3d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
 include("refinement/conservative_tree_adaptation_2d.jl")
+include("refinement/conservative_tree_subcycling_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
@@ -379,6 +380,16 @@ export conservative_tree_adaptation_plan_from_proposal_2d
 export conservative_tree_indicator_adaptation_plan_2d
 export conservative_tree_patch_proposals_from_krk_2d
 export adapt_conservative_tree_patch_with_plan_2d
+export ConservativeTreeSubcycleLedger2D
+export create_conservative_tree_subcycle_ledger_2d
+export reset_conservative_tree_subcycle_ledger_2d!
+export conservative_tree_subcycle_weights_2d
+export conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!
+export conservative_tree_subcycle_deposit_coarse_to_fine_corner_2d!
+export conservative_tree_subcycle_accumulate_fine_to_coarse_face_2d!
+export conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!
+export conservative_tree_subcycle_orientation_sums_2d
+export conservative_tree_subcycle_total_sums_2d
 export ConservativeTreeAdaptiveRun2D
 export ConservativeTreeSolidAdaptiveRun2D
 export ConservativeTreeOpenChannelRun2D
