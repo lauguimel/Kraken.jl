@@ -523,6 +523,33 @@ end
         @test sum(result.is_solid_leaf) > 0
     end
 
+    @testset "solid mask patch indicator is pure and padded" begin
+        is_solid = falses(20, 18)
+        is_solid[13:16, 9:12] .= true
+
+        ranges = conservative_tree_solid_mask_patch_range_2d(is_solid; pad=1)
+        tight = conservative_tree_solid_mask_patch_range_2d(is_solid; pad=0)
+
+        @test ranges.i_range == 6:9
+        @test ranges.j_range == 4:7
+        @test tight.i_range == 7:8
+        @test tight.j_range == 5:6
+        @test count(is_solid) == 16
+
+        border = falses(20, 18)
+        border[1:2, 17:18] .= true
+        clamped = conservative_tree_solid_mask_patch_range_2d(border; pad=2)
+        @test clamped.i_range == 1:3
+        @test clamped.j_range == 7:9
+
+        @test_throws ArgumentError conservative_tree_solid_mask_patch_range_2d(
+            falses(19, 18))
+        @test_throws ArgumentError conservative_tree_solid_mask_patch_range_2d(
+            falses(20, 18))
+        @test_throws ArgumentError conservative_tree_solid_mask_patch_range_2d(
+            is_solid; pad=-1)
+    end
+
     @testset "mask-driven patch adaptation conserves active populations" begin
         nx, ny = 10, 9
         patch = create_conservative_tree_patch_2d(2:4, 2:4)

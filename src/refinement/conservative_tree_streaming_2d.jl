@@ -530,6 +530,38 @@ function regrid_conservative_tree_patch_direct_F_2d!(
     return coarse_out, patch_out
 end
 
+function conservative_tree_solid_mask_patch_range_2d(
+        is_solid::AbstractArray{Bool,2};
+        pad::Int=1)
+    nx_leaf = size(is_solid, 1)
+    ny_leaf = size(is_solid, 2)
+    iseven(nx_leaf) && iseven(ny_leaf) ||
+        throw(ArgumentError("is_solid dimensions must be even leaf-grid sizes"))
+    pad >= 0 || throw(ArgumentError("pad must be nonnegative"))
+    any(is_solid) || throw(ArgumentError("is_solid contains no solid cells"))
+
+    i_min_leaf = typemax(Int)
+    i_max_leaf = typemin(Int)
+    j_min_leaf = typemax(Int)
+    j_max_leaf = typemin(Int)
+    @inbounds for j in axes(is_solid, 2), i in axes(is_solid, 1)
+        if is_solid[i, j]
+            i_min_leaf = min(i_min_leaf, i)
+            i_max_leaf = max(i_max_leaf, i)
+            j_min_leaf = min(j_min_leaf, j)
+            j_max_leaf = max(j_max_leaf, j)
+        end
+    end
+
+    nx = nx_leaf >>> 1
+    ny = ny_leaf >>> 1
+    i_min = max(1, cld(i_min_leaf, 2) - pad)
+    i_max = min(nx, cld(i_max_leaf, 2) + pad)
+    j_min = max(1, cld(j_min_leaf, 2) - pad)
+    j_max = min(ny, cld(j_max_leaf, 2) + pad)
+    return (i_range=i_min:i_max, j_range=j_min:j_max)
+end
+
 function adapt_conservative_tree_patch_to_solid_mask_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},
@@ -538,26 +570,9 @@ function adapt_conservative_tree_patch_to_solid_mask_2d(
     _check_composite_coarse_layout(coarse_F, patch)
     size(is_solid) == (2 * size(coarse_F, 1), 2 * size(coarse_F, 2)) ||
         throw(ArgumentError("is_solid must have size (2*Nx, 2*Ny)"))
-    pad >= 0 || throw(ArgumentError("pad must be nonnegative"))
-    any(is_solid) || throw(ArgumentError("is_solid contains no solid cells"))
-
-    solid_i = Int[]
-    solid_j = Int[]
-    @inbounds for j in axes(is_solid, 2), i in axes(is_solid, 1)
-        if is_solid[i, j]
-            push!(solid_i, i)
-            push!(solid_j, j)
-        end
-    end
-
-    nx = size(coarse_F, 1)
-    ny = size(coarse_F, 2)
-    i_min = max(1, ((minimum(solid_i) + 1) >>> 1) - pad)
-    i_max = min(nx, ((maximum(solid_i) + 1) >>> 1) + pad)
-    j_min = max(1, ((minimum(solid_j) + 1) >>> 1) - pad)
-    j_max = min(ny, ((maximum(solid_j) + 1) >>> 1) + pad)
-
-    patch_out = create_conservative_tree_patch_2d(i_min:i_max, j_min:j_max; T=T)
+    ranges = conservative_tree_solid_mask_patch_range_2d(is_solid; pad=pad)
+    patch_out = create_conservative_tree_patch_2d(
+        ranges.i_range, ranges.j_range; T=T)
     coarse_out = similar(coarse_F)
     regrid_conservative_tree_patch_direct_F_2d!(coarse_out, patch_out, coarse_F, patch)
     return (coarse_F=coarse_out, patch=patch_out)
