@@ -583,6 +583,20 @@ function vertical_facing_step_solid_mask_leaf_2d(
     return mask
 end
 
+struct ConservativeTreeAdaptiveRun2D{T}
+    flow::Symbol
+    coarse_F::Array{T,3}
+    patch::ConservativeTreePatch2D{T}
+    patch_history::Vector{Tuple{UnitRange{Int},UnitRange{Int}}}
+    ux_mean::T
+    mass_initial::T
+    mass_final::T
+    mass_drift::T
+    steps::Int
+    regrid_every::Int
+    regrid_count::Int
+end
+
 function run_conservative_tree_couette_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -675,6 +689,76 @@ function run_conservative_tree_poiseuille_route_native_2d(;
     return ConservativeTreeMacroFlow2D{T}(
         :poiseuille_route_native, coarse, patch, profile, analytic, l2, linf,
         mass_initial, mass_final, mass_final - mass_initial, steps)
+end
+
+function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
+        Nx::Int=18,
+        Ny::Int=14,
+        patch_schedule::Tuple=((7:12, 5:10), (6:11, 4:9), (8:13, 5:10)),
+        regrid_every::Int=80,
+        Fx=5e-5,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=320,
+        T::Type{<:Real}=Float64)
+    steps > 0 || throw(ArgumentError("steps must be positive"))
+    regrid_every > 0 || throw(ArgumentError("regrid_every must be positive"))
+    isempty(patch_schedule) && throw(ArgumentError("patch_schedule must be nonempty"))
+
+    Fx = T(Fx)
+    omega = T(omega)
+    rho = T(rho)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    first_ranges = patch_schedule[1]
+    patch = create_conservative_tree_patch_2d(first_ranges[1], first_ranges[2]; T=T)
+    patch_next = create_conservative_tree_patch_2d(first_ranges[1], first_ranges[2]; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
+    mass_initial = active_mass_F(coarse, patch)
+
+    patch_history = Tuple{UnitRange{Int},UnitRange{Int}}[
+        (patch.parent_i_range, patch.parent_j_range)
+    ]
+    regrid_count = 0
+
+    for step in 1:steps
+        collide_Guo_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
+                                    omega, omega, Fx, zero(T))
+        stream_composite_routes_periodic_x_wall_y_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+
+        if step < steps && step % regrid_every == 0
+            regrid_count += 1
+            ranges = patch_schedule[mod1(regrid_count + 1, length(patch_schedule))]
+            new_patch = create_conservative_tree_patch_2d(ranges[1], ranges[2]; T=T)
+            new_coarse = similar(coarse)
+            regrid_conservative_tree_patch_direct_F_2d!(
+                new_coarse, new_patch, coarse, patch)
+            coarse = new_coarse
+            patch = new_patch
+            patch_next = create_conservative_tree_patch_2d(ranges[1], ranges[2]; T=T)
+            coarse_next = similar(coarse)
+            topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+            push!(patch_history, (patch.parent_i_range, patch.parent_j_range))
+        end
+    end
+
+    mass_final = active_mass_F(coarse, patch)
+    ux_mean = sum(composite_leaf_mean_ux_profile(coarse, patch;
+                                                 volume_leaf=volume_fine,
+                                                 force_x=Fx)) / T(2 * Ny)
+
+    return ConservativeTreeAdaptiveRun2D{T}(
+        :poiseuille_adaptive_route_native, coarse, patch, patch_history,
+        ux_mean, mass_initial, mass_final, mass_final - mass_initial,
+        steps, regrid_every, regrid_count)
 end
 
 function run_conservative_tree_square_obstacle_route_native_2d(;

@@ -565,4 +565,20 @@ end
                            active_population_sums_F(coarse, patch); atol=1e-11, rtol=0)
         end
     end
+
+    @testset "adaptive route native Poiseuille regrids conservatively" begin
+        result = run_conservative_tree_poiseuille_adaptive_route_native_2d()
+
+        @test result.flow == :poiseuille_adaptive_route_native
+        @test result.steps == 320
+        @test result.regrid_every == 80
+        @test result.regrid_count == 3
+        @test length(result.patch_history) == 4
+        @test result.patch_history[1] == (7:12, 5:10)
+        @test result.patch_history[2] == (6:11, 4:9)
+        @test result.patch_history[3] == (8:13, 5:10)
+        @test result.patch_history[4] == (7:12, 5:10)
+        @test abs(result.mass_drift) < 1e-9
+        @test result.ux_mean > 0
+    end
 end
