@@ -231,4 +231,62 @@ end
         @test isapprox(active_mass_F(coarse_out, patch_out), active_mass_F(coarse_in, patch_in);
                        atol=1e-12, rtol=0)
     end
+
+    @testset "periodic x wall y bounces coarse boundary packets" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        topology = create_conservative_tree_topology_2d(Nx, Ny, patch_in)
+        coarse_in[4, 1, 5] = 2.0
+        coarse_in[6, Ny, 3] = 3.0
+        coarse_in[1, 1, 8] = 4.0
+
+        stream_composite_routes_periodic_x_wall_y_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[4, 1, d2q9_opposite(5)] == 2.0
+        @test coarse_out[6, Ny, d2q9_opposite(3)] == 3.0
+        @test coarse_out[1, 1, d2q9_opposite(8)] == 4.0
+        @test isapprox(active_mass_F(coarse_out, patch_out), 9.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wall y bounces fine boundary packets" begin
+        nx, ny = 6, 6
+        patch_in = create_conservative_tree_patch_2d(3:4, 5:6)
+        patch_out = create_conservative_tree_patch_2d(3:4, 5:6)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch_in)
+        coarse_in = zeros(Float64, nx, ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in.fine_F[2, 4, 3] = 7.0
+
+        stream_composite_routes_periodic_x_wall_y_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test patch_out.fine_F[2, 4, d2q9_opposite(3)] == 7.0
+        @test isapprox(active_mass_F(coarse_out, patch_out), 7.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wall y conserves total active mass" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        topology = create_conservative_tree_topology_2d(Nx, Ny, patch_in)
+
+        for q in 1:9, j in axes(coarse_in, 2), i in axes(coarse_in, 1)
+            if !(i in patch_in.parent_i_range && j in patch_in.parent_j_range)
+                coarse_in[i, j, q] = 0.375q + i / 43 + j / 71 + i * j / 8192
+            end
+        end
+        for q in 1:9, j in axes(patch_in.fine_F, 2), i in axes(patch_in.fine_F, 1)
+            patch_in.fine_F[i, j, q] = 0.1875q + i / 137 + j / 263 + i * j / 16384
+        end
+        mass0 = active_mass_F(coarse_in, patch_in)
+
+        stream_composite_routes_periodic_x_wall_y_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test isapprox(active_mass_F(coarse_out, patch_out), mass0; atol=1e-11, rtol=0)
+    end
 end

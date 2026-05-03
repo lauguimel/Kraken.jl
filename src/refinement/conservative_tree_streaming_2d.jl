@@ -151,6 +151,33 @@ function _stream_periodic_x_boundary_route_2d!(
     return true
 end
 
+function _stream_wall_y_boundary_route_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        route::ConservativeTreeRoute2D,
+        ny::Int)
+    src_cell = topology.cells[route.src]
+    q = route.q
+    cy = d2q9_cy(q)
+    cy == 0 && return false
+
+    if src_cell.level == 0
+        j_raw = src_cell.j + cy
+        (j_raw < 1 || j_raw > ny) || return false
+    else
+        j_raw = src_cell.j + cy
+        (j_raw < 1 || j_raw > 2 * ny) || return false
+    end
+
+    packet = _cell_Fq_2d(coarse_in, patch_in, src_cell, q)
+    _add_cell_Fq_2d!(coarse_out, patch_out, src_cell,
+                     d2q9_opposite(q), route.weight * packet)
+    return true
+end
+
 function _stream_composite_routes_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -171,15 +198,21 @@ function _stream_composite_routes_F_2d!(
 
     nx = size(coarse_in, 1)
     ny = size(coarse_in, 2)
-    cell_id_by_coord = boundary_policy == :periodic_x ?
+    cell_id_by_coord = boundary_policy in (:periodic_x, :periodic_x_wall_y) ?
         _cell_id_by_coord_2d(topology) : nothing
 
     @inbounds for route in topology.routes
         if route.kind == ROUTE_BOUNDARY
             boundary_policy == :skip && continue
-            boundary_policy == :periodic_x ||
+            boundary_policy in (:periodic_x, :periodic_x_wall_y) ||
                 throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
-            _stream_periodic_x_boundary_route_2d!(
+            handled = false
+            if boundary_policy == :periodic_x_wall_y
+                handled = _stream_wall_y_boundary_route_2d!(
+                    coarse_out, patch_out, coarse_in, patch_in,
+                    topology, route, ny)
+            end
+            handled || _stream_periodic_x_boundary_route_2d!(
                 coarse_out, patch_out, coarse_in, patch_in,
                 topology, cell_id_by_coord, route, nx, ny)
             continue
@@ -241,4 +274,27 @@ function stream_composite_routes_periodic_x_F_2d!(
     return _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
                                           topology, :periodic_x, clear)
+end
+
+"""
+    stream_composite_routes_periodic_x_wall_y_F_2d!(coarse_out, patch_out,
+                                                    coarse_in, patch_in,
+                                                    topology; clear=true)
+
+Scatter integrated D2Q9 populations with periodic x wrapping and stationary
+no-slip bounce-back for packets leaving through y boundaries.
+
+This is still a transport-only primitive. Moving-wall and inlet/outlet
+corrections belong to later boundary patches.
+"""
+function stream_composite_routes_periodic_x_wall_y_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D;
+        clear::Bool=true)
+    return _stream_composite_routes_F_2d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          topology, :periodic_x_wall_y, clear)
 end
