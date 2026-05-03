@@ -350,4 +350,51 @@ _stream_moving_wall_delta(volume, rho_wall, wall_u, q) =
         @test isapprox(active_mass_F(coarse_out, patch_out), mass0; atol=1e-12, rtol=0)
         @test active_momentum_F(coarse_out, patch_out)[1] > mx0
     end
+
+    @testset "route native Poiseuille smoke accelerates and conserves mass" begin
+        nx, ny = 18, 14
+        patch = create_conservative_tree_patch_2d(7:12, 5:10)
+        patch_next = create_conservative_tree_patch_2d(7:12, 5:10)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch)
+        coarse = zeros(Float64, nx, ny, 9)
+        coarse_next = similar(coarse)
+        fill_equilibrium_integrated_D2Q9!(coarse, 1.0, 1.0, 0.0, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch.fine_F, 0.25, 1.0, 0.0, 0.0)
+        mass0 = active_mass_F(coarse, patch)
+
+        for _ in 1:160
+            collide_Guo_composite_F_2d!(coarse, patch, 1.0, 0.25, 1.0, 1.0, 5e-5, 0.0)
+            stream_composite_routes_periodic_x_wall_y_F_2d!(
+                coarse_next, patch_next, coarse, patch, topology)
+            coarse, coarse_next = coarse_next, coarse
+            patch, patch_next = patch_next, patch
+        end
+
+        @test isapprox(active_mass_F(coarse, patch), mass0; atol=1e-10, rtol=0)
+        @test active_momentum_F(coarse, patch)[1] > 0.5
+    end
+
+    @testset "route native Couette smoke injects positive momentum" begin
+        nx, ny = 18, 14
+        patch = create_conservative_tree_patch_2d(7:12, 5:10)
+        patch_next = create_conservative_tree_patch_2d(7:12, 5:10)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch)
+        coarse = zeros(Float64, nx, ny, 9)
+        coarse_next = similar(coarse)
+        fill_equilibrium_integrated_D2Q9!(coarse, 1.0, 1.0, 0.0, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch.fine_F, 0.25, 1.0, 0.0, 0.0)
+        mass0 = active_mass_F(coarse, patch)
+
+        for _ in 1:160
+            collide_BGK_composite_F_2d!(coarse, patch, 1.0, 0.25, 1.0, 1.0)
+            stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
+                coarse_next, patch_next, coarse, patch, topology;
+                u_north=0.04, volume_coarse=1.0, volume_fine=0.25)
+            coarse, coarse_next = coarse_next, coarse
+            patch, patch_next = patch_next, patch
+        end
+
+        @test isapprox(active_mass_F(coarse, patch), mass0; atol=1e-10, rtol=0)
+        @test active_momentum_F(coarse, patch)[1] > 1.0
+    end
 end
