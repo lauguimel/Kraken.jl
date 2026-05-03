@@ -305,6 +305,7 @@ export stream_periodic_x_wall_y_solid_F_2d!
 export stream_bounceback_xy_solid_F_2d!
 export apply_zou_he_west_F_2d!, apply_zou_he_pressure_east_F_2d!
 export apply_zou_he_west_cell_F_2d!, apply_zou_he_pressure_east_cell_F_2d!
+export apply_composite_zou_he_west_F_2d!, apply_composite_zou_he_pressure_east_F_2d!
 export compute_drag_mea_solid_F_2d
 export ConservativeTreePatch2D, create_conservative_tree_patch_2d
 export coalesce_patch_to_shadow_F_2d!, explode_shadow_to_patch_uniform_F_2d!

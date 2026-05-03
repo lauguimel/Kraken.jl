@@ -66,20 +66,23 @@ Done:
 - static wall y;
 - moving wall y for Couette;
 - integrated cell-level Zou-He west velocity and east pressure closures;
+- composite active-cell Zou-He west/east application for coarse and fine
+  boundary cells;
 - bounce-back solid mask;
 - square obstacle route-native smoke;
 - vertical facing step route-native smoke.
 
 Not done yet:
 
-- streaming-time route dispatch for Zou-He inlet/outlet on composite AMR;
+- streaming-time route dispatch for Zou-He inlet/outlet during route-native
+  macro-flows;
 - BFS route-native validation. The current D stream has Poiseuille, Couette,
   square obstacle and VFS only.
 
 Next surgical patch:
 
-- connect boundary routes to the cell-level Zou-He closures for west/east
-  active composite cells;
+- call the composite Zou-He closures after route streaming in a small
+  open-channel smoke;
 - keep BFS disabled until those route tests are green.
 
 ## 4. Multi-Patch Statique 2D

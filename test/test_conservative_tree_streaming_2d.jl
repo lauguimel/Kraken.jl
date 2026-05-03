@@ -429,6 +429,49 @@ end
             zeros(8), volume; rho_out=1.0)
     end
 
+    @testset "composite Zou-He closures target active boundary cells" begin
+        nx, ny = 5, 4
+        volume_coarse = 1.0
+        volume_fine = 0.25
+
+        coarse = zeros(Float64, nx, ny, 9)
+        patch = create_conservative_tree_patch_2d(3:4, 2:3)
+        fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, 1.0, 0.0, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, 1.0, 0.0, 0.0)
+        apply_composite_zou_he_west_F_2d!(
+            coarse, patch, 0.03, volume_coarse, volume_fine)
+        for j in 1:ny
+            cell = @view coarse[1, j, :]
+            rho = mass_F(cell) / volume_coarse
+            ux = (momentum_F(cell)[1] / volume_coarse) / rho
+            @test isapprox(ux, 0.03; atol=1e-14, rtol=0)
+        end
+
+        patch_west = create_conservative_tree_patch_2d(1:2, 1:ny)
+        coarse_west = zeros(Float64, nx, ny, 9)
+        fill_equilibrium_integrated_D2Q9!(coarse_west, volume_coarse, 1.0, 0.0, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch_west.fine_F, volume_fine, 1.0, 0.0, 0.0)
+        apply_composite_zou_he_west_F_2d!(
+            coarse_west, patch_west, 0.03, volume_coarse, volume_fine)
+        for jf in axes(patch_west.fine_F, 2)
+            cell = @view patch_west.fine_F[1, jf, :]
+            rho = mass_F(cell) / volume_fine
+            ux = (momentum_F(cell)[1] / volume_fine) / rho
+            @test isapprox(ux, 0.03; atol=1e-14, rtol=0)
+        end
+
+        patch_east = create_conservative_tree_patch_2d(4:5, 1:ny)
+        coarse_east = zeros(Float64, nx, ny, 9)
+        fill_equilibrium_integrated_D2Q9!(coarse_east, volume_coarse, 1.0, 0.02, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch_east.fine_F, volume_fine, 1.0, 0.02, 0.0)
+        apply_composite_zou_he_pressure_east_F_2d!(
+            coarse_east, patch_east, volume_coarse, volume_fine; rho_out=1.08)
+        for jf in axes(patch_east.fine_F, 2)
+            cell = @view patch_east.fine_F[end, jf, :]
+            @test isapprox(mass_F(cell) / volume_fine, 1.08; atol=1e-14, rtol=0)
+        end
+    end
+
     @testset "route native Couette runner has Phase-P profile gates" begin
         result = run_conservative_tree_couette_route_native_2d()
 
