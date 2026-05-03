@@ -598,6 +598,39 @@ function conservative_tree_indicator_patch_range_2d(
     return (i_range=i_min:i_max, j_range=j_min:j_max)
 end
 
+function conservative_tree_gradient_indicator_2d(field::AbstractArray{<:Real,2})
+    nx = size(field, 1)
+    ny = size(field, 2)
+    nx > 0 && ny > 0 || throw(ArgumentError("field must be nonempty"))
+    T = promote_type(Float64, eltype(field))
+    indicator = zeros(T, nx, ny)
+
+    @inbounds for j in axes(field, 2), i in axes(field, 1)
+        isfinite(field[i, j]) || throw(ArgumentError("field contains non-finite values"))
+        if nx == 1
+            dx = zero(T)
+        elseif i == first(axes(field, 1))
+            dx = T(field[i + 1, j] - field[i, j])
+        elseif i == last(axes(field, 1))
+            dx = T(field[i, j] - field[i - 1, j])
+        else
+            dx = T(field[i + 1, j] - field[i - 1, j]) / T(2)
+        end
+
+        if ny == 1
+            dy = zero(T)
+        elseif j == first(axes(field, 2))
+            dy = T(field[i, j + 1] - field[i, j])
+        elseif j == last(axes(field, 2))
+            dy = T(field[i, j] - field[i, j - 1])
+        else
+            dy = T(field[i, j + 1] - field[i, j - 1]) / T(2)
+        end
+        indicator[i, j] = sqrt(dx * dx + dy * dy)
+    end
+    return indicator
+end
+
 function conservative_tree_hysteresis_patch_range_2d(
         current_i_range::AbstractUnitRange{<:Integer},
         current_j_range::AbstractUnitRange{<:Integer},

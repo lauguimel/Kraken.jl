@@ -108,6 +108,7 @@ Implemented:
 - mask-driven patch adaptation for solid proximity;
 - pure solid-mask patch indicator;
 - pure scalar-threshold patch indicator;
+- pure gradient-magnitude indicator field;
 - range-level hysteresis primitive for grow/shrink decisions;
 - prescribed adaptive Poiseuille route-native canary.
 
@@ -128,8 +129,8 @@ Not done yet:
 
 Next surgical patch:
 
-- build the velocity-gradient or vorticity scalar field that feeds the pure
-  range selector, still without mutating transport state.
+- feed the gradient indicator from composite AMR velocity fields, then regrid
+  only after the pure selector and hysteresis gates are green.
 
 ## 6. Sous-Cycling Temporel 2D
 

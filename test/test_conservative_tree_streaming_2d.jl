@@ -607,6 +607,24 @@ end
             bad; threshold=0.5)
     end
 
+    @testset "gradient indicator matches linear fields" begin
+        field = [2.0 * i - 3.0 * j for i in 1:7, j in 1:6]
+        indicator = conservative_tree_gradient_indicator_2d(field)
+
+        @test size(indicator) == size(field)
+        @test maximum(abs.(indicator .- sqrt(13.0))) < 1e-14
+        @test all(iszero, conservative_tree_gradient_indicator_2d(ones(4, 5)))
+
+        line = reshape(collect(0.0:3.0:12.0), 1, 5)
+        @test conservative_tree_gradient_indicator_2d(line) == fill(3.0, 1, 5)
+
+        bad = copy(field)
+        bad[3, 3] = Inf
+        @test_throws ArgumentError conservative_tree_gradient_indicator_2d(
+            zeros(Float64, 0, 2))
+        @test_throws ArgumentError conservative_tree_gradient_indicator_2d(bad)
+    end
+
     @testset "mask-driven patch adaptation conserves active populations" begin
         nx, ny = 10, 9
         patch = create_conservative_tree_patch_2d(2:4, 2:4)
