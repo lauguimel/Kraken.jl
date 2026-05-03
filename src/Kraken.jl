@@ -102,6 +102,7 @@ include("refinement/refinement.jl")
 include("refinement/conservative_tree_2d.jl")
 include("refinement/conservative_tree_3d.jl")
 include("refinement/conservative_tree_topology_2d.jl")
+include("refinement/conservative_tree_topology_3d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
@@ -332,6 +333,12 @@ export ConservativeTreeCell2D, ConservativeTreeLink2D, ConservativeTreeRoute2D
 export ConservativeTreeTopology2D, create_conservative_tree_topology_2d
 export ConservativeTreeBlock2D, ConservativeTreePackedRoute2D
 export ConservativeTreePackedTopology2D, pack_conservative_tree_topology_2d
+export CartesianMetrics3D
+export ConservativeTreePatch3D, create_conservative_tree_patch_3d
+export RouteKind3D, DIRECT_3D, SPLIT_FACE_3D, SPLIT_EDGE_3D
+export COALESCE_FACE_3D, COALESCE_EDGE_3D, ROUTE_BOUNDARY_3D
+export ConservativeTreeCell3D, ConservativeTreeLink3D, ConservativeTreeRoute3D
+export ConservativeTreeTopology3D, create_conservative_tree_topology_3d
 export active_volume, morton_key_2d
 export stream_composite_routes_interior_F_2d!
 export stream_composite_routes_periodic_x_F_2d!

@@ -174,6 +174,64 @@ function fill_equilibrium_integrated_D3Q19!(F::AbstractArray{<:Any,4},
     return F
 end
 
+"""
+    ConservativeTreePatch3D
+
+Experimental fixed ratio-2 patch for the conservative 3D tree route.
+
+`fine_F` is the active fine state inside the refined region. `coarse_shadow_F`
+is only a parent ledger/aggregate over the same physical region; it is not an
+active fluid state.
+"""
+struct ConservativeTreePatch3D{T}
+    parent_i_range::UnitRange{Int}
+    parent_j_range::UnitRange{Int}
+    parent_k_range::UnitRange{Int}
+    ratio::Int
+    fine_F::Array{T,4}
+    coarse_shadow_F::Array{T,4}
+end
+
+"""
+    create_conservative_tree_patch_3d(parent_i_range, parent_j_range, parent_k_range; ratio=2, T=Float64)
+
+Allocate an experimental fixed ratio-2 conservative-tree 3D patch. No ghost
+cells are allocated.
+"""
+function create_conservative_tree_patch_3d(parent_i_range::AbstractUnitRange{<:Integer},
+                                           parent_j_range::AbstractUnitRange{<:Integer},
+                                           parent_k_range::AbstractUnitRange{<:Integer};
+                                           ratio::Int=2,
+                                           T::Type{<:Real}=Float64)
+    ratio == 2 || throw(ArgumentError("only ratio=2 is implemented"))
+    isempty(parent_i_range) && throw(ArgumentError("parent_i_range must be nonempty"))
+    isempty(parent_j_range) && throw(ArgumentError("parent_j_range must be nonempty"))
+    isempty(parent_k_range) && throw(ArgumentError("parent_k_range must be nonempty"))
+
+    ip = Int(first(parent_i_range)):Int(last(parent_i_range))
+    jp = Int(first(parent_j_range)):Int(last(parent_j_range))
+    kp = Int(first(parent_k_range)):Int(last(parent_k_range))
+    nx_parent = length(ip)
+    ny_parent = length(jp)
+    nz_parent = length(kp)
+
+    fine_F = zeros(T, ratio * nx_parent, ratio * ny_parent, ratio * nz_parent, 19)
+    coarse_shadow_F = zeros(T, nx_parent, ny_parent, nz_parent, 19)
+    return ConservativeTreePatch3D{T}(ip, jp, kp, ratio, fine_F, coarse_shadow_F)
+end
+
+function _check_conservative_tree_patch_layout(patch::ConservativeTreePatch3D)
+    patch.ratio == 2 || throw(ArgumentError("only ratio=2 is implemented"))
+    nx_parent = length(patch.parent_i_range)
+    ny_parent = length(patch.parent_j_range)
+    nz_parent = length(patch.parent_k_range)
+    size(patch.fine_F) == (2 * nx_parent, 2 * ny_parent, 2 * nz_parent, 19) ||
+        throw(ArgumentError("patch.fine_F has inconsistent size"))
+    size(patch.coarse_shadow_F) == (nx_parent, ny_parent, nz_parent, 19) ||
+        throw(ArgumentError("patch.coarse_shadow_F has inconsistent size"))
+    return nothing
+end
+
 @inline function conservative_tree_parent_index_3d(i_f::Int, j_f::Int, k_f::Int)
     i_f >= 1 || throw(ArgumentError("i_f must be >= 1"))
     j_f >= 1 || throw(ArgumentError("j_f must be >= 1"))

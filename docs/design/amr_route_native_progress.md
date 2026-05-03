@@ -181,7 +181,7 @@ First target:
 
 ## 8. Topologie Et Primitives 3D
 
-Status: primitive canaries started.
+Status: primitive and active-topology canaries started.
 
 Existing 3D refinement utilities are not yet the complete conservative-tree
 D3Q19 route topology. The first accepted 3D slice is deliberately small:
@@ -197,21 +197,30 @@ D3Q19 route topology. The first accepted 3D slice is deliberately small:
 Validated canaries:
 
 - `test/test_conservative_tree_3d.jl`
+- `test/test_conservative_tree_topology_3d.jl`
 - D3Q19 integer accessors match the lattice constants;
 - 8-child coalesce preserves every oriented population, mass and momentum;
 - uniform explode followed by coalesce conserves the parent;
 - integrated D3Q19 equilibrium preserves volume-weighted mass and momentum;
+- fixed ratio-2 3D patch allocation uses active fine state and parent shadow
+  ledger arrays with D3Q19 layout;
+- active 3D topology stores inactive coarse ledger cells under the patch and
+  active fine children with volume `1/8`;
+- route tables classify D3Q19 links as direct, coarse-to-fine, fine-to-coarse
+  or boundary;
 - face packets split over four boundary-adjacent children and coalesce from
   the same child set;
 - edge packets split over two edge-adjacent children and coalesce from the
   same child set;
+- every logical 3D link has route weights summing to one;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.
 
 Exit gate:
 
 - orientation-wise conservation for every D3Q19 route primitive;
-- active mass and momentum agree before and after projection/restriction.
+- active mass and momentum agree before and after projection/restriction;
+- 3D route-native streaming canary passes on a tiny fixed patch.
 
 ## Publication-P Milestone Gate
 
@@ -237,4 +246,4 @@ Next commits should continue in this order:
 2. BFS route-native macro-flow after those patch tests;
 3. pure indicator and hysteresis tests for dynamic 2D adaptation;
 4. multi-patch ownership tests;
-5. 3D active-cell topology canaries built on the D3Q19 primitives.
+5. 3D route-native streaming canary built on the D3Q19 topology.
