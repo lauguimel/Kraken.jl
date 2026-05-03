@@ -467,6 +467,75 @@ function collide_Guo_composite_solid_F_2d!(
     return coarse_F, patch
 end
 
+function regrid_conservative_tree_patch_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D)
+    size(coarse_out) == size(coarse_in) ||
+        throw(ArgumentError("coarse_out and coarse_in must have the same size"))
+    _check_composite_coarse_layout(coarse_in, patch_in)
+    _check_composite_coarse_layout(coarse_out, patch_out)
+
+    leaf = similar(coarse_in, 2 * size(coarse_in, 1), 2 * size(coarse_in, 2), 9)
+    composite_to_leaf_F_2d!(leaf, coarse_in, patch_in)
+    leaf_to_composite_F_2d!(coarse_out, patch_out, leaf)
+    return coarse_out, patch_out
+end
+
+function adapt_conservative_tree_patch_to_solid_mask_2d(
+        coarse_F::AbstractArray{T,3},
+        patch::ConservativeTreePatch2D{T},
+        is_solid::AbstractArray{Bool,2};
+        pad::Int=1) where T
+    _check_composite_coarse_layout(coarse_F, patch)
+    size(is_solid) == (2 * size(coarse_F, 1), 2 * size(coarse_F, 2)) ||
+        throw(ArgumentError("is_solid must have size (2*Nx, 2*Ny)"))
+    pad >= 0 || throw(ArgumentError("pad must be nonnegative"))
+    any(is_solid) || throw(ArgumentError("is_solid contains no solid cells"))
+
+    solid_i = Int[]
+    solid_j = Int[]
+    @inbounds for j in axes(is_solid, 2), i in axes(is_solid, 1)
+        if is_solid[i, j]
+            push!(solid_i, i)
+            push!(solid_j, j)
+        end
+    end
+
+    nx = size(coarse_F, 1)
+    ny = size(coarse_F, 2)
+    i_min = max(1, ((minimum(solid_i) + 1) >>> 1) - pad)
+    i_max = min(nx, ((maximum(solid_i) + 1) >>> 1) + pad)
+    j_min = max(1, ((minimum(solid_j) + 1) >>> 1) - pad)
+    j_max = min(ny, ((maximum(solid_j) + 1) >>> 1) + pad)
+
+    patch_out = create_conservative_tree_patch_2d(i_min:i_max, j_min:j_max; T=T)
+    coarse_out = similar(coarse_F)
+    regrid_conservative_tree_patch_F_2d!(coarse_out, patch_out, coarse_F, patch)
+    return (coarse_F=coarse_out, patch=patch_out)
+end
+
+function vertical_facing_step_solid_mask_leaf_2d(
+        Nx::Int,
+        Ny::Int,
+        step_i_range::AbstractUnitRange{<:Integer},
+        step_height::Int)
+    Nx > 0 || throw(ArgumentError("Nx must be positive"))
+    Ny > 0 || throw(ArgumentError("Ny must be positive"))
+    isempty(step_i_range) && throw(ArgumentError("step_i_range must be nonempty"))
+    first(step_i_range) >= 1 && last(step_i_range) <= Nx ||
+        throw(ArgumentError("step_i_range must be inside 1:Nx"))
+    1 <= step_height < Ny ||
+        throw(ArgumentError("step_height must be inside 1:Ny-1"))
+
+    mask = falses(Nx, Ny)
+    @inbounds for j in 1:step_height, i in Int(first(step_i_range)):Int(last(step_i_range))
+        mask[i, j] = true
+    end
+    return mask
+end
+
 function run_conservative_tree_couette_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -614,5 +683,61 @@ function run_conservative_tree_square_obstacle_route_native_2d(;
 
     return ConservativeTreeSolidFlowResult2D{T}(
         :square_obstacle_route_native, coarse, patch, is_solid, ux_mean, uy_mean,
+        mass_initial, mass_final, mass_final - mass_initial, steps)
+end
+
+function run_conservative_tree_vfs_route_native_2d(;
+        Nx::Int=28,
+        Ny::Int=14,
+        patch_i_range::UnitRange{Int}=5:12,
+        patch_j_range::UnitRange{Int}=1:8,
+        step_i_range::UnitRange{Int}=14:19,
+        step_height_leaf::Int=8,
+        Fx=2e-5,
+        Fy=0.0,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=900,
+        T::Type{<:Real}=Float64)
+    Fx = T(Fx)
+    Fy = T(Fy)
+    omega = T(omega)
+    rho = T(rho)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    is_solid = vertical_facing_step_solid_mask_leaf_2d(
+        2 * Nx, 2 * Ny, step_i_range, step_height_leaf)
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    leaf = zeros(T, 2 * Nx, 2 * Ny, 9)
+
+    _check_route_solid_mask_layout(topology, coarse, patch, is_solid)
+
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_initial = _leaf_fluid_mass_F(leaf, is_solid)
+
+    for _ in 1:steps
+        collide_Guo_composite_solid_F_2d!(
+            coarse, patch, topology, is_solid,
+            volume_coarse, volume_fine, omega, omega, Fx, Fy)
+        stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology, is_solid)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_final = _leaf_fluid_mass_F(leaf, is_solid)
+    ux_mean, uy_mean = _leaf_fluid_mean_velocity_F(
+        leaf, is_solid; volume=volume_fine, force_x=Fx, force_y=Fy)
+
+    return ConservativeTreeSolidFlowResult2D{T}(
+        :vfs_route_native, coarse, patch, is_solid, ux_mean, uy_mean,
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end

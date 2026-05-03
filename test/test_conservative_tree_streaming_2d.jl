@@ -484,4 +484,54 @@ end
         @test abs(result.uy_mean) < 1e-10
         @test sum(result.is_solid_leaf) > 0
     end
+
+    @testset "vertical facing step mask is wall attached" begin
+        mask = vertical_facing_step_solid_mask_leaf_2d(16, 12, 7:9, 5)
+
+        @test sum(mask) == 15
+        @test mask[7, 1]
+        @test mask[9, 5]
+        @test !mask[7, 6]
+        @test !mask[6, 1]
+        @test_throws ArgumentError vertical_facing_step_solid_mask_leaf_2d(16, 12, 0:2, 5)
+        @test_throws ArgumentError vertical_facing_step_solid_mask_leaf_2d(16, 12, 7:9, 12)
+    end
+
+    @testset "route native VFS macroflow is conservative" begin
+        result = run_conservative_tree_vfs_route_native_2d(; steps=500)
+
+        @test result.flow == :vfs_route_native
+        @test result.steps == 500
+        @test abs(result.mass_drift) < 1e-8
+        @test result.ux_mean > 0
+        @test abs(result.uy_mean) < 5e-3
+        @test sum(result.is_solid_leaf) > 0
+    end
+
+    @testset "mask-driven patch adaptation conserves active populations" begin
+        nx, ny = 10, 9
+        patch = create_conservative_tree_patch_2d(2:4, 2:4)
+        coarse = zeros(Float64, nx, ny, 9)
+        for q in 1:9, j in axes(coarse, 2), i in axes(coarse, 1)
+            if !(i in patch.parent_i_range && j in patch.parent_j_range)
+                coarse[i, j, q] = 0.2 + q / 31 + i / 47 + j / 59 + i * j / 4096
+            end
+        end
+        for q in 1:9, j in axes(patch.fine_F, 2), i in axes(patch.fine_F, 1)
+            patch.fine_F[i, j, q] = 0.05 + q / 67 + i / 101 + j / 131 + i * j / 8192
+        end
+        pop0 = active_population_sums_F(coarse, patch)
+        is_solid = falses(2 * nx, 2 * ny)
+        is_solid[13:16, 9:12] .= true
+
+        adapted = adapt_conservative_tree_patch_to_solid_mask_2d(
+            coarse, patch, is_solid; pad=1)
+
+        @test adapted.patch.parent_i_range == 6:9
+        @test adapted.patch.parent_j_range == 4:7
+        @test isapprox(active_population_sums_F(adapted.coarse_F, adapted.patch), pop0;
+                       atol=1e-11, rtol=0)
+        @test_throws ArgumentError adapt_conservative_tree_patch_to_solid_mask_2d(
+            coarse, patch, falses(2 * nx, 2 * ny))
+    end
 end
