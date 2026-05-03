@@ -100,6 +100,7 @@ include("multiblock/multiblock.jl")
 # --- Grid refinement ---
 include("refinement/refinement.jl")
 include("refinement/conservative_tree_2d.jl")
+include("refinement/conservative_tree_3d.jl")
 include("refinement/conservative_tree_topology_2d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
@@ -289,10 +290,18 @@ export d2q9_opposite
 export coalesce_F_2d!, explode_uniform_F_2d!
 export mass_F, momentum_F, moments_F
 export fill_equilibrium_integrated_D2Q9!
+export d3q19_cx, d3q19_cy, d3q19_cz, d3q19_opposite
+export coalesce_F_3d!, explode_uniform_F_3d!
+export mass_F_3d, momentum_F_3d, moments_F_3d
+export fill_equilibrium_integrated_D3Q19!
 export conservative_tree_parent_index
+export conservative_tree_parent_index_3d
 export split_coarse_to_fine_vertical_F_2d!, coalesce_fine_to_coarse_vertical_F
 export split_coarse_to_fine_face_F_2d!, coalesce_fine_to_coarse_face_F
 export split_coarse_to_fine_corner_F_2d!, coalesce_fine_to_coarse_corner_F
+export split_coarse_to_fine_face_F_3d!, coalesce_fine_to_coarse_face_F_3d
+export split_coarse_to_fine_edge_F_3d!, coalesce_fine_to_coarse_edge_F_3d
+export split_coarse_to_fine_corner_F_3d!, coalesce_fine_to_coarse_corner_F_3d
 export coarse_to_fine_patch_boundary_F_2d!, fine_to_coarse_patch_boundary_F_2d!
 export collide_BGK_integrated_D2Q9!
 export collide_Guo_integrated_D2Q9!

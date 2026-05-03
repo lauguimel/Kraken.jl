@@ -181,16 +181,32 @@ First target:
 
 ## 8. Topologie Et Primitives 3D
 
-Status: pending.
+Status: primitive canaries started.
 
 Existing 3D refinement utilities are not yet the complete conservative-tree
-D3Q19 route topology. The first acceptable 3D milestone is deliberately small:
+D3Q19 route topology. The first accepted 3D slice is deliberately small:
 
 - D3Q19 directions and opposites;
 - coarse volume `1`, fine volume `1/8`;
 - 8-child coalesce and uniform explode primitives;
-- split/coalesce weights for face, edge and corner crossings;
+- split/coalesce weights for face and edge crossings;
+- explicit empty corner route set, because D3Q19 has no body-diagonal
+  populations;
 - topology canaries only, no 3D macro-flow until these pass.
+
+Validated canaries:
+
+- `test/test_conservative_tree_3d.jl`
+- D3Q19 integer accessors match the lattice constants;
+- 8-child coalesce preserves every oriented population, mass and momentum;
+- uniform explode followed by coalesce conserves the parent;
+- integrated D3Q19 equilibrium preserves volume-weighted mass and momentum;
+- face packets split over four boundary-adjacent children and coalesce from
+  the same child set;
+- edge packets split over two edge-adjacent children and coalesce from the
+  same child set;
+- all corner transfer calls reject, documenting the empty D3Q19 corner route
+  set.
 
 Exit gate:
 
@@ -221,4 +237,4 @@ Next commits should continue in this order:
 2. BFS route-native macro-flow after those patch tests;
 3. pure indicator and hysteresis tests for dynamic 2D adaptation;
 4. multi-patch ownership tests;
-5. D3Q19 primitive tests.
+5. 3D active-cell topology canaries built on the D3Q19 primitives.
