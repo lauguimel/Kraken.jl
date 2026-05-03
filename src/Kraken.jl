@@ -99,6 +99,8 @@ include("multiblock/multiblock.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
+include("refinement/conservative_tree_2d.jl")
+include("refinement/conservative_tree_topology_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
@@ -281,6 +283,54 @@ export rescaling_factor_c2f, rescaling_factor_f2c
 export prolongate_f_rescaled_2d!, restrict_f_rescaled_2d!
 export temporal_interpolate_2d!, copy_macroscopic_overlap_2d!
 export advance_refined_step!
+export d2q9_cx, d2q9_cy
+export d2q9_opposite
+export coalesce_F_2d!, explode_uniform_F_2d!
+export mass_F, momentum_F, moments_F
+export fill_equilibrium_integrated_D2Q9!
+export conservative_tree_parent_index
+export split_coarse_to_fine_vertical_F_2d!, coalesce_fine_to_coarse_vertical_F
+export split_coarse_to_fine_face_F_2d!, coalesce_fine_to_coarse_face_F
+export split_coarse_to_fine_corner_F_2d!, coalesce_fine_to_coarse_corner_F
+export coarse_to_fine_patch_boundary_F_2d!, fine_to_coarse_patch_boundary_F_2d!
+export collide_BGK_integrated_D2Q9!
+export collide_Guo_integrated_D2Q9!
+export stream_fully_periodic_F_2d!, stream_periodic_x_wall_y_F_2d!
+export stream_periodic_x_moving_wall_y_F_2d!
+export cylinder_solid_mask_leaf_2d, square_solid_mask_leaf_2d
+export backward_facing_step_solid_mask_leaf_2d
+export stream_periodic_x_wall_y_solid_F_2d!
+export stream_bounceback_xy_solid_F_2d!
+export apply_zou_he_west_F_2d!, apply_zou_he_pressure_east_F_2d!
+export compute_drag_mea_solid_F_2d
+export ConservativeTreePatch2D, create_conservative_tree_patch_2d
+export coalesce_patch_to_shadow_F_2d!, explode_shadow_to_patch_uniform_F_2d!
+export active_population_sums_F, active_mass_F, active_momentum_F, active_moments_F
+export composite_to_leaf_F_2d!, leaf_to_composite_F_2d!
+export stream_composite_fully_periodic_leaf_F_2d!
+export stream_composite_periodic_x_wall_y_leaf_F_2d!
+export stream_composite_periodic_x_moving_wall_y_leaf_F_2d!
+export collide_BGK_composite_F_2d!, collide_Guo_composite_F_2d!
+export LinkKind, SAME_LEVEL, COARSE_TO_FINE, FINE_TO_COARSE, BOUNDARY
+export RouteKind, DIRECT, SPLIT_FACE, SPLIT_CORNER, COALESCE_FACE
+export COALESCE_CORNER, ROUTE_BOUNDARY
+export AbstractCellMetrics, CartesianMetrics2D
+export ConservativeTreeCell2D, ConservativeTreeLink2D, ConservativeTreeRoute2D
+export ConservativeTreeTopology2D, create_conservative_tree_topology_2d
+export ConservativeTreeBlock2D, ConservativeTreePackedRoute2D
+export ConservativeTreePackedTopology2D, pack_conservative_tree_topology_2d
+export active_volume, morton_key_2d
+export ConservativeTreeMacroFlow2D, ConservativeTreeCylinderResult2D
+export ConservativeTreeCylinderChannelResult2D
+export ConservativeTreeSolidFlowResult2D
+export composite_leaf_mean_ux_profile
+export couette_analytic_profile_2d, poiseuille_analytic_profile_2d
+export run_conservative_tree_couette_macroflow_2d
+export run_conservative_tree_poiseuille_macroflow_2d
+export run_conservative_tree_square_obstacle_macroflow_2d
+export run_conservative_tree_bfs_macroflow_2d
+export run_conservative_tree_cylinder_macroflow_2d
+export run_conservative_tree_cylinder_channel_macroflow_2d
 export RefinementPatch3D, RefinedDomain3D
 export create_patch_3d, create_refined_domain_3d, advance_refined_step_3d!
 export prolongate_f_rescaled_3d!, prolongate_f_rescaled_full_3d!
