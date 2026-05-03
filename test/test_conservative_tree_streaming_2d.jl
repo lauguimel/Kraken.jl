@@ -46,6 +46,9 @@ function _stream_zero_y_boundary_packets!(coarse_F, patch, topology)
     return coarse_F, patch
 end
 
+_stream_moving_wall_delta(volume, rho_wall, wall_u, q) =
+    volume * rho_wall * wall_u * d2q9_cx(q) / 6
+
 @testset "Conservative tree route streaming 2D" begin
     Nx, Ny = 9, 10
     patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
@@ -288,5 +291,63 @@ end
             coarse_out, patch_out, coarse_in, patch_in, topology)
 
         @test isapprox(active_mass_F(coarse_out, patch_out), mass0; atol=1e-11, rtol=0)
+    end
+
+    @testset "periodic x moving wall y corrects coarse diagonals" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        topology = create_conservative_tree_topology_2d(Nx, Ny, patch_in)
+        u_south = 0.06
+        u_north = 0.03
+        coarse_in[4, 1, 8] = 2.0
+        coarse_in[6, Ny, 6] = 3.0
+
+        stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology;
+            u_south=u_south, u_north=u_north)
+
+        @test coarse_out[4, 1, 6] ==
+              2.0 + _stream_moving_wall_delta(1.0, 1.0, u_south, 6)
+        @test coarse_out[6, Ny, 8] ==
+              3.0 + _stream_moving_wall_delta(1.0, 1.0, u_north, 8)
+    end
+
+    @testset "periodic x moving wall y corrects fine diagonals" begin
+        nx, ny = 6, 6
+        patch_in = create_conservative_tree_patch_2d(3:4, 5:6)
+        patch_out = create_conservative_tree_patch_2d(3:4, 5:6)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch_in)
+        coarse_in = zeros(Float64, nx, ny, 9)
+        coarse_out = similar(coarse_in)
+        u_north = 0.08
+        patch_in.fine_F[2, 4, 6] = 5.0
+
+        stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology;
+            u_north=u_north, volume_fine=0.25)
+
+        @test patch_out.fine_F[2, 4, 8] ==
+              5.0 + _stream_moving_wall_delta(0.25, 1.0, u_north, 8)
+    end
+
+    @testset "periodic x moving wall y injects tangential momentum at rest" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        topology = create_conservative_tree_topology_2d(Nx, Ny, patch_in)
+        fill_equilibrium_integrated_D2Q9!(coarse_in, 1.0, 1.0, 0.0, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch_in.fine_F, 0.25, 1.0, 0.0, 0.0)
+        mass0 = active_mass_F(coarse_in, patch_in)
+        mx0 = active_momentum_F(coarse_in, patch_in)[1]
+
+        stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology;
+            u_north=0.04, volume_coarse=1.0, volume_fine=0.25)
+
+        @test isapprox(active_mass_F(coarse_out, patch_out), mass0; atol=1e-12, rtol=0)
+        @test active_momentum_F(coarse_out, patch_out)[1] > mx0
     end
 end
