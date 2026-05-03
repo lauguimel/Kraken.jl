@@ -523,6 +523,21 @@ end
         @test sum(result.is_solid_leaf) > 0
     end
 
+    @testset "mask adaptive route native VFS regrids around step" begin
+        result = run_conservative_tree_vfs_mask_adaptive_route_native_2d()
+
+        @test result.flow == :vfs_mask_adaptive_route_native
+        @test result.steps == 500
+        @test result.regrid_every == 120
+        @test result.regrid_count == 1
+        @test result.patch_history[1] == (5:12, 1:8)
+        @test result.patch_history[2] == (6:11, 1:5)
+        @test abs(result.mass_drift) < 1e-8
+        @test result.ux_mean > 0
+        @test abs(result.uy_mean) < 5e-3
+        @test sum(result.is_solid_leaf) > 0
+    end
+
     @testset "solid mask patch indicator is pure and padded" begin
         is_solid = falses(20, 18)
         is_solid[13:16, 9:12] .= true

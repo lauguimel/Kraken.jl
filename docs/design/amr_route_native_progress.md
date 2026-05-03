@@ -112,6 +112,7 @@ Implemented:
 - composite AMR leaf velocity field for indicator input;
 - velocity-gradient patch decision with direct conservative regrid;
 - short route-native Poiseuille macro-flow driven by velocity-gradient regrid;
+- mask-adaptive VFS route-native macro-flow around the step;
 - range-level hysteresis primitive for grow/shrink decisions;
 - prescribed adaptive Poiseuille route-native canary.
 
@@ -127,6 +128,8 @@ Validated by:
   sums;
 - gradient-driven adaptive Poiseuille regrids conservatively over a short
   route-native run;
+- mask-driven VFS regrids around the step while keeping fluid-mass drift
+  bounded;
 - adaptive Poiseuille keeps mass drift bounded.
 
 Not done yet:
@@ -138,8 +141,8 @@ Not done yet:
 
 Next surgical patch:
 
-- run the same gradient-driven adaptation on square obstacle or VFS before any
-  larger adaptive claim.
+- add route-native open-boundary patch tests before attempting BFS in this D
+  stream.
 
 ## 6. Sous-Cycling Temporel 2D
 
