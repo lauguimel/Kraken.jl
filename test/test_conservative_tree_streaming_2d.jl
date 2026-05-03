@@ -550,6 +550,27 @@ end
             is_solid; pad=-1)
     end
 
+    @testset "patch range hysteresis prevents one cell oscillation" begin
+        current = (i_range=4:10, j_range=3:8)
+        near_shrink = conservative_tree_hysteresis_patch_range_2d(
+            current.i_range, current.j_range, 5:9, 4:7; shrink_margin=2)
+        deep_shrink = conservative_tree_hysteresis_patch_range_2d(
+            current.i_range, current.j_range, 6:8, 5:6; shrink_margin=2)
+        grow = conservative_tree_hysteresis_patch_range_2d(
+            current.i_range, current.j_range, 3:10, 3:8; shrink_margin=2)
+        no_hysteresis = conservative_tree_hysteresis_patch_range_2d(
+            current.i_range, current.j_range, 5:9, 4:7; shrink_margin=0)
+
+        @test near_shrink == current
+        @test deep_shrink == (i_range=6:8, j_range=5:6)
+        @test grow == (i_range=3:10, j_range=3:8)
+        @test no_hysteresis == (i_range=5:9, j_range=4:7)
+        @test_throws ArgumentError conservative_tree_hysteresis_patch_range_2d(
+            4:10, 3:8, 5:4, 4:7)
+        @test_throws ArgumentError conservative_tree_hysteresis_patch_range_2d(
+            4:10, 3:8, 5:9, 4:7; shrink_margin=-1)
+    end
+
     @testset "mask-driven patch adaptation conserves active populations" begin
         nx, ny = 10, 9
         patch = create_conservative_tree_patch_2d(2:4, 2:4)

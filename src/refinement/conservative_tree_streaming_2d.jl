@@ -562,6 +562,41 @@ function conservative_tree_solid_mask_patch_range_2d(
     return (i_range=i_min:i_max, j_range=j_min:j_max)
 end
 
+function conservative_tree_hysteresis_patch_range_2d(
+        current_i_range::AbstractUnitRange{<:Integer},
+        current_j_range::AbstractUnitRange{<:Integer},
+        target_i_range::AbstractUnitRange{<:Integer},
+        target_j_range::AbstractUnitRange{<:Integer};
+        shrink_margin::Int=1)
+    isempty(current_i_range) && throw(ArgumentError("current_i_range must be nonempty"))
+    isempty(current_j_range) && throw(ArgumentError("current_j_range must be nonempty"))
+    isempty(target_i_range) && throw(ArgumentError("target_i_range must be nonempty"))
+    isempty(target_j_range) && throw(ArgumentError("target_j_range must be nonempty"))
+    shrink_margin >= 0 || throw(ArgumentError("shrink_margin must be nonnegative"))
+
+    current_i = Int(first(current_i_range)):Int(last(current_i_range))
+    current_j = Int(first(current_j_range)):Int(last(current_j_range))
+    target_i = Int(first(target_i_range)):Int(last(target_i_range))
+    target_j = Int(first(target_j_range)):Int(last(target_j_range))
+
+    grows = first(target_i) < first(current_i) ||
+            last(target_i) > last(current_i) ||
+            first(target_j) < first(current_j) ||
+            last(target_j) > last(current_j)
+    if grows || shrink_margin == 0
+        return (i_range=target_i, j_range=target_j)
+    end
+
+    can_shrink_i = first(target_i) >= first(current_i) + shrink_margin &&
+                   last(target_i) <= last(current_i) - shrink_margin
+    can_shrink_j = first(target_j) >= first(current_j) + shrink_margin &&
+                   last(target_j) <= last(current_j) - shrink_margin
+    if can_shrink_i && can_shrink_j
+        return (i_range=target_i, j_range=target_j)
+    end
+    return (i_range=current_i, j_range=current_j)
+end
+
 function adapt_conservative_tree_patch_to_solid_mask_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},

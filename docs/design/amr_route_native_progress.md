@@ -106,6 +106,8 @@ Implemented:
 
 - direct conservative patch regrid;
 - mask-driven patch adaptation for solid proximity;
+- pure solid-mask patch indicator;
+- range-level hysteresis primitive for grow/shrink decisions;
 - prescribed adaptive Poiseuille route-native canary.
 
 Validated by:
@@ -117,14 +119,14 @@ Validated by:
 Not done yet:
 
 - error indicators;
-- hysteresis;
+- integration of physical error indicators with hysteresis;
 - 2:1 balancing for multiple patches;
 - adaptive square obstacle/VFS macro-flow.
 
 Next surgical patch:
 
-- introduce a pure indicator function that returns a target patch range without
-  mutating state, then test it independently from transport.
+- attach a velocity-gradient or vorticity indicator to the pure range selector,
+  still without mutating transport state.
 
 ## 6. Sous-Cycling Temporel 2D
 
