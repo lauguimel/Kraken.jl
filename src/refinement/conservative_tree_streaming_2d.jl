@@ -761,6 +761,47 @@ function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
         steps, regrid_every, regrid_count)
 end
 
+function validate_conservative_tree_route_native_phase_p_2d(;
+        steps::Int=1000,
+        T::Type{<:Real}=Float64)
+    couette_route = run_conservative_tree_couette_route_native_2d(
+        ; steps=steps, T=T)
+    couette_oracle = run_conservative_tree_couette_macroflow_2d(
+        ; Nx=size(couette_route.coarse_F, 1),
+        Ny=size(couette_route.coarse_F, 2),
+        patch_i_range=couette_route.patch.parent_i_range,
+        patch_j_range=couette_route.patch.parent_j_range,
+        steps=steps, T=T)
+    couette_l2, couette_linf = _profile_errors(
+        couette_route.ux_profile, couette_oracle.ux_profile)
+
+    poiseuille_route = run_conservative_tree_poiseuille_route_native_2d(
+        ; steps=steps, T=T)
+    poiseuille_oracle = run_conservative_tree_poiseuille_macroflow_2d(
+        ; Nx=size(poiseuille_route.coarse_F, 1),
+        Ny=size(poiseuille_route.coarse_F, 2),
+        patch_i_range=poiseuille_route.patch.parent_i_range,
+        patch_j_range=poiseuille_route.patch.parent_j_range,
+        steps=steps, T=T)
+    poiseuille_l2, poiseuille_linf = _profile_errors(
+        poiseuille_route.ux_profile, poiseuille_oracle.ux_profile)
+
+    return (
+        couette=(
+            route=couette_route,
+            oracle=couette_oracle,
+            l2_delta=couette_l2,
+            linf_delta=couette_linf,
+        ),
+        poiseuille=(
+            route=poiseuille_route,
+            oracle=poiseuille_oracle,
+            l2_delta=poiseuille_l2,
+            linf_delta=poiseuille_linf,
+        ),
+    )
+end
+
 function run_conservative_tree_square_obstacle_route_native_2d(;
         Nx::Int=24,
         Ny::Int=14,

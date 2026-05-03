@@ -439,6 +439,21 @@ end
         @test maximum(abs.(left[1:ncmp] .- right[1:ncmp])) < 3e-3
     end
 
+    @testset "route native Phase P validation compares oracle runners" begin
+        report = validate_conservative_tree_route_native_phase_p_2d(; steps=1000)
+
+        @test report.couette.route.flow == :couette_route_native
+        @test report.couette.oracle.flow == :couette
+        @test abs(report.couette.route.mass_drift) < 1e-9
+        @test report.couette.l2_delta < 7e-3
+        @test report.couette.linf_delta < 9e-3
+        @test report.poiseuille.route.flow == :poiseuille_route_native
+        @test report.poiseuille.oracle.flow == :poiseuille
+        @test abs(report.poiseuille.route.mass_drift) < 1e-9
+        @test report.poiseuille.l2_delta < 1.5e-2
+        @test report.poiseuille.linf_delta < 2e-2
+    end
+
     @testset "solid route bounces fine packets at obstacle links" begin
         nx, ny = 8, 8
         patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
