@@ -224,6 +224,11 @@ Validated canaries:
 - periodic-x plus stationary wall-y/z 3D transport bounces coarse and fine wall
   packets, keeps periodic x wrapping, and gives y/z walls priority at corner
   exits;
+- integrated D3Q19 BGK collision conserves mass and momentum, `omega=1`
+  projects to equilibrium at conserved moments, and integrated D3Q19 Guo
+  collision conserves mass while driving momentum in the force direction;
+- a tiny fixed-patch 3D transport+BGK loop with periodic x and stationary
+  wall-y/z conserves active mass;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.
 
@@ -231,7 +236,7 @@ Exit gate:
 
 - orientation-wise conservation for every D3Q19 route primitive;
 - active mass and momentum agree before and after projection/restriction;
-- D3Q19 collision and a tiny transport+collision 3D fixed-patch canary pass.
+- 3D route-native macro-flow remains pending; no 3D AMR flow claim yet.
 
 ## Publication-P Milestone Gate
 
@@ -257,4 +262,4 @@ Next commits should continue in this order:
 2. BFS route-native macro-flow after those patch tests;
 3. pure indicator and hysteresis tests for dynamic 2D adaptation;
 4. multi-patch ownership tests;
-5. 3D integrated BGK/Guo collision canary built on the D3Q19 topology.
+5. 3D macro-flow precursor only after a dedicated reference test is defined.

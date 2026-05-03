@@ -375,6 +375,130 @@ function active_moments_F_3d(coarse_F::AbstractArray{<:Any,4},
     return m, mx, my, mz
 end
 
+function collide_BGK_integrated_D3Q19!(Fcell::AbstractVector, volume, omega)
+    _check_d3q19_vector(Fcell, "Fcell")
+    volume > zero(volume) || throw(ArgumentError("volume must be positive"))
+
+    m = mass_F_3d(Fcell)
+    iszero(m) && throw(ArgumentError("Fcell mass must be nonzero"))
+    mx, my, mz = momentum_F_3d(Fcell)
+    rho = m / volume
+    ux = mx / m
+    uy = my / m
+    uz = mz / m
+
+    @inbounds for q in 1:19
+        f = Fcell[q] / volume
+        feq = equilibrium(D3Q19(), rho, ux, uy, uz, q)
+        Fcell[q] = (f - omega * (f - feq)) * volume
+    end
+    return Fcell
+end
+
+function collide_BGK_integrated_D3Q19!(F::AbstractArray{<:Any,4}, volume, omega)
+    size(F, 4) == 19 ||
+        throw(ArgumentError("F must have 19 D3Q19 populations in dimension 4"))
+    @inbounds for k in axes(F, 3), j in axes(F, 2), i in axes(F, 1)
+        collide_BGK_integrated_D3Q19!(@view(F[i, j, k, :]), volume, omega)
+    end
+    return F
+end
+
+function collide_Guo_integrated_D3Q19!(Fcell::AbstractVector,
+                                       volume,
+                                       omega,
+                                       Fx,
+                                       Fy,
+                                       Fz)
+    _check_d3q19_vector(Fcell, "Fcell")
+    volume > zero(volume) || throw(ArgumentError("volume must be positive"))
+
+    m = mass_F_3d(Fcell)
+    iszero(m) && throw(ArgumentError("Fcell mass must be nonzero"))
+    mx, my, mz = momentum_F_3d(Fcell)
+    rho = m / volume
+    ux = (mx / volume + Fx / 2) / rho
+    uy = (my / volume + Fy / 2) / rho
+    uz = (mz / volume + Fz / 2) / rho
+    guo_pref = 1 - omega / 2
+
+    @inbounds for q in 1:19
+        cx = d3q19_cx(q)
+        cy = d3q19_cy(q)
+        cz = d3q19_cz(q)
+        w = weights(D3Q19())[q]
+        ci_dot_u = cx * ux + cy * uy + cz * uz
+        ci_dot_F = cx * Fx + cy * Fy + cz * Fz
+        Sq = w * (3 * ((cx - ux) * Fx + (cy - uy) * Fy + (cz - uz) * Fz) +
+                  9 * ci_dot_u * ci_dot_F)
+        f = Fcell[q] / volume
+        feq = equilibrium(D3Q19(), rho, ux, uy, uz, q)
+        Fcell[q] = volume * (f - omega * (f - feq) + guo_pref * Sq)
+    end
+    return Fcell
+end
+
+function collide_Guo_integrated_D3Q19!(F::AbstractArray{<:Any,4},
+                                       volume,
+                                       omega,
+                                       Fx,
+                                       Fy,
+                                       Fz)
+    size(F, 4) == 19 ||
+        throw(ArgumentError("F must have 19 D3Q19 populations in dimension 4"))
+    @inbounds for k in axes(F, 3), j in axes(F, 2), i in axes(F, 1)
+        collide_Guo_integrated_D3Q19!(@view(F[i, j, k, :]),
+                                      volume, omega, Fx, Fy, Fz)
+    end
+    return F
+end
+
+function collide_BGK_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
+                                     patch::ConservativeTreePatch3D,
+                                     volume_coarse,
+                                     volume_fine,
+                                     omega_coarse,
+                                     omega_fine)
+    _check_composite_coarse_layout_3d(coarse_F, patch)
+
+    @inbounds for k in axes(coarse_F, 3), j in axes(coarse_F, 2), i in axes(coarse_F, 1)
+        _inside_range_3d(i, j, k,
+                         patch.parent_i_range,
+                         patch.parent_j_range,
+                         patch.parent_k_range) && continue
+        collide_BGK_integrated_D3Q19!(
+            @view(coarse_F[i, j, k, :]), volume_coarse, omega_coarse)
+    end
+    collide_BGK_integrated_D3Q19!(patch.fine_F, volume_fine, omega_fine)
+    coalesce_patch_to_shadow_F_3d!(patch)
+    return coarse_F, patch
+end
+
+function collide_Guo_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
+                                     patch::ConservativeTreePatch3D,
+                                     volume_coarse,
+                                     volume_fine,
+                                     omega_coarse,
+                                     omega_fine,
+                                     Fx,
+                                     Fy,
+                                     Fz)
+    _check_composite_coarse_layout_3d(coarse_F, patch)
+
+    @inbounds for k in axes(coarse_F, 3), j in axes(coarse_F, 2), i in axes(coarse_F, 1)
+        _inside_range_3d(i, j, k,
+                         patch.parent_i_range,
+                         patch.parent_j_range,
+                         patch.parent_k_range) && continue
+        collide_Guo_integrated_D3Q19!(
+            @view(coarse_F[i, j, k, :]), volume_coarse,
+            omega_coarse, Fx, Fy, Fz)
+    end
+    collide_Guo_integrated_D3Q19!(patch.fine_F, volume_fine, omega_fine, Fx, Fy, Fz)
+    coalesce_patch_to_shadow_F_3d!(patch)
+    return coarse_F, patch
+end
+
 @inline function conservative_tree_parent_index_3d(i_f::Int, j_f::Int, k_f::Int)
     i_f >= 1 || throw(ArgumentError("i_f must be >= 1"))
     j_f >= 1 || throw(ArgumentError("j_f must be >= 1"))

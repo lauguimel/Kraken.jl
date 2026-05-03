@@ -157,6 +157,60 @@ end
         @test isapprox(mz, volume * rho * uz; atol=1e-14, rtol=0)
     end
 
+    @testset "BGK integrated collision conserves D3Q19 moments" begin
+        F = zeros(Float64, 19)
+        volume = 0.125
+        fill_equilibrium_integrated_D3Q19!(F, volume, 1.0, 0.02, -0.01, 0.015)
+        F[2] += 1e-4
+        F[3] += 1e-4
+        before = collect(moments_F_3d(F))
+
+        collide_BGK_integrated_D3Q19!(F, volume, 1.1)
+
+        @test isapprox(collect(moments_F_3d(F)), before; atol=1e-14, rtol=0)
+    end
+
+    @testset "BGK omega one projects to D3Q19 equilibrium at conserved moments" begin
+        F = [0.02 + q / 2000 for q in 1:19]
+        volume = 1.0
+        before = moments_F_3d(F)
+
+        collide_BGK_integrated_D3Q19!(F, volume, 1.0)
+
+        m, mx, my, mz = before
+        rho = m / volume
+        ux = mx / m
+        uy = my / m
+        uz = mz / m
+        expected = [volume * equilibrium(D3Q19(), rho, ux, uy, uz, q) for q in 1:19]
+        @test isapprox(F, expected; atol=1e-14, rtol=0)
+    end
+
+    @testset "Guo integrated collision conserves mass and drives momentum" begin
+        F = zeros(Float64, 19)
+        fill_equilibrium_integrated_D3Q19!(F, 1.0, 1.0, 0.0, 0.0, 0.0)
+        mass0 = mass_F_3d(F)
+
+        collide_Guo_integrated_D3Q19!(F, 1.0, 1.0, 1e-4, 0.0, -5e-5)
+
+        @test isapprox(mass_F_3d(F), mass0; atol=1e-14, rtol=0)
+        @test momentum_F_3d(F)[1] > 0
+        @test abs(momentum_F_3d(F)[2]) < 1e-14
+        @test momentum_F_3d(F)[3] < 0
+    end
+
+    @testset "grid BGK collision conserves global D3Q19 moments" begin
+        F = zeros(Float64, 3, 2, 2, 19)
+        for q in 1:19, k in axes(F, 3), j in axes(F, 2), i in axes(F, 1)
+            F[i, j, k, q] = 0.05 + q / 512 + i / 1024 + j / 2048 + k / 4096
+        end
+        before = collect(moments_F_3d(F))
+
+        collide_BGK_integrated_D3Q19!(F, 0.125, 1.2)
+
+        @test isapprox(collect(moments_F_3d(F)), before; atol=1e-12, rtol=0)
+    end
+
     @testset "parent-child mapping" begin
         @test conservative_tree_parent_index_3d(1, 1, 1) == (1, 1, 1, 1, 1, 1)
         @test conservative_tree_parent_index_3d(2, 1, 1) == (1, 1, 1, 2, 1, 1)

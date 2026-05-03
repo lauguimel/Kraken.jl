@@ -228,6 +228,35 @@ end
         @test isapprox(active_mass_F_3d(coarse_out, patch_out), 5.75; atol=1e-14, rtol=0)
     end
 
+    @testset "minimal 3D fixed-patch transport plus BGK collision conserves mass" begin
+        patch = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        patch_next = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        coarse = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_next = similar(coarse)
+
+        for k in axes(coarse, 3), j in axes(coarse, 2), i in axes(coarse, 1)
+            if !(i in patch.parent_i_range &&
+                 j in patch.parent_j_range &&
+                 k in patch.parent_k_range)
+                fill_equilibrium_integrated_D3Q19!(
+                    @view(coarse[i, j, k, :]), 1.0, 1.0, 0.0, 0.0, 0.0)
+            end
+        end
+        fill_equilibrium_integrated_D3Q19!(patch.fine_F, 0.125, 1.0, 0.0, 0.0, 0.0)
+        coalesce_patch_to_shadow_F_3d!(patch)
+        mass0 = active_mass_F_3d(coarse, patch)
+
+        for _ in 1:8
+            collide_BGK_composite_F_3d!(coarse, patch, 1.0, 0.125, 1.0, 1.0)
+            stream_composite_routes_periodic_x_wall_yz_F_3d!(
+                coarse_next, patch_next, coarse, patch, topology)
+            coarse, coarse_next = coarse_next, coarse
+            patch, patch_next = patch_next, patch
+        end
+
+        @test isapprox(active_mass_F_3d(coarse, patch), mass0; atol=1e-10, rtol=0)
+    end
+
     @testset "layout checks catch mismatched patch" begin
         patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
         wrong_patch = create_conservative_tree_patch_3d(4:5, 4:5, 2:3)

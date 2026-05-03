@@ -301,6 +301,8 @@ export conservative_tree_parent_index_3d
 export coalesce_patch_to_shadow_F_3d!, explode_shadow_to_patch_uniform_F_3d!
 export active_population_sums_F_3d, active_mass_F_3d
 export active_momentum_F_3d, active_moments_F_3d
+export collide_BGK_integrated_D3Q19!, collide_Guo_integrated_D3Q19!
+export collide_BGK_composite_F_3d!, collide_Guo_composite_F_3d!
 export split_coarse_to_fine_vertical_F_2d!, coalesce_fine_to_coarse_vertical_F
 export split_coarse_to_fine_face_F_2d!, coalesce_fine_to_coarse_face_F
 export split_coarse_to_fine_corner_F_2d!, coalesce_fine_to_coarse_corner_F
