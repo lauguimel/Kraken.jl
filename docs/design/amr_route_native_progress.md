@@ -87,21 +87,38 @@ Next surgical patch:
 
 ## 4. Multi-Patch Statique 2D
 
-Status: not started in code.
+Status: ownership tables started; route topology still pending.
+
+Implemented:
+
+- `ConservativeTreePatchSet2D` groups several disjoint ratio-2 patches;
+- parent-cell and leaf-cell owner tables;
+- active coarse mask and active volume accounting;
+- overlap and domain rejection;
+- parser-adjacent `.krk` helpers converting base-grid `Refine` blocks to
+  conservative-tree patch ranges.
+
+Validated by:
+
+- disjoint patch ownership canaries;
+- parent/leaf owner lookup canaries;
+- active volume and active coarse mask canaries;
+- `.krk` `Refine` helper canaries for valid, unsupported ratio, nested parent
+  and 3D-refine rejection.
 
 Required next sequence:
 
-1. Generalize ownership from one patch to a patch list.
-2. Add active-cell lookup tests for disjoint patches.
-3. Add route tests for coarse-to-fine and fine-to-coarse near two patches.
-4. Add patch-patch adjacency tests.
-5. Only then run macro-flows with two refined bands.
+1. Add route tests for coarse-to-fine and fine-to-coarse near two patches.
+2. Add patch-patch adjacency tests.
+3. Add route-native streaming over disjoint patch sets.
+4. Only then run macro-flows with two refined bands.
 
 Exit gate:
 
 - no double ownership;
 - active mass/volume matches oracle;
 - all route weights sum to one by orientation.
+- route topology covers patch-patch adjacency without packet loss.
 
 ## 5. Adaptation Dynamique CPU 2D
 
@@ -251,15 +268,17 @@ The wording must not claim:
 
 - BFS route-native, because it is not implemented in this D stream;
 - open boundaries, because Zou-He route-native is pending;
-- multi-patch AMR;
+- multi-patch route-native transport or adaptation, because only ownership and
+  `.krk` setup helpers are started;
 - subcycling;
 - GPU AMR;
 - 3D AMR.
 
 Next commits should continue in this order:
 
-1. route-native open-boundary patch tests;
-2. BFS route-native macro-flow after those patch tests;
-3. pure indicator and hysteresis tests for dynamic 2D adaptation;
-4. multi-patch ownership tests;
-5. 3D macro-flow precursor only after a dedicated reference test is defined.
+1. production-grade adaptation plan helpers and DSL-facing guards;
+2. route tests over multi-patch ownership tables;
+3. subcycling ledger and packet canaries;
+4. GPU packing parity canaries;
+5. route-native open-boundary patch tests before any BFS macro-flow;
+6. BFS route-native macro-flow only after those open-boundary tests.

@@ -100,6 +100,7 @@ include("multiblock/multiblock.jl")
 # --- Grid refinement ---
 include("refinement/refinement.jl")
 include("refinement/conservative_tree_2d.jl")
+include("refinement/conservative_tree_multipatch_2d.jl")
 include("refinement/conservative_tree_3d.jl")
 include("refinement/conservative_tree_topology_2d.jl")
 include("refinement/conservative_tree_topology_3d.jl")
@@ -324,6 +325,11 @@ export apply_zou_he_west_cell_F_2d!, apply_zou_he_pressure_east_cell_F_2d!
 export apply_composite_zou_he_west_F_2d!, apply_composite_zou_he_pressure_east_F_2d!
 export compute_drag_mea_solid_F_2d
 export ConservativeTreePatch2D, create_conservative_tree_patch_2d
+export ConservativeTreePatchSet2D, create_conservative_tree_patch_set_2d
+export conservative_tree_parent_owner_2d, conservative_tree_leaf_owner_2d
+export conservative_tree_patch_owner_counts_2d, active_coarse_mask
+export conservative_tree_patch_ranges_from_krk_refines_2d
+export create_conservative_tree_patch_set_from_krk_2d
 export coalesce_patch_to_shadow_F_2d!, explode_shadow_to_patch_uniform_F_2d!
 export active_population_sums_F, active_mass_F, active_momentum_F, active_moments_F
 export composite_to_leaf_F_2d!, leaf_to_composite_F_2d!
