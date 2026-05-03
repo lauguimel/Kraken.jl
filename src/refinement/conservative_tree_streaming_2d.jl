@@ -349,3 +349,97 @@ function stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
                                           volume_coarse=volume_coarse,
                                           volume_fine=volume_fine)
 end
+
+function run_conservative_tree_couette_route_native_2d(;
+        Nx::Int=18,
+        Ny::Int=14,
+        patch_i_range::UnitRange{Int}=7:12,
+        patch_j_range::UnitRange{Int}=5:10,
+        U=0.04,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=3000,
+        T::Type{<:Real}=Float64)
+    U = T(U)
+    omega = T(omega)
+    rho = T(rho)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
+    mass_initial = active_mass_F(coarse, patch)
+
+    for _ in 1:steps
+        collide_BGK_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
+                                    omega, omega)
+        stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology;
+            u_north=U, rho_wall=rho,
+            volume_coarse=volume_coarse, volume_fine=volume_fine)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    profile = composite_leaf_mean_ux_profile(coarse, patch; volume_leaf=volume_fine)
+    analytic = couette_analytic_profile_2d(length(profile), U)
+    l2, linf = _profile_errors(profile, analytic)
+    mass_final = active_mass_F(coarse, patch)
+
+    return ConservativeTreeMacroFlow2D{T}(
+        :couette_route_native, coarse, patch, profile, analytic, l2, linf,
+        mass_initial, mass_final, mass_final - mass_initial, steps)
+end
+
+function run_conservative_tree_poiseuille_route_native_2d(;
+        Nx::Int=18,
+        Ny::Int=14,
+        patch_i_range::UnitRange{Int}=7:12,
+        patch_j_range::UnitRange{Int}=5:10,
+        Fx=5e-5,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=3000,
+        T::Type{<:Real}=Float64)
+    Fx = T(Fx)
+    omega = T(omega)
+    rho = T(rho)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
+    mass_initial = active_mass_F(coarse, patch)
+
+    for _ in 1:steps
+        collide_Guo_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
+                                    omega, omega, Fx, zero(T))
+        stream_composite_routes_periodic_x_wall_y_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    profile = composite_leaf_mean_ux_profile(coarse, patch;
+                                             volume_leaf=volume_fine,
+                                             force_x=Fx)
+    analytic = poiseuille_analytic_profile_2d(length(profile), Fx, omega; rho=rho)
+    l2, linf = _profile_errors(profile, analytic)
+    mass_final = active_mass_F(coarse, patch)
+
+    return ConservativeTreeMacroFlow2D{T}(
+        :poiseuille_route_native, coarse, patch, profile, analytic, l2, linf,
+        mass_initial, mass_final, mass_final - mass_initial, steps)
+end

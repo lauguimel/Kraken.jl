@@ -397,4 +397,34 @@ _stream_moving_wall_delta(volume, rho_wall, wall_u, q) =
         @test isapprox(active_mass_F(coarse, patch), mass0; atol=1e-10, rtol=0)
         @test active_momentum_F(coarse, patch)[1] > 1.0
     end
+
+    @testset "route native Couette runner has Phase-P profile gates" begin
+        result = run_conservative_tree_couette_route_native_2d()
+
+        @test result.flow == :couette_route_native
+        @test result.steps == 3000
+        @test abs(result.mass_drift) < 1e-9
+        @test result.l2_error < 7e-3
+        @test result.linf_error < 8e-3
+        @test result.ux_profile[end] > result.ux_profile[1] + 0.035
+        @test all(isfinite, result.ux_profile)
+    end
+
+    @testset "route native Poiseuille runner has Phase-P shape gates" begin
+        result = run_conservative_tree_poiseuille_route_native_2d()
+        center = div(length(result.ux_profile), 2)
+        left = result.ux_profile[2:center]
+        right = reverse(result.ux_profile[center+1:end-1])
+        ncmp = min(length(left), length(right))
+
+        @test result.flow == :poiseuille_route_native
+        @test result.steps == 3000
+        @test abs(result.mass_drift) < 1e-9
+        @test result.l2_error < 2e-2
+        @test result.linf_error < 2.5e-2
+        @test result.ux_profile[center] > 0.006
+        @test result.ux_profile[center] > result.ux_profile[2] + 0.005
+        @test result.ux_profile[center] > result.ux_profile[end-1] + 0.005
+        @test maximum(abs.(left[1:ncmp] .- right[1:ncmp])) < 3e-3
+    end
 end
