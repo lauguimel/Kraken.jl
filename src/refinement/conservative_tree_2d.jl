@@ -900,21 +900,27 @@ function stream_bounceback_xy_solid_F_2d!(Fout::AbstractArray{<:Any,3},
     return Fout
 end
 
-function apply_zou_he_west_F_2d!(F::AbstractArray{T,3}, u_in, volume) where T
-    size(F, 3) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
+function apply_zou_he_west_cell_F_2d!(Fcell::AbstractVector{T}, u_in, volume) where T
+    _check_d2q9_vector(Fcell, "Fcell")
     u = T(u_in)
     vol = T(volume)
+    f1 = Fcell[1] / vol
+    f3 = Fcell[3] / vol
+    f4 = Fcell[4] / vol
+    f5 = Fcell[5] / vol
+    f7 = Fcell[7] / vol
+    f8 = Fcell[8] / vol
+    rho_wall = (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / (one(T) - u)
+    Fcell[2] = vol * (f4 + T(2//3) * rho_wall * u)
+    Fcell[6] = vol * (f8 - T(0.5) * (f3 - f5) + T(1//6) * rho_wall * u)
+    Fcell[9] = vol * (f7 + T(0.5) * (f3 - f5) + T(1//6) * rho_wall * u)
+    return Fcell
+end
+
+function apply_zou_he_west_F_2d!(F::AbstractArray{T,3}, u_in, volume) where T
+    size(F, 3) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
     @inbounds for j in axes(F, 2)
-        f1 = F[1, j, 1] / vol
-        f3 = F[1, j, 3] / vol
-        f4 = F[1, j, 4] / vol
-        f5 = F[1, j, 5] / vol
-        f7 = F[1, j, 7] / vol
-        f8 = F[1, j, 8] / vol
-        rho_wall = (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / (one(T) - u)
-        F[1, j, 2] = vol * (f4 + T(2//3) * rho_wall * u)
-        F[1, j, 6] = vol * (f8 - T(0.5) * (f3 - f5) + T(1//6) * rho_wall * u)
-        F[1, j, 9] = vol * (f7 + T(0.5) * (f3 - f5) + T(1//6) * rho_wall * u)
+        apply_zou_he_west_cell_F_2d!(@view(F[1, j, :]), u_in, volume)
     end
     return F
 end
@@ -923,41 +929,40 @@ function apply_zou_he_west_F_2d!(F::AbstractArray{T,3}, u_in, volume,
                                  is_solid::AbstractArray{Bool,2}) where T
     size(F, 3) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
     _check_solid_mask_layout(F, is_solid)
-    u = T(u_in)
-    vol = T(volume)
     @inbounds for j in axes(F, 2)
         is_solid[1, j] && continue
-        f1 = F[1, j, 1] / vol
-        f3 = F[1, j, 3] / vol
-        f4 = F[1, j, 4] / vol
-        f5 = F[1, j, 5] / vol
-        f7 = F[1, j, 7] / vol
-        f8 = F[1, j, 8] / vol
-        rho_wall = (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / (one(T) - u)
-        F[1, j, 2] = vol * (f4 + T(2//3) * rho_wall * u)
-        F[1, j, 6] = vol * (f8 - T(0.5) * (f3 - f5) + T(1//6) * rho_wall * u)
-        F[1, j, 9] = vol * (f7 + T(0.5) * (f3 - f5) + T(1//6) * rho_wall * u)
+        apply_zou_he_west_cell_F_2d!(@view(F[1, j, :]), u_in, volume)
     end
     return F
+end
+
+function apply_zou_he_pressure_east_cell_F_2d!(
+        Fcell::AbstractVector{T},
+        volume;
+        rho_out=one(T)) where T
+    _check_d2q9_vector(Fcell, "Fcell")
+    vol = T(volume)
+    rho = T(rho_out)
+    f1 = Fcell[1] / vol
+    f2 = Fcell[2] / vol
+    f3 = Fcell[3] / vol
+    f5 = Fcell[5] / vol
+    f6 = Fcell[6] / vol
+    f9 = Fcell[9] / vol
+    ux = -one(T) + (f1 + f3 + f5 + T(2) * (f2 + f6 + f9)) / rho
+    Fcell[4] = vol * (f2 - T(2//3) * rho * ux)
+    Fcell[7] = vol * (f9 - T(0.5) * (f3 - f5) - T(1//6) * rho * ux)
+    Fcell[8] = vol * (f6 + T(0.5) * (f3 - f5) - T(1//6) * rho * ux)
+    return Fcell
 end
 
 function apply_zou_he_pressure_east_F_2d!(F::AbstractArray{T,3}, volume;
                                           rho_out=one(T)) where T
     size(F, 3) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
-    vol = T(volume)
-    rho = T(rho_out)
     i = last(axes(F, 1))
     @inbounds for j in axes(F, 2)
-        f1 = F[i, j, 1] / vol
-        f2 = F[i, j, 2] / vol
-        f3 = F[i, j, 3] / vol
-        f5 = F[i, j, 5] / vol
-        f6 = F[i, j, 6] / vol
-        f9 = F[i, j, 9] / vol
-        ux = -one(T) + (f1 + f3 + f5 + T(2) * (f2 + f6 + f9)) / rho
-        F[i, j, 4] = vol * (f2 - T(2//3) * rho * ux)
-        F[i, j, 7] = vol * (f9 - T(0.5) * (f3 - f5) - T(1//6) * rho * ux)
-        F[i, j, 8] = vol * (f6 + T(0.5) * (f3 - f5) - T(1//6) * rho * ux)
+        apply_zou_he_pressure_east_cell_F_2d!(
+            @view(F[i, j, :]), volume; rho_out=rho_out)
     end
     return F
 end
@@ -967,21 +972,11 @@ function apply_zou_he_pressure_east_F_2d!(F::AbstractArray{T,3}, volume,
                                           rho_out=one(T)) where T
     size(F, 3) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
     _check_solid_mask_layout(F, is_solid)
-    vol = T(volume)
-    rho = T(rho_out)
     i = last(axes(F, 1))
     @inbounds for j in axes(F, 2)
         is_solid[i, j] && continue
-        f1 = F[i, j, 1] / vol
-        f2 = F[i, j, 2] / vol
-        f3 = F[i, j, 3] / vol
-        f5 = F[i, j, 5] / vol
-        f6 = F[i, j, 6] / vol
-        f9 = F[i, j, 9] / vol
-        ux = -one(T) + (f1 + f3 + f5 + T(2) * (f2 + f6 + f9)) / rho
-        F[i, j, 4] = vol * (f2 - T(2//3) * rho * ux)
-        F[i, j, 7] = vol * (f9 - T(0.5) * (f3 - f5) - T(1//6) * rho * ux)
-        F[i, j, 8] = vol * (f6 + T(0.5) * (f3 - f5) - T(1//6) * rho * ux)
+        apply_zou_he_pressure_east_cell_F_2d!(
+            @view(F[i, j, :]), volume; rho_out=rho_out)
     end
     return F
 end

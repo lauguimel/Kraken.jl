@@ -409,6 +409,26 @@ end
         @test active_momentum_F(coarse, patch)[1] > 1.0
     end
 
+    @testset "integrated Zou-He cell closures impose moments" begin
+        volume = 0.25
+        west = zeros(Float64, 9)
+        fill_equilibrium_integrated_D2Q9!(west, volume, 1.0, 0.0, 0.0)
+        apply_zou_he_west_cell_F_2d!(west, 0.04, volume)
+        rho_west = mass_F(west) / volume
+        ux_west = (momentum_F(west)[1] / volume) / rho_west
+
+        east = zeros(Float64, 9)
+        fill_equilibrium_integrated_D2Q9!(east, volume, 1.0, 0.02, 0.0)
+        apply_zou_he_pressure_east_cell_F_2d!(east, volume; rho_out=1.1)
+        rho_east = mass_F(east) / volume
+
+        @test isapprox(ux_west, 0.04; atol=1e-14, rtol=0)
+        @test isapprox(rho_east, 1.1; atol=1e-14, rtol=0)
+        @test_throws ArgumentError apply_zou_he_west_cell_F_2d!(zeros(8), 0.04, volume)
+        @test_throws ArgumentError apply_zou_he_pressure_east_cell_F_2d!(
+            zeros(8), volume; rho_out=1.0)
+    end
+
     @testset "route native Couette runner has Phase-P profile gates" begin
         result = run_conservative_tree_couette_route_native_2d()
 
