@@ -59,6 +59,141 @@ function _check_route_stream_topology_layout(topology::ConservativeTreeTopology2
     return nothing
 end
 
+function _cell_id_by_coord_2d(topology::ConservativeTreeTopology2D)
+    cell_id_by_coord = Dict{Tuple{Int,Int,Int},Int}()
+    @inbounds for (id, cell) in pairs(topology.cells)
+        cell_id_by_coord[_tree_topology_key(cell.level, cell.i, cell.j)] = id
+    end
+    return cell_id_by_coord
+end
+
+@inline function _scatter_route_packet_2d!(coarse_out::AbstractArray{<:Any,3},
+                                           patch_out::ConservativeTreePatch2D,
+                                           coarse_in::AbstractArray{<:Any,3},
+                                           patch_in::ConservativeTreePatch2D,
+                                           src_cell::ConservativeTreeCell2D,
+                                           dst_cell::ConservativeTreeCell2D,
+                                           q::Int,
+                                           weight)
+    packet = _cell_Fq_2d(coarse_in, patch_in, src_cell, q)
+    _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, q, weight * packet)
+    return nothing
+end
+
+@inline function _periodic_x_wrapped(i::Int, nx::Int)
+    return i < 1 ? nx : (i > nx ? 1 : i)
+end
+
+function _stream_periodic_x_boundary_route_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        cell_id_by_coord,
+        route::ConservativeTreeRoute2D,
+        nx::Int,
+        ny::Int)
+    src_cell = topology.cells[route.src]
+    q = route.q
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+    cx == 0 && return false
+
+    if src_cell.level == 0
+        i_raw = src_cell.i + cx
+        j_dst = src_cell.j + cy
+        (i_raw < 1 || i_raw > nx) || return false
+        1 <= j_dst <= ny || return false
+
+        i_dst = _periodic_x_wrapped(i_raw, nx)
+        if _inside_range(i_dst, j_dst, patch_in.parent_i_range, patch_in.parent_j_range)
+            di = -cx
+            dj = cy == 0 ? 0 : -cy
+            specs = _coarse_to_fine_route_specs(cell_id_by_coord, i_dst, j_dst, di, dj)
+            @inbounds for spec in specs
+                dst, weight, _ = spec
+                dst_cell = topology.cells[dst]
+                _scatter_route_packet_2d!(coarse_out, patch_out,
+                                           coarse_in, patch_in,
+                                           src_cell, dst_cell, q, weight)
+            end
+        else
+            dst = cell_id_by_coord[_tree_topology_key(0, i_dst, j_dst)]
+            dst_cell = topology.cells[dst]
+            _scatter_route_packet_2d!(coarse_out, patch_out,
+                                       coarse_in, patch_in,
+                                       src_cell, dst_cell, q, route.weight)
+        end
+        return true
+    end
+
+    i_raw = src_cell.i + cx
+    j_dst = src_cell.j + cy
+    (i_raw < 1 || i_raw > 2 * nx) || return false
+    1 <= j_dst <= 2 * ny || return false
+
+    i_dst = _periodic_x_wrapped(i_raw, 2 * nx)
+    if _inside_fine_patch(i_dst, j_dst, patch_in)
+        dst = cell_id_by_coord[_tree_topology_key(1, i_dst, j_dst)]
+        dst_cell = topology.cells[dst]
+        _scatter_route_packet_2d!(coarse_out, patch_out,
+                                   coarse_in, patch_in,
+                                   src_cell, dst_cell, q, route.weight)
+    else
+        i_parent, j_parent = _coarse_parent_from_fine(i_dst, j_dst)
+        dst = cell_id_by_coord[_tree_topology_key(0, i_parent, j_parent)]
+        dst_cell = topology.cells[dst]
+        _scatter_route_packet_2d!(coarse_out, patch_out,
+                                   coarse_in, patch_in,
+                                   src_cell, dst_cell, q, route.weight)
+    end
+    return true
+end
+
+function _stream_composite_routes_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        boundary_policy::Symbol,
+        clear::Bool)
+    _check_composite_pair_layout(coarse_out, patch_out, coarse_in, patch_in)
+    _check_route_stream_topology_layout(topology, coarse_in, patch_in)
+    _check_route_stream_topology_layout(topology, coarse_out, patch_out)
+
+    if clear
+        coarse_out .= 0
+        patch_out.fine_F .= 0
+        patch_out.coarse_shadow_F .= 0
+    end
+
+    nx = size(coarse_in, 1)
+    ny = size(coarse_in, 2)
+    cell_id_by_coord = boundary_policy == :periodic_x ?
+        _cell_id_by_coord_2d(topology) : nothing
+
+    @inbounds for route in topology.routes
+        if route.kind == ROUTE_BOUNDARY
+            boundary_policy == :skip && continue
+            boundary_policy == :periodic_x ||
+                throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
+            _stream_periodic_x_boundary_route_2d!(
+                coarse_out, patch_out, coarse_in, patch_in,
+                topology, cell_id_by_coord, route, nx, ny)
+            continue
+        end
+
+        src_cell = topology.cells[route.src]
+        dst_cell = topology.cells[route.dst]
+        _scatter_route_packet_2d!(coarse_out, patch_out, coarse_in, patch_in,
+                                   src_cell, dst_cell, route.q, route.weight)
+    end
+    coalesce_patch_to_shadow_F_2d!(patch_out)
+    return coarse_out, patch_out
+end
+
 """
     stream_composite_routes_interior_F_2d!(coarse_out, patch_out,
                                            coarse_in, patch_in, topology;
@@ -79,25 +214,31 @@ function stream_composite_routes_interior_F_2d!(
         patch_in::ConservativeTreePatch2D,
         topology::ConservativeTreeTopology2D;
         clear::Bool=true)
-    _check_composite_pair_layout(coarse_out, patch_out, coarse_in, patch_in)
-    _check_route_stream_topology_layout(topology, coarse_in, patch_in)
-    _check_route_stream_topology_layout(topology, coarse_out, patch_out)
-
-    if clear
-        coarse_out .= 0
-        patch_out.fine_F .= 0
-        patch_out.coarse_shadow_F .= 0
-    end
-
-    @inbounds for route in topology.routes
-        route.kind == ROUTE_BOUNDARY && continue
-        src_cell = topology.cells[route.src]
-        dst_cell = topology.cells[route.dst]
-        packet = _cell_Fq_2d(coarse_in, patch_in, src_cell, route.q)
-        _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, route.q,
-                         route.weight * packet)
-    end
-    coalesce_patch_to_shadow_F_2d!(patch_out)
-    return coarse_out, patch_out
+    return _stream_composite_routes_F_2d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          topology, :skip, clear)
 end
 
+"""
+    stream_composite_routes_periodic_x_F_2d!(coarse_out, patch_out,
+                                             coarse_in, patch_in, topology;
+                                             clear=true)
+
+Scatter integrated D2Q9 populations along all interior routes and wrap
+boundary packets that leave through the periodic x direction.
+
+Packets leaving through y boundaries are still skipped. This keeps the
+Milestone-1 boundary surface explicit: periodic x is native, wall and inlet/
+outlet closures are added by later surgical patches.
+"""
+function stream_composite_routes_periodic_x_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D;
+        clear::Bool=true)
+    return _stream_composite_routes_F_2d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          topology, :periodic_x, clear)
+end

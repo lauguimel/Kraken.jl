@@ -25,6 +25,27 @@ function _stream_zero_boundary_packets!(coarse_F, patch, topology)
     return coarse_F, patch
 end
 
+function _stream_zero_y_boundary_packets!(coarse_F, patch, topology)
+    ny = size(coarse_F, 2)
+    for idx in topology.boundary_links
+        link = topology.links[idx]
+        cell = topology.cells[link.src]
+        cy = d2q9_cy(link.q)
+        if cell.level == 0
+            j_raw = cell.j + cy
+            1 <= j_raw <= ny && continue
+            coarse_F[cell.i, cell.j, link.q] = 0
+        else
+            j_raw = cell.j + cy
+            1 <= j_raw <= 2 * ny && continue
+            i0 = 2 * first(patch.parent_i_range) - 1
+            j0 = 2 * first(patch.parent_j_range) - 1
+            patch.fine_F[cell.i - i0 + 1, cell.j - j0 + 1, link.q] = 0
+        end
+    end
+    return coarse_F, patch
+end
+
 @testset "Conservative tree route streaming 2D" begin
     Nx, Ny = 9, 10
     patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
@@ -134,5 +155,80 @@ end
         @test_throws ArgumentError stream_composite_routes_interior_F_2d!(
             coarse_out, wrong_patch, coarse_in, patch_in, topology)
     end
-end
 
+    @testset "periodic x wraps coarse boundary packets" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        coarse_in[1, 5, 4] = 2.5
+        coarse_in[Nx, 5, 2] = 3.5
+
+        stream_composite_routes_periodic_x_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[Nx, 5, 4] == 2.5
+        @test coarse_out[1, 5, 2] == 3.5
+        @test isapprox(active_mass_F(coarse_out, patch_out), 6.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wraps coarse boundary packets into fine patch" begin
+        nx, ny = 6, 6
+        patch_in = create_conservative_tree_patch_2d(5:6, 3:4)
+        patch_out = create_conservative_tree_patch_2d(5:6, 3:4)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch_in)
+        coarse_in = zeros(Float64, nx, ny, 9)
+        coarse_out = similar(coarse_in)
+        coarse_in[1, 3, 4] = 8.0
+
+        stream_composite_routes_periodic_x_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test patch_out.fine_F[4, 1, 4] == 4.0
+        @test patch_out.fine_F[4, 2, 4] == 4.0
+        @test isapprox(active_mass_F(coarse_out, patch_out), 8.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wraps fine boundary packets to coarse cells" begin
+        nx, ny = 6, 6
+        patch_in = create_conservative_tree_patch_2d(1:2, 3:4)
+        patch_out = create_conservative_tree_patch_2d(1:2, 3:4)
+        topology = create_conservative_tree_topology_2d(nx, ny, patch_in)
+        coarse_in = zeros(Float64, nx, ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in.fine_F[1, 1, 4] = 6.0
+
+        stream_composite_routes_periodic_x_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[nx, 3, 4] == 6.0
+        @test isapprox(active_mass_F(coarse_out, patch_out), 6.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x keeps all non-y-boundary population sums" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        topology = create_conservative_tree_topology_2d(Nx, Ny, patch_in)
+
+        for q in 1:9, j in axes(coarse_in, 2), i in axes(coarse_in, 1)
+            if !(i in patch_in.parent_i_range && j in patch_in.parent_j_range)
+                coarse_in[i, j, q] = 0.25q + i / 41 + j / 67 + i * j / 8192
+            end
+        end
+        for q in 1:9, j in axes(patch_in.fine_F, 2), i in axes(patch_in.fine_F, 1)
+            patch_in.fine_F[i, j, q] = 0.125q + i / 131 + j / 257 + i * j / 16384
+        end
+        _stream_zero_y_boundary_packets!(coarse_in, patch_in, topology)
+        pop0 = active_population_sums_F(coarse_in, patch_in)
+
+        stream_composite_routes_periodic_x_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test isapprox(active_population_sums_F(coarse_out, patch_out), pop0;
+                       atol=1e-12, rtol=0)
+        @test isapprox(active_mass_F(coarse_out, patch_out), active_mass_F(coarse_in, patch_in);
+                       atol=1e-12, rtol=0)
+    end
+end
