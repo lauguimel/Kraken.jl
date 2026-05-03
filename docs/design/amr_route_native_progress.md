@@ -11,6 +11,7 @@ macro-flow.
 
 ```bash
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_streaming_2d.jl")'
+julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_adaptation_2d.jl"); include("test/test_conservative_tree_multipatch_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_topology_2d.jl"); include("test/test_conservative_tree_2d.jl")'
 ```
 
@@ -136,7 +137,13 @@ Implemented:
 - short route-native Poiseuille macro-flow driven by velocity-gradient regrid;
 - mask-adaptive VFS route-native macro-flow around the step;
 - range-level hysteresis primitive for grow/shrink decisions;
-- prescribed adaptive Poiseuille route-native canary.
+- prescribed adaptive Poiseuille route-native canary;
+- production-facing adaptation policy/proposal/plan layer;
+- parent-grid indicator plans with padding, min-size, growth limits and
+  hysteresis;
+- `.krk` `Refine` blocks converted to named adaptation proposals;
+- plan application helper that calls the direct conservative regrid path only
+  when the selected patch range changes.
 
 Validated by:
 
@@ -152,7 +159,10 @@ Validated by:
   route-native run;
 - mask-driven VFS regrids around the step while keeping fluid-mass drift
   bounded;
-- adaptive Poiseuille keeps mass drift bounded.
+- adaptive Poiseuille keeps mass drift bounded;
+- policy-level tests cover domain clamp, min-size expansion, max-growth
+  limiting, near-shrink hysteresis, indicator-driven plans, `.krk` proposals
+  and conservative regrid through a plan.
 
 Not done yet:
 
@@ -163,8 +173,8 @@ Not done yet:
 
 Next surgical patch:
 
-- add route-native open-boundary patch tests before attempting BFS in this D
-  stream.
+- add physical error indicators on top of the policy/proposal/plan layer, then
+  keep BFS blocked behind route-native open-boundary patch tests.
 
 ## 6. Sous-Cycling Temporel 2D
 

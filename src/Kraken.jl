@@ -106,6 +106,7 @@ include("refinement/conservative_tree_topology_2d.jl")
 include("refinement/conservative_tree_topology_3d.jl")
 include("refinement/conservative_tree_streaming_3d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
+include("refinement/conservative_tree_adaptation_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
@@ -371,6 +372,13 @@ export conservative_tree_hysteresis_patch_range_2d
 export conservative_tree_velocity_gradient_patch_range_2d
 export adapt_conservative_tree_patch_to_solid_mask_2d
 export adapt_conservative_tree_patch_to_velocity_gradient_2d
+export ConservativeTreeAdaptationPolicy2D, ConservativeTreePatchProposal2D
+export ConservativeTreeAdaptationPlan2D
+export conservative_tree_adaptation_plan_2d
+export conservative_tree_adaptation_plan_from_proposal_2d
+export conservative_tree_indicator_adaptation_plan_2d
+export conservative_tree_patch_proposals_from_krk_2d
+export adapt_conservative_tree_patch_with_plan_2d
 export ConservativeTreeAdaptiveRun2D
 export ConservativeTreeSolidAdaptiveRun2D
 export ConservativeTreeOpenChannelRun2D
