@@ -101,6 +101,7 @@ include("multiblock/multiblock.jl")
 include("refinement/refinement.jl")
 include("refinement/conservative_tree_2d.jl")
 include("refinement/conservative_tree_topology_2d.jl")
+include("refinement/conservative_tree_streaming_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
@@ -320,6 +321,7 @@ export ConservativeTreeTopology2D, create_conservative_tree_topology_2d
 export ConservativeTreeBlock2D, ConservativeTreePackedRoute2D
 export ConservativeTreePackedTopology2D, pack_conservative_tree_topology_2d
 export active_volume, morton_key_2d
+export stream_composite_routes_interior_F_2d!
 export ConservativeTreeMacroFlow2D, ConservativeTreeCylinderResult2D
 export ConservativeTreeCylinderChannelResult2D
 export ConservativeTreeSolidFlowResult2D

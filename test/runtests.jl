@@ -25,6 +25,7 @@ using Kraken
     include("test_refinement.jl")
     include("test_conservative_tree_2d.jl")
     include("test_conservative_tree_topology_2d.jl")
+    include("test_conservative_tree_streaming_2d.jl")
     include("test_curvilinear_mesh.jl")
     include("test_slbm.jl")
     include("test_slbm_taylor_green.jl")

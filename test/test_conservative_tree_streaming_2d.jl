@@ -1,0 +1,138 @@
+using Test
+using Kraken
+
+function _stream_cell_id(topology, level, i, j)
+    for (id, cell) in pairs(topology.cells)
+        if cell.level == level && cell.i == i && cell.j == j
+            return id
+        end
+    end
+    error("cell not found: level=$level i=$i j=$j")
+end
+
+function _stream_zero_boundary_packets!(coarse_F, patch, topology)
+    for idx in topology.boundary_links
+        link = topology.links[idx]
+        cell = topology.cells[link.src]
+        if cell.level == 0
+            coarse_F[cell.i, cell.j, link.q] = 0
+        else
+            i0 = 2 * first(patch.parent_i_range) - 1
+            j0 = 2 * first(patch.parent_j_range) - 1
+            patch.fine_F[cell.i - i0 + 1, cell.j - j0 + 1, link.q] = 0
+        end
+    end
+    return coarse_F, patch
+end
+
+@testset "Conservative tree route streaming 2D" begin
+    Nx, Ny = 9, 10
+    patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+    patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch_in)
+
+    @testset "direct same-level route moves one packet" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        coarse_in[1, 5, 2] = 3.25
+
+        stream_composite_routes_interior_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[2, 5, 2] == 3.25
+        @test isapprox(active_mass_F(coarse_out, patch_out), 3.25; atol=1e-14, rtol=0)
+    end
+
+    @testset "coarse to fine face route splits one packet" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        coarse_in[2, 5, 2] = 4.0
+
+        stream_composite_routes_interior_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test patch_out.fine_F[1, 3, 2] == 2.0
+        @test patch_out.fine_F[1, 4, 2] == 2.0
+        @test isapprox(active_mass_F(coarse_out, patch_out), 4.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "coarse to fine corner route sends one packet" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        coarse_in[2, 3, 6] = 5.5
+
+        stream_composite_routes_interior_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test patch_out.fine_F[1, 1, 6] == 5.5
+        @test isapprox(active_mass_F(coarse_out, patch_out), 5.5; atol=1e-14, rtol=0)
+    end
+
+    @testset "fine to coarse face routes coalesce by accumulation" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_in.fine_F[1, 3, 4] = 1.25
+        patch_in.fine_F[1, 4, 4] = 2.75
+
+        stream_composite_routes_interior_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[2, 5, 4] == 4.0
+        @test isapprox(active_mass_F(coarse_out, patch_out), 4.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "fine to coarse corner route sends one packet" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_in.fine_F[1, 1, 8] = 7.0
+
+        stream_composite_routes_interior_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[2, 3, 8] == 7.0
+        @test isapprox(active_mass_F(coarse_out, patch_out), 7.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "all non-boundary routes conserve active population sums" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
+        patch_out = create_conservative_tree_patch_2d(3:5, 4:6)
+
+        for q in 1:9, j in axes(coarse_in, 2), i in axes(coarse_in, 1)
+            if !(i in patch_in.parent_i_range && j in patch_in.parent_j_range)
+                coarse_in[i, j, q] = q + i / 32 + j / 64 + i * j / 4096
+            end
+        end
+        for q in 1:9, j in axes(patch_in.fine_F, 2), i in axes(patch_in.fine_F, 1)
+            patch_in.fine_F[i, j, q] = q / 2 + i / 128 + j / 256 + i * j / 8192
+        end
+        _stream_zero_boundary_packets!(coarse_in, patch_in, topology)
+        pop0 = active_population_sums_F(coarse_in, patch_in)
+
+        stream_composite_routes_interior_F_2d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test isapprox(active_population_sums_F(coarse_out, patch_out), pop0;
+                       atol=1e-12, rtol=0)
+        @test isapprox(active_mass_F(coarse_out, patch_out), active_mass_F(coarse_in, patch_in);
+                       atol=1e-12, rtol=0)
+    end
+
+    @testset "layout checks catch mismatched patch" begin
+        coarse_in = zeros(Float64, Nx, Ny, 9)
+        coarse_out = similar(coarse_in)
+        wrong_patch = create_conservative_tree_patch_2d(4:6, 4:6)
+        @test_throws ArgumentError stream_composite_routes_interior_F_2d!(
+            coarse_out, wrong_patch, coarse_in, patch_in, topology)
+    end
+end
+
