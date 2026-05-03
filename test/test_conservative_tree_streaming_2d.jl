@@ -534,4 +534,35 @@ end
         @test_throws ArgumentError adapt_conservative_tree_patch_to_solid_mask_2d(
             coarse, patch, falses(2 * nx, 2 * ny))
     end
+
+    @testset "direct regrid matches leaf oracle for grow shrink and shift" begin
+        nx, ny = 11, 10
+        patch = create_conservative_tree_patch_2d(3:5, 4:6)
+        coarse = zeros(Float64, nx, ny, 9)
+        for q in 1:9, j in axes(coarse, 2), i in axes(coarse, 1)
+            if !(i in patch.parent_i_range && j in patch.parent_j_range)
+                coarse[i, j, q] = 0.12 + q / 29 + i / 53 + j / 61 + i * j / 5000
+            end
+        end
+        for q in 1:9, j in axes(patch.fine_F, 2), i in axes(patch.fine_F, 1)
+            patch.fine_F[i, j, q] = 0.03 + q / 71 + i / 107 + j / 139 + i * j / 9000
+        end
+
+        for ranges in ((2:7, 3:8), (4:4, 5:5), (6:9, 2:4))
+            patch_oracle = create_conservative_tree_patch_2d(ranges[1], ranges[2])
+            coarse_oracle = similar(coarse)
+            patch_direct = create_conservative_tree_patch_2d(ranges[1], ranges[2])
+            coarse_direct = similar(coarse)
+
+            regrid_conservative_tree_patch_F_2d!(
+                coarse_oracle, patch_oracle, coarse, patch)
+            regrid_conservative_tree_patch_direct_F_2d!(
+                coarse_direct, patch_direct, coarse, patch)
+
+            @test isapprox(coarse_direct, coarse_oracle; atol=1e-13, rtol=0)
+            @test isapprox(patch_direct.fine_F, patch_oracle.fine_F; atol=1e-13, rtol=0)
+            @test isapprox(active_population_sums_F(coarse_direct, patch_direct),
+                           active_population_sums_F(coarse, patch); atol=1e-11, rtol=0)
+        end
+    end
 end

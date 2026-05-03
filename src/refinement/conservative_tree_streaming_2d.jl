@@ -483,6 +483,53 @@ function regrid_conservative_tree_patch_F_2d!(
     return coarse_out, patch_out
 end
 
+function _source_parent_leaf_block_F_2d!(
+        leaf_block::AbstractArray{<:Any,3},
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        I::Int,
+        J::Int)
+    _check_child_block_2d(leaf_block, "leaf_block")
+    if _inside_range(I, J, patch_in.parent_i_range, patch_in.parent_j_range)
+        il, jl = _patch_local_parent_index(patch_in, I, J)
+        leaf_block .= _child_block_view(patch_in.fine_F, il, jl)
+    else
+        _explode_limited_linear_composite_F_2d!(leaf_block, coarse_in, patch_in, I, J)
+    end
+    return leaf_block
+end
+
+function regrid_conservative_tree_patch_direct_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D)
+    size(coarse_out) == size(coarse_in) ||
+        throw(ArgumentError("coarse_out and coarse_in must have the same size"))
+    _check_composite_coarse_layout(coarse_in, patch_in)
+    _check_composite_coarse_layout(coarse_out, patch_out)
+    coalesce_patch_to_shadow_F_2d!(patch_in)
+
+    coarse_out .= 0
+    patch_out.fine_F .= 0
+    patch_out.coarse_shadow_F .= 0
+    leaf_block = zeros(promote_type(eltype(coarse_in), eltype(patch_in.fine_F)),
+                       2, 2, 9)
+
+    @inbounds for J in axes(coarse_in, 2), I in axes(coarse_in, 1)
+        _source_parent_leaf_block_F_2d!(leaf_block, coarse_in, patch_in, I, J)
+        if _inside_range(I, J, patch_out.parent_i_range, patch_out.parent_j_range)
+            il, jl = _patch_local_parent_index(patch_out, I, J)
+            _child_block_view(patch_out.fine_F, il, jl) .= leaf_block
+        else
+            coalesce_F_2d!(@view(coarse_out[I, J, :]), leaf_block)
+        end
+    end
+
+    coalesce_patch_to_shadow_F_2d!(patch_out)
+    return coarse_out, patch_out
+end
+
 function adapt_conservative_tree_patch_to_solid_mask_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},
@@ -512,7 +559,7 @@ function adapt_conservative_tree_patch_to_solid_mask_2d(
 
     patch_out = create_conservative_tree_patch_2d(i_min:i_max, j_min:j_max; T=T)
     coarse_out = similar(coarse_F)
-    regrid_conservative_tree_patch_F_2d!(coarse_out, patch_out, coarse_F, patch)
+    regrid_conservative_tree_patch_direct_F_2d!(coarse_out, patch_out, coarse_F, patch)
     return (coarse_F=coarse_out, patch=patch_out)
 end
 
