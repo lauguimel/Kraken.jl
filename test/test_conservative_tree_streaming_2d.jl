@@ -625,6 +625,32 @@ end
         @test_throws ArgumentError conservative_tree_gradient_indicator_2d(bad)
     end
 
+    @testset "composite velocity field feeds gradient patch selector" begin
+        nx, ny = 6, 5
+        volume_leaf = 0.25
+        rho = 1.0
+        coarse = zeros(Float64, nx, ny, 9)
+        patch = create_conservative_tree_patch_2d(1:nx, 1:ny)
+        ux_ref = zeros(Float64, 2 * nx, 2 * ny)
+        ux_ref[7:8, 4:6] .= 0.04
+
+        for j in axes(patch.fine_F, 2), i in axes(patch.fine_F, 1)
+            fill_equilibrium_integrated_D2Q9!(
+                @view(patch.fine_F[i, j, :]), volume_leaf, rho, ux_ref[i, j], 0.0)
+        end
+
+        velocity = composite_leaf_velocity_field_2d(
+            coarse, patch; volume_leaf=volume_leaf)
+        indicator = conservative_tree_gradient_indicator_2d(velocity.ux)
+        ranges = conservative_tree_indicator_patch_range_2d(
+            indicator; threshold=0.015, pad=0)
+
+        @test maximum(abs.(velocity.ux .- ux_ref)) < 1e-14
+        @test maximum(abs.(velocity.uy)) < 1e-14
+        @test ranges.i_range == 6:9
+        @test ranges.j_range == 3:7
+    end
+
     @testset "mask-driven patch adaptation conserves active populations" begin
         nx, ny = 10, 9
         patch = create_conservative_tree_patch_2d(2:4, 2:4)

@@ -1577,6 +1577,27 @@ function composite_leaf_mean_ux_profile(coarse_F::AbstractArray{T,3},
     return profile
 end
 
+function composite_leaf_velocity_field_2d(coarse_F::AbstractArray{T,3},
+                                          patch::ConservativeTreePatch2D{T};
+                                          volume_leaf::T=T(0.25),
+                                          force_x::T=zero(T),
+                                          force_y::T=zero(T)) where T
+    leaf = zeros(T, 2 * size(coarse_F, 1), 2 * size(coarse_F, 2), 9)
+    composite_to_leaf_F_2d!(leaf, coarse_F, patch)
+
+    ux = zeros(T, size(leaf, 1), size(leaf, 2))
+    uy = similar(ux)
+    @inbounds for j in axes(leaf, 2), i in axes(leaf, 1)
+        cell = @view leaf[i, j, :]
+        rho = mass_F(cell) / volume_leaf
+        rho > zero(T) || throw(ArgumentError("leaf cell density must be positive"))
+        mx, my = momentum_F(cell)
+        ux[i, j] = (mx / volume_leaf + force_x / 2) / rho
+        uy[i, j] = (my / volume_leaf + force_y / 2) / rho
+    end
+    return (ux=ux, uy=uy)
+end
+
 function couette_analytic_profile_2d(ny::Int, U)
     ny >= 2 || throw(ArgumentError("ny must be >= 2"))
     T = typeof(float(U))
