@@ -134,6 +134,55 @@ end
                        atol=1e-11, rtol=0)
     end
 
+    @testset "periodic x wraps coarse boundary packets" begin
+        patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        patch_out = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        coarse_in = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_out = similar(coarse_in)
+        coarse_in[1, 4, 2, 3] = 2.5
+        coarse_in[Nx, 4, 2, 2] = 3.5
+
+        stream_composite_routes_periodic_x_F_3d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology)
+
+        @test coarse_out[Nx, 4, 2, 3] == 2.5
+        @test coarse_out[1, 4, 2, 2] == 3.5
+        @test isapprox(active_mass_F_3d(coarse_out, patch_out), 6.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wraps coarse boundary packets into fine patch" begin
+        patch_in = create_conservative_tree_patch_3d(1:2, 3:4, 2:3)
+        patch_out = create_conservative_tree_patch_3d(1:2, 3:4, 2:3)
+        topology_x = create_conservative_tree_topology_3d(Nx, Ny, Nz, patch_in)
+        coarse_in = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_out = similar(coarse_in)
+        coarse_in[Nx, 3, 2, 2] = 4.0
+
+        stream_composite_routes_periodic_x_F_3d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology_x)
+
+        @test patch_out.fine_F[1, 1, 1, 2] == 1.0
+        @test patch_out.fine_F[1, 2, 1, 2] == 1.0
+        @test patch_out.fine_F[1, 1, 2, 2] == 1.0
+        @test patch_out.fine_F[1, 2, 2, 2] == 1.0
+        @test isapprox(active_mass_F_3d(coarse_out, patch_out), 4.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "periodic x wraps fine boundary packets to coarse cells" begin
+        patch_in = create_conservative_tree_patch_3d(1:2, 3:4, 2:3)
+        patch_out = create_conservative_tree_patch_3d(1:2, 3:4, 2:3)
+        topology_x = create_conservative_tree_topology_3d(Nx, Ny, Nz, patch_in)
+        coarse_in = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_out = similar(coarse_in)
+        patch_in.fine_F[1, 1, 1, 3] = 2.75
+
+        stream_composite_routes_periodic_x_F_3d!(
+            coarse_out, patch_out, coarse_in, patch_in, topology_x)
+
+        @test coarse_out[Nx, 3, 2, 3] == 2.75
+        @test isapprox(active_mass_F_3d(coarse_out, patch_out), 2.75; atol=1e-14, rtol=0)
+    end
+
     @testset "layout checks catch mismatched patch" begin
         patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
         wrong_patch = create_conservative_tree_patch_3d(4:5, 4:5, 2:3)

@@ -86,6 +86,94 @@ end
     return nothing
 end
 
+function _cell_id_by_coord_3d(topology::ConservativeTreeTopology3D)
+    cell_id_by_coord = Dict{Tuple{Int,Int,Int,Int},Int}()
+    @inbounds for (id, cell) in pairs(topology.cells)
+        cell_id_by_coord[_tree_topology_key_3d(cell.level, cell.i, cell.j, cell.k)] = id
+    end
+    return cell_id_by_coord
+end
+
+@inline function _periodic_x_wrapped_3d(i::Int, nx::Int)
+    return i < 1 ? nx : (i > nx ? 1 : i)
+end
+
+function _stream_periodic_x_boundary_route_3d!(
+        coarse_out::AbstractArray{<:Any,4},
+        patch_out::ConservativeTreePatch3D,
+        coarse_in::AbstractArray{<:Any,4},
+        patch_in::ConservativeTreePatch3D,
+        topology::ConservativeTreeTopology3D,
+        cell_id_by_coord,
+        route::ConservativeTreeRoute3D,
+        nx::Int,
+        ny::Int,
+        nz::Int)
+    src_cell = topology.cells[route.src]
+    q = route.q
+    cx = d3q19_cx(q)
+    cy = d3q19_cy(q)
+    cz = d3q19_cz(q)
+    cx == 0 && return false
+
+    if src_cell.level == 0
+        i_raw = src_cell.i + cx
+        j_dst = src_cell.j + cy
+        k_dst = src_cell.k + cz
+        (i_raw < 1 || i_raw > nx) || return false
+        (1 <= j_dst <= ny && 1 <= k_dst <= nz) || return false
+
+        i_dst = _periodic_x_wrapped_3d(i_raw, nx)
+        if _inside_range_3d(i_dst, j_dst, k_dst,
+                            patch_in.parent_i_range,
+                            patch_in.parent_j_range,
+                            patch_in.parent_k_range)
+            di = -cx
+            dj = cy == 0 ? 0 : -cy
+            dk = cz == 0 ? 0 : -cz
+            specs = _coarse_to_fine_route_specs_3d(
+                cell_id_by_coord, i_dst, j_dst, k_dst, di, dj, dk)
+            @inbounds for spec in specs
+                dst, weight, _ = spec
+                dst_cell = topology.cells[dst]
+                _scatter_route_packet_3d!(coarse_out, patch_out,
+                                           coarse_in, patch_in,
+                                           src_cell, dst_cell, q, weight)
+            end
+        else
+            dst = cell_id_by_coord[_tree_topology_key_3d(0, i_dst, j_dst, k_dst)]
+            dst_cell = topology.cells[dst]
+            _scatter_route_packet_3d!(coarse_out, patch_out,
+                                      coarse_in, patch_in,
+                                      src_cell, dst_cell, q, route.weight)
+        end
+        return true
+    end
+
+    i_raw = src_cell.i + cx
+    j_dst = src_cell.j + cy
+    k_dst = src_cell.k + cz
+    (i_raw < 1 || i_raw > 2 * nx) || return false
+    (1 <= j_dst <= 2 * ny && 1 <= k_dst <= 2 * nz) || return false
+
+    i_dst = _periodic_x_wrapped_3d(i_raw, 2 * nx)
+    if _inside_fine_patch_3d(i_dst, j_dst, k_dst, patch_in)
+        dst = cell_id_by_coord[_tree_topology_key_3d(1, i_dst, j_dst, k_dst)]
+        dst_cell = topology.cells[dst]
+        _scatter_route_packet_3d!(coarse_out, patch_out,
+                                  coarse_in, patch_in,
+                                  src_cell, dst_cell, q, route.weight)
+    else
+        I_dst, J_dst, K_dst = _coarse_parent_from_fine_3d(i_dst, j_dst, k_dst)
+        dst = cell_id_by_coord[_tree_topology_key_3d(0, I_dst, J_dst, K_dst)]
+        dst_cell = topology.cells[dst]
+        _scatter_route_packet_3d!(coarse_out, patch_out,
+                                  coarse_in, patch_in,
+                                  src_cell, dst_cell, q, route.weight)
+    end
+    return true
+end
+
 function _stream_composite_routes_F_3d!(
         coarse_out::AbstractArray{<:Any,4},
         patch_out::ConservativeTreePatch3D,
@@ -104,10 +192,21 @@ function _stream_composite_routes_F_3d!(
         patch_out.coarse_shadow_F .= 0
     end
 
+    nx = size(coarse_in, 1)
+    ny = size(coarse_in, 2)
+    nz = size(coarse_in, 3)
+    cell_id_by_coord = boundary_policy == :periodic_x ?
+        _cell_id_by_coord_3d(topology) : nothing
+
     @inbounds for route in topology.routes
         if route.kind == ROUTE_BOUNDARY_3D
             boundary_policy == :skip && continue
-            throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
+            boundary_policy == :periodic_x ||
+                throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
+            _stream_periodic_x_boundary_route_3d!(
+                coarse_out, patch_out, coarse_in, patch_in, topology,
+                cell_id_by_coord, route, nx, ny, nz)
+            continue
         end
 
         src_cell = topology.cells[route.src]
@@ -141,4 +240,16 @@ function stream_composite_routes_interior_F_3d!(
     return _stream_composite_routes_F_3d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
                                           topology, :skip, clear)
+end
+
+function stream_composite_routes_periodic_x_F_3d!(
+        coarse_out::AbstractArray{<:Any,4},
+        patch_out::ConservativeTreePatch3D,
+        coarse_in::AbstractArray{<:Any,4},
+        patch_in::ConservativeTreePatch3D,
+        topology::ConservativeTreeTopology3D;
+        clear::Bool=true)
+    return _stream_composite_routes_F_3d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          topology, :periodic_x, clear)
 end

@@ -345,6 +345,7 @@ export ConservativeTreeCell3D, ConservativeTreeLink3D, ConservativeTreeRoute3D
 export ConservativeTreeTopology3D, create_conservative_tree_topology_3d
 export active_volume, morton_key_2d
 export stream_composite_routes_interior_F_3d!
+export stream_composite_routes_periodic_x_F_3d!
 export stream_composite_routes_interior_F_2d!
 export stream_composite_routes_periodic_x_F_2d!
 export stream_composite_routes_periodic_x_wall_y_F_2d!
