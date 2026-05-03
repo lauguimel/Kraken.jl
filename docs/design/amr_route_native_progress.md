@@ -11,6 +11,7 @@ macro-flow.
 
 ```bash
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_streaming_2d.jl")'
+julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_open_boundary_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_gpu_pack_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_subcycling_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_adaptation_2d.jl"); include("test/test_conservative_tree_multipatch_2d.jl")'
@@ -72,6 +73,9 @@ Done:
 - composite active-cell Zou-He west/east application for coarse and fine
   boundary cells;
 - one-step open-x route smoke with wall-y and composite Zou-He closures;
+- surgical open-boundary canaries for fine inlet/outlet faces when a patch
+  touches west/east boundaries;
+- short inlet-spanning open-channel smoke with bounded finite drift;
 - short route-native open-channel smoke with bounded mass drift;
 - bounce-back solid mask;
 - square obstacle route-native smoke;
@@ -80,13 +84,16 @@ Done:
 Not done yet:
 
 - longer open-channel/BFS stability with Zou-He route-native boundaries;
+- long inlet-spanning open-channel stability. A 40-step probe still shows large
+  mass drift, so this remains a BFS blocker;
 - BFS route-native validation. The current D stream has Poiseuille, Couette,
   square obstacle and VFS only.
 
 Next surgical patch:
 
-- extend the open-channel smoke toward an obstacle-free BFS precursor, then
-  add the step only after mass/momentum behaviour stays bounded.
+- debug the long inlet-spanning open-channel drift at the boundary packet level,
+  then extend toward an obstacle-free BFS precursor only after mass/momentum
+  behaviour stays bounded.
 
 ## 4. Multi-Patch Statique 2D
 
@@ -316,7 +323,8 @@ Couette + Poiseuille + square obstacle + VFS
 The wording must not claim:
 
 - BFS route-native, because it is not implemented in this D stream;
-- open boundaries, because Zou-He route-native is pending;
+- robust open boundaries, because only one-step/short smokes are covered and
+  long inlet-spanning drift remains unresolved;
 - multi-patch route-native transport or adaptation, because only ownership and
   `.krk` setup helpers are started;
 - subcycling;
@@ -329,5 +337,5 @@ Next commits should continue in this order:
 2. route tests over multi-patch ownership tables;
 3. subcycling ledger and packet canaries;
 4. GPU packing parity canaries;
-5. route-native open-boundary patch tests before any BFS macro-flow;
-6. BFS route-native macro-flow only after those open-boundary tests.
+5. debug long inlet-spanning open-channel drift with packet-level canaries;
+6. route-native BFS macro-flow only after those open-boundary tests.
