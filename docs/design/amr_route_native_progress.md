@@ -137,6 +137,13 @@ Aqua runs:
   yet a publication convergence claim; route-native obstacle metrics still
   differ materially from the leaf oracle while the transport mass ledger stays
   conservative.
+- `20761329.aqua` reran the benchmark after full-packet coarse-to-fine routes.
+  BFS streamwise velocity is much closer to the leaf oracle, but open-flow
+  mass drift remains high (`1.91e-1` versus `4.93e-3` for the oracle).
+- `20761330.aqua` reran the square/cylinder convergence ladder after
+  full-packet coarse-to-fine routes. Obstacle mass conservation remains at
+  roundoff; cylinder Cd moved closer to the leaf oracle but is still not a
+  convergence claim.
 
 ## 4. Multi-Patch Statique 2D
 
