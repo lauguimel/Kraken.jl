@@ -1936,6 +1936,112 @@ end
     @test maximum(cutlink_errors) > 1e-6
 end
 
+function _single_cutlink_wall_aligned_couette_once(q_out, q_wall_value, bc)
+    Nx = Ny = 9
+    i0 = j0 = 5
+    cx = D2Q9_CX[q_out]
+    cy = D2Q9_CY[q_out]
+    link_length = hypot(cx, cy)
+    nx = cx / link_length
+    ny = cy / link_length
+    tx = -ny
+    ty = nx
+    γ = 0.01
+    λ = 3.0
+    wall_x = (i0 - 1.0) + q_wall_value * cx
+    wall_y = (j0 - 1.0) + q_wall_value * cy
+
+    is_solid = falses(Nx, Ny)
+    is_solid[i0 + Int(cx), j0 + Int(cy)] = true
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    q_wall[i0, j0, q_out] = q_wall_value
+    ux = zeros(Float64, Nx, Ny)
+    uy = zeros(Float64, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        distance = (wall_x - (i - 1.0)) * nx + (wall_y - (j - 1.0)) * ny
+        ux[i, j] = γ * distance * tx
+        uy[i, j] = γ * distance * ty
+    end
+    dudx = -γ * tx * nx
+    dudy = -γ * tx * ny
+    dvdx = -γ * ty * nx
+    dvdy = -γ * ty * ny
+    cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+        dudx, dudy, dvdx, dvdy, λ,
+    )
+
+    Cxx = fill(cxx, Nx, Ny)
+    Cxy = fill(cxy, Nx, Ny)
+    Cyy = fill(cyy, Nx, Ny)
+    gxx = zeros(Float64, Nx, Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, ux, uy)
+    init_conformation_field_2d!(gxy, Cxy, ux, uy)
+    init_conformation_field_2d!(gyy, Cyy, ux, uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+
+    stream_2d!(bxx, gxx, Nx, Ny; sync=true)
+    stream_2d!(bxy, gxy, Nx, Ny; sync=true)
+    stream_2d!(byy, gyy, Nx, Ny; sync=true)
+    apply_polymer_wall_bc!(bxx, gxx, is_solid, q_wall, Cxx, ux, uy, bc)
+    apply_polymer_wall_bc!(bxy, gxy, is_solid, q_wall, Cxy, ux, uy, bc)
+    apply_polymer_wall_bc!(byy, gyy, is_solid, q_wall, Cyy, ux, uy, bc)
+    gxx, bxx = bxx, gxx
+    gxy, bxy = bxy, gxy
+    gyy, byy = byy, gyy
+
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    wall_error = max(abs(Cxx[i0, j0] - cxx), abs(Cxy[i0, j0] - cxy),
+                     abs(Cyy[i0, j0] - cyy))
+
+    collide_conformation_2d!(gxx, Cxx, ux, uy, Cxx, Cxy, Cyy,
+                             is_solid, 1.0, λ;
+                             magic=1e-6, component=1, divergence_mode=:trace_free)
+    collide_conformation_2d!(gxy, Cxy, ux, uy, Cxx, Cxy, Cyy,
+                             is_solid, 1.0, λ;
+                             magic=1e-6, component=2, divergence_mode=:trace_free)
+    collide_conformation_2d!(gyy, Cyy, ux, uy, Cxx, Cxy, Cyy,
+                             is_solid, 1.0, λ;
+                             magic=1e-6, component=3, divergence_mode=:trace_free)
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    cde_error = max(abs(Cxx[i0, j0] - cxx), abs(Cxy[i0, j0] - cxy),
+                    abs(Cyy[i0, j0] - cyy))
+    return (; wall_error, cde_error)
+end
+
+@testset "P18e single cut-link q-aware Couette canary before curved geometry" begin
+    cutlink_errors = Float64[]
+    for case in _wall_bc_cases(),
+        q_out in 2:9,
+        q_wall_value in (0.3, 0.5, 0.7)
+
+        result = _single_cutlink_wall_aligned_couette_once(
+            q_out, q_wall_value, case.bc,
+        )
+        if case.name === :cnebb_eq_gradient
+            @test result.wall_error < P0_ATOL
+            @test result.cde_error < P0_ATOL
+        elseif case.name === :cnebb_cutlink_eq_gradient
+            push!(cutlink_errors, result.wall_error)
+        elseif q_wall_value == 0.5
+            @test result.wall_error < P0_ATOL
+            @test result.cde_error < P0_ATOL
+        else
+            @test result.wall_error > 1e-6
+            @test result.cde_error > 1e-6
+        end
+    end
+    @test maximum(cutlink_errors) > 1e-6
+end
+
 function _curved_affine_oldroydb_patch()
     Nx, Ny = 56, 48
     cx, cy, R = 27.31, 23.67, 9.0
