@@ -1353,6 +1353,7 @@ function run_conservative_tree_square_obstacle_route_native_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=1200,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     Fx = T(Fx)
     Fy = T(Fy)
@@ -1367,7 +1368,8 @@ function run_conservative_tree_square_obstacle_route_native_2d(;
     coarse_next = similar(coarse)
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
     leaf = zeros(T, 2 * Nx, 2 * Ny, 9)
 
     _check_route_solid_mask_layout(topology, coarse, patch, is_solid)
@@ -1410,6 +1412,7 @@ function run_conservative_tree_cylinder_obstacle_route_native_2d(;
         rho=1.0,
         steps::Int=1200,
         avg_window::Int=300,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     steps > 0 || throw(ArgumentError("steps must be positive"))
     avg_window > 0 || throw(ArgumentError("avg_window must be positive"))
@@ -1429,7 +1432,8 @@ function run_conservative_tree_cylinder_obstacle_route_native_2d(;
     coarse_next = similar(coarse)
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
     leaf = zeros(T, 2 * Nx, 2 * Ny, 9)
     leaf_next = similar(leaf)
 

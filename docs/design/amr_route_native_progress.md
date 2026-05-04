@@ -172,8 +172,9 @@ Notes:
   perturbation into mass and velocity drift. Open-channel and BFS route-native
   runners now opt into `coarse_route_mode=:leaf_equivalent`, which splits
   coarse same-level packets into leaf-equivalent residuals and restores the
-  rest-state canary. Obstacle periodic runners still use the default
-  coarse-grid mode until their convergence ladder is re-audited.
+  rest-state canary. Square/cylinder route-native runners also use this mode
+  after a local audit showed improved obstacle metrics with roundoff-level mass
+  conservation.
 
 ## 4. Multi-Patch Statique 2D
 
