@@ -1447,6 +1447,129 @@ end
     @test clean < P0_ATOL
 end
 
+function _bulk_affine_shear_patch(; orientation=:x_shear_y)
+    Nx = Ny = 48
+    γ = 0.01
+    λ = 3.0
+    ux = zeros(Float64, Nx, Ny)
+    uy = zeros(Float64, Nx, Ny)
+    if orientation === :x_shear_y
+        for j in 1:Ny, i in 1:Nx
+            ux[i, j] = γ * ((j - 1.0) - 24.0)
+        end
+        cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+            0.0, γ, 0.0, 0.0, λ,
+        )
+    elseif orientation === :y_shear_x
+        for j in 1:Ny, i in 1:Nx
+            uy[i, j] = γ * ((i - 1.0) - 24.0)
+        end
+        cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+            0.0, 0.0, γ, 0.0, λ,
+        )
+    else
+        error("unknown bulk affine shear orientation $(orientation)")
+    end
+    return (; Nx, Ny, λ, ux, uy, cxx, cxy, cyy, is_solid=falses(Nx, Ny))
+end
+
+function _bulk_affine_transport_error(; orientation=:x_shear_y, steps=4,
+                                      constant_velocity=false)
+    p = _bulk_affine_shear_patch(; orientation)
+    C_ref = 1.234
+    C = fill(C_ref, p.Nx, p.Ny)
+    ux = constant_velocity ? fill(0.02, p.Nx, p.Ny) : p.ux
+    uy = constant_velocity ? fill(-0.01, p.Nx, p.Ny) : p.uy
+    g = zeros(Float64, p.Nx, p.Ny, 9)
+    buf = similar(g)
+    init_conformation_field_2d!(g, C, ux, uy)
+    margin = steps + 4
+    max_error = 0.0
+    for _ in 1:steps
+        stream_2d!(buf, g, p.Nx, p.Ny; sync=true)
+        g, buf = buf, g
+        compute_conformation_macro_2d!(C, g)
+        for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
+            max_error = max(max_error, abs(C[i, j] - C_ref))
+        end
+    end
+    return max_error
+end
+
+function _bulk_affine_cde_stationary_error(; orientation=:x_shear_y, steps=4)
+    p = _bulk_affine_shear_patch(; orientation)
+    Cxx = fill(p.cxx, p.Nx, p.Ny)
+    Cxy = fill(p.cxy, p.Nx, p.Ny)
+    Cyy = fill(p.cyy, p.Nx, p.Ny)
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+    Fe_xx = similar(gxx)
+    Fe_xy = similar(gxy)
+    Fe_yy = similar(gyy)
+    ρ = ones(Float64, p.Nx, p.Ny)
+    fill!(Fe_xx, 0.0)
+    fill!(Fe_xy, 0.0)
+    fill!(Fe_yy, 0.0)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+
+    margin = steps + 4
+    max_error = 0.0
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+        stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+        stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _collide_component_once!(
+            :trt, gxx, Fe_xx, Cxx, p.ux, p.uy, ρ, Cxx, Cxy, Cyy,
+            p.is_solid, 1.0, p.λ, 1; magic=1e-6, divergence_mode=:trace_free,
+        )
+        _collide_component_once!(
+            :trt, gxy, Fe_xy, Cxy, p.ux, p.uy, ρ, Cxx, Cxy, Cyy,
+            p.is_solid, 1.0, p.λ, 2; magic=1e-6, divergence_mode=:trace_free,
+        )
+        _collide_component_once!(
+            :trt, gyy, Fe_yy, Cyy, p.ux, p.uy, ρ, Cxx, Cxy, Cyy,
+            p.is_solid, 1.0, p.λ, 3; magic=1e-6, divergence_mode=:trace_free,
+        )
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+
+        for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
+            max_error = max(
+                max_error,
+                abs(Cxx[i, j] - p.cxx),
+                abs(Cxy[i, j] - p.cxy),
+                abs(Cyy[i, j] - p.cyy),
+            )
+        end
+    end
+    return max_error
+end
+
+@testset "P15d bulk affine CDE separates transport from wall defects" begin
+    for orientation in (:x_shear_y, :y_shear_x)
+        @test _bulk_affine_transport_error(
+            ; orientation, steps=4, constant_velocity=true,
+        ) < P0_ATOL
+        @test _bulk_affine_transport_error(
+            ; orientation, steps=4, constant_velocity=false,
+        ) < P0_ATOL
+        @test _bulk_affine_cde_stationary_error(; orientation, steps=4) < P0_ATOL
+    end
+end
+
 function _stream_periodic_y_wall_x_2d!(f_out, f_in, Nx, Ny)
     @inbounds for j in 1:Ny, i in 1:Nx
         jm = j > 1 ? j - 1 : Ny
