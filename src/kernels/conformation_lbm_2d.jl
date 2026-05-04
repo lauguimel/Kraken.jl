@@ -25,8 +25,14 @@ using KernelAbstractions
 @inline function _wall_aware_dx_2d(a, is_solid, i, j, Nx, ::Type{T}) where {T}
     plus_ok = i < Nx && !is_solid[i + 1, j]
     minus_ok = i > 1 && !is_solid[i - 1, j]
+    plus2_ok = i < Nx - 1 && plus_ok && !is_solid[i + 2, j]
+    minus2_ok = i > 2 && minus_ok && !is_solid[i - 2, j]
     if plus_ok && minus_ok
         return (a[i + 1, j] - a[i - 1, j]) / T(2)
+    elseif plus2_ok
+        return (-T(3) * a[i, j] + T(4) * a[i + 1, j] - a[i + 2, j]) / T(2)
+    elseif minus2_ok
+        return (T(3) * a[i, j] - T(4) * a[i - 1, j] + a[i - 2, j]) / T(2)
     elseif plus_ok
         return a[i + 1, j] - a[i, j]
     elseif minus_ok
@@ -39,8 +45,14 @@ end
 @inline function _wall_aware_dy_2d(a, is_solid, i, j, Ny, ::Type{T}) where {T}
     plus_ok = j < Ny && !is_solid[i, j + 1]
     minus_ok = j > 1 && !is_solid[i, j - 1]
+    plus2_ok = j < Ny - 1 && plus_ok && !is_solid[i, j + 2]
+    minus2_ok = j > 2 && minus_ok && !is_solid[i, j - 2]
     if plus_ok && minus_ok
         return (a[i, j + 1] - a[i, j - 1]) / T(2)
+    elseif plus2_ok
+        return (-T(3) * a[i, j] + T(4) * a[i, j + 1] - a[i, j + 2]) / T(2)
+    elseif minus2_ok
+        return (T(3) * a[i, j] - T(4) * a[i, j - 1] + a[i, j - 2]) / T(2)
     elseif plus_ok
         return a[i, j + 1] - a[i, j]
     elseif minus_ok

@@ -154,6 +154,32 @@ end
     @test Kraken._wall_aware_dy_2d(field, solid, 4, 4, Ny, Float64) == 0.0
 end
 
+@testset "P0 straight-wall quadratic gradients use second-order one-sided stencils" begin
+    Nx, Ny = 9, 10
+    ax, bx = 0.11, -0.017
+    ay, by = -0.07, 0.021
+    field_x = [1.2 + ax * (i - 1) + bx * (i - 1)^2 for i in 1:Nx, j in 1:Ny]
+    field_y = [0.4 + ay * (j - 1) + by * (j - 1)^2 for i in 1:Nx, j in 1:Ny]
+    solid = falses(Nx, Ny)
+
+    solid[3, 5] = true
+    @test Kraken._wall_aware_dx_2d(field_x, solid, 4, 5, Nx, Float64) ≈
+          ax + 2bx * (4 - 1) atol=P0_ATOL
+    solid[3, 5] = false
+    solid[5, 5] = true
+    @test Kraken._wall_aware_dx_2d(field_x, solid, 4, 5, Nx, Float64) ≈
+          ax + 2bx * (4 - 1) atol=P0_ATOL
+
+    solid .= false
+    solid[5, 3] = true
+    @test Kraken._wall_aware_dy_2d(field_y, solid, 5, 4, Ny, Float64) ≈
+          ay + 2by * (4 - 1) atol=P0_ATOL
+    solid[5, 3] = false
+    solid[5, 5] = true
+    @test Kraken._wall_aware_dy_2d(field_y, solid, 5, 4, Ny, Float64) ≈
+          ay + 2by * (4 - 1) atol=P0_ATOL
+end
+
 @testset "P0 direct conformation source: stationary simple shear x<-y" begin
     λ = 4.0
     γ = 0.03
@@ -2140,7 +2166,7 @@ end
             max_far_source = max(max_far_source, residual)
         end
     end
-    @test max_cut_source > 1e-5
+    @test max_cut_source < 5e-4
     @test max_cut_source > 5 * max_far_source
 end
 
