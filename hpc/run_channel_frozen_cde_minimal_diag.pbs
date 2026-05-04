@@ -1,0 +1,34 @@
+#!/bin/bash -l
+#PBS -N krk_cde_channel
+#PBS -l select=1:ncpus=8:ngpus=1:mem=96GB:gpu_id=H100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND=cuda
+export KRAKEN_R=30
+export KRAKEN_NX=900
+export KRAKEN_NY=120
+export KRAKEN_BETA=0.59
+export KRAKEN_WI=0.1
+export KRAKEN_MODELS=direct,logconf
+export KRAKEN_STEPS=60000
+export KRAKEN_DIAGNOSTIC_INTERVAL=10000
+export KRAKEN_CONFORMATION_DIVERGENCE_MODE=trace_free
+export KRAKEN_RESULTS_DIR=results/channel_frozen_cde_minimal_diag_${PBS_JOBID:-local}
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+
+julia --project=. hpc/channel_frozen_velocity_cde_patch.jl 2>&1 \
+    | tee "results/channel_frozen_cde_minimal_diag_${PBS_JOBID:-local}.txt"
