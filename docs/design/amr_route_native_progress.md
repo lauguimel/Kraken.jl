@@ -123,7 +123,10 @@ Aqua runs:
   `benchmarks/results/amr_cartesian_vs_route_native_2d_aqua_20757938.csv`
   at 1200 steps for BFS, square and cylinder. Square and cylinder conserve
   mass to roundoff; BFS remains finite but has a much larger open-flow mass
-  drift than the leaf oracle.
+  drift than the leaf oracle. A follow-up full-patch BFS surgical test shows
+  the route-native open-solid path matches the leaf oracle when no coarse/fine
+  interface cuts the open channel; the remaining BFS issue is therefore the
+  localized AMR coarse/fine open-flow coupling.
 - `20757949.aqua` produced
   `benchmarks/results/amr_obstacle_convergence_2d_aqua_conv_20757949.csv`
   for square/cylinder scales 1 and 2. This is a numerical ladder canary, not

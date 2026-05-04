@@ -144,6 +144,20 @@ end
         @test sum(result.is_solid_leaf) > 0
     end
 
+    @testset "full-patch BFS route matches leaf open-solid oracle" begin
+        route = run_conservative_tree_bfs_route_native_2d(
+            ; patch_i_range=1:28, patch_j_range=1:14, steps=160)
+        oracle = run_conservative_tree_bfs_macroflow_2d(
+            ; patch_i_range=1:28, patch_j_range=1:14, steps=160)
+
+        @test route.steps == oracle.steps
+        @test isapprox(route.mass_initial, oracle.mass_initial; atol=1e-12, rtol=0)
+        @test isapprox(route.mass_final, oracle.mass_final; atol=1e-10, rtol=0)
+        @test isapprox(route.ux_mean, oracle.ux_mean; atol=1e-12, rtol=0)
+        @test isapprox(route.uy_mean, oracle.uy_mean; atol=1e-12, rtol=0)
+        @test isapprox(route.mass_drift, oracle.mass_drift; atol=1e-10, rtol=0)
+    end
+
     @testset "short open channel with inlet-spanning patch remains finite" begin
         nx, ny = 8, 6
         volume_coarse = 1.0
