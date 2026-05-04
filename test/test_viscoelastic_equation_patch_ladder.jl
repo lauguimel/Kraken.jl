@@ -2684,6 +2684,217 @@ end
     end
 end
 
+# ---------------------------------------------------------------------
+# Population-level wall residual on the inclined straight wall.
+#
+# After ONE stream + apply_polymer_wall_bc!, classify each population
+# g_post[i, j, q] and compare it to the closed-form expectation:
+#
+#   * cut cell, q is BC-filled (source is solid)         → local equilibrium
+#                                                          feq(C_ref, ux[i,j], uy[i,j], q)
+#   * cut cell, q == 1 (rest, BC rebalances)             → same local equilibrium
+#   * cut cell, q has fluid source                       → pure-stream prediction
+#   * non-cut cell, q == 1                               → local equilibrium
+#   * non-cut cell, fluid source not on a cut cell       → pure-stream prediction
+#   * non-cut cell, fluid source ON a cut cell           → pure-stream prediction
+#
+# The canary isolates which population class carries the residual that
+# the macro-level P18i/P18j tests already report. The findings frozen
+# below are surprising and must not regress:
+#
+#   1. CNEBB:  inclined-wall :pre_opp φ-recovery has an O(|u| · C_ref)
+#      asymmetry residual *even at constant velocity*. The src_solid set
+#      {2,3,6} (or any set without its opposite) makes the recovery sum
+#      asymmetric, producing δφ ≈ -(5/6)·(u_x+u_y)·C_ref. This is the
+#      irreducible inclined-wall defect of the strict CNEBB recovery and
+#      the wall-coupled velocity transport residual seen in P18i/P18j.
+#
+#   2. CNEBBField + q_aware: with q_wall provided, the q_w ≤ 0.5 branch
+#      simultaneously zeroes both non-equilibrium terms, giving
+#      err_filled = 0 even with variable velocity. The BC's wall-fill
+#      is bit-exact at one step.
+#
+#   3. CNEBBFieldEquilibrium: reset_cutlink_conformation_equilibrium_2d!
+#      overwrites the pure-stream populations at cut cells with the
+#      local equilibrium, breaking the bulk-affine moment cancellation
+#      and creating an O(γ) population residual on src_fluid populations
+#      at cut cells (err_cut_outgoing > 1e-4). The reset is therefore a
+#      new pollution channel, not a fix.
+# ---------------------------------------------------------------------
+
+function _inclined_straight_population_residual(bc; normal=(3.0, 4.0), γ=0.01,
+                                                constant_velocity=false)
+    p = _inclined_straight_couette_patch(; normal, γ)
+    C_ref = 1.234
+    C = fill(C_ref, p.Nx, p.Ny)
+    ux = constant_velocity ? fill(0.02, p.Nx, p.Ny) : copy(p.ux)
+    uy = constant_velocity ? fill(-0.01, p.Nx, p.Ny) : copy(p.uy)
+
+    g_pre = zeros(Float64, p.Nx, p.Ny, 9)
+    init_conformation_field_2d!(g_pre, C, ux, uy)
+    g_post = similar(g_pre)
+    stream_2d!(g_post, g_pre, p.Nx, p.Ny; sync=true)
+    apply_polymer_wall_bc!(g_post, g_pre, p.is_solid, p.q_wall, C, ux, uy, bc)
+
+    margin = 3
+    err_filled = 0.0; n_filled = 0
+    err_rest = 0.0; n_rest = 0
+    err_cut_outgoing = 0.0; n_cut_outgoing = 0
+    err_far_pure = 0.0; n_far_pure = 0
+    err_far_from_cut = 0.0; n_far_from_cut = 0
+    domain_boundary_touched = false
+
+    for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
+        p.is_solid[i, j] && continue
+        i_cut = _is_cut_cell(p.q_wall, i, j)
+        for q in 1:9
+            cx = Int(D2Q9_CX[q]); cy = Int(D2Q9_CY[q])
+            si = i - cx; sj = j - cy
+            in_dom = 1 <= si <= p.Nx && 1 <= sj <= p.Ny
+            src_solid = !in_dom || p.is_solid[si, sj]
+            local_eq = equilibrium(D2Q9(), C_ref, ux[i, j], uy[i, j], q)
+            if i_cut && q == 1
+                err_rest = max(err_rest, abs(g_post[i, j, 1] - local_eq))
+                n_rest += 1
+            elseif i_cut && src_solid
+                err_filled = max(err_filled, abs(g_post[i, j, q] - local_eq))
+                n_filled += 1
+            elseif i_cut
+                pure = equilibrium(D2Q9(), C_ref, ux[si, sj], uy[si, sj], q)
+                err_cut_outgoing = max(err_cut_outgoing,
+                                       abs(g_post[i, j, q] - pure))
+                n_cut_outgoing += 1
+            else
+                if q == 1
+                    err_far_pure = max(err_far_pure,
+                                       abs(g_post[i, j, 1] - local_eq))
+                    n_far_pure += 1
+                elseif src_solid
+                    domain_boundary_touched = true
+                else
+                    pure = equilibrium(D2Q9(), C_ref, ux[si, sj], uy[si, sj], q)
+                    err = abs(g_post[i, j, q] - pure)
+                    if _is_cut_cell(p.q_wall, si, sj)
+                        err_far_from_cut = max(err_far_from_cut, err)
+                        n_far_from_cut += 1
+                    else
+                        err_far_pure = max(err_far_pure, err)
+                        n_far_pure += 1
+                    end
+                end
+            end
+        end
+    end
+    return (; err_filled, n_filled, err_rest, n_rest,
+              err_cut_outgoing, n_cut_outgoing,
+              err_far_pure, n_far_pure,
+              err_far_from_cut, n_far_from_cut,
+              domain_boundary_touched)
+end
+
+@testset "P18k inclined straight population residual localizes wall-fill" begin
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        # Common census: every BC must populate every class.
+        for case in (CNEBB(), CNEBBField(), CNEBBFieldEquilibrium())
+            const_pop = _inclined_straight_population_residual(
+                case; normal, γ=0.01, constant_velocity=true,
+            )
+            @test !const_pop.domain_boundary_touched
+            @test const_pop.n_filled > 0
+            @test const_pop.n_rest > 0
+            @test const_pop.n_cut_outgoing > 0
+            @test const_pop.n_far_pure > 0
+            @test const_pop.n_far_from_cut > 0
+            # Far cells (no wall contact) are exact for every BC.
+            @test const_pop.err_far_pure < P0_ATOL
+            @test const_pop.err_far_from_cut < P0_ATOL
+            # Outgoing fluid-source populations at cut cells are not
+            # touched by CNEBB / CNEBBField (the BC only writes
+            # src_solid populations + rest). CNEBBFieldEquilibrium
+            # however resets all 9, so it is the only BC that
+            # disturbs cut_outgoing at constant velocity — and even
+            # the reset preserves them when velocity is uniform.
+            @test const_pop.err_cut_outgoing < P0_ATOL
+        end
+
+        const_cnebb = _inclined_straight_population_residual(
+            CNEBB(); normal, γ=0.01, constant_velocity=true,
+        )
+        const_field = _inclined_straight_population_residual(
+            CNEBBField(); normal, γ=0.01, constant_velocity=true,
+        )
+        const_equil = _inclined_straight_population_residual(
+            CNEBBFieldEquilibrium(); normal, γ=0.01, constant_velocity=true,
+        )
+
+        # CNEBB :pre_opp recovery on an inclined wall: asymmetry of the
+        # src_solid set yields δφ ≈ -(5/6)(u_x+u_y)·C_ref ≈ 1e-2
+        # *at constant velocity*. The defect rides on |u| × C_ref, not
+        # on velocity gradients, and is the irreducible signature of the
+        # strict CNEBB recovery on non-axis-aligned walls.
+        @test const_cnebb.err_rest > 5e-3
+        @test const_cnebb.err_filled > 5e-5
+
+        # CNEBBField + q_aware pins φ to C_ref → constant velocity is
+        # exact at eps everywhere (filled, rest, outgoing).
+        @test const_field.err_filled < P0_ATOL
+        @test const_field.err_rest < P0_ATOL
+
+        # CNEBBFieldEquilibrium = CNEBBField + reset to local equilibrium.
+        # At constant velocity, the reset writes the same value the BC
+        # would have written, so all populations remain exact.
+        @test const_equil.err_filled < P0_ATOL
+        @test const_equil.err_rest < P0_ATOL
+
+        var_cnebb = _inclined_straight_population_residual(
+            CNEBB(); normal, γ=0.01, constant_velocity=false,
+        )
+        var_field = _inclined_straight_population_residual(
+            CNEBBField(); normal, γ=0.01, constant_velocity=false,
+        )
+        var_equil = _inclined_straight_population_residual(
+            CNEBBFieldEquilibrium(); normal, γ=0.01, constant_velocity=false,
+        )
+
+        @test !var_cnebb.domain_boundary_touched
+        @test !var_field.domain_boundary_touched
+        @test !var_equil.domain_boundary_touched
+
+        # No BC may pollute cells away from the wall in a single step.
+        @test var_cnebb.err_far_pure < P0_ATOL
+        @test var_cnebb.err_far_from_cut < P0_ATOL
+        @test var_field.err_far_pure < P0_ATOL
+        @test var_field.err_far_from_cut < P0_ATOL
+        @test var_equil.err_far_pure < P0_ATOL
+        @test var_equil.err_far_from_cut < P0_ATOL
+
+        # CNEBB / CNEBBField do not touch fluid-source populations at
+        # cut cells — they retain the pure-stream prediction.
+        @test var_cnebb.err_cut_outgoing < P0_ATOL
+        @test var_field.err_cut_outgoing < P0_ATOL
+
+        # CNEBBFieldEquilibrium's reset overwrites those pure-stream
+        # populations with the cut-cell local equilibrium, breaking
+        # bulk-affine moment cancellation. This is the new pollution
+        # channel that the reset introduces.
+        @test var_equil.err_cut_outgoing > 1e-4
+        @test var_equil.err_filled < P0_ATOL
+        @test var_equil.err_rest < P0_ATOL
+
+        # Strict CNEBB still carries its inclined-wall asymmetry.
+        @test var_cnebb.err_filled > 1e-5
+        @test var_cnebb.err_rest > 1e-3
+
+        # CNEBBField + q_aware fills cut-link populations exactly to
+        # local equilibrium even with variable velocity (the q_w ≤ 0.5
+        # branch zeroes both non-equilibria simultaneously). The rest
+        # rebalance still carries an O(γ) residual because src_fluid
+        # populations differ from local equilibrium by O(γ).
+        @test var_field.err_filled < P0_ATOL
+        @test var_field.err_rest > 1e-5
+    end
+end
+
 function _curved_affine_oldroydb_patch()
     Nx, Ny = 56, 48
     cx, cy, R = 27.31, 23.67, 9.0
