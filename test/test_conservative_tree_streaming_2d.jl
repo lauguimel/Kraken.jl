@@ -632,6 +632,29 @@ end
         @test all(row.elapsed_s >= 0 for row in rows)
     end
 
+    @testset "obstacle convergence ladder rows are finite" begin
+        rows = convergence_conservative_tree_obstacles_2d(
+            ; flows=(:square, :cylinder), scales=(1,), base_steps=20,
+            step_exponent=0, avg_window=10)
+
+        @test length(rows) == 4
+        @test Set(row.flow for row in rows) == Set([:square, :cylinder])
+        @test Set(row.method for row in rows) == Set([:leaf_oracle, :amr_route_native])
+        @test all(row.scale == 1 for row in rows)
+        @test all(row.steps == 20 for row in rows)
+        @test all(row.Nx > 0 && row.Ny > 0 for row in rows)
+        @test all(isfinite(row.ux_mean) for row in rows)
+        @test all(isfinite(row.uy_mean) for row in rows)
+        @test all(isfinite(row.mass_rel_drift) for row in rows)
+        @test all(row.elapsed_s >= 0 for row in rows)
+
+        cylinder_rows = filter(row -> row.flow == :cylinder, rows)
+        @test all(isfinite(row.Cd) for row in cylinder_rows)
+        @test all(isfinite(row.Fx_drag) for row in cylinder_rows)
+        square_rows = filter(row -> row.flow == :square, rows)
+        @test all(isnan(row.Cd) for row in square_rows)
+    end
+
     @testset "vertical facing step mask is wall attached" begin
         mask = vertical_facing_step_solid_mask_leaf_2d(16, 12, 7:9, 5)
 

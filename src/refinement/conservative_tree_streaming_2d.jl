@@ -1466,6 +1466,145 @@ function benchmark_conservative_tree_cartesian_vs_amr_2d(;
     return rows
 end
 
+struct ConservativeTreeConvergenceRow2D
+    flow::Symbol
+    method::Symbol
+    scale::Int
+    Nx::Int
+    Ny::Int
+    steps::Int
+    ux_mean::Float64
+    uy_mean::Float64
+    Fx_drag::Float64
+    Fy_drag::Float64
+    Cd::Float64
+    mass_rel_drift::Float64
+    elapsed_s::Float64
+end
+
+function _scale_parent_range_2d(range::UnitRange{Int}, scale::Int)
+    scale > 0 || throw(ArgumentError("scale must be positive"))
+    return ((first(range) - 1) * scale + 1):(last(range) * scale)
+end
+
+function _scale_leaf_range_2d(range::UnitRange{Int}, scale::Int)
+    scale > 0 || throw(ArgumentError("scale must be positive"))
+    return ((first(range) - 1) * scale + 1):(last(range) * scale)
+end
+
+function _conservative_tree_obstacle_convergence_row_2d(
+        flow::Symbol,
+        method::Symbol,
+        scale::Int,
+        Nx::Int,
+        Ny::Int,
+        result,
+        elapsed_s::Real)
+    mass_initial = getproperty(result, :mass_initial)
+    mass_drift = getproperty(result, :mass_drift)
+    rel = abs(mass_drift) / max(abs(mass_initial), eps(typeof(float(mass_initial))))
+    if flow == :cylinder
+        return ConservativeTreeConvergenceRow2D(
+            flow, method, scale, Nx, Ny, getproperty(result, :steps),
+            Float64(getproperty(result, :u_ref)),
+            0.0,
+            Float64(getproperty(result, :Fx_drag)),
+            Float64(getproperty(result, :Fy_drag)),
+            Float64(getproperty(result, :Cd)),
+            Float64(rel),
+            Float64(elapsed_s))
+    end
+
+    return ConservativeTreeConvergenceRow2D(
+        flow, method, scale, Nx, Ny, getproperty(result, :steps),
+        Float64(getproperty(result, :ux_mean)),
+        Float64(getproperty(result, :uy_mean)),
+        NaN,
+        NaN,
+        NaN,
+        Float64(rel),
+        Float64(elapsed_s))
+end
+
+function _conservative_tree_obstacle_steps(scale::Int,
+                                           base_steps::Int,
+                                           step_exponent::Real)
+    scale > 0 || throw(ArgumentError("scale must be positive"))
+    base_steps > 0 || throw(ArgumentError("base_steps must be positive"))
+    step_exponent >= 0 || throw(ArgumentError("step_exponent must be nonnegative"))
+    return max(1, round(Int, base_steps * scale^step_exponent))
+end
+
+function convergence_conservative_tree_obstacles_2d(;
+        flows::Tuple=(:square, :cylinder),
+        scales::Tuple=(1, 2),
+        base_steps::Int=1200,
+        step_exponent::Real=1,
+        avg_window::Int=300,
+        T::Type{<:Real}=Float64)
+    avg_window > 0 || throw(ArgumentError("avg_window must be positive"))
+    rows = ConservativeTreeConvergenceRow2D[]
+
+    for scale in scales
+        scale > 0 || throw(ArgumentError("scales must contain positive integers"))
+        steps = _conservative_tree_obstacle_steps(scale, base_steps, step_exponent)
+        avg = min(avg_window * scale, steps)
+
+        for flow in flows
+            if flow == :square
+                Nx = 24 * scale
+                Ny = 14 * scale
+                patch_i = _scale_parent_range_2d(8:17, scale)
+                patch_j = _scale_parent_range_2d(4:11, scale)
+                obstacle_i = _scale_leaf_range_2d(22:27, scale)
+                obstacle_j = _scale_leaf_range_2d(12:17, scale)
+
+                leaf = nothing
+                leaf_elapsed = @elapsed leaf = run_conservative_tree_square_obstacle_macroflow_2d(
+                    ; Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                    patch_j_range=patch_j, obstacle_i_range=obstacle_i,
+                    obstacle_j_range=obstacle_j, steps=steps, T=T)
+                route = nothing
+                route_elapsed = @elapsed route = run_conservative_tree_square_obstacle_route_native_2d(
+                    ; Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                    patch_j_range=patch_j, obstacle_i_range=obstacle_i,
+                    obstacle_j_range=obstacle_j, steps=steps, T=T)
+                push!(rows, _conservative_tree_obstacle_convergence_row_2d(
+                    :square, :leaf_oracle, scale, Nx, Ny, leaf, leaf_elapsed))
+                push!(rows, _conservative_tree_obstacle_convergence_row_2d(
+                    :square, :amr_route_native, scale, Nx, Ny, route, route_elapsed))
+            elseif flow == :cylinder
+                Nx = 24 * scale
+                Ny = 14 * scale
+                patch_i = _scale_parent_range_2d(8:17, scale)
+                patch_j = _scale_parent_range_2d(4:11, scale)
+                cx_leaf = 24 * scale
+                cy_leaf = 14 * scale
+                radius_leaf = 3 * scale
+
+                leaf = nothing
+                leaf_elapsed = @elapsed leaf = run_conservative_tree_cylinder_macroflow_2d(
+                    ; Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                    patch_j_range=patch_j, cx_leaf=cx_leaf, cy_leaf=cy_leaf,
+                    radius_leaf=radius_leaf, steps=steps, avg_window=avg, T=T)
+                route = nothing
+                route_elapsed = @elapsed route = run_conservative_tree_cylinder_obstacle_route_native_2d(
+                    ; Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                    patch_j_range=patch_j, cx_leaf=cx_leaf, cy_leaf=cy_leaf,
+                    radius_leaf=radius_leaf, steps=steps, avg_window=avg, T=T)
+                push!(rows, _conservative_tree_obstacle_convergence_row_2d(
+                    :cylinder, :leaf_oracle, scale, Nx, Ny, leaf, leaf_elapsed))
+                push!(rows, _conservative_tree_obstacle_convergence_row_2d(
+                    :cylinder, :amr_route_native, scale, Nx, Ny, route, route_elapsed))
+            else
+                throw(ArgumentError("unsupported obstacle convergence flow: $flow"))
+            end
+        end
+    end
+
+    return rows
+end
+
 function run_conservative_tree_vfs_route_native_2d(;
         Nx::Int=28,
         Ny::Int=14,

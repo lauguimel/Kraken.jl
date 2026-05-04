@@ -108,6 +108,14 @@ Benchmark hook:
 - `benchmarks/amr_cartesian_vs_route_native_2d.jl` writes those rows to CSV;
 - `hpc/amr_cartesian_vs_route_native_2d_aqua.pbs` is the aqua submission
   wrapper (`KRK_AMR_STEPS`, `KRK_AMR_FLOWS`, `KRK_AMR_TAG`).
+- `convergence_conservative_tree_obstacles_2d` emits a scaled square/cylinder
+  ladder with Cartesian leaf-oracle and AMR route-native rows;
+- `benchmarks/amr_obstacle_convergence_2d.jl` writes the convergence ladder to
+  CSV, including cylinder drag/Cd columns;
+- `hpc/amr_obstacle_convergence_2d_aqua.pbs` is the aqua submission wrapper
+  (`KRK_AMR_CONV_FLOWS`, `KRK_AMR_CONV_SCALES`,
+  `KRK_AMR_CONV_BASE_STEPS`, `KRK_AMR_CONV_STEP_EXPONENT`,
+  `KRK_AMR_CONV_AVG_WINDOW`, `KRK_AMR_TAG`).
 
 ## 4. Multi-Patch Statique 2D
 
