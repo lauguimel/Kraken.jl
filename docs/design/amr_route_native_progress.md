@@ -1,6 +1,6 @@
 # AMR Route-Native Progress Ledger
 
-Date: 2026-05-03
+Date: 2026-05-04
 
 This document tracks the autonomous AMR work against the first eight milestones
 from `docs/design/amr_complete_project_plan.md`. It is intentionally strict:
@@ -25,7 +25,8 @@ Status: done for one ratio-2 patch.
 Implemented:
 
 - same-level active-cell routes;
-- coarse-to-fine face and corner splits;
+- coarse-to-fine face and corner routes with leaf-equivalent routed fractions
+  and explicit coarse residuals;
 - fine-to-coarse face and corner coalesces;
 - route topology and packed route representation;
 - periodic-x, wall-y, moving-wall-y and solid-mask route variants.
@@ -33,6 +34,7 @@ Implemented:
 Surgical tests:
 
 - packet canaries for direct, split and coalesce routes;
+- leaf-equivalent coarse-to-fine fraction and residual canaries;
 - orientation-wise conservation;
 - route-native streaming against leaf-grid oracle canaries;
 - periodic and wall boundary conservation.
@@ -80,20 +82,24 @@ Done:
 - bounce-back solid mask;
 - square obstacle route-native smoke;
 - vertical facing step route-native smoke.
+- solid-aware composite Zou-He skips solid inlet/outlet cells and rejects
+  partially solid active coarse cells;
+- nominal route-native BFS smoke at 240 steps stays finite and has positive
+  mean streamwise velocity.
 
 Not done yet:
 
-- longer open-channel/BFS stability with Zou-He route-native boundaries;
-- long inlet-spanning open-channel stability. A 40-step probe still shows large
-  mass drift, so this remains a BFS blocker;
-- BFS route-native validation. The current D stream has Poiseuille, Couette,
-  square obstacle and VFS only.
+- BFS convergence and publication-quality comparison against the Cartesian
+  oracle;
+- long-horizon open-channel/BFS stability envelope. The route-native BFS
+  still has a strong early transient around 80 steps, so convergence studies
+  must use the nominal/longer canaries, not the early transient.
 
 Next surgical patch:
 
-- debug the long inlet-spanning open-channel drift at the boundary packet level,
-  then extend toward an obstacle-free BFS precursor only after mass/momentum
-  behaviour stays bounded.
+- add BFS route-native versus Cartesian benchmark tables after one more
+  boundary packet audit, then run the same ladder for square and cylinder
+  obstacles.
 
 ## 4. Multi-Patch Statique 2D
 
@@ -151,6 +157,11 @@ Implemented:
 - parent-grid indicator plans with padding, min-size, growth limits and
   hysteresis;
 - `.krk` `Refine` blocks converted to named adaptation proposals;
+- `.krk` adaptive `Refine` criteria parse as
+  `criterion = gradient(ux) > threshold` with `update_every`, `pad`,
+  `max_growth`, `shrink_margin` and `balance = 1`;
+- `.krk` criterion helpers convert parsed criteria to adaptation policies and
+  indicator-driven plans;
 - plan application helper that calls the direct conservative regrid path only
   when the selected patch range changes.
 
@@ -172,18 +183,33 @@ Validated by:
 - policy-level tests cover domain clamp, min-size expansion, max-growth
   limiting, near-shrink hysteresis, indicator-driven plans, `.krk` proposals
   and conservative regrid through a plan.
+- parser-level tests cover adaptive `Refine` criterion fields and reject
+  unsupported `balance != 1`.
 
 Not done yet:
 
 - error indicators;
 - integration of physical error indicators with hysteresis;
-- 2:1 balancing for multiple patches;
+- multi-level enforcement of 2:1 balancing beyond the parsed DSL contract;
 - adaptive square obstacle/VFS macro-flow.
 
 Next surgical patch:
 
 - add physical error indicators on top of the policy/proposal/plan layer, then
-  keep BFS blocked behind route-native open-boundary patch tests.
+  connect the parsed `.krk` criteria to production macro-flow runners.
+
+## Multi-Level Rule
+
+Current executable route-native topology is still level 0 to level 1. The DSL
+contract is already fixed for the complete AMR path:
+
+- level 0 is the Cartesian base grid;
+- level `k + 1` may only refine inside a level `k` parent patch;
+- all active adjacent leaves must satisfy `abs(level_a - level_b) <= 1`;
+- `.krk` blocks must keep `balance = 1`; other values are rejected until a
+  different balancing rule is implemented and tested;
+- before activating a new patch, the proposal must be padded, clamped, checked
+  for ownership conflicts, then 2:1-balanced against neighbours.
 
 ## 6. Sous-Cycling Temporel 2D
 

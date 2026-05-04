@@ -173,11 +173,13 @@ function _stream_periodic_x_boundary_route_2d!(
 
         i_dst = _periodic_x_wrapped(i_raw, nx)
         if _inside_range(i_dst, j_dst, patch_in.parent_i_range, patch_in.parent_j_range)
-            di = -cx
-            dj = cy == 0 ? 0 : -cy
-            specs = _coarse_to_fine_route_specs(cell_id_by_coord, i_dst, j_dst, di, dj)
+            specs = _coarse_to_fine_route_specs(cell_id_by_coord,
+                                                src_cell.i, src_cell.j, q,
+                                                patch_in, nx, ny;
+                                                periodic_x=true)
             @inbounds for spec in specs
                 dst, weight, _ = spec
+                dst == 0 && continue
                 dst_cell = topology.cells[dst]
                 _scatter_route_packet_2d!(coarse_out, patch_out,
                                            coarse_in, patch_in,
@@ -452,6 +454,34 @@ function stream_composite_routes_zou_he_x_wall_y_F_2d!(
         coarse_out, patch_out, u_in, volume_coarse, volume_fine)
     apply_composite_zou_he_pressure_east_F_2d!(
         coarse_out, patch_out, volume_coarse, volume_fine; rho_out=rho_out)
+    return coarse_out, patch_out
+end
+
+function stream_composite_routes_zou_he_x_wall_y_solid_F_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        is_solid::AbstractArray{Bool,2};
+        u_in=0,
+        rho_out=1,
+        rho_wall=1,
+        volume_coarse=1,
+        volume_fine=0.25,
+        clear::Bool=true)
+    _stream_composite_routes_F_2d!(coarse_out, patch_out,
+                                   coarse_in, patch_in,
+                                   topology, :open_x_wall_y, clear;
+                                   rho_wall=rho_wall,
+                                   volume_coarse=volume_coarse,
+                                   volume_fine=volume_fine,
+                                   is_solid=is_solid)
+    apply_composite_zou_he_west_F_2d!(
+        coarse_out, patch_out, is_solid, u_in, volume_coarse, volume_fine)
+    apply_composite_zou_he_pressure_east_F_2d!(
+        coarse_out, patch_out, is_solid, volume_coarse, volume_fine;
+        rho_out=rho_out)
     return coarse_out, patch_out
 end
 
@@ -968,6 +998,67 @@ function run_conservative_tree_open_channel_route_native_2d(;
 
     return ConservativeTreeOpenChannelRun2D{T}(
         :open_channel_route_native, coarse, patch, ux_mean,
+        mass_initial, mass_final, mass_final - mass_initial, steps)
+end
+
+function run_conservative_tree_bfs_route_native_2d(;
+        Nx::Int=28,
+        Ny::Int=14,
+        patch_i_range::UnitRange{Int}=1:12,
+        patch_j_range::UnitRange{Int}=1:8,
+        step_i_leaf::Int=16,
+        step_height_leaf::Int=8,
+        u_in=0.03,
+        rho_out=1.0,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=240,
+        T::Type{<:Real}=Float64)
+    steps > 0 || throw(ArgumentError("steps must be positive"))
+    u_in = T(u_in)
+    rho_out = T(rho_out)
+    omega = T(omega)
+    rho = T(rho)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+
+    is_solid = backward_facing_step_solid_mask_leaf_2d(
+        2 * Nx, 2 * Ny, step_i_leaf, step_height_leaf)
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    leaf = zeros(T, 2 * Nx, 2 * Ny, 9)
+
+    _check_route_solid_mask_layout(topology, coarse, patch, is_solid)
+
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, u_in, zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, u_in, zero(T))
+    apply_composite_zou_he_west_F_2d!(
+        coarse, patch, is_solid, u_in, volume_coarse, volume_fine)
+    apply_composite_zou_he_pressure_east_F_2d!(
+        coarse, patch, is_solid, volume_coarse, volume_fine; rho_out=rho_out)
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_initial = _leaf_fluid_mass_F(leaf, is_solid)
+
+    for _ in 1:steps
+        collide_Guo_composite_solid_F_2d!(
+            coarse, patch, topology, is_solid, volume_coarse, volume_fine,
+            omega, omega, zero(T), zero(T))
+        stream_composite_routes_zou_he_x_wall_y_solid_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology, is_solid;
+            u_in=u_in, rho_out=rho_out,
+            volume_coarse=volume_coarse, volume_fine=volume_fine)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_final = _leaf_fluid_mass_F(leaf, is_solid)
+    ux_mean, uy_mean = _leaf_fluid_mean_velocity_F(leaf, is_solid; volume=volume_fine)
+    return ConservativeTreeSolidFlowResult2D{T}(
+        :bfs_route_native, coarse, patch, is_solid, ux_mean, uy_mean,
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 

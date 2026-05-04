@@ -103,6 +103,18 @@ end
 
 Refinement patch specification from a .krk `Refine` block.
 """
+struct RefineCriterionSetup
+    indicator::Symbol              # :gradient, currently production-facing
+    field::Symbol                  # :ux, :uy, :rho, ...
+    op::Symbol                     # :> or :>=
+    threshold::Float64
+    update_every::Int
+    pad::Int
+    max_growth::Int
+    shrink_margin::Int
+    balance::Int                   # 1 means adjacent AMR leaves differ by <= 1 level
+end
+
 struct RefineSetup
     name::String
     region::NTuple{4, Float64}   # 2D: (x_min, y_min, x_max, y_max)
@@ -110,7 +122,11 @@ struct RefineSetup
     ratio::Int                   # refinement ratio (default 2)
     parent::String               # parent patch name ("" = base grid)
     is_3d::Bool                  # true when 6 region coords provided
+    criterion::Union{RefineCriterionSetup, Nothing}
 end
+
+RefineSetup(name, region, region_3d, ratio, parent, is_3d) =
+    RefineSetup(name, region, region_3d, ratio, parent, is_3d, nothing)
 
 """
     RheologySetup
@@ -549,6 +565,10 @@ end
 
 """
 Parse: Refine <name> { region = [x0, y0, x1, y1], ratio = 2, parent = <name> }
+
+Adaptive conservative-tree fields are optional and intentionally explicit:
+`criterion = gradient(ux) > 0.02`, `update_every = 50`, `pad = 2`,
+`max_growth = 1`, `shrink_margin = 1`, `balance = 1`.
 """
 function _parse_refine(line::String, user_vars::Dict{Symbol,Float64})
     # Extract name (second word)
@@ -586,7 +606,49 @@ function _parse_refine(line::String, user_vars::Dict{Symbol,Float64})
     parent_m = match(r"parent\s*=\s*(\w+)", content)
     parent = parent_m !== nothing ? String(parent_m.captures[1]) : ""
 
-    return RefineSetup(name, region, region_3d, ratio, parent, is_3d)
+    criterion = _parse_refine_criterion(content, user_vars)
+
+    return RefineSetup(name, region, region_3d, ratio, parent, is_3d, criterion)
+end
+
+function _parse_refine_int_option(content::AbstractString,
+                                  key::AbstractString,
+                                  default::Int,
+                                  user_vars::Dict{Symbol,Float64})
+    m = match(Regex("\\b" * key * "\\s*=\\s*([\\w.eE+\\-*/()]+)"), content)
+    m === nothing && return default
+    value = round(Int, _eval_number(strip(m.captures[1]), user_vars))
+    return value
+end
+
+function _parse_refine_criterion(content::AbstractString,
+                                 user_vars::Dict{Symbol,Float64})
+    occursin(r"\bcriterion\s*=", content) || return nothing
+    m = match(r"criterion\s*=\s*(\w+)\((\w+)\)\s*(>=|>)\s*([\w.eE+\-*/()]+)", content)
+    m === nothing && throw(ArgumentError(
+        "Refine criterion must look like `criterion = gradient(ux) > threshold`"))
+
+    indicator = Symbol(m.captures[1])
+    indicator in (:gradient,) || throw(ArgumentError(
+        "Unsupported Refine criterion indicator '$indicator'"))
+    field = Symbol(m.captures[2])
+    op = Symbol(m.captures[3])
+    threshold = _eval_number(strip(m.captures[4]), user_vars)
+    update_every = _parse_refine_int_option(content, "update_every", 1, user_vars)
+    pad = _parse_refine_int_option(content, "pad", 0, user_vars)
+    max_growth = _parse_refine_int_option(content, "max_growth", typemax(Int), user_vars)
+    shrink_margin = _parse_refine_int_option(content, "shrink_margin", 1, user_vars)
+    balance = _parse_refine_int_option(content, "balance", 1, user_vars)
+
+    update_every > 0 || throw(ArgumentError("Refine update_every must be positive"))
+    pad >= 0 || throw(ArgumentError("Refine pad must be nonnegative"))
+    max_growth >= 0 || throw(ArgumentError("Refine max_growth must be nonnegative"))
+    shrink_margin >= 0 || throw(ArgumentError("Refine shrink_margin must be nonnegative"))
+    balance == 1 || throw(ArgumentError(
+        "Only 2:1 AMR balance is supported in .krk Refine blocks (balance = 1)"))
+
+    return RefineCriterionSetup(indicator, field, op, threshold, update_every,
+                                pad, max_growth, shrink_margin, balance)
 end
 
 """Evaluate a number string, substituting user variables."""

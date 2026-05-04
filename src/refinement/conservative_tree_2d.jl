@@ -1194,6 +1194,85 @@ function apply_composite_zou_he_pressure_east_F_2d!(
     return coarse_F, patch
 end
 
+function _check_composite_solid_mask_layout(coarse_F::AbstractArray{<:Any,3},
+                                            patch::ConservativeTreePatch2D,
+                                            is_solid::AbstractArray{Bool,2})
+    size(is_solid) == (2 * size(coarse_F, 1), 2 * size(coarse_F, 2)) ||
+        throw(ArgumentError("is_solid must have size (2*Nx, 2*Ny)"))
+    @inbounds for J in axes(coarse_F, 2), I in axes(coarse_F, 1)
+        _inside_range(I, J, patch.parent_i_range, patch.parent_j_range) && continue
+        i0 = 2 * I - 1
+        j0 = 2 * J - 1
+        s11 = is_solid[i0, j0]
+        s21 = is_solid[i0 + 1, j0]
+        s12 = is_solid[i0, j0 + 1]
+        s22 = is_solid[i0 + 1, j0 + 1]
+        (s11 == s21 == s12 == s22) ||
+            throw(ArgumentError("active coarse cells cannot be partially solid"))
+    end
+    return nothing
+end
+
+function apply_composite_zou_he_west_F_2d!(
+        coarse_F::AbstractArray{T,3},
+        patch::ConservativeTreePatch2D{T},
+        is_solid::AbstractArray{Bool,2},
+        u_in,
+        volume_coarse,
+        volume_fine) where T
+    _check_composite_coarse_layout(coarse_F, patch)
+    _check_composite_solid_mask_layout(coarse_F, patch, is_solid)
+    @inbounds for J in axes(coarse_F, 2)
+        if first(patch.parent_i_range) <= 1 <= last(patch.parent_i_range) &&
+                J in patch.parent_j_range
+            il, jl = _patch_local_parent_index(patch, 1, J)
+            i_leaf = 2 * first(patch.parent_i_range) - 1
+            for jf in (2 * jl - 1):(2 * jl)
+                is_solid[i_leaf, jf] && continue
+                apply_zou_he_west_cell_F_2d!(
+                    @view(patch.fine_F[2 * il - 1, jf, :]), u_in, volume_fine)
+            end
+        else
+            is_solid[1, 2 * J - 1] && continue
+            apply_zou_he_west_cell_F_2d!(
+                @view(coarse_F[1, J, :]), u_in, volume_coarse)
+        end
+    end
+    coalesce_patch_to_shadow_F_2d!(patch)
+    return coarse_F, patch
+end
+
+function apply_composite_zou_he_pressure_east_F_2d!(
+        coarse_F::AbstractArray{T,3},
+        patch::ConservativeTreePatch2D{T},
+        is_solid::AbstractArray{Bool,2},
+        volume_coarse,
+        volume_fine;
+        rho_out=one(T)) where T
+    _check_composite_coarse_layout(coarse_F, patch)
+    _check_composite_solid_mask_layout(coarse_F, patch, is_solid)
+    I = last(axes(coarse_F, 1))
+    @inbounds for J in axes(coarse_F, 2)
+        if first(patch.parent_i_range) <= I <= last(patch.parent_i_range) &&
+                J in patch.parent_j_range
+            il, jl = _patch_local_parent_index(patch, I, J)
+            i_leaf = 2 * last(patch.parent_i_range)
+            for jf in (2 * jl - 1):(2 * jl)
+                is_solid[i_leaf, jf] && continue
+                apply_zou_he_pressure_east_cell_F_2d!(
+                    @view(patch.fine_F[2 * il, jf, :]), volume_fine;
+                    rho_out=rho_out)
+            end
+        else
+            is_solid[2 * I - 1, 2 * J - 1] && continue
+            apply_zou_he_pressure_east_cell_F_2d!(
+                @view(coarse_F[I, J, :]), volume_coarse; rho_out=rho_out)
+        end
+    end
+    coalesce_patch_to_shadow_F_2d!(patch)
+    return coarse_F, patch
+end
+
 """
     active_mass_F(coarse_F, patch)
 

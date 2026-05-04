@@ -104,6 +104,46 @@ end
         @test active_mass_F(coarse_next, patch_next) > 0
     end
 
+    @testset "solid-aware composite Zou-He skips step cells" begin
+        nx, ny = 8, 6
+        volume_coarse = 1.0
+        volume_fine = 0.25
+        u_in = 0.02
+        patch = create_conservative_tree_patch_2d(1:4, 1:4)
+        coarse = zeros(Float64, nx, ny, 9)
+        fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, 1.0, 0.0, 0.0)
+        fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, 1.0, 0.0, 0.0)
+        is_solid = falses(2 * nx, 2 * ny)
+        is_solid[1:6, 1:4] .= true
+        solid_before = copy(@view(patch.fine_F[1, 1:4, :]))
+
+        apply_composite_zou_he_west_F_2d!(
+            coarse, patch, is_solid, u_in, volume_coarse, volume_fine)
+
+        @test patch.fine_F[1, 1:4, :] == solid_before
+        for jf in 5:8
+            rho, ux = _cell_rho_ux_2d(@view(patch.fine_F[1, jf, :]), volume_fine)
+            @test isfinite(rho)
+            @test isapprox(ux, u_in; atol=1e-14, rtol=0)
+        end
+        bad_solid = copy(is_solid)
+        bad_solid[2 * nx - 1, 2 * ny - 1] = true
+        @test_throws ArgumentError apply_composite_zou_he_west_F_2d!(
+            coarse, patch, bad_solid, u_in, volume_coarse, volume_fine)
+    end
+
+    @testset "open route solid step nominal smoke remains finite" begin
+        result = run_conservative_tree_bfs_route_native_2d()
+
+        @test result.flow == :bfs_route_native
+        @test result.steps == 240
+        @test isfinite(result.mass_final)
+        @test abs(result.mass_drift) / result.mass_initial < 0.2
+        @test result.ux_mean > 0.005
+        @test abs(result.uy_mean) < 0.01
+        @test sum(result.is_solid_leaf) > 0
+    end
+
     @testset "short open channel with inlet-spanning patch remains finite" begin
         nx, ny = 8, 6
         volume_coarse = 1.0

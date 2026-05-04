@@ -169,39 +169,65 @@ function _push_link_route!(links::Vector{ConservativeTreeLink2D},
     return nothing
 end
 
-function _coarse_to_fine_route_specs(cell_id_by_coord,
-                                     I_dst::Int,
-                                     J_dst::Int,
-                                     di::Int,
-                                     dj::Int)
-    if di != 0 && dj != 0
-        ix = di < 0 ? 1 : 2
-        iy = dj < 0 ? 1 : 2
-        dst = cell_id_by_coord[_tree_topology_key(1,
-                                                  _fine_global_i(I_dst, ix),
-                                                  _fine_global_j(J_dst, iy))]
-        return ((dst, 1.0, SPLIT_CORNER),)
-    elseif di < 0
-        return (
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 1), _fine_global_j(J_dst, 1))], 0.5, SPLIT_FACE),
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 1), _fine_global_j(J_dst, 2))], 0.5, SPLIT_FACE),
-        )
-    elseif di > 0
-        return (
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 2), _fine_global_j(J_dst, 1))], 0.5, SPLIT_FACE),
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 2), _fine_global_j(J_dst, 2))], 0.5, SPLIT_FACE),
-        )
-    elseif dj < 0
-        return (
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 1), _fine_global_j(J_dst, 1))], 0.5, SPLIT_FACE),
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 2), _fine_global_j(J_dst, 1))], 0.5, SPLIT_FACE),
-        )
-    else
-        return (
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 1), _fine_global_j(J_dst, 2))], 0.5, SPLIT_FACE),
-            (cell_id_by_coord[_tree_topology_key(1, _fine_global_i(I_dst, 2), _fine_global_j(J_dst, 2))], 0.5, SPLIT_FACE),
-        )
+function _push_or_accumulate_route_spec!(dsts::Vector{Int},
+                                         weights::Vector{Float64},
+                                         kinds::Vector{RouteKind},
+                                         dst::Int,
+                                         weight::Float64,
+                                         kind::RouteKind)
+    @inbounds for idx in eachindex(dsts)
+        if dsts[idx] == dst && kinds[idx] == kind
+            weights[idx] += weight
+            return nothing
+        end
     end
+    push!(dsts, dst)
+    push!(weights, weight)
+    push!(kinds, kind)
+    return nothing
+end
+
+function _coarse_to_fine_route_specs(cell_id_by_coord,
+                                     src_i::Int,
+                                     src_j::Int,
+                                     q::Int,
+                                     patch::ConservativeTreePatch2D,
+                                     Nx::Int,
+                                     Ny::Int;
+                                     periodic_x::Bool=false)
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+    split_kind = (src_i < first(patch.parent_i_range) ||
+                  src_i > last(patch.parent_i_range)) &&
+                 (src_j < first(patch.parent_j_range) ||
+                  src_j > last(patch.parent_j_range)) ? SPLIT_CORNER : SPLIT_FACE
+
+    dsts = Int[]
+    weights = Float64[]
+    kinds = RouteKind[]
+    @inbounds for iy in 1:2, ix in 1:2
+        i_dst = _fine_global_i(src_i, ix) + cx
+        j_dst = _fine_global_j(src_j, iy) + cy
+        if periodic_x
+            i_dst = mod1(i_dst, 2 * Nx)
+        end
+
+        if !_inside_leaf_domain(i_dst, j_dst, Nx, Ny)
+            _push_or_accumulate_route_spec!(dsts, weights, kinds,
+                                            0, 0.25, ROUTE_BOUNDARY)
+        elseif _inside_fine_patch(i_dst, j_dst, patch)
+            dst = cell_id_by_coord[_tree_topology_key(1, i_dst, j_dst)]
+            _push_or_accumulate_route_spec!(dsts, weights, kinds,
+                                            dst, 0.25, split_kind)
+        else
+            I_dst, J_dst = _coarse_parent_from_fine(i_dst, j_dst)
+            dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
+            _push_or_accumulate_route_spec!(dsts, weights, kinds,
+                                            dst, 0.25, DIRECT)
+        end
+    end
+
+    return Tuple((dsts[idx], weights[idx], kinds[idx]) for idx in eachindex(dsts))
 end
 
 @inline function _fine_to_coarse_route_kind(i_dst_leaf::Int,
@@ -284,12 +310,9 @@ function _build_conservative_tree_links_2d(cells::Vector{ConservativeTreeCell2D}
                 elseif _inside_range(I_dst, J_dst,
                                      patch.parent_i_range,
                                      patch.parent_j_range)
-                    di = cell.i < first(patch.parent_i_range) ? -1 :
-                         cell.i > last(patch.parent_i_range) ? 1 : 0
-                    dj = cell.j < first(patch.parent_j_range) ? -1 :
-                         cell.j > last(patch.parent_j_range) ? 1 : 0
                     specs = _coarse_to_fine_route_specs(cell_id_by_coord,
-                                                        I_dst, J_dst, di, dj)
+                                                        cell.i, cell.j, q,
+                                                        patch, Nx, Ny)
                     _push_link_route!(links, routes,
                                       same_level_links, coarse_to_fine_links,
                                       fine_to_coarse_links, boundary_links,

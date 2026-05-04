@@ -94,6 +94,67 @@ using Kraken
         @test proposal_plan.i_range == 5:8
         @test proposal_plan.j_range == 3:6
         @test proposal_plan.reason == :krk_refine
+
+        adaptive_setup = parse_kraken("""
+        Simulation adapt_criterion D2Q9
+        Domain L = 8 x 4  N = 16 x 12
+        Physics nu = 0.1
+        Refine wake {
+            region = [2.0, 1.0, 4.0, 2.0],
+            ratio = 2,
+            criterion = gradient(ux) > 0.2,
+            pad = 2,
+            max_growth = 1,
+            shrink_margin = 0,
+            balance = 1
+        }
+        Boundary west periodic
+        Boundary east periodic
+        Boundary south wall
+        Boundary north wall
+        Run 10 steps
+        """)
+        criterion_refine = adaptive_setup.refinements[1]
+        criterion = criterion_refine.criterion
+        criterion_policy =
+            conservative_tree_adaptation_policy_from_krk_refine_2d(criterion_refine)
+        criterion_indicator = zeros(Float64, 16, 12)
+        criterion_indicator[10:11, 5] .= 0.3
+        criterion_plan = conservative_tree_indicator_adaptation_plan_from_krk_2d(
+            criterion_indicator, 9:10, 5:5, criterion_refine)
+
+        @test criterion !== nothing
+        @test criterion.indicator == :gradient
+        @test criterion.field == :ux
+        @test criterion.op == Symbol(">")
+        @test criterion.threshold ≈ 0.2
+        @test criterion.update_every == 1
+        @test criterion.balance == 1
+        @test criterion_policy.pad_parent == 2
+        @test criterion_policy.max_growth == 1
+        @test criterion_policy.shrink_margin == 0
+        @test criterion_plan.requested_i_range == 10:11
+        @test criterion_plan.requested_j_range == 5:5
+        @test criterion_plan.i_range == 8:11
+        @test criterion_plan.j_range == 4:6
+        @test criterion_plan.reason == :krk_refine_criterion
+        @test_throws ArgumentError parse_kraken(
+            """
+            Simulation bad_balance D2Q9
+            Domain L = 8 x 4  N = 16 x 12
+            Physics nu = 0.1
+            Refine wake {
+                region = [2.0, 1.0, 4.0, 2.0],
+                ratio = 2,
+                criterion = gradient(ux) > 0.2,
+                balance = 2
+            }
+            Boundary west periodic
+            Boundary east periodic
+            Boundary south wall
+            Boundary north wall
+            Run 10 steps
+            """)
     end
 
     @testset "plan application regrids conservatively" begin

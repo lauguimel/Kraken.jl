@@ -218,6 +218,32 @@ function conservative_tree_patch_proposals_from_krk_2d(setup)
     return proposals
 end
 
+function conservative_tree_adaptation_policy_from_krk_refine_2d(refine)
+    criterion = getproperty(refine, :criterion)
+    criterion === nothing && return ConservativeTreeAdaptationPolicy2D()
+    return ConservativeTreeAdaptationPolicy2D(
+        pad_parent=getproperty(criterion, :pad),
+        max_growth=getproperty(criterion, :max_growth),
+        shrink_margin=getproperty(criterion, :shrink_margin))
+end
+
+function conservative_tree_indicator_adaptation_plan_from_krk_2d(
+        indicator::AbstractArray{<:Real,2},
+        current_i_range::AbstractUnitRange{<:Integer},
+        current_j_range::AbstractUnitRange{<:Integer},
+        refine)
+    criterion = getproperty(refine, :criterion)
+    criterion !== nothing ||
+        throw(ArgumentError("Refine block has no adaptive criterion"))
+    getproperty(criterion, :indicator) == :gradient ||
+        throw(ArgumentError("Only gradient Refine criteria are supported"))
+    return conservative_tree_indicator_adaptation_plan_2d(
+        indicator, current_i_range, current_j_range;
+        threshold=getproperty(criterion, :threshold),
+        policy=conservative_tree_adaptation_policy_from_krk_refine_2d(refine),
+        reason=:krk_refine_criterion)
+end
+
 function adapt_conservative_tree_patch_with_plan_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},
