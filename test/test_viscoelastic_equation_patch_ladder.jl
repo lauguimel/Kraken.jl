@@ -2029,3 +2029,173 @@ end
     @test max_exhaustive > 1e-4
     @test actual.max_macro_error < P0_ATOL
 end
+
+@inline function _couette_circular_constants(Ri, Ro, Ω)
+    A = -Ω * Ri^2 / (Ro^2 - Ri^2)
+    B = Ω * Ri^2 * Ro^2 / (Ro^2 - Ri^2)
+    return A, B
+end
+
+@inline function _couette_circular_velocity_gradient(x, y; cx, cy, Ri, Ro, Ω)
+    xr = x - cx
+    yr = y - cy
+    r2 = xr^2 + yr^2
+    A, B = _couette_circular_constants(Ri, Ro, Ω)
+    F = A + B / r2
+    ux = -F * yr
+    uy = F * xr
+    dudx = 2B * xr * yr / (r2^2)
+    dudy = -F + 2B * yr^2 / (r2^2)
+    dvdx = F - 2B * xr^2 / (r2^2)
+    dvdy = -2B * xr * yr / (r2^2)
+    return (; ux, uy, dudx, dudy, dvdx, dvdy)
+end
+
+function _curved_couette_oldroydb_patch(; Nx=72, Ny=72, Ri=12.0,
+                                        Ro=28.0, Ω=0.006, λ=4.0)
+    cx = (Nx - 1) / 2
+    cy = (Ny - 1) / 2
+    q_wall, is_solid = precompute_q_wall_cylinder(Nx, Ny, cx, cy, Ri)
+    ux = zeros(Float64, Nx, Ny)
+    uy = zeros(Float64, Nx, Ny)
+    Cxx = ones(Float64, Nx, Ny)
+    Cxy = zeros(Float64, Nx, Ny)
+    Cyy = ones(Float64, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        if is_solid[i, j]
+            continue
+        end
+        vg = _couette_circular_velocity_gradient(i - 1.0, j - 1.0;
+                                                 cx, cy, Ri, Ro, Ω)
+        ux[i, j] = vg.ux
+        uy[i, j] = vg.uy
+        Cxx[i, j], Cxy[i, j], Cyy[i, j] =
+            _stationary_direct_conformation_incompressible(
+                vg.dudx, vg.dudy, vg.dvdx, vg.dvdy, λ,
+            )
+    end
+    return (; Nx, Ny, cx, cy, Ri, Ro, Ω, λ, q_wall, is_solid, ux, uy,
+            Cxx, Cxy, Cyy)
+end
+
+function _curved_couette_error_stats(p, Axx, Axy, Ayy)
+    max_cut = 0.0
+    max_near = 0.0
+    max_far = 0.0
+    for j in 3:p.Ny-2, i in 3:p.Nx-2
+        p.is_solid[i, j] && continue
+        err = max(abs(Axx[i, j] - p.Cxx[i, j]),
+                  abs(Axy[i, j] - p.Cxy[i, j]),
+                  abs(Ayy[i, j] - p.Cyy[i, j]))
+        r = hypot((i - 1.0) - p.cx, (j - 1.0) - p.cy)
+        if _is_cut_cell(p.q_wall, i, j)
+            max_cut = max(max_cut, err)
+        elseif r < p.Ri + 3.5
+            max_near = max(max_near, err)
+        elseif r < p.Ro
+            max_far = max(max_far, err)
+        end
+    end
+    return (; max_cut, max_near, max_far)
+end
+
+@testset "P28 circular Couette Oldroyd-B analytic closure is exact" begin
+    p = _curved_couette_oldroydb_patch()
+    max_source = 0.0
+    min_eig = Inf
+    for j in 1:p.Ny, i in 1:p.Nx
+        p.is_solid[i, j] && continue
+        vg = _couette_circular_velocity_gradient(i - 1.0, j - 1.0;
+                                                 cx=p.cx, cy=p.cy,
+                                                 Ri=p.Ri, Ro=p.Ro, Ω=p.Ω)
+        source = _direct_source_tuple(
+            p.Cxx[i, j], p.Cxy[i, j], p.Cyy[i, j],
+            vg.dudx, vg.dudy, vg.dvdx, vg.dvdy, p.λ,
+        )
+        max_source = max(max_source, maximum(abs, source))
+        min_eig = min(min_eig, _min_eig_spd_2x2(p.Cxx[i, j], p.Cxy[i, j], p.Cyy[i, j]))
+    end
+    @test max_source < 5e-14
+    @test min_eig > 0.9
+end
+
+@testset "P29 circular Couette numerical gradient is a separate curved-wall canary" begin
+    p = _curved_couette_oldroydb_patch()
+    max_cut_source = 0.0
+    max_far_source = 0.0
+    for j in 3:p.Ny-2, i in 3:p.Nx-2
+        p.is_solid[i, j] && continue
+        source = _direct_source_tuple(
+            p.Cxx[i, j], p.Cxy[i, j], p.Cyy[i, j],
+            Kraken._wall_aware_dx_2d(p.ux, p.is_solid, i, j, p.Nx, Float64),
+            Kraken._wall_aware_dy_2d(p.ux, p.is_solid, i, j, p.Ny, Float64),
+            Kraken._wall_aware_dx_2d(p.uy, p.is_solid, i, j, p.Nx, Float64),
+            Kraken._wall_aware_dy_2d(p.uy, p.is_solid, i, j, p.Ny, Float64),
+            p.λ,
+        )
+        residual = maximum(abs, source)
+        if _is_cut_cell(p.q_wall, i, j)
+            max_cut_source = max(max_cut_source, residual)
+        elseif hypot((i - 1.0) - p.cx, (j - 1.0) - p.cy) > p.Ri + 6
+            max_far_source = max(max_far_source, residual)
+        end
+    end
+    @test max_cut_source > 1e-5
+    @test max_cut_source > 5 * max_far_source
+end
+
+@testset "P30 circular Couette collision-only drift localizes gradient/source error" begin
+    p = _curved_couette_oldroydb_patch()
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = zeros(Float64, p.Nx, p.Ny, 9)
+    gyy = zeros(Float64, p.Nx, p.Ny, 9)
+    Cxx = copy(p.Cxx)
+    Cxy = copy(p.Cxy)
+    Cyy = copy(p.Cyy)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    collide_conformation_2d!(gxx, Cxx, p.ux, p.uy, Cxx, Cxy, Cyy,
+                             p.is_solid, 1.0, p.λ;
+                             magic=1e-6, component=1, divergence_mode=:trace_free)
+    collide_conformation_2d!(gxy, Cxy, p.ux, p.uy, Cxx, Cxy, Cyy,
+                             p.is_solid, 1.0, p.λ;
+                             magic=1e-6, component=2, divergence_mode=:trace_free)
+    collide_conformation_2d!(gyy, Cyy, p.ux, p.uy, Cxx, Cxy, Cyy,
+                             p.is_solid, 1.0, p.λ;
+                             magic=1e-6, component=3, divergence_mode=:trace_free)
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    stats = _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
+    @test stats.max_cut > 1e-5
+    @test stats.max_cut > stats.max_far
+end
+
+@testset "P31 circular Couette stream+BC-only drift localizes wall transport error" begin
+    p = _curved_couette_oldroydb_patch()
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = zeros(Float64, p.Nx, p.Ny, 9)
+    gyy = zeros(Float64, p.Nx, p.Ny, 9)
+    Cxx = copy(p.Cxx)
+    Cxy = copy(p.Cxy)
+    Cyy = copy(p.Cyy)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+    stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+    stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+    stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+    apply_polymer_wall_bc!(bxx, gxx, p.is_solid, p.q_wall, Cxx, p.ux, p.uy, CNEBB())
+    apply_polymer_wall_bc!(bxy, gxy, p.is_solid, p.q_wall, Cxy, p.ux, p.uy, CNEBB())
+    apply_polymer_wall_bc!(byy, gyy, p.is_solid, p.q_wall, Cyy, p.ux, p.uy, CNEBB())
+    compute_conformation_macro_2d!(Cxx, bxx)
+    compute_conformation_macro_2d!(Cxy, bxy)
+    compute_conformation_macro_2d!(Cyy, byy)
+    stats = _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
+    @test stats.max_cut > 1e-5
+    @test stats.max_cut > 10 * stats.max_far
+end

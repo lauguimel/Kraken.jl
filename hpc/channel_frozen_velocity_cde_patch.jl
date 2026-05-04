@@ -110,7 +110,7 @@ function _run_case(; backend, FT, Nx, Ny, R, beta, Wi, model_name,
     ux_h = repeat(reshape(ux_prof, 1, Ny), Nx, 1)
     uy_h = zeros(FT, Nx, Ny)
     ρ_h = ones(FT, Nx, Ny)
-    solid_h = falses(Nx, Ny)
+    solid_h = fill(false, Nx, Ny)
 
     ux = KernelAbstractions.allocate(backend, FT, Nx, Ny); copyto!(ux, ux_h)
     uy = KernelAbstractions.allocate(backend, FT, Nx, Ny); copyto!(uy, uy_h)
