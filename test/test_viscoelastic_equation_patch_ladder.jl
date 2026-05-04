@@ -2978,3 +2978,62 @@ end
     @test stats_by_name[:cnebb].max_cut > 1e-5
     @test stats_by_name[:cnebb].max_cut > 10 * stats_by_name[:cnebb].max_far
 end
+
+function _curved_couette_cde_repeated_stats(bc; steps=4)
+    p = _curved_couette_oldroydb_patch()
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = zeros(Float64, p.Nx, p.Ny, 9)
+    gyy = zeros(Float64, p.Nx, p.Ny, 9)
+    Cxx = copy(p.Cxx)
+    Cxy = copy(p.Cxy)
+    Cyy = copy(p.Cyy)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+
+    max_cut = 0.0
+    max_near = 0.0
+    max_far = 0.0
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+        stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+        stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+        apply_polymer_wall_bc!(bxx, gxx, p.is_solid, p.q_wall, Cxx, p.ux, p.uy, bc)
+        apply_polymer_wall_bc!(bxy, gxy, p.is_solid, p.q_wall, Cxy, p.ux, p.uy, bc)
+        apply_polymer_wall_bc!(byy, gyy, p.is_solid, p.q_wall, Cyy, p.ux, p.uy, bc)
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                   p.ux, p.uy, p.is_solid, p.λ)
+        stats = _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
+        max_cut = max(max_cut, stats.max_cut)
+        max_near = max(max_near, stats.max_near)
+        max_far = max(max_far, stats.max_far)
+    end
+    return (; max_cut, max_near, max_far)
+end
+
+@testset "P32 circular Couette repeated CDE separates wall and collision errors" begin
+    stats = Dict{Symbol,Any}()
+    for (name, bc) in ((:cnebb, CNEBB()),
+                       (:field, CNEBBField()),
+                       (:field_equilibrium, CNEBBFieldEquilibrium()),
+                       (:eq_gradient, CNEBBEqGradient()))
+        stats[name] = _curved_couette_cde_repeated_stats(bc; steps=4)
+    end
+
+    @test stats[:cnebb].max_cut > 1e-2
+    @test stats[:field].max_cut < 1e-3
+    @test stats[:field_equilibrium].max_cut < 1e-3
+    @test stats[:eq_gradient].max_cut > stats[:field_equilibrium].max_cut
+    @test stats[:field_equilibrium].max_near < stats[:field].max_near
+    @test stats[:field_equilibrium].max_far < stats[:field].max_far
+end
