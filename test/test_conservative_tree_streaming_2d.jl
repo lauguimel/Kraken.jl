@@ -606,6 +606,32 @@ end
         @test sum(result.is_solid_leaf) > 0
     end
 
+    @testset "route native cylinder obstacle benchmark canary is finite" begin
+        result = run_conservative_tree_cylinder_obstacle_route_native_2d(
+            ; steps=120, avg_window=40)
+
+        @test result.steps == 120
+        @test result.avg_window == 40
+        @test isfinite(result.Cd)
+        @test abs(result.mass_drift) < 1e-8
+        @test result.u_ref > 0
+        @test sum(result.is_solid_leaf) > 0
+    end
+
+    @testset "cartesian versus AMR benchmark rows are finite" begin
+        rows = benchmark_conservative_tree_cartesian_vs_amr_2d(
+            ; flows=(:bfs, :square, :cylinder), steps=20)
+
+        @test length(rows) == 6
+        @test Set(row.flow for row in rows) == Set([:bfs, :square, :cylinder])
+        @test Set(row.method for row in rows) == Set([:leaf_oracle, :amr_route_native])
+        @test all(row.steps == 20 for row in rows)
+        @test all(isfinite(row.ux_mean) for row in rows)
+        @test all(isfinite(row.uy_mean) for row in rows)
+        @test all(isfinite(row.mass_rel_drift) for row in rows)
+        @test all(row.elapsed_s >= 0 for row in rows)
+    end
+
     @testset "vertical facing step mask is wall attached" begin
         mask = vertical_facing_step_solid_mask_leaf_2d(16, 12, 7:9, 5)
 

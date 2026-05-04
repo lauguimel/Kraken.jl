@@ -1311,6 +1311,161 @@ function run_conservative_tree_square_obstacle_route_native_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+function run_conservative_tree_cylinder_obstacle_route_native_2d(;
+        Nx::Int=24,
+        Ny::Int=14,
+        patch_i_range::UnitRange{Int}=8:17,
+        patch_j_range::UnitRange{Int}=4:11,
+        cx_leaf=(2 * Nx) / 2,
+        cy_leaf=(2 * Ny) / 2,
+        radius_leaf=3.0,
+        Fx=2e-5,
+        omega=1.0,
+        rho=1.0,
+        steps::Int=1200,
+        avg_window::Int=300,
+        T::Type{<:Real}=Float64)
+    steps > 0 || throw(ArgumentError("steps must be positive"))
+    avg_window > 0 || throw(ArgumentError("avg_window must be positive"))
+    Fx = T(Fx)
+    omega = T(omega)
+    rho = T(rho)
+    cx_leaf = T(cx_leaf)
+    cy_leaf = T(cy_leaf)
+    radius_leaf = T(radius_leaf)
+    volume_coarse = one(T)
+    volume_fine = T(0.25)
+    avg_window_i = min(avg_window, steps)
+
+    is_solid = cylinder_solid_mask_leaf_2d(2 * Nx, 2 * Ny,
+                                           cx_leaf, cy_leaf, radius_leaf)
+    coarse = zeros(T, Nx, Ny, 9)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
+    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    leaf = zeros(T, 2 * Nx, 2 * Ny, 9)
+    leaf_next = similar(leaf)
+
+    _check_route_solid_mask_layout(topology, coarse, patch, is_solid)
+
+    fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
+    fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_initial = _leaf_fluid_mass_F(leaf, is_solid)
+
+    Fx_sum = zero(T)
+    Fy_sum = zero(T)
+    n_avg = 0
+    for step in 1:steps
+        collide_Guo_composite_solid_F_2d!(
+            coarse, patch, topology, is_solid,
+            volume_coarse, volume_fine, omega, omega, Fx, zero(T))
+        stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
+            coarse_next, patch_next, coarse, patch, topology, is_solid)
+
+        if step > steps - avg_window_i
+            composite_to_leaf_F_2d!(leaf, coarse, patch)
+            composite_to_leaf_F_2d!(leaf_next, coarse_next, patch_next)
+            drag = compute_drag_mea_solid_F_2d(leaf, leaf_next, is_solid)
+            Fx_sum += T(drag.Fx)
+            Fy_sum += T(drag.Fy)
+            n_avg += 1
+        end
+
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    composite_to_leaf_F_2d!(leaf, coarse, patch)
+    mass_final = _leaf_fluid_mass_F(leaf, is_solid)
+    u_ref = _leaf_fluid_mean_ux_F(leaf, is_solid; volume=volume_fine, force_x=Fx)
+    Fx_drag = Fx_sum / T(n_avg)
+    Fy_drag = Fy_sum / T(n_avg)
+    diameter = T(2) * radius_leaf
+    Cd = T(2) * Fx_drag / (rho * max(abs(u_ref), eps(T))^2 * diameter)
+
+    return ConservativeTreeCylinderResult2D{T}(
+        coarse, patch, is_solid, Fx_drag, Fy_drag, Cd, u_ref,
+        mass_initial, mass_final, mass_final - mass_initial, steps, avg_window_i)
+end
+
+struct ConservativeTreeBenchmarkRow2D
+    flow::Symbol
+    method::Symbol
+    Nx::Int
+    Ny::Int
+    steps::Int
+    ux_mean::Float64
+    uy_mean::Float64
+    mass_rel_drift::Float64
+    elapsed_s::Float64
+end
+
+function _conservative_tree_benchmark_row_2d(flow::Symbol,
+                                             method::Symbol,
+                                             Nx::Int,
+                                             Ny::Int,
+                                             result,
+                                             elapsed_s::Real)
+    ux = hasproperty(result, :ux_mean) ? getproperty(result, :ux_mean) :
+         getproperty(result, :u_ref)
+    uy = hasproperty(result, :uy_mean) ? getproperty(result, :uy_mean) : zero(ux)
+    mass_initial = getproperty(result, :mass_initial)
+    mass_drift = getproperty(result, :mass_drift)
+    rel = abs(mass_drift) / max(abs(mass_initial), eps(typeof(float(mass_initial))))
+    return ConservativeTreeBenchmarkRow2D(
+        flow, method, Nx, Ny, getproperty(result, :steps),
+        Float64(ux), Float64(uy), Float64(rel), Float64(elapsed_s))
+end
+
+function benchmark_conservative_tree_cartesian_vs_amr_2d(;
+        flows::Tuple=(:bfs, :square, :cylinder),
+        steps::Int=240,
+        T::Type{<:Real}=Float64)
+    steps > 0 || throw(ArgumentError("steps must be positive"))
+    rows = ConservativeTreeBenchmarkRow2D[]
+    for flow in flows
+        if flow == :bfs
+            leaf = nothing
+            leaf_elapsed = @elapsed leaf = run_conservative_tree_bfs_macroflow_2d(
+                ; steps=steps, T=T)
+            route = nothing
+            route_elapsed = @elapsed route = run_conservative_tree_bfs_route_native_2d(
+                ; steps=steps, T=T)
+            push!(rows, _conservative_tree_benchmark_row_2d(
+                :bfs, :leaf_oracle, 28, 14, leaf, leaf_elapsed))
+            push!(rows, _conservative_tree_benchmark_row_2d(
+                :bfs, :amr_route_native, 28, 14, route, route_elapsed))
+        elseif flow == :square
+            leaf = nothing
+            leaf_elapsed = @elapsed leaf = run_conservative_tree_square_obstacle_macroflow_2d(
+                ; steps=steps, T=T)
+            route = nothing
+            route_elapsed = @elapsed route = run_conservative_tree_square_obstacle_route_native_2d(
+                ; steps=steps, T=T)
+            push!(rows, _conservative_tree_benchmark_row_2d(
+                :square, :leaf_oracle, 24, 14, leaf, leaf_elapsed))
+            push!(rows, _conservative_tree_benchmark_row_2d(
+                :square, :amr_route_native, 24, 14, route, route_elapsed))
+        elseif flow == :cylinder
+            leaf = nothing
+            leaf_elapsed = @elapsed leaf = run_conservative_tree_cylinder_macroflow_2d(
+                ; steps=steps, avg_window=min(steps, 60), T=T)
+            route = nothing
+            route_elapsed = @elapsed route = run_conservative_tree_cylinder_obstacle_route_native_2d(
+                ; steps=steps, avg_window=min(steps, 60), T=T)
+            push!(rows, _conservative_tree_benchmark_row_2d(
+                :cylinder, :leaf_oracle, 24, 14, leaf, leaf_elapsed))
+            push!(rows, _conservative_tree_benchmark_row_2d(
+                :cylinder, :amr_route_native, 24, 14, route, route_elapsed))
+        else
+            throw(ArgumentError("unsupported conservative-tree benchmark flow: $flow"))
+        end
+    end
+    return rows
+end
+
 function run_conservative_tree_vfs_route_native_2d(;
         Nx::Int=28,
         Ny::Int=14,

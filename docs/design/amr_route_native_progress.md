@@ -101,6 +101,14 @@ Next surgical patch:
   boundary packet audit, then run the same ladder for square and cylinder
   obstacles.
 
+Benchmark hook:
+
+- `benchmark_conservative_tree_cartesian_vs_amr_2d` now emits comparable
+  `leaf_oracle` and `amr_route_native` rows for BFS, square and cylinder;
+- `benchmarks/amr_cartesian_vs_route_native_2d.jl` writes those rows to CSV;
+- `hpc/amr_cartesian_vs_route_native_2d_aqua.pbs` is the aqua submission
+  wrapper (`KRK_AMR_STEPS`, `KRK_AMR_FLOWS`, `KRK_AMR_TAG`).
+
 ## 4. Multi-Patch Statique 2D
 
 Status: ownership tables started; route topology still pending.
