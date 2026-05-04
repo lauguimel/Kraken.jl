@@ -177,6 +177,23 @@ end
         @test_broken local_rel < 0.02
     end
 
+    @testset "open channel rest state exposes local interface drift" begin
+        local_patch = Kraken.run_conservative_tree_open_channel_mass_ledger_2d(
+            ; u_in=0.0, steps=160)
+        full_patch = Kraken.run_conservative_tree_open_channel_mass_ledger_2d(
+            ; u_in=0.0, patch_i_range=1:18, patch_j_range=1:10, steps=160)
+
+        local_rel = abs(local_patch.mass_drift) / local_patch.mass_initial
+        full_rel = abs(full_patch.mass_drift) / full_patch.mass_initial
+
+        @test full_rel < 1e-12
+        @test abs(full_patch.ux_history[end]) < 1e-12
+        @test local_rel < 0.25
+        @test isfinite(local_patch.ux_history[end])
+        @test_broken local_rel < 0.02
+        @test_broken abs(local_patch.ux_history[end]) < 1e-6
+    end
+
     @testset "short open channel with inlet-spanning patch remains finite" begin
         nx, ny = 8, 6
         volume_coarse = 1.0

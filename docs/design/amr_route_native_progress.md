@@ -83,6 +83,9 @@ Done:
   patch; the full-domain route stays bounded, while the local-patch target
   `mass_rel_drift < 0.02` is marked as a broken test until the coarse/fine
   open-flow coupling is fixed;
+- zero-inlet open-channel rest-state canary; the full-domain patch remains at
+  rest to roundoff, while a local patch generates spurious interface drift and
+  is marked as broken until the route-native interface preserves rest states;
 - bounce-back solid mask;
 - square obstacle route-native smoke;
 - vertical facing step route-native smoke.
@@ -153,6 +156,11 @@ Notes:
   path. The non-subcycled topology therefore uses leaf-equivalent residual
   routes again; full-packet transfer belongs with the subcycling milestone where
   the packet is split in time instead of injected in one coarse step.
+- A zero-inlet open-channel audit showed the deeper blocker: the current
+  non-subcycled local interface conserves packet sums but does not preserve the
+  rest distribution locally. Zou-He open boundaries then convert that interface
+  perturbation into mass and velocity drift. BFS convergence must stay gated on
+  this surgical rest-state canary.
 
 ## 4. Multi-Patch Statique 2D
 
