@@ -117,6 +117,20 @@ Benchmark hook:
   `KRK_AMR_CONV_BASE_STEPS`, `KRK_AMR_CONV_STEP_EXPONENT`,
   `KRK_AMR_CONV_AVG_WINDOW`, `KRK_AMR_TAG`).
 
+Aqua runs:
+
+- `20757938.aqua` produced
+  `benchmarks/results/amr_cartesian_vs_route_native_2d_aqua_20757938.csv`
+  at 1200 steps for BFS, square and cylinder. Square and cylinder conserve
+  mass to roundoff; BFS remains finite but has a much larger open-flow mass
+  drift than the leaf oracle.
+- `20757949.aqua` produced
+  `benchmarks/results/amr_obstacle_convergence_2d_aqua_conv_20757949.csv`
+  for square/cylinder scales 1 and 2. This is a numerical ladder canary, not
+  yet a publication convergence claim; route-native obstacle metrics still
+  differ materially from the leaf oracle while the transport mass ledger stays
+  conservative.
+
 ## 4. Multi-Patch Statique 2D
 
 Status: ownership tables started; route topology still pending.
