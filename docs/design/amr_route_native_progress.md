@@ -185,6 +185,33 @@ Notes:
   rest-state canary. Square/cylinder route-native runners also use this mode
   after a local audit showed improved obstacle metrics with roundoff-level mass
   conservation.
+- 2026-05-04 Phase A diagnostic (obstacle + interface coarse/fine).
+  - `test/test_conservative_tree_obstacle_interface_2d.jl` adds 4 rest-state
+    canaries (obstacle inside fine, in coarse, straddling interface, adjacent
+    to interface), a `diff_route_vs_oracle_one_step` localiser at
+    1/2/5/20/100 steps, and a MEA drag isolation test. All 22 assertions pass.
+  - Rest-state result: route-native preserves mass and velocity to roundoff
+    in every obstacle + interface configuration. There is no separate solid
+    transport bug. The constant `max|ΔF| ≈ 1/9` between paths is a harmless
+    storage difference inside solid leaf cells (route-native zeros solid
+    output cells, oracle reconstructs them from the coarse equilibrium); the
+    fluid-cell velocities are bit-identical (`max|Δu| = 0`).
+  - Driven-flow result: under the cylinder regime (Fx=2e-5, Nx=24, Ny=14,
+    cylinder of radius 3 in patch 8:17 × 4:11), the route-native vs oracle
+    leaf transport diff grows roughly linearly: `max|Δu|` is 1.77e-6 at step
+    1, 9.08e-6 at step 5, 3.40e-5 at step 20, 3.66e-4 at step 100. Linear
+    growth is consistent with the documented "non-subcycled coarse-to-fine
+    injection doubles interface packets" issue. Extrapolated to the 1200-step
+    cylinder runner, the accumulated transport mismatch is the primary
+    candidate cause of the ~1.86x Cd ratio (route-native 3.26e+01 vs leaf
+    oracle 1.75e+01 at scale 2).
+  - MEA drag is bit-identical when fed identical Fpre/Fpost arrays, so the
+    drag computation itself is not the source of the discrepancy.
+  - Verdict: B-1 (priority #1 obstacle gap is blocked by priority #2
+    subcycling). No surgical transport fix in src/ is justified at this
+    stage. Next step is to wire `ConservativeTreeSubcycleLedger2D` into the
+    route-native time integrator, then re-evaluate the obstacle ladder with
+    one coarse step plus two fine half-steps.
 
 ## 4. Multi-Patch Statique 2D
 
