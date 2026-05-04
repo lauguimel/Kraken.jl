@@ -39,6 +39,8 @@ Uses analytical 2×2 eigendecomposition of the symmetric Ψ matrix.
 @inline function logconf_source_2d(Ψxx::T, Ψxy::T, Ψyy::T,
                                      dudx::T, dudy::T, dvdx::T, dvdy::T,
                                      λ::T, component::Int) where {T<:AbstractFloat}
+    divu = dudx + dvdy
+
     # Eigendecomposition of symmetric Ψ = [Ψxx Ψxy; Ψxy Ψyy]
     tr = Ψxx + Ψyy
     diff = Ψxx - Ψyy
@@ -95,11 +97,11 @@ Uses analytical 2×2 eigendecomposition of the symmetric Ψ matrix.
     # (S'_12 = S'_21 in eigenframe; Ω contribution is antisymmetric but
     #  [Ω, Ψ'] is symmetric after commutation since Ψ' is diagonal)
     if component == 1
-        return c2*S11p - T(2)*cs*S12p + s2*S22p
+        return c2*S11p - T(2)*cs*S12p + s2*S22p + Ψxx * divu
     elseif component == 2
-        return cs*S11p + (c2 - s2)*S12p - cs*S22p
+        return cs*S11p + (c2 - s2)*S12p - cs*S22p + Ψxy * divu
     else
-        return s2*S11p + T(2)*cs*S12p + c2*S22p
+        return s2*S11p + T(2)*cs*S12p + c2*S22p + Ψyy * divu
     end
 end
 
@@ -113,7 +115,7 @@ end
                                               @Const(Ψ_xx_f), @Const(Ψ_xy_f), @Const(Ψ_yy_f),
                                               @Const(is_solid),
                                               tau_plus, tau_minus, lambda,
-                                              component, Nx, Ny)
+                                              component, divergence_mode, Nx, Ny)
     i, j = @index(Global, NTuple)
 
     @inbounds if !is_solid[i, j]
@@ -123,19 +125,26 @@ end
         v = uy[i, j]
         usq = u*u + v*v
 
-        ip = ifelse(i < Nx, i + 1, 1)
-        im = ifelse(i > 1,  i - 1, Nx)
-        jp = min(j + 1, Ny)
-        jm = max(j - 1, 1)
-
-        dudx = (ux[ip,j] - ux[im,j]) / T(2)
-        dudy = (ux[i,jp] - ux[i,jm]) / T(2)
-        dvdx = (uy[ip,j] - uy[im,j]) / T(2)
-        dvdy = (uy[i,jp] - uy[i,jm]) / T(2)
+        # Same wall-aware stencil as direct-C conformation: centered in the
+        # bulk, one-sided next to embedded solids/domain walls, no x wrap.
+        dudx = _wall_aware_dx_2d(ux, is_solid, i, j, Nx, T)
+        dvdx = _wall_aware_dx_2d(uy, is_solid, i, j, Nx, T)
+        dudy = _wall_aware_dy_2d(ux, is_solid, i, j, Ny, T)
+        dvdy = _wall_aware_dy_2d(uy, is_solid, i, j, Ny, T)
+        dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
+            dudx, dudy, dvdx, dvdy, divergence_mode)
+        divu = dudx + dvdy
 
         Ψxx = Ψ_xx_f[i, j]; Ψxy = Ψ_xy_f[i, j]; Ψyy = Ψ_yy_f[i, j]
         S = logconf_source_2d(Ψxx, Ψxy, Ψyy, dudx, dudy, dvdx, dvdy,
                                 T(lambda), component)
+        if component == 1
+            S += Ψxx * divu
+        elseif component == 2
+            S += Ψxy * divu
+        else
+            S += Ψyy * divu
+        end
 
         g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
         g6 = g[i,j,6]; g7 = g[i,j,7]; g8 = g[i,j,8]; g9 = g[i,j,9]
@@ -154,37 +163,47 @@ end
         ωm = one(T) / T(tau_minus)
         half = T(0.5)
         wr = T(4/9); wa = T(1/9); we = T(1/36)
+        source_linear = (one(T) - ωp * half) * T(3) * S
+        S1 = wr * S
+        S2 = wa * (S + source_linear * u)
+        S3 = wa * (S + source_linear * v)
+        S4 = wa * (S - source_linear * u)
+        S5 = wa * (S - source_linear * v)
+        S6 = we * (S + source_linear * (u + v))
+        S7 = we * (S + source_linear * (-u + v))
+        S8 = we * (S - source_linear * (u + v))
+        S9 = we * (S + source_linear * (u - v))
 
         nq1 = g1 - ge1
-        g[i,j,1] = g1 - ωp * nq1 + wr * S
+        g[i,j,1] = g1 - ωp * nq1 + S1
 
         gp24 = (g2 + g4) * half;  gm24 = (g2 - g4) * half
         ep24 = (ge2 + ge4) * half; em24 = (ge2 - ge4) * half
         post2 = g2 - ωp*(gp24 - ep24) - ωm*(gm24 - em24)
         post4 = g4 - ωp*(gp24 - ep24) - ωm*(-(gm24 - em24))
-        g[i,j,2] = post2 + wa * S
-        g[i,j,4] = post4 + wa * S
+        g[i,j,2] = post2 + S2
+        g[i,j,4] = post4 + S4
 
         gp35 = (g3 + g5) * half;  gm35 = (g3 - g5) * half
         ep35 = (ge3 + ge5) * half; em35 = (ge3 - ge5) * half
         post3 = g3 - ωp*(gp35 - ep35) - ωm*(gm35 - em35)
         post5 = g5 - ωp*(gp35 - ep35) - ωm*(-(gm35 - em35))
-        g[i,j,3] = post3 + wa * S
-        g[i,j,5] = post5 + wa * S
+        g[i,j,3] = post3 + S3
+        g[i,j,5] = post5 + S5
 
         gp68 = (g6 + g8) * half;  gm68 = (g6 - g8) * half
         ep68 = (ge6 + ge8) * half; em68 = (ge6 - ge8) * half
         post6 = g6 - ωp*(gp68 - ep68) - ωm*(gm68 - em68)
         post8 = g8 - ωp*(gp68 - ep68) - ωm*(-(gm68 - em68))
-        g[i,j,6] = post6 + we * S
-        g[i,j,8] = post8 + we * S
+        g[i,j,6] = post6 + S6
+        g[i,j,8] = post8 + S8
 
         gp79 = (g7 + g9) * half;  gm79 = (g7 - g9) * half
         ep79 = (ge7 + ge9) * half; em79 = (ge7 - ge9) * half
         post7 = g7 - ωp*(gp79 - ep79) - ωm*(gm79 - em79)
         post9 = g9 - ωp*(gp79 - ep79) - ωm*(-(gm79 - em79))
-        g[i,j,7] = post7 + we * S
-        g[i,j,9] = post9 + we * S
+        g[i,j,7] = post7 + S7
+        g[i,j,9] = post9 + S9
     end
 end
 
@@ -199,7 +218,8 @@ evolving Ψ rather than C directly. Use together with
 C = exp(Ψ) via 2×2 eigendecomposition at each cell.
 """
 function collide_logconf_2d!(g, Ψ_field, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
-                                tau_plus, lambda; magic=0.25, component=1)
+                                tau_plus, lambda; magic=0.25, component=1,
+                                divergence_mode::Symbol=:numerical)
     backend = KernelAbstractions.get_backend(g)
     Nx, Ny = size(Ψ_field)
     T = eltype(g)
@@ -207,7 +227,8 @@ function collide_logconf_2d!(g, Ψ_field, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
     kernel! = collide_logconf_2d_kernel!(backend)
     kernel!(g, Ψ_field, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
             T(tau_plus), T(tau_minus), T(lambda),
-            Int(component), Nx, Ny; ndrange=(Nx, Ny))
+            Int(component), _conformation_divergence_mode_code(divergence_mode),
+            Nx, Ny; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end
 

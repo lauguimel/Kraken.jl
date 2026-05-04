@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#PBS -N krk_ve_tfdiag
+#PBS -l select=1:ncpus=8:ngpus=1:mem=96GB:gpu_id=H100
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export KRAKEN_MODELS=direct,logconf
+export KRAKEN_DIAGNOSTIC_INTERVAL=10000
+export KRAKEN_RESULTS_DIR=results/tracefree_physical_diag_${PBS_JOBID:-local}
+
+exec bash hpc/run_physical_wi_validation.pbs

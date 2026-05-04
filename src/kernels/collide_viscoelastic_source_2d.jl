@@ -44,20 +44,7 @@ using KernelAbstractions
             feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
 
             txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
-            # Hermite stress source for BGK collision (Liu 2025, Eq. 25
-            # adapted for standard BGK).
-            #
-            # The source T_i adds -ω·τ_αβ to the 2nd-order non-equilibrium
-            # moment Π_αβ. Chapman-Enskog recovers the stress as:
-            #   σ_p = (1 - ω/2) · Π_source / ω = -(1 - ω/2) · τ_αβ
-            #
-            # To get σ_p = -τ_αβ (full polymer stress), we must divide
-            # by (1 - ω/2), giving:
-            #   pre = -ω · 9/2 / (1 - ω/2)
-            #
-            # In Liu's regularized scheme, (1-ω/2) is already in the
-            # reconstruction, so their formula omits this factor. For
-            # standard BGK (our case), it must be included.
+            # Hermite stress source fused into the BGK collision.
             pre = -ω * T(9.0/2.0)
             cs2 = T(1/3)
             wr = T(4/9); wa = T(1/9); we = T(1/36)
@@ -118,12 +105,13 @@ end
 @kernel function apply_hermite_source_2d_kernel!(f, @Const(is_solid), s_plus,
                                                    @Const(tau_p_xx),
                                                    @Const(tau_p_xy),
-                                                   @Const(tau_p_yy))
+                                                   @Const(tau_p_yy),
+                                                   source_scale)
     i, j = @index(Global, NTuple)
     @inbounds if !is_solid[i, j]
         T = eltype(f)
         txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
-        pre = -s_plus * T(9.0/2.0) / (one(T) - s_plus / T(2))
+        pre = -s_plus * T(9.0/2.0) * source_scale
         cs2 = T(1/3)
         wr = T(4/9); wa = T(1/9); we = T(1/36)
 
@@ -142,23 +130,167 @@ end
 end
 
 """
-    apply_hermite_source_2d!(f, is_solid, s_plus, tau_p_xx, tau_p_xy, tau_p_yy)
+    apply_hermite_source_2d!(f, is_solid, s_plus, tau_p_xx, tau_p_xy, tau_p_yy;
+                             ce_correction=true)
 
-Post-collision injection of the viscoelastic Hermite stress source T_q
-(Liu et al. 2025, Eq. 25). Use when the BGK/TRT collision has already
-been performed by a separate kernel (e.g. `fused_trt_libb_v2_step!`)
-and only the τ_p contribution remains to be added.
+Post-collision injection of the viscoelastic Hermite stress source T_q.
+Use when the BGK/TRT collision has already been performed by a separate
+kernel (e.g. `fused_trt_libb_v2_step!`) and only the τ_p contribution
+remains to be added.
+
+`ce_correction=true` applies the standard post-collision half-step scaling
+`1/(1-s_plus/2)`, giving the bulk moment closure
+`ΔΠ_αβ = -s_plus τ_αβ/(1-s_plus/2)`. `ce_correction=false` matches the
+local in-collision Liu/Yu source amplitude, `ΔΠ_αβ = -s_plus τ_αβ`, and is
+kept as a diagnostic for separating source-amplitude and boundary-MEA effects.
 
 For TRT, pass `s_plus = 1/(3ν+0.5)` (symmetric rate, controls viscosity).
 For BGK, pass `s_plus = ω`.
 """
 function apply_hermite_source_2d!(f, is_solid, s_plus,
-                                    tau_p_xx, tau_p_xy, tau_p_yy)
+                                    tau_p_xx, tau_p_xy, tau_p_yy;
+                                    ce_correction::Bool=true,
+                                    source_scale::Real=1)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)
     T = eltype(f)
+    source_scale_t = T(source_scale) *
+        (ce_correction ? inv(one(T) - T(s_plus) / T(2)) : one(T))
     kernel! = apply_hermite_source_2d_kernel!(backend)
-    kernel!(f, is_solid, T(s_plus), tau_p_xx, tau_p_xy, tau_p_yy;
+    kernel!(f, is_solid, T(s_plus), tau_p_xx, tau_p_xy, tau_p_yy,
+            source_scale_t;
             ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+@inline function _has_wall_cut_link_2d(q_wall, i, j)
+    for q in 2:9
+        q_wall[i, j, q] > zero(eltype(q_wall)) && return true
+    end
+    return false
+end
+
+@inline function _clean_stress_sample_2d(is_solid, q_wall, i, j, Nx, Ny)
+    return 1 <= i <= Nx && 1 <= j <= Ny &&
+           !is_solid[i, j] &&
+           !_has_wall_cut_link_2d(q_wall, i, j)
+end
+
+@inline function _lagrange_extrapolate_to_wall_cell_2d(y1::T, s1::T,
+                                                       y2::T, s2::T) where {T}
+    return (s2 * y1 - s1 * y2) / (s2 - s1)
+end
+
+@inline function _lagrange_extrapolate_to_wall_cell_2d(y1::T, s1::T,
+                                                       y2::T, s2::T,
+                                                       y3::T, s3::T) where {T}
+    l1 = (s2 * s3) / ((s1 - s2) * (s1 - s3))
+    l2 = (s1 * s3) / ((s2 - s1) * (s2 - s3))
+    l3 = (s1 * s2) / ((s3 - s1) * (s3 - s2))
+    return l1 * y1 + l2 * y2 + l3 * y3
+end
+
+@inline function _reconstruct_wall_cell_from_interior_2d(a, is_solid, q_wall,
+                                                         i, j, q, Nx, Ny,
+                                                         order)
+    T = eltype(a)
+    cxq = _cx_q(q)
+    cyq = _cy_q(q)
+
+    y1 = zero(T); y2 = zero(T); y3 = zero(T)
+    s1 = zero(T); s2 = zero(T); s3 = zero(T)
+    n = 0
+    max_steps = max(Nx, Ny)
+    for step in 1:max_steps
+        ii = i - step * cxq
+        jj = j - step * cyq
+        if _clean_stress_sample_2d(is_solid, q_wall, ii, jj, Nx, Ny)
+            n += 1
+            if n == 1
+                y1 = a[ii, jj]; s1 = T(step)
+            elseif n == 2
+                y2 = a[ii, jj]; s2 = T(step)
+                order < 2 && break
+            else
+                y3 = a[ii, jj]; s3 = T(step)
+                break
+            end
+        elseif !(1 <= ii <= Nx && 1 <= jj <= Ny) || is_solid[ii, jj]
+            break
+        end
+    end
+
+    if n >= 3 && order >= 2
+        return _lagrange_extrapolate_to_wall_cell_2d(y1, s1, y2, s2, y3, s3), true
+    elseif n >= 2
+        return _lagrange_extrapolate_to_wall_cell_2d(y1, s1, y2, s2), true
+    elseif n == 1
+        return y1, true
+    end
+    return a[i, j], false
+end
+
+@kernel function reconstruct_wall_cell_stress_from_interior_2d_kernel!(
+        tau_xx_out, tau_xy_out, tau_yy_out,
+        @Const(tau_xx), @Const(tau_xy), @Const(tau_yy),
+        @Const(q_wall), @Const(is_solid), order, Nx, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(tau_xx_out)
+        if is_solid[i, j]
+            tau_xx_out[i, j] = tau_xx[i, j]
+            tau_xy_out[i, j] = tau_xy[i, j]
+            tau_yy_out[i, j] = tau_yy[i, j]
+        else
+            sum_xx = zero(T)
+            sum_xy = zero(T)
+            sum_yy = zero(T)
+            n = zero(T)
+            for q in 2:9
+                if q_wall[i, j, q] > zero(T)
+                    vxx, ok_xx = _reconstruct_wall_cell_from_interior_2d(
+                        tau_xx, is_solid, q_wall, i, j, q, Nx, Ny, order)
+                    vxy, ok_xy = _reconstruct_wall_cell_from_interior_2d(
+                        tau_xy, is_solid, q_wall, i, j, q, Nx, Ny, order)
+                    vyy, ok_yy = _reconstruct_wall_cell_from_interior_2d(
+                        tau_yy, is_solid, q_wall, i, j, q, Nx, Ny, order)
+                    if ok_xx && ok_xy && ok_yy
+                        sum_xx += vxx
+                        sum_xy += vxy
+                        sum_yy += vyy
+                        n += one(T)
+                    end
+                end
+            end
+            if n > zero(T)
+                tau_xx_out[i, j] = sum_xx / n
+                tau_xy_out[i, j] = sum_xy / n
+                tau_yy_out[i, j] = sum_yy / n
+            else
+                tau_xx_out[i, j] = tau_xx[i, j]
+                tau_xy_out[i, j] = tau_xy[i, j]
+                tau_yy_out[i, j] = tau_yy[i, j]
+            end
+        end
+    end
+end
+
+"""
+    reconstruct_wall_cell_stress_from_interior_2d!(out_xx, out_xy, out_yy,
+        tau_xx, tau_xy, tau_yy, q_wall, is_solid; order=1)
+
+Build a cell-centered physical stress field for Hermite source evaluation near
+curved walls. Boundary-adjacent cells are reconstructed from interior samples
+along cut-links; other fluid cells are copied unchanged.
+"""
+function reconstruct_wall_cell_stress_from_interior_2d!(
+        out_xx, out_xy, out_yy, tau_xx, tau_xy, tau_yy, q_wall, is_solid;
+        order::Integer=1)
+    backend = KernelAbstractions.get_backend(out_xx)
+    Nx, Ny = size(out_xx)
+    kernel! = reconstruct_wall_cell_stress_from_interior_2d_kernel!(backend)
+    kernel!(out_xx, out_xy, out_yy, tau_xx, tau_xy, tau_yy, q_wall, is_solid,
+            Int(order), Nx, Ny; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end

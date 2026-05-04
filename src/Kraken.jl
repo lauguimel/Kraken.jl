@@ -90,8 +90,10 @@ include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
 include("drivers/viscoelastic_spec.jl")
+include("drivers/viscoelastic_diagnostics.jl")
 include("kernels/viscoelastic_3d.jl")
 include("drivers/viscoelastic.jl")
+include("drivers/step_geometry_2d.jl")
 include("drivers/contraction_libb.jl")
 include("drivers/viscoelastic_3d.jl")
 
@@ -156,9 +158,10 @@ export run_cavity_2d, run_cavity_3d
 export run_poiseuille_2d, run_couette_2d
 export initialize_taylor_green_2d, run_taylor_green_2d
 export initialize_cylinder_2d, run_cylinder_2d, compute_drag_mea_2d
-export run_cylinder_libb_2d, compute_drag_libb_2d, compute_drag_libb_mei_2d
+export run_cylinder_libb_2d, compute_drag_libb_2d, compute_drag_libb_mei_2d, compute_drag_libb_liu_eq63_2d, compute_drag_libb_postpair_2d
 export rebuild_inlet_outlet_libb_2d!, rebuild_inlet_outlet_libb_3d!
 export AbstractBC, HalfwayBB, ZouHeVelocity, ZouHePressure
+export MaskedZouHeVelocity, MaskedZouHePressure
 export BCSpec2D, BCSpec3D, apply_bc_rebuild_2d!, apply_bc_rebuild_3d!
 export compute_drag_libb_mei_2d_gpu!, compute_drag_libb_3d_gpu!
 export CutLinkList, CutLinkList3D, build_cut_link_list_2d, build_cut_link_list_3d
@@ -176,7 +179,7 @@ export apply_fixed_temp_south_3d!, apply_fixed_temp_north_3d!
 export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
-export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_step_3d!, fused_trt_libb_v2_step_3d_periodic_z!, precompute_q_wall_cylinder
+export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_hermite_step!, fused_trt_libb_v2_step_3d!, fused_trt_libb_v2_step_3d_periodic_z!, precompute_q_wall_cylinder
 export precompute_q_wall_sphere_3d, compute_drag_libb_3d, run_sphere_libb_3d
 export precompute_q_wall_cylinder_extruded_3d
 export precompute_q_wall_annulus, precompute_q_wall_contraction_2d
@@ -298,21 +301,36 @@ export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 export run_viscoelastic_cylinder_2d, run_conformation_cylinder_2d
 export run_conformation_cylinder_libb_2d
+export conformation_field_diagnostics_2d
+export StepChannelGeometry2D, step_channel_geometry_2d
+export contraction_step_geometry_2d, backward_facing_step_geometry_2d,
+       square_obstacle_channel_geometry_2d
+export transfer_step_geometry_2d, parabolic_face_profile_2d
+export oldroydb_inlet_conformation_profile_2d, default_step_bcspec_2d
+export run_conformation_step_libb_2d
 export run_conformation_contraction_libb_2d
 export vortex_length_contraction_2d, outlet_centerline_N1_contraction_2d
 export run_conformation_sphere_libb_3d
 export AbstractPolymerModel, OldroydB, LogConfOldroydB, update_polymer_stress!
 export uses_log_conformation
-export collide_logconf_2d!, psi_to_C_2d!, C_to_psi_2d!
+export collide_logconf_2d!, psi_to_C_2d!, C_to_psi_2d!, logconf_source_2d
 export reset_conformation_inlet_2d!, reset_conformation_outlet_2d!
+export reset_conformation_inlet_masked_2d!, reset_conformation_outlet_masked_2d!
 export polymer_modulus, polymer_relaxation_time
-export AbstractPolymerWallBC, CNEBB, NoPolymerWallBC, apply_polymer_wall_bc!
+export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBEqGradient,
+       CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,
+       NoPolymerWallBC, apply_polymer_wall_bc!
 
 # Conformation TRT-LBM (Liu et al. 2025)
-export collide_conformation_2d!, init_conformation_field_2d!
-export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!
+export collide_conformation_2d!, collide_conformation_regularized_2d!,
+       collide_conformation_liu_eq26_2d!, init_conformation_field_2d!,
+       conformation_source_2d
+export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!,
+       apply_ylw_a_conformation_2d!, apply_ylw_b_conformation_2d!,
+       apply_ylw_balance_conformation_2d!
 export collide_viscoelastic_source_2d!, collide_viscoelastic_source_guo_2d!
-export apply_hermite_source_2d!
+export apply_hermite_source_2d!, reconstruct_wall_cell_stress_from_interior_2d!
+export reconstruct_wall_link_value_2d
 # 3D viscoelastic (D3Q19 port)
 export collide_conformation_3d!, init_conformation_field_3d!
 export compute_conformation_macro_3d!, apply_cnebb_conformation_3d!

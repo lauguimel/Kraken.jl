@@ -1,0 +1,20 @@
+#!/bin/bash -l
+#PBS -N krk_ve_mindiag
+#PBS -l select=1:ncpus=8:ngpus=1:mem=96GB:gpu_id=H100
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export KRAKEN_R_LIST=30
+export KRAKEN_BETA_LIST=0.59
+export KRAKEN_WI_LIST=0.1
+export KRAKEN_MODELS=direct,logconf
+export KRAKEN_POLYMER_BCS=cnebb
+export KRAKEN_DIAGNOSTIC_INTERVAL=10000
+export KRAKEN_STEPS_PER_R=2000
+export KRAKEN_DRAG_STRIDE=250
+export KRAKEN_RESULTS_DIR=results/physical_wi_minimal_diag_${PBS_JOBID:-local}
+
+exec bash hpc/run_physical_wi_validation.pbs

@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#PBS -N krk_ve_phys
+#PBS -l select=1:ncpus=8:ngpus=1:mem=96GB:gpu_id=H100
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+export KRAKEN_R_LIST="${KRAKEN_R_LIST:-30,40}"
+export KRAKEN_BETA_LIST="${KRAKEN_BETA_LIST:-0.59}"
+export KRAKEN_WI_LIST="${KRAKEN_WI_LIST:-0.05,0.1,0.2}"
+export KRAKEN_MODELS="${KRAKEN_MODELS:-direct}"
+export KRAKEN_POLYMER_BCS="${KRAKEN_POLYMER_BCS:-cnebb}"
+export KRAKEN_DRAG_MODES="${KRAKEN_DRAG_MODES:-post_source_mea}"
+export KRAKEN_HERMITE_SOURCE_MODES="${KRAKEN_HERMITE_SOURCE_MODES:-liu_direct}"
+export KRAKEN_SOLVENT_SOURCE_MODE="${KRAKEN_SOLVENT_SOURCE_MODE:-post_collision}"
+export KRAKEN_MOMENTUM_EXCHANGE_MODE="${KRAKEN_MOMENTUM_EXCHANGE_MODE:-mei_reconstruct}"
+export KRAKEN_SOLVENT_MAGIC="${KRAKEN_SOLVENT_MAGIC:-0.1875}"
+export KRAKEN_CONFORMATION_MAGIC="${KRAKEN_CONFORMATION_MAGIC:-1e-6}"
+export KRAKEN_CONFORMATION_DIVERGENCE_MODE="${KRAKEN_CONFORMATION_DIVERGENCE_MODE:-trace_free}"
+export KRAKEN_SOURCE_STRESS_RECONSTRUCTION="${KRAKEN_SOURCE_STRESS_RECONSTRUCTION:-interior}"
+export KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER="${KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER:-2}"
+export KRAKEN_U_MEAN="${KRAKEN_U_MEAN:-0.005}"
+export KRAKEN_STEPS_PER_R="${KRAKEN_STEPS_PER_R:-2000}"
+export KRAKEN_AVG_DIVISOR="${KRAKEN_AVG_DIVISOR:-10}"
+export KRAKEN_DRAG_STRIDE="${KRAKEN_DRAG_STRIDE:-250}"
+export KRAKEN_CONTROL_BETA="${KRAKEN_CONTROL_BETA:-1.0}"
+export KRAKEN_CONTROL_ALL_R="${KRAKEN_CONTROL_ALL_R:-1}"
+export KRAKEN_RESULTS_DIR="${KRAKEN_RESULTS_DIR:-results/physical_wi_validation_${PBS_JOBID:-local}}"
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p results
+echo "=== Physical Wi validation at $(date) ==="
+echo "R_LIST=$KRAKEN_R_LIST"
+echo "BETA_LIST=$KRAKEN_BETA_LIST"
+echo "WI_LIST=$KRAKEN_WI_LIST"
+echo "MODELS=$KRAKEN_MODELS"
+echo "POLYMER_BCS=$KRAKEN_POLYMER_BCS"
+echo "CONFORMATION_MAGIC=$KRAKEN_CONFORMATION_MAGIC"
+echo "CONFORMATION_DIVERGENCE_MODE=$KRAKEN_CONFORMATION_DIVERGENCE_MODE"
+echo "SOURCE_STRESS_RECONSTRUCTION=$KRAKEN_SOURCE_STRESS_RECONSTRUCTION"
+echo "SOURCE_STRESS_RECONSTRUCTION_ORDER=$KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER"
+julia --project=. hpc/newtonian_limit_scaling_sweep.jl 2>&1 \
+    | tee "results/physical_wi_validation_${PBS_JOBID:-local}.txt"
+echo "=== Done at $(date) ==="

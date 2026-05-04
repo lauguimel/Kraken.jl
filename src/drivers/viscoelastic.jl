@@ -1,25 +1,154 @@
 # --- Viscoelastic simulation drivers (lbm branch, f[i,j,q] layout) ---
 
+const _D2Q9_CX_VISCO = (0, 1, 0, -1,  0, 1, -1, -1,  1)
+const _D2Q9_CY_VISCO = (0, 0, 1,  0, -1, 1,  1, -1, -1)
+
 """
-    compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy, is_solid, Nx, Ny)
+    reconstruct_wall_link_value_2d(field, i, j, q, q_w; location=:cut, order=1)
+
+Reconstruct a smooth physical field at a wall-adjacent cell or at the
+cut-point of link `q`, using only interior fluid samples along `-c_q`.
+`location=:cell` evaluates at the wall-adjacent cell center (`x=0`);
+`location=:cut` evaluates at the cut point (`x=q_w`).  The samples are at
+`x=-1,-2` for linear reconstruction and `x=-1,-2,-3` for quadratic
+reconstruction. If the required interior samples are out of bounds, the
+function falls back to the nearest available lower-order reconstruction.
+"""
+function reconstruct_wall_link_value_2d(field::AbstractMatrix, i::Integer, j::Integer,
+                                        q::Integer, q_w::Real;
+                                        location::Symbol=:cut,
+                                        order::Integer=1)
+    Nx, Ny = size(field)
+    cxq = _D2Q9_CX_VISCO[q]
+    cyq = _D2Q9_CY_VISCO[q]
+    x = location === :cell ? 0.0 :
+        (location === :cut ? Float64(q_w) :
+         error("unknown reconstruction location $(location); expected :cell or :cut"))
+
+    i1 = i - cxq; j1 = j - cyq
+    1 <= i1 <= Nx && 1 <= j1 <= Ny || return Float64(field[i, j])
+    y1 = Float64(field[i1, j1])
+
+    i2 = i - 2cxq; j2 = j - 2cyq
+    1 <= i2 <= Nx && 1 <= j2 <= Ny || return y1
+    y2 = Float64(field[i2, j2])
+
+    if order >= 2
+        i3 = i - 3cxq; j3 = j - 3cyq
+        if 1 <= i3 <= Nx && 1 <= j3 <= Ny
+            y3 = Float64(field[i3, j3])
+            return 0.5 * (x + 2.0) * (x + 3.0) * y1 -
+                   (x + 1.0) * (x + 3.0) * y2 +
+                   0.5 * (x + 1.0) * (x + 2.0) * y3
+        end
+    end
+
+    return (x + 2.0) * y1 - (x + 1.0) * y2
+end
+
+"""
+    compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy, q_wall, Nx, Ny; cx, cy)
         → (Fx, Fy)
 
 Polymeric stress contribution to the drag on a solid surface.
 
-For each fluid cell adjacent to a solid neighbor (link q), accumulate the
-traction by the fluid on the solid:
-    dF = τ_p · n_solid_outward · dA
-where n_solid_outward points from solid to fluid = -(cx[q], cy[q]). So:
-    dF_x = -(τ_xx·cx + τ_xy·cy)
-    dF_y = -(τ_xy·cx + τ_yy·cy)
+For a curved LI-BB surface, prefer the `q_wall` method. It evaluates τ at
+the actual cut point `x_w = x_f + q_w c_q`, computes the local circle normal
+from `(cx, cy)`, and integrates `τ·n ds` with arc-length weights over the
+ordered cut points. This is a surface quadrature, unlike the older
+solid-neighbour link count.
 
 Sign is consistent with `compute_drag_mea_2d`: in the Newtonian limit
 (Wi→0), τ_p ≈ 2·ν_p·S, and Cd_p + Cd_solvent should equal the total
 Cd of a Newtonian fluid with ν_total = ν_s + ν_p.
-
-Each link is treated with unit face area (consistent with MEA convention).
 """
-function compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy, is_solid, Nx, Ny;
+function compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
+                                     q_wall::AbstractArray{<:Real,3},
+                                     Nx::Integer, Ny::Integer;
+                                     cx::Real, cy::Real,
+                                     radius::Union{Nothing,Real}=nothing,
+                                     extrapolate::Bool=true,
+                                     reconstruction_order::Integer=1,
+                                     reconstruction_mode::Symbol=:interior)
+    txx = Array(tau_p_xx)
+    txy = Array(tau_p_xy)
+    tyy = Array(tau_p_yy)
+    qw = Array(q_wall)
+    cxv = _D2Q9_CX_VISCO
+    cyv = _D2Q9_CY_VISCO
+
+    points = Vector{NTuple{7,Float64}}()
+    @inbounds for j in 1:Ny, i in 1:Nx, q in 2:9
+        q_w = Float64(qw[i, j, q])
+        q_w > 0 || continue
+        xw = Float64(i - 1) + q_w * Float64(cxv[q])
+        yw = Float64(j - 1) + q_w * Float64(cyv[q])
+        rx = xw - Float64(cx)
+        ry = yw - Float64(cy)
+        r = hypot(rx, ry)
+        r > 0 || continue
+        nx = rx / r
+        ny = ry / r
+
+        txx_w = Float64(txx[i, j])
+        txy_w = Float64(txy[i, j])
+        tyy_w = Float64(tyy[i, j])
+        if extrapolate
+            if reconstruction_mode === :interior
+                txx_w = reconstruct_wall_link_value_2d(txx, i, j, q, q_w;
+                                                       location=:cut,
+                                                       order=reconstruction_order)
+                txy_w = reconstruct_wall_link_value_2d(txy, i, j, q, q_w;
+                                                       location=:cut,
+                                                       order=reconstruction_order)
+                tyy_w = reconstruct_wall_link_value_2d(tyy, i, j, q, q_w;
+                                                       location=:cut,
+                                                       order=reconstruction_order)
+            elseif reconstruction_mode === :wall_cell
+                ib = i - cxv[q]
+                jb = j - cyv[q]
+                if 1 <= ib <= Nx && 1 <= jb <= Ny
+                    txx_w += q_w * (txx_w - Float64(txx[ib, jb]))
+                    txy_w += q_w * (txy_w - Float64(txy[ib, jb]))
+                    tyy_w += q_w * (tyy_w - Float64(tyy[ib, jb]))
+                end
+            else
+                error("unknown reconstruction_mode $(reconstruction_mode); expected :interior or :wall_cell")
+            end
+        end
+
+        θ = atan(ry, rx)
+        push!(points, (θ, r, nx, ny, txx_w, txy_w, tyy_w))
+    end
+
+    isempty(points) && return (Fx=0.0, Fy=0.0)
+    sort!(points; by=first)
+    R = if isnothing(radius)
+        r_sum = 0.0
+        for p in points
+            r_sum += p[2]
+        end
+        r_sum / length(points)
+    else
+        Float64(radius)
+    end
+    Fx_p = 0.0
+    Fy_p = 0.0
+    npts = length(points)
+    @inbounds for k in 1:npts
+        θ_prev = k == 1 ? points[end][1] - 2π : points[k - 1][1]
+        θ_next = k == npts ? points[1][1] + 2π : points[k + 1][1]
+        ds = R * 0.5 * (θ_next - θ_prev)
+        _, _, nx, ny, txx_w, txy_w, tyy_w = points[k]
+        Fx_p += (txx_w * nx + txy_w * ny) * ds
+        Fy_p += (txy_w * nx + tyy_w * ny) * ds
+    end
+    return (Fx=Fx_p, Fy=Fy_p)
+end
+
+function compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
+                                     is_solid::AbstractArray{Bool,2},
+                                     Nx::Integer, Ny::Integer;
                                      extrapolate=true)
     txx = Array(tau_p_xx)
     txy = Array(tau_p_xy)
@@ -31,9 +160,13 @@ function compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy, is_solid, Nx, N
     Fx_p = 0.0
     Fy_p = 0.0
 
+    # Staircase/solid-mask fallback: integrate over axis-aligned cell faces
+    # only. D2Q9 diagonal fluid-solid neighbours touch at a corner and have
+    # zero surface measure; including them overcounts square-obstacle traction
+    # by a factor three on linear analytic stress patches.
     for j in 1:Ny, i in 1:Nx
         if !solid[i, j]
-            for q in 2:9
+            for q in 2:5
                 ni = i + cxv[q]
                 nj = j + cyv[q]
                 if 1 <= ni <= Nx && 1 <= nj <= Ny && solid[ni, nj]
@@ -104,7 +237,7 @@ function run_viscoelastic_cylinder_2d(;
     !isnothing(nu_p) && (ν_p = nu_p)
 
     cx = isnothing(cx) ? Nx ÷ 4 : cx
-    cy = isnothing(cy) ? Ny ÷ 2 : cy
+    cy = isnothing(cy) ? (Ny - 1) / 2 : cy
     D = 2 * radius
     ν_total = ν_s + ν_p
     Re = u_in * D / ν_total
@@ -253,7 +386,7 @@ function run_conformation_cylinder_2d(;
         backend=KernelAbstractions.CPU(), FT=Float64)
 
     cx = isnothing(cx) ? Nx ÷ 4 : cx
-    cy = isnothing(cy) ? Ny ÷ 2 : cy
+    cy = isnothing(cy) ? (Ny - 1) / 2 : cy
     D = 2 * radius
     ν_total = ν_s + ν_p
     Re = u_in * D / ν_total
@@ -323,9 +456,9 @@ function run_conformation_cylinder_2d(;
         # Conservative non-equilibrium bounce-back at fluid cells adjacent
         # to solid (Liu et al. 2025, Eqs 38-39). Updates both g_*_buf
         # populations and the C_* macroscopic field at near-wall cells.
-        apply_cnebb_conformation_2d!(g_xx_buf, g_xx, is_solid, C_xx)
-        apply_cnebb_conformation_2d!(g_xy_buf, g_xy, is_solid, C_xy)
-        apply_cnebb_conformation_2d!(g_yy_buf, g_yy, is_solid, C_yy)
+        apply_cnebb_conformation_2d!(g_xx_buf, g_xx, is_solid, C_xx, ux, uy)
+        apply_cnebb_conformation_2d!(g_xy_buf, g_xy, is_solid, C_xy, ux, uy)
+        apply_cnebb_conformation_2d!(g_yy_buf, g_yy, is_solid, C_yy, ux, uy)
 
         g_xx, g_xx_buf = g_xx_buf, g_xx
         g_xy, g_xy_buf = g_xy_buf, g_xy
@@ -373,7 +506,13 @@ end
     run_conformation_cylinder_libb_2d(; Nx, Ny, radius, cx, cy,
                                          u_mean, ν_s, ν_p, lambda, tau_plus,
                                          inlet=:parabolic, ρ_out=1.0,
-                                         max_steps, avg_window, backend, FT)
+                                         max_steps, avg_window,
+                                         drag_stride=1,
+                                         drag_mode=:post_source_mea,
+                                         hermite_source_mode=:liu_direct,
+                                         conformation_magic=1e-6,
+                                         momentum_exchange_mode=:mei_reconstruct,
+                                         backend, FT)
 
 Confined-cylinder Oldroyd-B benchmark using:
 - **Fused TRT + Bouzidi LI-BB V2** for the solvent flow (sub-cell accurate
@@ -381,7 +520,10 @@ Confined-cylinder Oldroyd-B benchmark using:
 - **Modular BCSpec** with `ZouHeVelocity(Poiseuille profile)` at inlet,
   `ZouHePressure(ρ_out)` at outlet. Inlet is fully-developed Poiseuille
   if `inlet=:parabolic`, uniform plug flow if `:uniform`.
-- **Mei-consistent MEA drag** (`compute_drag_libb_mei_2d`) for the solvent.
+- **Mei-consistent MEA drag** (`compute_drag_libb_mei_2d`) for the total
+  Liu/Yu-style force, sampled after the Hermite polymer source is injected.
+  The pre-source MEA (`Cd_s`) and explicit link stress integral (`Cd_p`) are
+  kept as diagnostics only.
 - TRT conformation LBM (Liu 2025) + CNEBB for the polymer stress.
 - Hermite source added post-collision on the fused-stepped f_out.
 
@@ -389,7 +531,49 @@ Confined-cylinder Oldroyd-B benchmark using:
 - `:parabolic` inlet: u_mean = 2/3·u_max (Schäfer-Turek / Liu convention)
 - `:uniform` inlet:   u_mean = u_in  (plug flow)
 
-Returns `(ux, uy, ρ, C_xx, C_xy, C_yy, tau_p_*, Cd, Cd_s, Cd_p, Re, Wi, beta, u_ref, D)`.
+`drag_mode` controls the reported `Cd`:
+- `:post_source_mea` (default): raw MEA after source injection, matching the
+  Liu/Yu-style total-force path when paired with `hermite_source_mode=:liu_direct`.
+- `:explicit_split`: `Cd = Cd_s + Cd_p`, the old diagnostic split using the
+  link-counting polymer stress integral.
+- `:source_scaled_mea`: diagnostic cancellation path retained for audits only;
+  callers must pass `allow_diagnostic_force_mode=true`.
+
+`hermite_source_mode` controls the standalone post-collision stress source:
+- `:liu_direct` (default): no `1/(1-s_plus/2)` denominator, matching Liu/Yu's
+  in-collision source amplitude for force-accounting audits.
+- `:ce_corrected`: applies the standard post-collision CE denominator for bulk
+  coupling studies; do not pair it with `:source_scaled_mea` for validation.
+
+`solvent_source_mode` controls where the Hermite stress source is inserted:
+- `:post_collision` (default): current split path, `TRT+LI-BB` then
+  `apply_hermite_source_2d!`.
+- `:integrated_collision`: experimental path, source fused into the
+  `TRT+LI-BB` collision kernel.
+
+`conformation_magic` is the TRT magic parameter Λₚ for the conformation/log-
+conformation populations, i.e. `tau_minus = Λₚ/(tau_plus-0.5)+0.5`. The
+default is the Liu/Yu-style near-maximum anti-symmetric relaxation `1e-6`;
+Kraken's historical hydrodynamic value `0.25` is a diagnostic opt-in.
+`conformation_collision` windows are guarded by the analytic CDE patch tests:
+TRT is validated at `tau_plus=1.0`, while `:regularized` and `:liu_eq26` are
+validated at `tau_plus=0.50001`. Other combinations require
+`allow_diagnostic_conformation_collision=true`.
+
+`momentum_exchange_mode` selects how cut-link force is evaluated from the
+post-boundary populations:
+- `:mei_reconstruct` (default): existing LI-BB reconstruction path.
+- `:liu_eq63`: explicit Liu/Yu Eq. 63 diagnostic; identical reconstruction
+  path, but named to make the force equation selection auditable.
+- `:simple_halfway`: old `2c_q f_q` diagnostic.
+- `:postpair`: diagnostic direct pair form using the already-overwritten
+  reflected population in `f_out`.
+
+Returns `(ux, uy, ρ, C_xx, C_xy, C_yy, tau_p_*, Cd, Cd_s, Cd_p,
+Cd_mea_post_source, Cd_mea_source_scaled, Cd_split_explicit, drag_mode,
+hermite_source_mode, conformation_magic, momentum_exchange_mode, Re, Wi,
+beta, u_ref, D)`.
+`n_drag_samples` reports how many cut-link MEA samples were averaged.
 """
 function run_conformation_cylinder_libb_2d(;
         Nx=600, Ny=120, radius=30, cx=nothing, cy=nothing,
@@ -399,8 +583,51 @@ function run_conformation_cylinder_libb_2d(;
         bcspec::Union{Nothing,BCSpec2D}=nothing,
         inlet::Symbol=:parabolic, ρ_out=1.0,
         tau_plus=1.0,
-        max_steps=100_000, avg_window=10_000,
+        max_steps=100_000, avg_window=10_000, drag_stride::Int=1,
+        drag_mode::Symbol=:post_source_mea,
+        hermite_source_mode::Symbol=:liu_direct,
+        solvent_source_mode::Symbol=:post_collision,
+        solvent_magic::Real=3/16,
+        conformation_magic::Real=1e-6,
+        conformation_collision::Symbol=:trt,
+        conformation_divergence_mode::Symbol=:trace_free,
+        wall_geometry::Symbol=:cutlink,
+        momentum_exchange_mode::Symbol=:mei_reconstruct,
+        source_stress_reconstruction::Symbol=:interior,
+        source_stress_reconstruction_order::Integer=2,
+        source_scale_dynamics::Union{Nothing,Real}=nothing,
+        diagnostic_interval::Integer=0,
+        allow_diagnostic_polymer_bc::Bool=false,
+        allow_diagnostic_force_mode::Bool=false,
+        allow_diagnostic_conformation_collision::Bool=false,
+        allow_diagnostic_log_wall_bc::Bool=false,
         backend=KernelAbstractions.CPU(), FT=Float64)
+    drag_stride > 0 || error("drag_stride must be positive")
+    drag_mode in (:source_scaled_mea, :post_source_mea, :explicit_split) ||
+        error("unknown drag_mode $(drag_mode); expected :source_scaled_mea, :post_source_mea, or :explicit_split")
+    hermite_source_mode in (:liu_direct, :ce_corrected) ||
+        error("unknown hermite_source_mode $(hermite_source_mode); expected :liu_direct or :ce_corrected")
+    solvent_source_mode in (:post_collision, :integrated_collision) ||
+        error("unknown solvent_source_mode $(solvent_source_mode); expected :post_collision or :integrated_collision")
+    conformation_collision in (:trt, :regularized, :liu_eq26) ||
+        error("unknown conformation_collision $(conformation_collision); expected :trt, :regularized, or :liu_eq26")
+    conformation_divergence_mode in (:numerical, :trace_free) ||
+        error("unknown conformation_divergence_mode $(conformation_divergence_mode); expected :numerical or :trace_free")
+    wall_geometry in (:cutlink, :staircase) ||
+        error("unknown wall_geometry $(wall_geometry); expected :cutlink or :staircase")
+    momentum_exchange_mode in (:mei_reconstruct, :liu_eq63, :simple_halfway, :postpair) ||
+        error("unknown momentum_exchange_mode $(momentum_exchange_mode); expected :mei_reconstruct, :liu_eq63, :simple_halfway, or :postpair")
+    source_stress_reconstruction in (:raw, :interior) ||
+        error("unknown source_stress_reconstruction $(source_stress_reconstruction); expected :raw or :interior")
+    source_stress_reconstruction_order in (1, 2) ||
+        error("source_stress_reconstruction_order must be 1 or 2")
+    _assert_validation_polymer_wall_bc(polymer_bc;
+                                       allow_diagnostic=allow_diagnostic_polymer_bc)
+    if drag_mode === :source_scaled_mea && !allow_diagnostic_force_mode
+        error("drag_mode=:source_scaled_mea is a diagnostic cancellation path, not a validation force law; use :post_source_mea or pass allow_diagnostic_force_mode=true in audit code.")
+    end
+    _assert_validation_conformation_collision_window(conformation_collision, tau_plus;
+        allow_diagnostic=allow_diagnostic_conformation_collision)
 
     # Resolve polymer model: explicit `polymer_model` wins; else build
     # an Oldroyd-B from the scalar kwargs (`ν_p` + `lambda`).
@@ -409,11 +636,13 @@ function run_conformation_cylinder_libb_2d(;
         G_ = FT(ν_p / lambda)
         polymer_model = OldroydB(G=G_, λ=FT(lambda))
     end
+    _assert_validation_log_wall_bc(polymer_model, polymer_bc;
+        allow_diagnostic=allow_diagnostic_log_wall_bc)
     λ_p = polymer_relaxation_time(polymer_model)
     ν_p_eff = polymer_modulus(polymer_model) * λ_p   # G·λ = ν_p (Oldroyd-B)
 
     cx_f = isnothing(cx) ? Nx / 4 : Float64(cx)
-    cy_f = isnothing(cy) ? Ny / 2 : Float64(cy)
+    cy_f = isnothing(cy) ? (Ny - 1) / 2 : Float64(cy)
     D = 2 * Float64(radius)
     ν_total = ν_s + ν_p_eff
     beta = ν_s / ν_total
@@ -424,14 +653,28 @@ function run_conformation_cylinder_libb_2d(;
     # that area-averaged velocity equals u_mean (Schäfer-Turek / Liu).
     u_max = inlet === :parabolic ? FT(1.5) * FT(u_mean) : FT(u_mean)
     u_ref = Float64(u_mean)
-    Re = u_ref * D / ν_total
+    Re_R = u_ref * Float64(radius) / ν_total
+    Re_D = u_ref * D / ν_total
+    Re = Re_R
     Wi = λ_p * u_ref / radius
 
-    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Wi beta λ_p tau_plus inlet u_max u_ref polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
+    magic_p = FT(conformation_magic)
+
+    source_scale_dynamics = isnothing(source_scale_dynamics) ?
+        (hermite_source_mode === :ce_corrected ?
+        inv(1.0 - s_plus_s / 2.0) : 1.0
+        ) : Float64(source_scale_dynamics)
+
+    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Re_R Re_D Wi beta λ_p tau_plus solvent_magic conformation_magic conformation_collision conformation_divergence_mode wall_geometry inlet u_max u_ref drag_mode hermite_source_mode solvent_source_mode momentum_exchange_mode source_stress_reconstruction source_stress_reconstruction_order source_scale_dynamics polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
 
     # Precompute cylinder cut-link geometry (q_wall ∈ [0,1] per link)
     q_wall_h, is_solid_h = precompute_q_wall_cylinder(Nx, Ny, cx_f, cy_f,
                                                         Float64(radius); FT=FT)
+    if wall_geometry === :staircase
+        @inbounds for q in 2:9, j in 1:Ny, i in 1:Nx
+            q_wall_h[i, j, q] > 0 && (q_wall_h[i, j, q] = FT(0.5))
+        end
+    end
 
     # Inlet velocity profile (only used if `bcspec === nothing`)
     u_prof_h = if inlet === :parabolic
@@ -488,6 +731,26 @@ function run_conformation_cylinder_libb_2d(;
         C_xy_inlet_h[j] = FT(λ_p) * dudy
         C_xx_inlet_h[j] = FT(1) + FT(2) * (FT(λ_p) * dudy)^2
     end
+    if use_logconf
+        for j in 1:Ny
+            cxx = C_xx_inlet_h[j]
+            cxy = C_xy_inlet_h[j]
+            cyy = C_yy_inlet_h[j]
+            tr = cxx + cyy
+            diff = cxx - cyy
+            disc = sqrt(diff * diff + FT(4) * cxy * cxy)
+            μ1 = FT(0.5) * (tr + disc)
+            μ2 = FT(0.5) * (tr - disc)
+            l1 = log(max(μ1, FT(1e-30)))
+            l2 = log(max(μ2, FT(1e-30)))
+            θ = FT(0.5) * atan(FT(2) * cxy, diff)
+            c = cos(θ)
+            s = sin(θ)
+            C_xx_inlet_h[j] = c * c * l1 + s * s * l2
+            C_xy_inlet_h[j] = c * s * (l1 - l2)
+            C_yy_inlet_h[j] = s * s * l1 + c * c * l2
+        end
+    end
     C_xx_inlet = KernelAbstractions.allocate(backend, FT, Ny)
     C_xy_inlet = KernelAbstractions.allocate(backend, FT, Ny)
     C_yy_inlet = KernelAbstractions.allocate(backend, FT, Ny)
@@ -512,41 +775,107 @@ function run_conformation_cylinder_libb_2d(;
     init_conformation_field_2d!(g_xy, Ψ_xy, ux, uy)
     init_conformation_field_2d!(g_yy, Ψ_yy, ux, uy)
     g_xx_buf = similar(g_xx); g_xy_buf = similar(g_xy); g_yy_buf = similar(g_yy)
+    Fe_xx_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    Fe_xy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    Fe_yy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
 
     tau_p_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     tau_p_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     tau_p_yy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    tau_p_xx_source = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    tau_p_xy_source = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    tau_p_yy_source = KernelAbstractions.zeros(backend, FT, Nx, Ny)
 
     Fx_s_sum = 0.0; Fy_s_sum = 0.0
+    Fx_mea_post_sum = 0.0; Fy_mea_post_sum = 0.0
+    Fx_p_sum = 0.0; Fy_p_sum = 0.0
     n_avg = 0
+    first_nonfinite_step = 0
+
+    pre_source_available = solvent_source_mode === :post_collision
 
     for step in 1:max_steps
         # --- Solvent TRT + LI-BB V2 ---
-        fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
-                                  q_wall, uw_x, uw_y, Nx, Ny, FT(ν_s))
+        if solvent_source_mode === :integrated_collision
+            fused_trt_libb_v2_hermite_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                             q_wall, uw_x, uw_y,
+                                             tau_p_xx, tau_p_xy, tau_p_yy,
+                                             Nx, Ny, FT(ν_s);
+                                             Λ = solvent_magic,
+                                             source_scale = FT(source_scale_dynamics))
+        else
+            fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                      q_wall, uw_x, uw_y, Nx, Ny, FT(ν_s);
+                                      Λ = solvent_magic)
+        end
 
         # Pre-collision Zou-He rebuild at inlet/outlet (fixes halfway-BB corruption)
-        apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν_s, Nx, Ny)
+        apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν_s, Nx, Ny; Λ = solvent_magic)
 
-        # Inject Hermite polymer source on post-collision f_out. The
-        # populations carry the combined solvent + polymer stress into
-        # the next streaming step; MEA below then integrates the FULL
-        # (σ_s + τ_p) · n on the cylinder in one pass.
-        apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
-                                   tau_p_xx, tau_p_xy, tau_p_yy)
+        sample_drag = step > max_steps - avg_window &&
+           ((step - (max_steps - avg_window) - 1) % drag_stride == 0 ||
+            step == max_steps)
 
-        # Standard halfway-BB MEA drag on post-source f_out.
-        # We deliberately AVOID the Mei-with-Bouzidi formula here: Mei
-        # mixes populations from neighbour cells via the LI-BB
-        # interpolation, and when the Hermite source injects spatially-
-        # varying τ_p into f, that neighbour mixing produces a spurious
-        # +10-15 % drag inflation (identified by isolation sweep, R=20
-        # Wi=0.001). Standard halfway-BB MEA (compute_drag_mea_2d) on
-        # post-source f gives ratio = 1.02 vs Newtonian limit, which is
-        # consistent with the expected Wi² correction.
-        if step > max_steps - avg_window
-            drag = compute_drag_mea_2d(f_in, f_out, is_solid, Nx, Ny)
-            Fx_s_sum += drag.Fx;  Fy_s_sum += drag.Fy
+        # Pre-source cut-link MEA measures the solvent/pressure contribution
+        # before direct stress embedding. The explicit link stress integral is
+        # retained only as a diagnostic because it uses staircase/link geometry.
+        if sample_drag && pre_source_available
+            drag_s = momentum_exchange_mode === :postpair ?
+                compute_drag_libb_postpair_2d(f_out, q_wall, Nx, Ny) :
+                (momentum_exchange_mode === :simple_halfway ?
+                 compute_drag_libb_2d(f_out, q_wall, Nx, Ny) :
+                 (momentum_exchange_mode === :liu_eq63 ?
+                  compute_drag_libb_liu_eq63_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny) :
+                  compute_drag_libb_mei_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny)))
+            drag_p = compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
+                                                q_wall, Nx, Ny;
+                                                cx=cx_f, cy=cy_f,
+                                                radius=Float64(radius))
+            Fx_s_sum += drag_s.Fx;  Fy_s_sum += drag_s.Fy
+            Fx_p_sum += drag_p.Fx;  Fy_p_sum += drag_p.Fy
+        elseif sample_drag
+            drag_p = compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
+                                                q_wall, Nx, Ny;
+                                                cx=cx_f, cy=cy_f,
+                                                radius=Float64(radius))
+            Fx_p_sum += drag_p.Fx;  Fy_p_sum += drag_p.Fy
+        end
+
+        # Inject Hermite polymer source on post-collision f_out. In the
+        # Liu/Yu-style formulation, the total cylinder force is then measured
+        # by MEA on these stress-embedded hydrodynamic populations.
+        if solvent_source_mode === :post_collision
+            source_tau_xx = tau_p_xx
+            source_tau_xy = tau_p_xy
+            source_tau_yy = tau_p_yy
+            if source_stress_reconstruction === :interior
+                reconstruct_wall_cell_stress_from_interior_2d!(
+                    tau_p_xx_source, tau_p_xy_source, tau_p_yy_source,
+                    tau_p_xx, tau_p_xy, tau_p_yy, q_wall, is_solid;
+                    order=source_stress_reconstruction_order)
+                source_tau_xx = tau_p_xx_source
+                source_tau_xy = tau_p_xy_source
+                source_tau_yy = tau_p_yy_source
+            end
+            apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
+                                       source_tau_xx, source_tau_xy, source_tau_yy;
+                                       ce_correction = hermite_source_mode === :ce_corrected,
+                                       source_scale = source_scale_dynamics)
+        end
+
+        # Total MEA after direct stress embedding. This is the default Cd path
+        # because Liu/Yu compute the total drag from hydrodynamic populations,
+        # not from a separate explicit ∮τ_p·n ds quadrature.
+        if sample_drag
+            drag_post = momentum_exchange_mode === :postpair ?
+                compute_drag_libb_postpair_2d(f_out, q_wall, Nx, Ny) :
+                (momentum_exchange_mode === :simple_halfway ?
+                 compute_drag_libb_2d(f_out, q_wall, Nx, Ny) :
+                 (momentum_exchange_mode === :liu_eq63 ?
+                  compute_drag_libb_liu_eq63_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny) :
+                  compute_drag_libb_mei_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny)))
+            Fx_mea_post_sum += drag_post.Fx
+            Fy_mea_post_sum += drag_post.Fy
             n_avg += 1
         end
 
@@ -555,9 +884,9 @@ function run_conformation_cylinder_libb_2d(;
         stream_2d!(g_xy_buf, g_xy, Nx, Ny)
         stream_2d!(g_yy_buf, g_yy, Nx, Ny)
 
-        apply_polymer_wall_bc!(g_xx_buf, g_xx, is_solid, Ψ_xx, polymer_bc)
-        apply_polymer_wall_bc!(g_xy_buf, g_xy, is_solid, Ψ_xy, polymer_bc)
-        apply_polymer_wall_bc!(g_yy_buf, g_yy, is_solid, Ψ_yy, polymer_bc)
+        apply_polymer_wall_bc!(g_xx_buf, g_xx, is_solid, q_wall, Ψ_xx, ux, uy, polymer_bc)
+        apply_polymer_wall_bc!(g_xy_buf, g_xy, is_solid, q_wall, Ψ_xy, ux, uy, polymer_bc)
+        apply_polymer_wall_bc!(g_yy_buf, g_yy, is_solid, q_wall, Ψ_yy, ux, uy, polymer_bc)
 
         # Fix conformation at inlet (west, i=1) and outlet (east, i=Nx):
         # reset g-populations to equilibrium with analytical C and u_profile.
@@ -578,42 +907,106 @@ function run_conformation_cylinder_libb_2d(;
         compute_conformation_macro_2d!(Ψ_yy, g_yy)
 
         if use_logconf
-            collide_logconf_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=1)
-            collide_logconf_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=2)
-            collide_logconf_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=3)
+            conformation_collision in (:regularized, :liu_eq26) &&
+                error("$(conformation_collision) conformation collision is only implemented for direct-C, not log-conformation")
+            collide_logconf_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
+            collide_logconf_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
+            collide_logconf_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
             # Reconstruct C = exp(Ψ) before computing τ_p
             psi_to_C_2d!(C_xx, C_xy, C_yy, Ψ_xx, Ψ_xy, Ψ_yy)
+        elseif conformation_collision === :regularized
+            collide_conformation_regularized_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
+            collide_conformation_regularized_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
+            collide_conformation_regularized_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
+        elseif conformation_collision === :liu_eq26
+            collide_conformation_liu_eq26_2d!(g_xx, Fe_xx_prev, Ψ_xx, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
+            collide_conformation_liu_eq26_2d!(g_xy, Fe_xy_prev, Ψ_xy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
+            collide_conformation_liu_eq26_2d!(g_yy, Fe_yy_prev, Ψ_yy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
         else
-            collide_conformation_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=1)
-            collide_conformation_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=2)
-            collide_conformation_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; component=3)
+            collide_conformation_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
+            collide_conformation_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
+            collide_conformation_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
         end
+
+        reset_conformation_inlet_2d!(g_xx, C_xx_inlet, u_profile, Ny)
+        reset_conformation_inlet_2d!(g_xy, C_xy_inlet, u_profile, Ny)
+        reset_conformation_inlet_2d!(g_yy, C_yy_inlet, u_profile, Ny)
+        reset_conformation_outlet_2d!(g_xx, Nx, Ny)
+        reset_conformation_outlet_2d!(g_xy, Nx, Ny)
+        reset_conformation_outlet_2d!(g_yy, Nx, Ny)
 
         update_polymer_stress!(tau_p_xx, tau_p_xy, tau_p_yy,
                                  C_xx, C_xy, C_yy, polymer_model)
+
+        if diagnostic_interval > 0 &&
+           (step == 1 || step % diagnostic_interval == 0 || step == max_steps)
+            diag = conformation_field_diagnostics_2d(C_xx, C_xy, C_yy, ρ, ux, uy, is_solid)
+            @info "Conformation field diagnostics" step finite=diag.finite min_eig_C=diag.min_eig min_i=diag.min_i min_j=diag.min_j min_C_xx=diag.min_C_xx min_C_xy=diag.min_C_xy min_C_yy=diag.min_C_yy max_abs_C=diag.max_abs_C maxC_i=diag.maxC_i maxC_j=diag.maxC_j max_abs_u=diag.max_abs_u max_abs_divu=diag.max_abs_divu maxDiv_i=diag.maxDiv_i maxDiv_j=diag.maxDiv_j max_strain_eig=diag.max_strain_eig maxStrain_i=diag.maxStrain_i maxStrain_j=diag.maxStrain_j min_dudx=diag.min_dudx min_dudy=diag.min_dudy min_dvdx=diag.min_dvdx min_dvdy=diag.min_dvdy min_strain_eig=diag.min_strain_eig first_bad_i=diag.first_bad_i first_bad_j=diag.first_bad_j n_fluid=diag.n_fluid
+            if first_nonfinite_step == 0 && (!diag.finite || !(diag.min_eig > 0.0))
+                first_nonfinite_step = step
+            end
+        end
 
         f_in, f_out = f_out, f_in
     end
     KernelAbstractions.synchronize(backend)
 
-    Fx_s = n_avg > 0 ? Fx_s_sum / n_avg : 0.0
-    Fy_s = n_avg > 0 ? Fy_s_sum / n_avg : 0.0
-    # Hermite source injects τ_p into f, so Mei-MEA on post-source f
-    # captures the full effective stress (solvent + polymer). Reported
-    # Cd = Cd_s. Cd_p kept as diagnostic (polymer stress surface integral).
-    Cd   = 2.0 * Fx_s / (u_ref^2 * D)
-    Cd_s = Cd
-    drag_p = compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
-                                        is_solid, Nx, Ny)
-    Cd_p = 2.0 * drag_p.Fx / (u_ref^2 * D)
+    Fx_s = (n_avg > 0 && pre_source_available) ? Fx_s_sum / n_avg : NaN
+    Fy_s = (n_avg > 0 && pre_source_available) ? Fy_s_sum / n_avg : NaN
+    Fx_p = n_avg > 0 ? Fx_p_sum / n_avg : 0.0
+    Fy_p = n_avg > 0 ? Fy_p_sum / n_avg : 0.0
+    Fx_mea_post = n_avg > 0 ? Fx_mea_post_sum / n_avg : 0.0
+    Fy_mea_post = n_avg > 0 ? Fy_mea_post_sum / n_avg : 0.0
 
-    @info "Conformation cylinder (LI-BB V2) result" Cd Cd_s Cd_p Re Wi
+    Cd_s = 2.0 * Fx_s / (u_ref^2 * D)
+    Cd_p = 2.0 * Fx_p / (u_ref^2 * D)
+    Cd_mea_post_source = 2.0 * Fx_mea_post / (u_ref^2 * D)
+    source_force_scale = (hermite_source_mode === :ce_corrected && pre_source_available) ?
+        (1.0 - s_plus_s / 2.0) : 1.0
+    Fx_mea_source_scaled = pre_source_available ?
+        Fx_s + source_force_scale * (Fx_mea_post - Fx_s) : Fx_mea_post
+    Fy_mea_source_scaled = pre_source_available ?
+        Fy_s + source_force_scale * (Fy_mea_post - Fy_s) : Fy_mea_post
+    Cd_mea_source_scaled = 2.0 * Fx_mea_source_scaled / (u_ref^2 * D)
+    Cd_split_explicit = Cd_s + Cd_p
+    Fx_split_explicit = Fx_s + Fx_p
+    Fy_split_explicit = Fy_s + Fy_p
+    Fx = drag_mode === :source_scaled_mea ? Fx_mea_source_scaled :
+         (drag_mode === :post_source_mea ? Fx_mea_post : Fx_split_explicit)
+    Fy = drag_mode === :source_scaled_mea ? Fy_mea_source_scaled :
+         (drag_mode === :post_source_mea ? Fy_mea_post : Fy_split_explicit)
+    Cd = drag_mode === :source_scaled_mea ? Cd_mea_source_scaled :
+         (drag_mode === :post_source_mea ? Cd_mea_post_source : Cd_split_explicit)
+    Cl = 2.0 * Fy / (u_ref^2 * D)
+
+    @info "Conformation cylinder (LI-BB V2) result" Cd Cl drag_mode hermite_source_mode solvent_source_mode solvent_magic conformation_magic conformation_collision momentum_exchange_mode Cd_s Cd_p Cd_split_explicit Cd_mea_post_source Cd_mea_source_scaled source_force_scale Re Re_R Re_D Wi
 
     return (ux=Array(ux), uy=Array(uy), ρ=Array(ρ),
             C_xx=Array(C_xx), C_xy=Array(C_xy), C_yy=Array(C_yy),
             tau_p_xx=Array(tau_p_xx), tau_p_xy=Array(tau_p_xy), tau_p_yy=Array(tau_p_yy),
             q_wall=Array(q_wall), is_solid=Array(is_solid),
-            Cd=Cd, Cd_s=Cd_s, Cd_p=Cd_p,
-            Fx=Fx_s, Fy=Fy_s,
-            Re=Re, Wi=Wi, beta=beta, u_ref=u_ref, D=D)
+            Cd=Cd, Cl=Cl, Cd_s=Cd_s, Cd_p=Cd_p,
+            Cd_mea_post_source=Cd_mea_post_source,
+            Cd_mea_source_scaled=Cd_mea_source_scaled,
+            Cd_split_explicit=Cd_split_explicit,
+            drag_mode=drag_mode,
+            hermite_source_mode=hermite_source_mode,
+            solvent_source_mode=solvent_source_mode,
+            source_stress_reconstruction=source_stress_reconstruction,
+            source_stress_reconstruction_order=source_stress_reconstruction_order,
+            solvent_magic=Float64(solvent_magic),
+            conformation_magic=Float64(conformation_magic),
+            conformation_collision=conformation_collision,
+            conformation_divergence_mode=conformation_divergence_mode,
+            wall_geometry=wall_geometry,
+            momentum_exchange_mode=momentum_exchange_mode,
+            Fx=Fx, Fy=Fy,
+            Fx_s=Fx_s, Fy_s=Fy_s, Fx_p=Fx_p, Fy_p=Fy_p,
+            Fx_split_explicit=Fx_split_explicit, Fy_split_explicit=Fy_split_explicit,
+            Fx_mea_post_source=Fx_mea_post, Fy_mea_post_source=Fy_mea_post,
+            Fx_mea_source_scaled=Fx_mea_source_scaled, Fy_mea_source_scaled=Fy_mea_source_scaled,
+            source_force_scale=source_force_scale,
+            first_nonfinite_step=first_nonfinite_step,
+            Re=Re, Re_R=Re_R, Re_D=Re_D, Wi=Wi, beta=beta, u_ref=u_ref, D=D,
+            n_drag_samples=n_avg)
 end
