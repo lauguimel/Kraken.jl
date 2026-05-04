@@ -144,6 +144,19 @@ end
         @test sum(result.is_solid_leaf) > 0
     end
 
+    @testset "local BFS route tracks leaf open-solid oracle" begin
+        route = run_conservative_tree_bfs_route_native_2d(; steps=240)
+        oracle = run_conservative_tree_bfs_macroflow_2d(; steps=240)
+
+        route_rel = abs(route.mass_drift) / route.mass_initial
+        oracle_rel = abs(oracle.mass_drift) / oracle.mass_initial
+
+        @test route.steps == oracle.steps
+        @test abs(route_rel - oracle_rel) < 0.01
+        @test abs(route.ux_mean - oracle.ux_mean) < 2e-3
+        @test abs(route.uy_mean - oracle.uy_mean) < 1e-3
+    end
+
     @testset "full-patch BFS route matches leaf open-solid oracle" begin
         route = run_conservative_tree_bfs_route_native_2d(
             ; patch_i_range=1:28, patch_j_range=1:14, steps=160)
@@ -173,11 +186,10 @@ end
         @test all(isfinite, local_patch.ux_history)
         @test local_patch.ux_history[end] > 0
         @test full_rel < 0.02
-        @test local_rel < 0.25
-        @test_broken local_rel < 0.02
+        @test local_rel < 0.02
     end
 
-    @testset "open channel rest state exposes local interface drift" begin
+    @testset "open channel rest state survives local leaf-equivalent interface" begin
         local_patch = Kraken.run_conservative_tree_open_channel_mass_ledger_2d(
             ; u_in=0.0, steps=160)
         full_patch = Kraken.run_conservative_tree_open_channel_mass_ledger_2d(
@@ -188,10 +200,8 @@ end
 
         @test full_rel < 1e-12
         @test abs(full_patch.ux_history[end]) < 1e-12
-        @test local_rel < 0.25
-        @test isfinite(local_patch.ux_history[end])
-        @test_broken local_rel < 0.02
-        @test_broken abs(local_patch.ux_history[end]) < 1e-6
+        @test local_rel < 1e-12
+        @test abs(local_patch.ux_history[end]) < 1e-12
     end
 
     @testset "short open channel with inlet-spanning patch remains finite" begin

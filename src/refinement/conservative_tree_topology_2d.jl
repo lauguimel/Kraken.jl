@@ -230,6 +230,20 @@ function _coarse_to_fine_route_specs(cell_id_by_coord,
     return Tuple((dsts[idx], weights[idx], kinds[idx]) for idx in eachindex(dsts))
 end
 
+function _coarse_leaf_equivalent_link_kind(specs)
+    has_boundary = false
+    has_split = false
+    @inbounds for spec in specs
+        _, _, kind = spec
+        if kind == ROUTE_BOUNDARY
+            has_boundary = true
+        elseif kind == SPLIT_FACE || kind == SPLIT_CORNER
+            has_split = true
+        end
+    end
+    return has_boundary ? BOUNDARY : (has_split ? COARSE_TO_FINE : SAME_LEVEL)
+end
+
 @inline function _fine_to_coarse_route_kind(i_dst_leaf::Int,
                                             j_dst_leaf::Int,
                                             patch::ConservativeTreePatch2D)
@@ -279,7 +293,8 @@ function _build_conservative_tree_links_2d(cells::Vector{ConservativeTreeCell2D}
                                            cell_id_by_coord,
                                            Nx::Int,
                                            Ny::Int,
-                                           patch::ConservativeTreePatch2D)
+                                           patch::ConservativeTreePatch2D,
+                                           coarse_route_mode::Symbol)
     links = ConservativeTreeLink2D[]
     routes = ConservativeTreeRoute2D[]
     same_level_links = Int[]
@@ -297,37 +312,49 @@ function _build_conservative_tree_links_2d(cells::Vector{ConservativeTreeCell2D}
             cy = d2q9_cy(q)
 
             if cell.level == 0
-                I_dst = cell.i + cx
-                J_dst = cell.j + cy
-                if !(1 <= I_dst <= Nx && 1 <= J_dst <= Ny)
+                if coarse_route_mode == :leaf_equivalent
+                    specs = _coarse_to_fine_route_specs(
+                        cell_id_by_coord, cell.i, cell.j, q, patch, Nx, Ny)
+                    link_kind = _coarse_leaf_equivalent_link_kind(specs)
                     _push_link_route!(links, routes,
                                       same_level_links, coarse_to_fine_links,
                                       fine_to_coarse_links, boundary_links,
                                       direct_routes, interface_routes,
                                       boundary_routes,
-                                      src, q, BOUNDARY,
-                                      ((0, 1.0, ROUTE_BOUNDARY),))
-                elseif _inside_range(I_dst, J_dst,
-                                     patch.parent_i_range,
-                                     patch.parent_j_range)
-                    specs = _coarse_to_fine_route_specs(cell_id_by_coord,
-                                                        cell.i, cell.j, q,
-                                                        patch, Nx, Ny)
-                    _push_link_route!(links, routes,
-                                      same_level_links, coarse_to_fine_links,
-                                      fine_to_coarse_links, boundary_links,
-                                      direct_routes, interface_routes,
-                                      boundary_routes,
-                                      src, q, COARSE_TO_FINE, specs)
+                                      src, q, link_kind, specs)
                 else
-                    dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
-                    _push_link_route!(links, routes,
-                                      same_level_links, coarse_to_fine_links,
-                                      fine_to_coarse_links, boundary_links,
-                                      direct_routes, interface_routes,
-                                      boundary_routes,
-                                      src, q, SAME_LEVEL,
-                                      ((dst, 1.0, DIRECT),))
+                    I_dst = cell.i + cx
+                    J_dst = cell.j + cy
+                    if !(1 <= I_dst <= Nx && 1 <= J_dst <= Ny)
+                        _push_link_route!(links, routes,
+                                          same_level_links, coarse_to_fine_links,
+                                          fine_to_coarse_links, boundary_links,
+                                          direct_routes, interface_routes,
+                                          boundary_routes,
+                                          src, q, BOUNDARY,
+                                          ((0, 1.0, ROUTE_BOUNDARY),))
+                    elseif _inside_range(I_dst, J_dst,
+                                         patch.parent_i_range,
+                                         patch.parent_j_range)
+                        specs = _coarse_to_fine_route_specs(cell_id_by_coord,
+                                                            cell.i, cell.j, q,
+                                                            patch, Nx, Ny)
+                        _push_link_route!(links, routes,
+                                          same_level_links, coarse_to_fine_links,
+                                          fine_to_coarse_links, boundary_links,
+                                          direct_routes, interface_routes,
+                                          boundary_routes,
+                                          src, q, COARSE_TO_FINE, specs)
+                    else
+                        dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
+                        _push_link_route!(links, routes,
+                                          same_level_links, coarse_to_fine_links,
+                                          fine_to_coarse_links, boundary_links,
+                                          direct_routes, interface_routes,
+                                          boundary_routes,
+                                          src, q, SAME_LEVEL,
+                                          ((dst, 1.0, DIRECT),))
+                    end
                 end
             else
                 i_dst = cell.i + cx
@@ -371,7 +398,8 @@ function _build_conservative_tree_links_2d(cells::Vector{ConservativeTreeCell2D}
 end
 
 """
-    create_conservative_tree_topology_2d(Nx, Ny, patch; coarse_volume=1.0)
+    create_conservative_tree_topology_2d(Nx, Ny, patch; coarse_volume=1.0,
+                                         coarse_route_mode=:coarse)
 
 Build static D2Q9 topology tables for a fixed ratio-2 conservative-tree patch.
 
@@ -381,12 +409,15 @@ routes are CPU-built tables intended to be packed or copied to a GPU-oriented
 layout later; no LBM state is stored here.
 """
 function create_conservative_tree_topology_2d(Nx::Integer,
-                                              Ny::Integer,
-                                              patch::ConservativeTreePatch2D;
-                                              coarse_volume::Real=1.0)
+                                               Ny::Integer,
+                                               patch::ConservativeTreePatch2D;
+                                               coarse_volume::Real=1.0,
+                                               coarse_route_mode::Symbol=:coarse)
     Nx_i = Int(Nx)
     Ny_i = Int(Ny)
     _check_conservative_tree_topology_args(Nx_i, Ny_i, patch, coarse_volume)
+    coarse_route_mode in (:coarse, :leaf_equivalent) ||
+        throw(ArgumentError("coarse_route_mode must be :coarse or :leaf_equivalent"))
 
     cells, active_cells, cell_id_by_coord =
         _build_conservative_tree_cells_2d(Nx_i, Ny_i, patch, Float64(coarse_volume))
@@ -395,7 +426,7 @@ function create_conservative_tree_topology_2d(Nx::Integer,
     same_level_links, coarse_to_fine_links, fine_to_coarse_links,
     boundary_links, direct_routes, interface_routes, boundary_routes =
         _build_conservative_tree_links_2d(cells, active_cells, cell_id_by_coord,
-                                          Nx_i, Ny_i, patch)
+                                          Nx_i, Ny_i, patch, coarse_route_mode)
 
     return ConservativeTreeTopology2D(cells, links, routes, active_cells,
                                       same_level_links, coarse_to_fine_links,

@@ -256,6 +256,34 @@ end
         @test routes[1].weight == 1.0
     end
 
+    @testset "leaf-equivalent coarse mode splits same-level coarse routes" begin
+        leaf_topology = create_conservative_tree_topology_2d(
+            Nx, Ny, patch; coarse_route_mode=:leaf_equivalent)
+        src = _topology_cell_id(leaf_topology, 0, 1, 5)
+        link = _topology_link_for(leaf_topology, src, 2)
+        routes = _topology_routes_for(leaf_topology, src, 2)
+
+        @test link.kind == SAME_LEVEL
+        @test length(routes) == 2
+        @test all(route.kind == DIRECT for route in routes)
+        @test all(isapprox(route.weight, 0.5; atol=0, rtol=0) for route in routes)
+        @test sort(collect((leaf_topology.cells[route.dst].i,
+                            leaf_topology.cells[route.dst].j)
+                           for route in routes)) == [(1, 5), (2, 5)]
+
+        boundary_routes = _topology_routes_for(leaf_topology, src, 4)
+        direct = [route for route in boundary_routes if route.kind == DIRECT]
+        boundary = [route for route in boundary_routes if route.kind == ROUTE_BOUNDARY]
+        @test length(direct) == 1
+        @test length(boundary) == 1
+        @test direct[1].dst == src
+        @test isapprox(direct[1].weight, 0.5; atol=0, rtol=0)
+        @test isapprox(boundary[1].weight, 0.5; atol=0, rtol=0)
+
+        @test_throws ArgumentError create_conservative_tree_topology_2d(
+            Nx, Ny, patch; coarse_route_mode=:bad)
+    end
+
     @testset "fine to coarse routes reproduce local coalesce primitives" begin
         fine_src = zeros(size(patch.fine_F))
         for q in 1:9, j in axes(fine_src, 2), i in axes(fine_src, 1)

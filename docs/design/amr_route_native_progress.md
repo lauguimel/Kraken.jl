@@ -80,27 +80,28 @@ Done:
 - short inlet-spanning open-channel smoke with bounded finite drift;
 - short route-native open-channel smoke with bounded mass drift;
 - open-channel mass ledger canary comparing a local patch with a full-domain
-  patch; the full-domain route stays bounded, while the local-patch target
-  `mass_rel_drift < 0.02` is marked as a broken test until the coarse/fine
-  open-flow coupling is fixed;
+  patch; the local-patch target `mass_rel_drift < 0.02` now passes when the
+  open runners use leaf-equivalent coarse same-level routes;
 - zero-inlet open-channel rest-state canary; the full-domain patch remains at
-  rest to roundoff, while a local patch generates spurious interface drift and
-  is marked as broken until the route-native interface preserves rest states;
+  rest to roundoff, and the local patch now also remains at rest with
+  leaf-equivalent coarse same-level routes;
 - bounce-back solid mask;
 - square obstacle route-native smoke;
 - vertical facing step route-native smoke.
 - solid-aware composite Zou-He skips solid inlet/outlet cells and rejects
   partially solid active coarse cells;
 - nominal route-native BFS smoke at 240 steps stays finite and has positive
-  mean streamwise velocity.
+  mean streamwise velocity;
+- short local-patch BFS route-native canary tracks the leaf open-solid oracle
+  for mass drift and mean velocity after the leaf-equivalent coarse route fix.
 
 Not done yet:
 
 - BFS convergence and publication-quality comparison against the Cartesian
   oracle;
 - long-horizon open-channel/BFS stability envelope. The route-native BFS
-  still has a strong early transient around 80 steps, so convergence studies
-  must use the nominal/longer canaries, not the early transient.
+  short canary now tracks the oracle, but convergence studies still need the
+  nominal/longer canaries, not early transients.
 
 Next surgical patch:
 
@@ -159,8 +160,11 @@ Notes:
 - A zero-inlet open-channel audit showed the deeper blocker: the current
   non-subcycled local interface conserves packet sums but does not preserve the
   rest distribution locally. Zou-He open boundaries then convert that interface
-  perturbation into mass and velocity drift. BFS convergence must stay gated on
-  this surgical rest-state canary.
+  perturbation into mass and velocity drift. Open-channel and BFS route-native
+  runners now opt into `coarse_route_mode=:leaf_equivalent`, which splits
+  coarse same-level packets into leaf-equivalent residuals and restores the
+  rest-state canary. Obstacle periodic runners still use the default
+  coarse-grid mode until their convergence ladder is re-audited.
 
 ## 4. Multi-Patch Statique 2D
 

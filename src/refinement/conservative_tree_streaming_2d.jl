@@ -977,6 +977,7 @@ function run_conservative_tree_open_channel_route_native_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=160,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     steps > 0 || throw(ArgumentError("steps must be positive"))
     u_in = T(u_in)
@@ -990,7 +991,8 @@ function run_conservative_tree_open_channel_route_native_2d(;
     coarse_next = similar(coarse)
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
 
     fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, u_in, zero(T))
     fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, u_in, zero(T))
@@ -1031,6 +1033,7 @@ function run_conservative_tree_open_channel_mass_ledger_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=160,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     steps > 0 || throw(ArgumentError("steps must be positive"))
     u_in = T(u_in)
@@ -1044,7 +1047,8 @@ function run_conservative_tree_open_channel_mass_ledger_2d(;
     coarse_next = similar(coarse)
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
 
     fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, u_in, zero(T))
     fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, u_in, zero(T))
@@ -1093,6 +1097,7 @@ function run_conservative_tree_bfs_route_native_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=240,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     steps > 0 || throw(ArgumentError("steps must be positive"))
     u_in = T(u_in)
@@ -1108,7 +1113,8 @@ function run_conservative_tree_bfs_route_native_2d(;
     coarse_next = similar(coarse)
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
     leaf = zeros(T, 2 * Nx, 2 * Ny, 9)
 
     _check_route_solid_mask_layout(topology, coarse, patch, is_solid)
