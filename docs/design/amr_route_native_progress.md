@@ -148,6 +148,15 @@ Aqua runs:
   full-packet coarse-to-fine routes. Obstacle mass conservation remains at
   roundoff; cylinder Cd moved closer to the leaf oracle but is still not a
   convergence claim.
+- `20763397.aqua` reran BFS only after enabling leaf-equivalent coarse
+  same-level routes for open runners. At 1200 steps the AMR route-native row
+  tracks the leaf oracle closely (`ux=2.395e-2` versus `2.375e-2`,
+  `uy=-1.735e-3` versus `-1.732e-3`, mass drift `9.35e-3` versus `4.93e-3`).
+- `20763404.aqua` reran square/cylinder scales 1 and 2 after restoring the
+  non-full-packet topology. Mass conservation remains at roundoff, but
+  square/cylinder velocities and cylinder Cd are still materially far from the
+  leaf oracle. The next obstacle patch must audit periodic/solid interface
+  transport before claiming convergence.
 
 Notes:
 
