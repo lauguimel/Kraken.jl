@@ -2425,6 +2425,43 @@ function _inclined_straight_source_residual(; normal=(3.0, 4.0))
     return (; max_cut, max_far)
 end
 
+function _inclined_straight_transport_only(bc; normal=(3.0, 4.0), steps=4,
+                                           constant_velocity=false)
+    p = _inclined_straight_couette_patch(; normal)
+    C_ref = 1.234
+    C = fill(C_ref, p.Nx, p.Ny)
+    ux = constant_velocity ? fill(0.02, p.Nx, p.Ny) : p.ux
+    uy = constant_velocity ? fill(-0.01, p.Nx, p.Ny) : p.uy
+    g = zeros(Float64, p.Nx, p.Ny, 9)
+    buf = similar(g)
+    init_conformation_field_2d!(g, C, ux, uy)
+
+    margin = steps + 4
+    max_cut = 0.0
+    max_far = 0.0
+    n_cut = 0
+    n_far = 0
+    for _ in 1:steps
+        stream_2d!(buf, g, p.Nx, p.Ny; sync=true)
+        apply_polymer_wall_bc!(buf, g, p.is_solid, p.q_wall, C, ux, uy, bc)
+        g, buf = buf, g
+        compute_conformation_macro_2d!(C, g)
+
+        for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
+            p.is_solid[i, j] && continue
+            err = abs(C[i, j] - C_ref)
+            if _is_cut_cell(p.q_wall, i, j)
+                n_cut += 1
+                max_cut = max(max_cut, err)
+            else
+                n_far += 1
+                max_far = max(max_far, err)
+            end
+        end
+    end
+    return (; max_cut, max_far, n_cut, n_far)
+end
+
 @testset "P18h inclined straight Couette residual is not source-gradient error" begin
     for normal in ((3.0, 4.0), (4.0, 3.0))
         source = _inclined_straight_source_residual(; normal)
@@ -2442,6 +2479,51 @@ end
         @test pre_only.max_far > 1e-5
         @test post_reset.max_far < 5e-5
         @test pre_only.max_far < 5e-5
+    end
+end
+
+@testset "P18i inclined straight pure transport isolates variable-velocity residual" begin
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        cnebb_variable = nothing
+        field_variable = nothing
+        field_equilibrium_variable = nothing
+        for case in _wall_bc_cases()
+            constant = _inclined_straight_transport_only(
+                case.bc; normal, steps=4, constant_velocity=true,
+            )
+            variable = _inclined_straight_transport_only(
+                case.bc; normal, steps=4, constant_velocity=false,
+            )
+            @test constant.n_cut > 0
+            @test constant.n_far > 0
+            @test variable.n_cut == constant.n_cut
+            @test variable.n_far == constant.n_far
+            @test isfinite(constant.max_cut)
+            @test isfinite(constant.max_far)
+            @test isfinite(variable.max_cut)
+            @test isfinite(variable.max_far)
+
+            if case.name in (:cnebb_field, :cnebb_field_equilibrium,
+                             :cnebb_eq_gradient)
+                @test constant.max_cut < P0_ATOL
+                @test constant.max_far < P0_ATOL
+            end
+            if case.name === :cnebb_field
+                field_variable = variable
+                @test variable.max_cut < P0_ATOL
+                @test 1e-3 < variable.max_far < 2e-3
+            elseif case.name === :cnebb_field_equilibrium
+                field_equilibrium_variable = variable
+                @test variable.max_cut < P0_ATOL
+                @test 1e-3 < variable.max_far < 2e-3
+            elseif case.name === :cnebb
+                cnebb_variable = variable
+                @test variable.max_cut > 1e-3
+            end
+        end
+
+        @test cnebb_variable.max_cut > 3 * field_equilibrium_variable.max_cut + 1e-3
+        @test field_variable.max_far ≈ field_equilibrium_variable.max_far rtol=5e-3
     end
 end
 
