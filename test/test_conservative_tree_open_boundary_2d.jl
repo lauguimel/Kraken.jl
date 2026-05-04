@@ -158,6 +158,25 @@ end
         @test isapprox(route.mass_drift, oracle.mass_drift; atol=1e-10, rtol=0)
     end
 
+    @testset "open channel local patch mass ledger exposes coarse fine drift" begin
+        local_patch = Kraken.run_conservative_tree_open_channel_mass_ledger_2d(
+            ; steps=160)
+        full_patch = Kraken.run_conservative_tree_open_channel_mass_ledger_2d(
+            ; patch_i_range=1:18, patch_j_range=1:10, steps=160)
+
+        local_rel = abs(local_patch.mass_drift) / local_patch.mass_initial
+        full_rel = abs(full_patch.mass_drift) / full_patch.mass_initial
+
+        @test length(local_patch.mass_history) == local_patch.steps + 1
+        @test length(local_patch.ux_history) == local_patch.steps + 1
+        @test all(isfinite, local_patch.mass_history)
+        @test all(isfinite, local_patch.ux_history)
+        @test local_patch.ux_history[end] > 0
+        @test full_rel < 0.02
+        @test local_rel < 0.25
+        @test_broken local_rel < 0.02
+    end
+
     @testset "short open channel with inlet-spanning patch remains finite" begin
         nx, ny = 8, 6
         volume_coarse = 1.0
