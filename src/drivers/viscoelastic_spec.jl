@@ -114,8 +114,9 @@ end
 
 Boundary treatment for the conformation LBM populations g_* at fluid
 cells adjacent to solid walls. Concrete types: `CNEBB`, `CNEBBQAware`,
-`CNEBBField`, `CNEBBEqGradient`, `CNEBBCutLinkEqGradient`, `YLW_A`, `YLW_B`,
-`YLWBalanceOnly`, `NoPolymerWallBC`.
+`CNEBBField`, `CNEBBFieldEquilibrium`, `CNEBBEqGradient`,
+`CNEBBCutLinkEqGradient`, `YLW_A`, `YLW_B`, `YLWBalanceOnly`,
+`NoPolymerWallBC`.
 """
 abstract type AbstractPolymerWallBC end
 
@@ -149,6 +150,17 @@ explicit until validated on higher-level canaries.
 struct CNEBBField <: AbstractPolymerWallBC end
 
 """
+    CNEBBFieldEquilibrium()
+
+Diagnostic CNEBB variant that first applies `CNEBBField()` and then resets
+explicit cut-link wall-cell populations to local equilibrium. This isolates
+whether residual errors come from the wall-cell macro value or from outgoing
+non-equilibrium populations propagated away from that wall cell. It is not a
+conservative Yu et al. 2025 boundary condition.
+"""
+struct CNEBBFieldEquilibrium <: AbstractPolymerWallBC end
+
+"""
     CNEBBEqGradient()
 
 Diagnostic CNEBB variant that recovers the wall macro field by preserving the
@@ -171,7 +183,8 @@ struct CNEBBCutLinkEqGradient <: AbstractPolymerWallBC end
 function _assert_validation_polymer_wall_bc(bc::AbstractPolymerWallBC;
                                             allow_diagnostic::Bool=false)
     if !allow_diagnostic &&
-       (bc isa CNEBBField || bc isa CNEBBEqGradient || bc isa CNEBBCutLinkEqGradient)
+       (bc isa CNEBBField || bc isa CNEBBFieldEquilibrium ||
+        bc isa CNEBBEqGradient || bc isa CNEBBCutLinkEqGradient)
         error("$(typeof(bc)) is a diagnostic wall BC and is not allowed in validation flows; use CNEBB() or pass allow_diagnostic_polymer_bc=true in audit code.")
     end
     return nothing
@@ -343,6 +356,33 @@ function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
                                   q_wall, C, ux, uy, ::CNEBBField) where {T}
     apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, q_wall, C, ux, uy;
                                  phi_mode=:field)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,
+                                  ::CNEBBFieldEquilibrium) where {T}
+    apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, C;
+                                 phi_mode=:field)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
+                                  q_wall, C, ::CNEBBFieldEquilibrium) where {T}
+    apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, q_wall, C;
+                                 phi_mode=:field)
+    reset_cutlink_conformation_equilibrium_2d!(g_post, C, is_solid, q_wall)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,
+                                  ux, uy, ::CNEBBFieldEquilibrium) where {T}
+    apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, C, ux, uy;
+                                 phi_mode=:field)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
+                                  q_wall, C, ux, uy,
+                                  ::CNEBBFieldEquilibrium) where {T}
+    apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, q_wall, C, ux, uy;
+                                 phi_mode=:field)
+    reset_cutlink_conformation_equilibrium_2d!(g_post, C, ux, uy, is_solid, q_wall)
     return nothing
 end
 function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,

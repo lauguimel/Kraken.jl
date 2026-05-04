@@ -1425,6 +1425,34 @@ end
     end
 end
 
+@kernel function reset_cutlink_conformation_equilibrium_2d_kernel!(
+        g, @Const(C_field), @Const(ux_bc), @Const(uy_bc),
+        @Const(is_solid), @Const(q_wall), use_local_velocity, Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds if !is_solid[i, j]
+        T = eltype(g)
+        any_cut = false
+        for q in 2:9
+            any_cut |= q_wall[i, j, q] > zero(T)
+        end
+        if any_cut
+            φ = C_field[i, j]
+            u = use_local_velocity ? ux_bc[i, j] : zero(T)
+            v = use_local_velocity ? uy_bc[i, j] : zero(T)
+            usq = u * u + v * v
+            g[i, j, 1] = feq_2d(Val(1), φ, u, v, usq)
+            g[i, j, 2] = feq_2d(Val(2), φ, u, v, usq)
+            g[i, j, 3] = feq_2d(Val(3), φ, u, v, usq)
+            g[i, j, 4] = feq_2d(Val(4), φ, u, v, usq)
+            g[i, j, 5] = feq_2d(Val(5), φ, u, v, usq)
+            g[i, j, 6] = feq_2d(Val(6), φ, u, v, usq)
+            g[i, j, 7] = feq_2d(Val(7), φ, u, v, usq)
+            g[i, j, 8] = feq_2d(Val(8), φ, u, v, usq)
+            g[i, j, 9] = feq_2d(Val(9), φ, u, v, usq)
+        end
+    end
+end
+
 @kernel function apply_cnebb_2d_kernel!(g_post, @Const(g_pre), @Const(is_solid),
                                           @Const(q_wall), use_q_wall,
                                           C_field, @Const(ux_bc), @Const(uy_bc),
@@ -1606,6 +1634,27 @@ end
             C_field[i, j] = φ
         end
     end
+end
+
+function reset_cutlink_conformation_equilibrium_2d!(g, C_field, is_solid, q_wall)
+    backend = KernelAbstractions.get_backend(g)
+    Nx, Ny = size(C_field)
+    kernel! = reset_cutlink_conformation_equilibrium_2d_kernel!(backend)
+    kernel!(g, C_field, C_field, C_field, is_solid, q_wall, false,
+            Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+function reset_cutlink_conformation_equilibrium_2d!(g, C_field, ux, uy,
+                                                    is_solid, q_wall)
+    backend = KernelAbstractions.get_backend(g)
+    Nx, Ny = size(C_field)
+    kernel! = reset_cutlink_conformation_equilibrium_2d_kernel!(backend)
+    kernel!(g, C_field, ux, uy, is_solid, q_wall, true,
+            Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+    return nothing
 end
 
 """

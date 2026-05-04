@@ -699,6 +699,7 @@ _wall_bc_cases() = (
     (name=:cnebb, bc=CNEBB()),
     (name=:cnebb_qaware, bc=CNEBBQAware()),
     (name=:cnebb_field, bc=CNEBBField()),
+    (name=:cnebb_field_equilibrium, bc=CNEBBFieldEquilibrium()),
     (name=:cnebb_eq_gradient, bc=CNEBBEqGradient()),
     (name=:cnebb_cutlink_eq_gradient, bc=CNEBBCutLinkEqGradient()),
     (name=:ylw_a, bc=YLW_A()),
@@ -707,7 +708,7 @@ _wall_bc_cases() = (
 )
 
 function _active_bc_linear_macro_passes(name::Symbol, orientation::Symbol, velocity)
-    name === :cnebb_field && return true
+    name in (:cnebb_field, :cnebb_field_equilibrium) && return true
     name === :cnebb_eq_gradient && return true
     name === :cnebb_cutlink_eq_gradient && return false
     return velocity == (0.0, 0.0) && orientation in (:uniform, :tangent)
@@ -821,7 +822,7 @@ end
                                             amplitude=0.0)
         nonlinear_gap = _logspace_wall_bc_gap(q_out, case.bc; q_wall_value=qw)
         @test abs(uniform_gap) < P0_ATOL
-        if case.name in (:cnebb_field, :cnebb_eq_gradient)
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient)
             @test abs(nonlinear_gap) < P0_ATOL
         elseif case.name === :cnebb_cutlink_eq_gradient
             @test isfinite(nonlinear_gap)
@@ -930,7 +931,7 @@ end
         macro_error, _ = _multi_cut_link_macro_error_bc(
             q_outs, gx, gy, case.bc; velocity,
         )
-        if case.name in (:cnebb_field, :cnebb_eq_gradient)
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient)
             @test abs(macro_error) < P0_ATOL
         else
             push!(broken_macro_errors[case.name], abs(macro_error))
@@ -997,14 +998,14 @@ end
         result = _actual_square_obstacle_macro_errors(case.bc; velocity=(0.03, -0.02))
         @test result.n_cut_cells > 0
         @test result.max_sum_error < P0_ATOL
-        if case.name in (:cnebb_field, :cnebb_eq_gradient)
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient)
             @test result.max_macro_error < P0_ATOL
         else
             push!(broken_velocity_errors[case.name], result.max_macro_error)
         end
     end
     for case in _wall_bc_cases()
-        case.name in (:cnebb_field, :cnebb_eq_gradient) && continue
+        case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient) && continue
         @test maximum(broken_velocity_errors[case.name]) > 1e-6
     end
 
@@ -1018,14 +1019,14 @@ end
         result = _actual_square_obstacle_macro_errors(case.bc; gradient, velocity)
         @test result.n_cut_cells > 0
         @test result.max_sum_error < P0_ATOL
-        if case.name in (:cnebb_field, :cnebb_eq_gradient)
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient)
             @test result.max_macro_error < P0_ATOL
         else
             push!(broken_gradient_errors[case.name], result.max_macro_error)
         end
     end
     for case in _wall_bc_cases()
-        case.name in (:cnebb_field, :cnebb_eq_gradient) && continue
+        case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient) && continue
         @test maximum(broken_gradient_errors[case.name]) > 1e-6
     end
 end
@@ -1081,14 +1082,14 @@ end
         result = _actual_cylinder_cutlink_macro_errors(case.bc; velocity=(0.03, -0.02))
         @test result.n_cut_cells > 0
         @test result.max_sum_error < P0_ATOL
-        if case.name in (:cnebb_field, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient)
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient)
             @test result.max_macro_error < P0_ATOL
         else
             push!(arbitrary_velocity_errors[case.name], result.max_macro_error)
         end
     end
     for case in _wall_bc_cases()
-        case.name in (:cnebb_field, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient) &&
+        case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient) &&
             continue
         @test maximum(arbitrary_velocity_errors[case.name]) > 1e-6
     end
@@ -1103,14 +1104,14 @@ end
         result = _actual_cylinder_cutlink_macro_errors(case.bc; gradient, velocity)
         @test result.n_cut_cells > 0
         @test result.max_sum_error < P0_ATOL
-        if case.name in (:cnebb_field, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient)
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient)
             @test result.max_macro_error < P0_ATOL
         else
             push!(broken_macro_errors[case.name], result.max_macro_error)
         end
     end
     for case in _wall_bc_cases()
-        case.name in (:cnebb_field, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient) &&
+        case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient, :cnebb_cutlink_eq_gradient) &&
             continue
         @test maximum(broken_macro_errors[case.name]) > 1e-6
     end
@@ -1667,6 +1668,7 @@ function _planar_wall_bc_cases_for_tau(tau_plus)
         (name=:cnebb, bc=CNEBB()),
         (name=:cnebb_qaware, bc=CNEBBQAware()),
         (name=:cnebb_field, bc=CNEBBField()),
+        (name=:cnebb_field_equilibrium, bc=CNEBBFieldEquilibrium()),
         (name=:cnebb_eq_gradient, bc=CNEBBEqGradient()),
         (name=:cnebb_cutlink_eq_gradient, bc=CNEBBCutLinkEqGradient()),
         (name=:ylw_a, bc=YLW_A(tau_plus=tau_plus)),
@@ -2191,7 +2193,7 @@ end
         result = _single_cutlink_wall_aligned_couette_once(
             q_out, q_wall_value, case.bc,
         )
-        if case.name in (:cnebb_field, :cnebb_eq_gradient)
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium, :cnebb_eq_gradient)
             @test result.wall_error < P0_ATOL
             @test result.cde_error < P0_ATOL
         elseif case.name === :cnebb_cutlink_eq_gradient
@@ -2217,7 +2219,7 @@ end
             q_out, q_wall_value, case.bc; steps=12,
         )
         @test result.min_eig > 0.9
-        if case.name === :cnebb_field
+        if case.name in (:cnebb_field, :cnebb_field_equilibrium)
             @test result.max_wall_error < P0_ATOL
             @test result.max_cde_error < P0_ATOL
         else
@@ -2298,7 +2300,8 @@ function _inclined_straight_couette_patch(; normal=(3.0, 4.0))
 end
 
 function _inclined_straight_couette_repeated(bc; normal=(3.0, 4.0), steps=4,
-                                             reset_cut_equilibrium=false)
+                                             reset_cut_equilibrium=false,
+                                             reset_cut_after_collision=false)
     p = _inclined_straight_couette_patch(; normal)
     Cxx = fill(p.cxx, p.Nx, p.Ny)
     Cxy = fill(p.cxy, p.Nx, p.Ny)
@@ -2341,6 +2344,17 @@ function _inclined_straight_couette_repeated(bc; normal=(3.0, 4.0), steps=4,
         compute_conformation_macro_2d!(Cyy, gyy)
         _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
                                    p.ux, p.uy, p.is_solid, p.λ)
+        if reset_cut_after_collision
+            reset_cutlink_conformation_equilibrium_2d!(gxx, Cxx, p.ux, p.uy,
+                                                       p.is_solid, p.q_wall)
+            reset_cutlink_conformation_equilibrium_2d!(gxy, Cxy, p.ux, p.uy,
+                                                       p.is_solid, p.q_wall)
+            reset_cutlink_conformation_equilibrium_2d!(gyy, Cyy, p.ux, p.uy,
+                                                       p.is_solid, p.q_wall)
+            compute_conformation_macro_2d!(Cxx, gxx)
+            compute_conformation_macro_2d!(Cxy, gxy)
+            compute_conformation_macro_2d!(Cyy, gyy)
+        end
 
         for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
             p.is_solid[i, j] && continue
@@ -2376,12 +2390,59 @@ end
             @test oracle.max_cut < P0_ATOL
             @test oracle.max_far < 5e-5
             @test result.max_far > 50 * oracle.max_far
+        elseif case.name === :cnebb_field_equilibrium
+            @test result.max_cut < P0_ATOL
+            @test result.max_far < 5e-5
         else
             push!(broken_errors, result.max_cut)
             @test result.max_cut > 1e-6
         end
     end
     @test maximum(broken_errors) > 1e-6
+end
+
+function _inclined_straight_source_residual(; normal=(3.0, 4.0))
+    p = _inclined_straight_couette_patch(; normal)
+    max_cut = 0.0
+    max_far = 0.0
+    for j in 3:p.Ny-2, i in 3:p.Nx-2
+        p.is_solid[i, j] && continue
+        source = _direct_source_tuple(
+            p.cxx, p.cxy, p.cyy,
+            Kraken._wall_aware_dx_2d(p.ux, p.is_solid, i, j, p.Nx, Float64),
+            Kraken._wall_aware_dy_2d(p.ux, p.is_solid, i, j, p.Ny, Float64),
+            Kraken._wall_aware_dx_2d(p.uy, p.is_solid, i, j, p.Nx, Float64),
+            Kraken._wall_aware_dy_2d(p.uy, p.is_solid, i, j, p.Ny, Float64),
+            p.λ,
+        )
+        residual = maximum(abs, source)
+        if _is_cut_cell(p.q_wall, i, j)
+            max_cut = max(max_cut, residual)
+        else
+            max_far = max(max_far, residual)
+        end
+    end
+    return (; max_cut, max_far)
+end
+
+@testset "P18h inclined straight Couette residual is not source-gradient error" begin
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        source = _inclined_straight_source_residual(; normal)
+        pre_only = _inclined_straight_couette_repeated(
+            CNEBBFieldEquilibrium(); normal, steps=4,
+        )
+        post_reset = _inclined_straight_couette_repeated(
+            CNEBBFieldEquilibrium(); normal, steps=4,
+            reset_cut_after_collision=true,
+        )
+        @test source.max_cut < P0_ATOL
+        @test source.max_far < P0_ATOL
+        @test pre_only.max_cut < P0_ATOL
+        @test post_reset.max_cut < P0_ATOL
+        @test pre_only.max_far > 1e-5
+        @test post_reset.max_far < 5e-5
+        @test pre_only.max_far < 5e-5
+    end
 end
 
 function _curved_affine_oldroydb_patch()
@@ -2597,7 +2658,7 @@ end
 end
 
 @testset "P21 curved affine stream+BC localizes active-wall defect" begin
-    for bc in (CNEBBField(), CNEBBEqGradient())
+    for bc in (CNEBBField(), CNEBBFieldEquilibrium(), CNEBBEqGradient())
         exact = _curved_affine_bc_once_error(bc)
         @test exact.max_cut < P0_ATOL
     end
@@ -2609,7 +2670,7 @@ end
 end
 
 @testset "P22 curved frozen affine CDE one-step localizes CNEBB pollution" begin
-    for bc in (CNEBBField(), CNEBBEqGradient())
+    for bc in (CNEBBField(), CNEBBFieldEquilibrium(), CNEBBEqGradient())
         p, Cxx, Cxy, Cyy = _curved_affine_cde_once(bc)
         exact = _max_curved_cut_error(p.q_wall, p.is_solid, Cxx, Cxy, Cyy,
                                       p.cxx, p.cxy, p.cyy)
@@ -2650,6 +2711,7 @@ end
     results = Dict{Symbol,Any}()
     for (name, bc) in ((:cnebb, CNEBB()),
                        (:field, CNEBBField()),
+                       (:field_equilibrium, CNEBBFieldEquilibrium()),
                        (:eq_gradient, CNEBBEqGradient()))
         p, Cxx, Cxy, Cyy = _curved_affine_cde_once(bc)
         tau_xx = p.G .* (Cxx .- 1.0)
@@ -2668,13 +2730,14 @@ end
         results[name] = (Fx=after.Fx - before.Fx, Fy=after.Fy - before.Fy)
     end
     @test hypot(results[:field].Fx, results[:field].Fy) < 1e-5
+    @test hypot(results[:field_equilibrium].Fx, results[:field_equilibrium].Fy) < 1e-5
     @test hypot(results[:eq_gradient].Fx, results[:eq_gradient].Fy) < 1e-5
     @test hypot(results[:cnebb].Fx, results[:cnebb].Fy) > 1e-3
 end
 
 @testset "P25 active curved-wall defect is present for every cut-link orientation" begin
     for q_out in 2:9, qw in (0.1, 0.3, 0.5, 0.7, 0.9)
-        for bc in (CNEBBField(), CNEBBEqGradient())
+        for bc in (CNEBBField(), CNEBBFieldEquilibrium(), CNEBBEqGradient())
             fixed_macro, fixed_sum = _single_cut_link_macro_error_bc(
                 q_out, bc; q_wall_value=qw,
                 orientation=:uniform, velocity=(0.03, -0.02),
@@ -2883,6 +2946,7 @@ end
     stats_by_name = Dict{Symbol,Any}()
     for (name, bc) in ((:cnebb, CNEBB()),
                        (:field, CNEBBField()),
+                       (:field_equilibrium, CNEBBFieldEquilibrium()),
                        (:eq_gradient, CNEBBEqGradient()))
         gxx = zeros(Float64, p.Nx, p.Ny, 9)
         gxy = zeros(Float64, p.Nx, p.Ny, 9)
@@ -2909,6 +2973,7 @@ end
     end
 
     @test stats_by_name[:field].max_cut < P0_ATOL
+    @test stats_by_name[:field_equilibrium].max_cut < P0_ATOL
     @test stats_by_name[:eq_gradient].max_cut < P0_ATOL
     @test stats_by_name[:cnebb].max_cut > 1e-5
     @test stats_by_name[:cnebb].max_cut > 10 * stats_by_name[:cnebb].max_far

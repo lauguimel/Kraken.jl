@@ -318,6 +318,7 @@ export reset_conformation_inlet_2d!, reset_conformation_outlet_2d!
 export reset_conformation_inlet_masked_2d!, reset_conformation_outlet_masked_2d!
 export polymer_modulus, polymer_relaxation_time
 export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
+       CNEBBFieldEquilibrium,
        CNEBBEqGradient, CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,
        NoPolymerWallBC, apply_polymer_wall_bc!
 
@@ -327,7 +328,8 @@ export collide_conformation_2d!, collide_conformation_regularized_2d!,
        conformation_source_2d
 export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!,
        apply_ylw_a_conformation_2d!, apply_ylw_b_conformation_2d!,
-       apply_ylw_balance_conformation_2d!
+       apply_ylw_balance_conformation_2d!,
+       reset_cutlink_conformation_equilibrium_2d!
 export collide_viscoelastic_source_2d!, collide_viscoelastic_source_guo_2d!
 export apply_hermite_source_2d!, reconstruct_wall_cell_stress_from_interior_2d!
 export reconstruct_wall_link_value_2d
