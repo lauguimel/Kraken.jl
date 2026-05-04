@@ -159,24 +159,51 @@ end
         end
     end
 
-    @testset "coarse to fine routes transfer full coarse packets" begin
+    @testset "coarse to fine routes reproduce leaf-equivalent fractions" begin
+        coarse_src = zeros(Float64, Nx, Ny, 9)
+        for q in 1:9, J in 1:Ny, I in 1:Nx
+            coarse_src[I, J, q] = 100q + 10I + J / 10
+        end
+
+        expected_fine = zeros(size(patch.fine_F))
+        expected_coarse = zeros(size(coarse_src))
+        routed = zeros(size(patch.fine_F))
+        routed_coarse = zeros(size(coarse_src))
+        i0 = 2 * first(patch.parent_i_range) - 1
+        j0 = 2 * first(patch.parent_j_range) - 1
         for idx in topology.coarse_to_fine_links
             link = topology.links[idx]
+            src_cell = topology.cells[link.src]
+            packet = coarse_src[src_cell.i, src_cell.j, link.q]
             cx = d2q9_cx(link.q)
             cy = d2q9_cy(link.q)
-            routes = _topology_routes_for(topology, link.src, link.q)
-            @test all(topology.cells[route.dst].level == 1 for route in routes)
-            @test isapprox(sum(route.weight for route in routes), 1.0; atol=1e-14, rtol=0)
-            if cx != 0 && cy != 0
-                @test length(routes) == 1
-                @test routes[1].kind in (SPLIT_FACE, SPLIT_CORNER)
-                @test routes[1].weight == 1.0
-            else
-                @test length(routes) == 2
-                @test all(route.kind == SPLIT_FACE for route in routes)
-                @test all(route.weight == 0.5 for route in routes)
+            for iy in 1:2, ix in 1:2
+                i_dst = 2 * src_cell.i - 2 + ix + cx
+                j_dst = 2 * src_cell.j - 2 + iy + cy
+                if _test_inside_fine_patch(i_dst, j_dst, patch)
+                    expected_fine[i_dst - i0 + 1, j_dst - j0 + 1, link.q] +=
+                        0.25 * packet
+                else
+                    I_dst = (i_dst + 1) >>> 1
+                    J_dst = (j_dst + 1) >>> 1
+                    expected_coarse[I_dst, J_dst, link.q] += 0.25 * packet
+                end
+            end
+
+            for route in _topology_routes_for(topology, link.src, link.q)
+                dst_cell = topology.cells[route.dst]
+                if dst_cell.level == 1
+                    routed[dst_cell.i - i0 + 1, dst_cell.j - j0 + 1, link.q] +=
+                        packet * route.weight
+                else
+                    routed_coarse[dst_cell.i, dst_cell.j, link.q] +=
+                        packet * route.weight
+                end
             end
         end
+
+        @test isapprox(routed, expected_fine; atol=1e-14, rtol=0)
+        @test isapprox(routed_coarse, expected_coarse; atol=1e-14, rtol=0)
     end
 
     @testset "interface route primitives are explicit" begin
@@ -186,23 +213,28 @@ end
         west_split = [route for route in west_routes if route.kind == SPLIT_FACE]
         west_residual = [route for route in west_routes if route.kind == DIRECT]
         @test west_link.kind == COARSE_TO_FINE
-        @test length(west_routes) == 2
+        @test length(west_routes) == 3
         @test length(west_split) == 2
-        @test isempty(west_residual)
-        @test all(isapprox(route.weight, 0.5; atol=0, rtol=0) for route in west_split)
+        @test length(west_residual) == 1
+        @test all(isapprox(route.weight, 0.25; atol=0, rtol=0) for route in west_split)
         @test sort(collect((topology.cells[route.dst].i, topology.cells[route.dst].j)
                            for route in west_split)) == [(5, 9), (5, 10)]
+        @test west_residual[1].dst == west_source
+        @test isapprox(west_residual[1].weight, 0.5; atol=0, rtol=0)
 
         southwest_source = _topology_cell_id(topology, 0, 2, 3)
         corner_routes = _topology_routes_for(topology, southwest_source, 6)
         corner_split = [route for route in corner_routes if route.kind == SPLIT_CORNER]
         corner_residual = [route for route in corner_routes if route.kind == DIRECT]
-        @test length(corner_routes) == 1
+        @test length(corner_routes) == 4
         @test length(corner_split) == 1
-        @test isempty(corner_residual)
-        @test corner_split[1].weight == 1.0
+        @test length(corner_residual) == 3
+        @test corner_split[1].weight == 0.25
         @test (topology.cells[corner_split[1].dst].i,
                topology.cells[corner_split[1].dst].j) == (5, 7)
+        @test all(route.weight == 0.25 for route in corner_residual)
+        @test sort(collect((topology.cells[route.dst].i, topology.cells[route.dst].j)
+                           for route in corner_residual)) == [(2, 3), (2, 4), (3, 3)]
 
         fine_face_src_a = _topology_cell_id(topology, 1, 5, 9)
         fine_face_src_b = _topology_cell_id(topology, 1, 5, 10)

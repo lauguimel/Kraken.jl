@@ -205,34 +205,25 @@ function _coarse_to_fine_route_specs(cell_id_by_coord,
     dsts = Int[]
     weights = Float64[]
     kinds = RouteKind[]
-    I_dst = src_i + cx
-    J_dst = src_j + cy
-    if periodic_x
-        I_dst = mod1(I_dst, Nx)
-    end
-
-    if !(1 <= I_dst <= Nx && 1 <= J_dst <= Ny)
-        _push_or_accumulate_route_spec!(dsts, weights, kinds,
-                                        0, 1.0, ROUTE_BOUNDARY)
-    elseif cx != 0 && cy != 0
-        i_child = cx > 0 ? _fine_global_i(I_dst, 1) : _fine_global_i(I_dst, 2)
-        j_child = cy > 0 ? _fine_global_j(J_dst, 1) : _fine_global_j(J_dst, 2)
-        dst = cell_id_by_coord[_tree_topology_key(1, i_child, j_child)]
-        _push_or_accumulate_route_spec!(dsts, weights, kinds,
-                                        dst, 1.0, split_kind)
-    elseif cx != 0
-        i_child = cx > 0 ? _fine_global_i(I_dst, 1) : _fine_global_i(I_dst, 2)
-        for j_child in (_fine_global_j(J_dst, 1), _fine_global_j(J_dst, 2))
-            dst = cell_id_by_coord[_tree_topology_key(1, i_child, j_child)]
-            _push_or_accumulate_route_spec!(dsts, weights, kinds,
-                                            dst, 0.5, split_kind)
+    @inbounds for iy in 1:2, ix in 1:2
+        i_dst = _fine_global_i(src_i, ix) + cx
+        j_dst = _fine_global_j(src_j, iy) + cy
+        if periodic_x
+            i_dst = mod1(i_dst, 2 * Nx)
         end
-    else
-        j_child = cy > 0 ? _fine_global_j(J_dst, 1) : _fine_global_j(J_dst, 2)
-        for i_child in (_fine_global_i(I_dst, 1), _fine_global_i(I_dst, 2))
-            dst = cell_id_by_coord[_tree_topology_key(1, i_child, j_child)]
+
+        if !_inside_leaf_domain(i_dst, j_dst, Nx, Ny)
             _push_or_accumulate_route_spec!(dsts, weights, kinds,
-                                            dst, 0.5, split_kind)
+                                            0, 0.25, ROUTE_BOUNDARY)
+        elseif _inside_fine_patch(i_dst, j_dst, patch)
+            dst = cell_id_by_coord[_tree_topology_key(1, i_dst, j_dst)]
+            _push_or_accumulate_route_spec!(dsts, weights, kinds,
+                                            dst, 0.25, split_kind)
+        else
+            I_dst, J_dst = _coarse_parent_from_fine(i_dst, j_dst)
+            dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
+            _push_or_accumulate_route_spec!(dsts, weights, kinds,
+                                            dst, 0.25, DIRECT)
         end
     end
 

@@ -25,8 +25,8 @@ Status: done for one ratio-2 patch.
 Implemented:
 
 - same-level active-cell routes;
-- coarse-to-fine face and corner routes that transfer the full coarse packet
-  to interface children (`1/2 + 1/2` for faces, `1` for corners);
+- coarse-to-fine face and corner routes using leaf-equivalent routed fractions
+  with explicit coarse residuals (`1/4` per child trajectory);
 - fine-to-coarse face and corner coalesces;
 - route topology and packed route representation;
 - periodic-x, wall-y, moving-wall-y and solid-mask route variants.
@@ -34,7 +34,7 @@ Implemented:
 Surgical tests:
 
 - packet canaries for direct, split and coalesce routes;
-- full-packet coarse-to-fine face/corner split canaries;
+- leaf-equivalent coarse-to-fine face/corner fraction and residual canaries;
 - orientation-wise conservation;
 - route-native streaming against leaf-grid oracle canaries;
 - periodic and wall boundary conservation.
@@ -144,6 +144,15 @@ Aqua runs:
   full-packet coarse-to-fine routes. Obstacle mass conservation remains at
   roundoff; cylinder Cd moved closer to the leaf oracle but is still not a
   convergence claim.
+
+Notes:
+
+- `20761329.aqua` and `20761330.aqua` are retained as exploratory full-packet
+  canaries. A one-step leaf-oracle audit showed that full-packet coarse-to-fine
+  injection doubles interface packets in the current non-subcycled route-native
+  path. The non-subcycled topology therefore uses leaf-equivalent residual
+  routes again; full-packet transfer belongs with the subcycling milestone where
+  the packet is split in time instead of injected in one coarse step.
 
 ## 4. Multi-Patch Statique 2D
 
