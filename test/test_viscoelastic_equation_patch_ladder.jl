@@ -2371,14 +2371,13 @@ function _reset_cut_cells_to_equilibrium!(g, C, ux, uy, is_solid, q_wall)
     return nothing
 end
 
-function _inclined_straight_couette_patch(; normal=(3.0, 4.0))
+function _inclined_straight_couette_patch(; normal=(3.0, 4.0), γ=0.01)
     Nx = Ny = 48
     norm_n = hypot(normal[1], normal[2])
     nx = normal[1] / norm_n
     ny = normal[2] / norm_n
     tx = -ny
     ty = nx
-    γ = 0.01
     λ = 3.0
     x0 = 22.37
     y0 = 19.81
@@ -2422,10 +2421,10 @@ function _inclined_straight_couette_patch(; normal=(3.0, 4.0))
     return (; Nx, Ny, λ, q_wall, is_solid, ux, uy, cxx, cxy, cyy)
 end
 
-function _inclined_straight_couette_repeated(bc; normal=(3.0, 4.0), steps=4,
+function _inclined_straight_couette_repeated(bc; normal=(3.0, 4.0), γ=0.01, steps=4,
                                              reset_cut_equilibrium=false,
                                              reset_cut_after_collision=false)
-    p = _inclined_straight_couette_patch(; normal)
+    p = _inclined_straight_couette_patch(; normal, γ)
     Cxx = fill(p.cxx, p.Nx, p.Ny)
     Cxy = fill(p.cxy, p.Nx, p.Ny)
     Cyy = fill(p.cyy, p.Nx, p.Ny)
@@ -2524,8 +2523,8 @@ end
     @test maximum(broken_errors) > 1e-6
 end
 
-function _inclined_straight_source_residual(; normal=(3.0, 4.0))
-    p = _inclined_straight_couette_patch(; normal)
+function _inclined_straight_source_residual(; normal=(3.0, 4.0), γ=0.01)
+    p = _inclined_straight_couette_patch(; normal, γ)
     max_cut = 0.0
     max_far = 0.0
     for j in 3:p.Ny-2, i in 3:p.Nx-2
@@ -2549,8 +2548,8 @@ function _inclined_straight_source_residual(; normal=(3.0, 4.0))
 end
 
 function _inclined_straight_transport_only(bc; normal=(3.0, 4.0), steps=4,
-                                           constant_velocity=false)
-    p = _inclined_straight_couette_patch(; normal)
+                                           constant_velocity=false, γ=0.01)
+    p = _inclined_straight_couette_patch(; normal, γ)
     C_ref = 1.234
     C = fill(C_ref, p.Nx, p.Ny)
     ux = constant_velocity ? fill(0.02, p.Nx, p.Ny) : p.ux
@@ -2647,6 +2646,41 @@ end
 
         @test cnebb_variable.max_cut > 3 * field_equilibrium_variable.max_cut + 1e-3
         @test field_variable.max_far ≈ field_equilibrium_variable.max_far rtol=5e-3
+    end
+end
+
+@testset "P18j inclined straight residual scales with wall-coupled velocity transport" begin
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        zero_transport = _inclined_straight_transport_only(
+            CNEBBFieldEquilibrium(); normal, γ=0.0, steps=4,
+        )
+        zero_cde = _inclined_straight_couette_repeated(
+            CNEBBFieldEquilibrium(); normal, γ=0.0, steps=4,
+        )
+        source = _inclined_straight_source_residual(; normal, γ=0.01)
+        transport_low = _inclined_straight_transport_only(
+            CNEBBFieldEquilibrium(); normal, γ=0.005, steps=4,
+        )
+        transport_high = _inclined_straight_transport_only(
+            CNEBBFieldEquilibrium(); normal, γ=0.01, steps=4,
+        )
+        cde_low = _inclined_straight_couette_repeated(
+            CNEBBFieldEquilibrium(); normal, γ=0.005, steps=4,
+        )
+        cde_high = _inclined_straight_couette_repeated(
+            CNEBBFieldEquilibrium(); normal, γ=0.01, steps=4,
+        )
+
+        @test zero_transport.max_cut < 2e-15
+        @test zero_transport.max_far < P0_ATOL
+        @test zero_cde.max_cut < P0_ATOL
+        @test zero_cde.max_far < P0_ATOL
+        @test source.max_cut < P0_ATOL
+        @test source.max_far < P0_ATOL
+
+        @test 1.8 < transport_high.max_far / transport_low.max_far < 2.2
+        @test 3.5 < cde_high.max_far / cde_low.max_far < 4.5
+        @test cde_high.max_far < 0.02 * transport_high.max_far
     end
 end
 
