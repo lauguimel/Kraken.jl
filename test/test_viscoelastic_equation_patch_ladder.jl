@@ -1711,6 +1711,231 @@ end
     end
 end
 
+function _straight_embedded_wall_macro_errors(bc; orientation=:horizontal,
+                                              field=:tangent,
+                                              velocity=(0.0, 0.0))
+    Nx, Ny = 14, 12
+    is_solid = falses(Nx, Ny)
+    if orientation === :horizontal
+        is_solid[:, 1:4] .= true
+        cut_range = ((3:Nx-2), (5:5))
+        tangent = (1.0, 0.0)
+        normal = (0.0, 1.0)
+    elseif orientation === :vertical
+        is_solid[1:4, :] .= true
+        cut_range = ((5:5), (3:Ny-2))
+        tangent = (0.0, 1.0)
+        normal = (1.0, 0.0)
+    else
+        error("unknown straight wall orientation $(orientation)")
+    end
+
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        for q in 2:9
+            ni = i + Int(D2Q9_CX[q])
+            nj = j + Int(D2Q9_CY[q])
+            if 1 <= ni <= Nx && 1 <= nj <= Ny && is_solid[ni, nj]
+                q_wall[i, j, q] = 0.5
+            end
+        end
+    end
+
+    cx0, cy0 = 6.5, 4.5
+    slope = 0.08
+    C0 = [
+        field === :uniform ? 1.0 :
+        field === :tangent ? 1.0 + slope * (((i - 1.0) - cx0) * tangent[1] +
+                                             ((j - 1.0) - cy0) * tangent[2]) :
+        field === :normal ? 1.0 + slope * (((i - 1.0) - cx0) * normal[1] +
+                                            ((j - 1.0) - cy0) * normal[2]) :
+        error("unknown straight wall field $(field)")
+        for i in 1:Nx, j in 1:Ny
+    ]
+    ux = fill(velocity[1], Nx, Ny)
+    uy = fill(velocity[2], Nx, Ny)
+    g_pre = _fill_constant_velocity_equilibrium!(
+        zeros(Float64, Nx, Ny, 9), C0, velocity[1], velocity[2],
+    )
+    g_post = similar(g_pre)
+    stream_2d!(g_post, g_pre, Nx, Ny; sync=true)
+    C_after = copy(C0)
+    apply_polymer_wall_bc!(g_post, g_pre, is_solid, q_wall, C_after, ux, uy, bc)
+
+    max_sum_error = 0.0
+    max_macro_error = 0.0
+    n_cut_cells = 0
+    for j in cut_range[2], i in cut_range[1]
+        any(q -> q > 0.0, view(q_wall, i, j, :)) || continue
+        n_cut_cells += 1
+        max_sum_error = max(
+            max_sum_error,
+            abs(sum(g_post[i, j, q] for q in 1:9) - C_after[i, j]),
+        )
+        max_macro_error = max(max_macro_error, abs(C_after[i, j] - C0[i, j]))
+    end
+    return (; max_sum_error, max_macro_error, n_cut_cells)
+end
+
+@testset "P18c straight embedded q=0.5 wall matrix before curved tests" begin
+    cutlink_tangent_errors = Float64[]
+    for case in _wall_bc_cases(), orientation in (:horizontal, :vertical)
+        uniform = _straight_embedded_wall_macro_errors(
+            case.bc; orientation, field=:uniform,
+        )
+        tangent = _straight_embedded_wall_macro_errors(
+            case.bc; orientation, field=:tangent,
+        )
+        @test uniform.n_cut_cells > 0
+        @test tangent.n_cut_cells > 0
+        @test uniform.max_sum_error < P0_ATOL
+        @test tangent.max_sum_error < P0_ATOL
+        @test uniform.max_macro_error < P0_ATOL
+        if case.name === :cnebb_cutlink_eq_gradient
+            push!(cutlink_tangent_errors, tangent.max_macro_error)
+        else
+            @test tangent.max_macro_error < P0_ATOL
+        end
+    end
+    @test maximum(cutlink_tangent_errors) > 1e-6
+
+    cutlink_active_errors = Float64[]
+    for case in _wall_bc_cases()
+        horizontal = _straight_embedded_wall_macro_errors(
+            case.bc; orientation=:horizontal, field=:uniform,
+            velocity=(0.03, 0.0),
+        )
+        vertical = _straight_embedded_wall_macro_errors(
+            case.bc; orientation=:vertical, field=:uniform,
+            velocity=(0.0, -0.02),
+        )
+        @test horizontal.max_sum_error < P0_ATOL
+        @test vertical.max_sum_error < P0_ATOL
+        if case.name === :cnebb_cutlink_eq_gradient
+            push!(cutlink_active_errors, horizontal.max_macro_error)
+            push!(cutlink_active_errors, vertical.max_macro_error)
+        else
+            @test horizontal.max_macro_error < P0_ATOL
+            @test vertical.max_macro_error < P0_ATOL
+        end
+    end
+    @test maximum(cutlink_active_errors) > 1e-6
+end
+
+function _straight_couette_oldroydb_patch(; orientation=:horizontal)
+    Nx, Ny = 32, 28
+    γ = 0.01
+    λ = 3.0
+    is_solid = falses(Nx, Ny)
+    ux = zeros(Float64, Nx, Ny)
+    uy = zeros(Float64, Nx, Ny)
+    if orientation === :horizontal
+        is_solid[:, 1:4] .= true
+        y_wall = 3.5
+        for j in 1:Ny, i in 1:Nx
+            ux[i, j] = is_solid[i, j] ? 0.0 : γ * ((j - 1.0) - y_wall)
+        end
+        cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+            0.0, γ, 0.0, 0.0, λ,
+        )
+    elseif orientation === :vertical
+        is_solid[1:4, :] .= true
+        x_wall = 3.5
+        for j in 1:Ny, i in 1:Nx
+            uy[i, j] = is_solid[i, j] ? 0.0 : γ * ((i - 1.0) - x_wall)
+        end
+        cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+            0.0, 0.0, γ, 0.0, λ,
+        )
+    else
+        error("unknown straight Couette orientation $(orientation)")
+    end
+
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        for q in 2:9
+            ni = i + Int(D2Q9_CX[q])
+            nj = j + Int(D2Q9_CY[q])
+            if 1 <= ni <= Nx && 1 <= nj <= Ny && is_solid[ni, nj]
+                q_wall[i, j, q] = 0.5
+            end
+        end
+    end
+    return (; Nx, Ny, λ, q_wall, is_solid, ux, uy, cxx, cxy, cyy)
+end
+
+function _straight_couette_cde_once(bc; orientation=:horizontal)
+    p = _straight_couette_oldroydb_patch(; orientation)
+    Cxx = fill(p.cxx, p.Nx, p.Ny)
+    Cxy = fill(p.cxy, p.Nx, p.Ny)
+    Cyy = fill(p.cyy, p.Nx, p.Ny)
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+
+    stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+    stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+    stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+    apply_polymer_wall_bc!(bxx, gxx, p.is_solid, p.q_wall, Cxx, p.ux, p.uy, bc)
+    apply_polymer_wall_bc!(bxy, gxy, p.is_solid, p.q_wall, Cxy, p.ux, p.uy, bc)
+    apply_polymer_wall_bc!(byy, gyy, p.is_solid, p.q_wall, Cyy, p.ux, p.uy, bc)
+    gxx, bxx = bxx, gxx
+    gxy, bxy = bxy, gxy
+    gyy, byy = byy, gyy
+
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    collide_conformation_2d!(gxx, Cxx, p.ux, p.uy, Cxx, Cxy, Cyy,
+                             p.is_solid, 1.0, p.λ;
+                             magic=1e-6, component=1, divergence_mode=:trace_free)
+    collide_conformation_2d!(gxy, Cxy, p.ux, p.uy, Cxx, Cxy, Cyy,
+                             p.is_solid, 1.0, p.λ;
+                             magic=1e-6, component=2, divergence_mode=:trace_free)
+    collide_conformation_2d!(gyy, Cyy, p.ux, p.uy, Cxx, Cxy, Cyy,
+                             p.is_solid, 1.0, p.λ;
+                             magic=1e-6, component=3, divergence_mode=:trace_free)
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+
+    max_cut = 0.0
+    max_far = 0.0
+    for j in 3:p.Ny-2, i in 3:p.Nx-2
+        p.is_solid[i, j] && continue
+        err = max(abs(Cxx[i, j] - p.cxx), abs(Cxy[i, j] - p.cxy),
+                  abs(Cyy[i, j] - p.cyy))
+        if any(q -> q > 0.0, view(p.q_wall, i, j, :))
+            max_cut = max(max_cut, err)
+        else
+            max_far = max(max_far, err)
+        end
+    end
+    return (; max_cut, max_far)
+end
+
+@testset "P18d straight Couette CDE one-step exact before curved tests" begin
+    cutlink_errors = Float64[]
+    for case in _wall_bc_cases(), orientation in (:horizontal, :vertical)
+        result = _straight_couette_cde_once(case.bc; orientation)
+        if case.name === :cnebb_cutlink_eq_gradient
+            push!(cutlink_errors, result.max_cut)
+        else
+            @test result.max_cut < P0_ATOL
+            @test result.max_far < P0_ATOL
+        end
+    end
+    @test maximum(cutlink_errors) > 1e-6
+end
+
 function _curved_affine_oldroydb_patch()
     Nx, Ny = 56, 48
     cx, cy, R = 27.31, 23.67, 9.0
