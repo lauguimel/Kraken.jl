@@ -317,8 +317,8 @@ export collide_logconf_2d!, psi_to_C_2d!, C_to_psi_2d!, logconf_source_2d
 export reset_conformation_inlet_2d!, reset_conformation_outlet_2d!
 export reset_conformation_inlet_masked_2d!, reset_conformation_outlet_masked_2d!
 export polymer_modulus, polymer_relaxation_time
-export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBEqGradient,
-       CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,
+export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
+       CNEBBEqGradient, CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,
        NoPolymerWallBC, apply_polymer_wall_bc!
 
 # Conformation TRT-LBM (Liu et al. 2025)
