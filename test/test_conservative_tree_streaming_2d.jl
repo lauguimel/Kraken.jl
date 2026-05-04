@@ -78,7 +78,7 @@ end
         @test isapprox(active_mass_F(coarse_out, patch_out), 3.25; atol=1e-14, rtol=0)
     end
 
-    @testset "coarse to fine face route keeps leaf-equivalent residual" begin
+    @testset "coarse to fine face route transfers the full packet" begin
         coarse_in = zeros(Float64, Nx, Ny, 9)
         coarse_out = similar(coarse_in)
         patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
@@ -88,13 +88,13 @@ end
         stream_composite_routes_interior_F_2d!(
             coarse_out, patch_out, coarse_in, patch_in, topology)
 
-        @test patch_out.fine_F[1, 3, 2] == 1.0
-        @test patch_out.fine_F[1, 4, 2] == 1.0
-        @test coarse_out[2, 5, 2] == 2.0
+        @test patch_out.fine_F[1, 3, 2] == 2.0
+        @test patch_out.fine_F[1, 4, 2] == 2.0
+        @test coarse_out[2, 5, 2] == 0.0
         @test isapprox(active_mass_F(coarse_out, patch_out), 4.0; atol=1e-14, rtol=0)
     end
 
-    @testset "coarse to fine corner route keeps leaf-equivalent residual" begin
+    @testset "coarse to fine corner route transfers the full packet" begin
         coarse_in = zeros(Float64, Nx, Ny, 9)
         coarse_out = similar(coarse_in)
         patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
@@ -104,10 +104,10 @@ end
         stream_composite_routes_interior_F_2d!(
             coarse_out, patch_out, coarse_in, patch_in, topology)
 
-        @test patch_out.fine_F[1, 1, 6] == 1.375
-        @test coarse_out[2, 3, 6] == 1.375
-        @test coarse_out[3, 3, 6] == 1.375
-        @test coarse_out[2, 4, 6] == 1.375
+        @test patch_out.fine_F[1, 1, 6] == 5.5
+        @test coarse_out[2, 3, 6] == 0.0
+        @test coarse_out[3, 3, 6] == 0.0
+        @test coarse_out[2, 4, 6] == 0.0
         @test isapprox(active_mass_F(coarse_out, patch_out), 5.5; atol=1e-14, rtol=0)
     end
 
@@ -202,9 +202,9 @@ end
         stream_composite_routes_periodic_x_F_2d!(
             coarse_out, patch_out, coarse_in, patch_in, topology)
 
-        @test patch_out.fine_F[4, 1, 4] == 2.0
-        @test patch_out.fine_F[4, 2, 4] == 2.0
-        @test coarse_out[1, 3, 4] == 4.0
+        @test patch_out.fine_F[4, 1, 4] == 4.0
+        @test patch_out.fine_F[4, 2, 4] == 4.0
+        @test coarse_out[1, 3, 4] == 0.0
         @test isapprox(active_mass_F(coarse_out, patch_out), 8.0; atol=1e-14, rtol=0)
     end
 
@@ -930,7 +930,7 @@ end
         @test result.regrid_every == 80
         @test result.regrid_count == 2
         @test result.patch_history[1] == (7:12, 5:10)
-        @test result.patch_history[2] == (3:16, 2:13)
+        @test result.patch_history[2] == (4:15, 3:12)
         @test result.patch_history[3] == (1:18, 1:14)
         @test abs(result.mass_drift) < 1e-9
         @test result.ux_mean > 0

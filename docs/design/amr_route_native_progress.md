@@ -25,8 +25,8 @@ Status: done for one ratio-2 patch.
 Implemented:
 
 - same-level active-cell routes;
-- coarse-to-fine face and corner routes with leaf-equivalent routed fractions
-  and explicit coarse residuals;
+- coarse-to-fine face and corner routes that transfer the full coarse packet
+  to interface children (`1/2 + 1/2` for faces, `1` for corners);
 - fine-to-coarse face and corner coalesces;
 - route topology and packed route representation;
 - periodic-x, wall-y, moving-wall-y and solid-mask route variants.
@@ -34,7 +34,7 @@ Implemented:
 Surgical tests:
 
 - packet canaries for direct, split and coalesce routes;
-- leaf-equivalent coarse-to-fine fraction and residual canaries;
+- full-packet coarse-to-fine face/corner split canaries;
 - orientation-wise conservation;
 - route-native streaming against leaf-grid oracle canaries;
 - periodic and wall boundary conservation.
