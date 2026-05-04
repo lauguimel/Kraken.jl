@@ -162,8 +162,11 @@ Aqua runs:
   coarse routes for obstacle runners. Metrics improve materially while mass
   remains at roundoff: cylinder Cd moves from `8.52e2 -> 2.65e2` at scale 1
   and from `9.86e1 -> 3.26e1` at scale 2, versus leaf-oracle `1.54e2` and
-  `1.75e1`. Aqua job `20763538.aqua` was submitted for the same ladder and was
-  still queued behind another CPU job at the time of this note.
+  `1.75e1`.
+- `20763538.aqua` completed the same leaf-equivalent obstacle ladder on aqua and
+  produced
+  `benchmarks/results/amr_obstacle_convergence_2d_aqua_leafeq_obstacles_20260504.csv`
+  with matching metrics and roundoff-level mass conservation.
 
 Notes:
 
