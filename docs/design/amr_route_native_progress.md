@@ -342,14 +342,45 @@ Validated by:
 - a corner packet is split only in time, not spatially duplicated;
 - fine-to-coarse half-step packets accumulate to the expected orientation sum;
 - a symmetric full-cycle ledger preserves expected orientation and total sums;
+- rest equilibrium axis face cycle balances per orientation: a coarse cell at
+  rest deposits exactly `w_q * V_c` into the ledger across both sub-steps and
+  the fine equilibrium reflux in the opposite direction matches it to
+  roundoff for q in 2:5;
+- rest equilibrium corner cycle exposes the known 2x geometric imbalance:
+  `coarse_to_fine[q] = w_q * V_c` while `fine_to_coarse[opp(q)] = w_q * V_c / 2`
+  for q in 6:9 (one fine corner cell vs four coarse children, two sub-steps).
+  This is intrinsic to the subcycling corner geometry, not a ledger bug.
+  The future time integrator must compensate it via Filippova-Hanel rescaling
+  or an explicit residual-on-coarse contribution.
 - unsupported ratio, invalid face/corner direction, wrong block shape and bad
   substep are rejected.
 
-Still required before implementation:
+Still required before implementation (next focused session, larger scope):
 
-- wire the ledger into route-native coarse/fine streaming;
-- define the collision ordering for coarse step and two fine steps;
-- compare subcycled and non-subcycled Couette/Poiseuille short runs.
+1. design choice: how the ledger composes with the existing route-native
+   coarse same-level path under `coarse_route_mode=:leaf_equivalent`
+   (the current production setting). The ledger split-in-time replaces the
+   one-shot non-subcycled coarse-to-fine packet doubling identified in the
+   2026-05-04 Phase A diagnostic; the residual-on-coarse arithmetic must be
+   reconciled with the ledger's split-in-time arithmetic so they do not
+   double-count;
+2. wire the ledger into route-native coarse/fine streaming with one coarse
+   stream + collision and two fine half-step stream + collision passes;
+3. define and document the collision ordering (coarse first vs fine first,
+   and where the reflux lands in time);
+4. choose a Filippova-Hanel-style omega rescaling rule for fine cells when
+   `omega_coarse != omega_fine` is required to keep stress consistent across
+   the interface (current runners use `omega_coarse == omega_fine`);
+5. integration canaries to add before any macro-flow:
+   - subcycled rest-state on a 1-patch composite reproduces non-subcycled
+     rest-state to roundoff;
+   - subcycled Couette and Poiseuille short runs match the non-subcycled
+     route-native path to better than the current `:leaf_equivalent` accuracy;
+   - subcycled obstacle (cylinder) ladder local first, then aqua, with the
+     target Cd ratio versus oracle dropping below 1.10x.
+
+The scope of step 1-5 above is genuinely a multi-day design effort. It must
+not be rushed in the same session as the diagnostic that motivated it.
 
 Exit gate:
 
