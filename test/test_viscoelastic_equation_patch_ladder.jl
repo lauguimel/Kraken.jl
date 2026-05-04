@@ -1871,6 +1871,23 @@ function _straight_couette_oldroydb_patch(; orientation=:horizontal)
     return (; Nx, Ny, λ, q_wall, is_solid, ux, uy, cxx, cxy, cyy)
 end
 
+function _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                    ux, uy, is_solid, λ)
+    collide_conformation_2d!(gxx, Cxx, ux, uy, Cxx, Cxy, Cyy,
+                             is_solid, 1.0, λ;
+                             magic=1e-6, component=1, divergence_mode=:trace_free)
+    collide_conformation_2d!(gxy, Cxy, ux, uy, Cxx, Cxy, Cyy,
+                             is_solid, 1.0, λ;
+                             magic=1e-6, component=2, divergence_mode=:trace_free)
+    collide_conformation_2d!(gyy, Cyy, ux, uy, Cxx, Cxy, Cyy,
+                             is_solid, 1.0, λ;
+                             magic=1e-6, component=3, divergence_mode=:trace_free)
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    return nothing
+end
+
 function _straight_couette_cde_once(bc; orientation=:horizontal)
     p = _straight_couette_oldroydb_patch(; orientation)
     Cxx = fill(p.cxx, p.Nx, p.Ny)
@@ -1927,6 +1944,67 @@ function _straight_couette_cde_once(bc; orientation=:horizontal)
     return (; max_cut, max_far)
 end
 
+function _straight_couette_cde_repeated(bc; orientation=:horizontal, steps=4)
+    p = _straight_couette_oldroydb_patch(; orientation)
+    Cxx = fill(p.cxx, p.Nx, p.Ny)
+    Cxy = fill(p.cxy, p.Nx, p.Ny)
+    Cyy = fill(p.cyy, p.Nx, p.Ny)
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+
+    max_cut = 0.0
+    max_far = 0.0
+    min_eig = Inf
+    n_cut = 0
+    n_far = 0
+    margin = steps + 3
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+        stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+        stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+        apply_polymer_wall_bc!(bxx, gxx, p.is_solid, p.q_wall, Cxx, p.ux, p.uy, bc)
+        apply_polymer_wall_bc!(bxy, gxy, p.is_solid, p.q_wall, Cxy, p.ux, p.uy, bc)
+        apply_polymer_wall_bc!(byy, gyy, p.is_solid, p.q_wall, Cyy, p.ux, p.uy, bc)
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                   p.ux, p.uy, p.is_solid, p.λ)
+
+        irange = orientation === :horizontal ? (margin:p.Nx-margin+1) :
+                 orientation === :vertical ? (5:p.Nx-margin+1) :
+                 error("unknown straight Couette orientation $(orientation)")
+        jrange = orientation === :horizontal ? (5:p.Ny-margin+1) :
+                 orientation === :vertical ? (margin:p.Ny-margin+1) :
+                 error("unknown straight Couette orientation $(orientation)")
+        for j in jrange, i in irange
+            p.is_solid[i, j] && continue
+            err = max(abs(Cxx[i, j] - p.cxx), abs(Cxy[i, j] - p.cxy),
+                      abs(Cyy[i, j] - p.cyy))
+            min_eig = min(min_eig, _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j]))
+            if any(q -> q > 0.0, view(p.q_wall, i, j, :))
+                n_cut += 1
+                max_cut = max(max_cut, err)
+            else
+                n_far += 1
+                max_far = max(max_far, err)
+            end
+        end
+    end
+    return (; max_cut, max_far, min_eig, n_cut, n_far)
+end
+
 @testset "P18d straight Couette CDE one-step exact before curved tests" begin
     cutlink_errors = Float64[]
     for case in _wall_bc_cases(), orientation in (:horizontal, :vertical)
@@ -1939,6 +2017,18 @@ end
         end
     end
     @test maximum(cutlink_errors) > 1e-6
+end
+
+@testset "P18d2 straight Couette CDE repeated q=0.5 before cut-link tests" begin
+    repeated_tol = 1e-6
+    for case in _wall_bc_cases(), orientation in (:horizontal, :vertical)
+        result = _straight_couette_cde_repeated(case.bc; orientation, steps=4)
+        @test result.n_cut > 0
+        @test result.n_far > 0
+        @test result.min_eig > 0.9
+        @test result.max_cut < repeated_tol
+        @test result.max_far < repeated_tol
+    end
 end
 
 function _single_cutlink_wall_aligned_couette_once(q_out, q_wall_value, bc)
@@ -2005,21 +2095,91 @@ function _single_cutlink_wall_aligned_couette_once(q_out, q_wall_value, bc)
     wall_error = max(abs(Cxx[i0, j0] - cxx), abs(Cxy[i0, j0] - cxy),
                      abs(Cyy[i0, j0] - cyy))
 
-    collide_conformation_2d!(gxx, Cxx, ux, uy, Cxx, Cxy, Cyy,
-                             is_solid, 1.0, λ;
-                             magic=1e-6, component=1, divergence_mode=:trace_free)
-    collide_conformation_2d!(gxy, Cxy, ux, uy, Cxx, Cxy, Cyy,
-                             is_solid, 1.0, λ;
-                             magic=1e-6, component=2, divergence_mode=:trace_free)
-    collide_conformation_2d!(gyy, Cyy, ux, uy, Cxx, Cxy, Cyy,
-                             is_solid, 1.0, λ;
-                             magic=1e-6, component=3, divergence_mode=:trace_free)
-    compute_conformation_macro_2d!(Cxx, gxx)
-    compute_conformation_macro_2d!(Cxy, gxy)
-    compute_conformation_macro_2d!(Cyy, gyy)
+    _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                               ux, uy, is_solid, λ)
     cde_error = max(abs(Cxx[i0, j0] - cxx), abs(Cxy[i0, j0] - cxy),
                     abs(Cyy[i0, j0] - cyy))
     return (; wall_error, cde_error)
+end
+
+function _single_cutlink_wall_aligned_couette_repeated(q_out, q_wall_value, bc;
+                                                       steps=20)
+    Nx = Ny = 9
+    i0 = j0 = 5
+    cx = D2Q9_CX[q_out]
+    cy = D2Q9_CY[q_out]
+    link_length = hypot(cx, cy)
+    nx = cx / link_length
+    ny = cy / link_length
+    tx = -ny
+    ty = nx
+    γ = 0.01
+    λ = 3.0
+    wall_x = (i0 - 1.0) + q_wall_value * cx
+    wall_y = (j0 - 1.0) + q_wall_value * cy
+
+    is_solid = falses(Nx, Ny)
+    is_solid[i0 + Int(cx), j0 + Int(cy)] = true
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    q_wall[i0, j0, q_out] = q_wall_value
+    ux = zeros(Float64, Nx, Ny)
+    uy = zeros(Float64, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        distance = (wall_x - (i - 1.0)) * nx + (wall_y - (j - 1.0)) * ny
+        ux[i, j] = γ * distance * tx
+        uy[i, j] = γ * distance * ty
+    end
+    dudx = -γ * tx * nx
+    dudy = -γ * tx * ny
+    dvdx = -γ * ty * nx
+    dvdy = -γ * ty * ny
+    cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+        dudx, dudy, dvdx, dvdy, λ,
+    )
+
+    Cxx = fill(cxx, Nx, Ny)
+    Cxy = fill(cxy, Nx, Ny)
+    Cyy = fill(cyy, Nx, Ny)
+    gxx = zeros(Float64, Nx, Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, ux, uy)
+    init_conformation_field_2d!(gxy, Cxy, ux, uy)
+    init_conformation_field_2d!(gyy, Cyy, ux, uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+
+    max_wall_error = 0.0
+    max_cde_error = 0.0
+    min_eig = Inf
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, Nx, Ny; sync=true)
+        stream_2d!(bxy, gxy, Nx, Ny; sync=true)
+        stream_2d!(byy, gyy, Nx, Ny; sync=true)
+        apply_polymer_wall_bc!(bxx, gxx, is_solid, q_wall, Cxx, ux, uy, bc)
+        apply_polymer_wall_bc!(bxy, gxy, is_solid, q_wall, Cxy, ux, uy, bc)
+        apply_polymer_wall_bc!(byy, gyy, is_solid, q_wall, Cyy, ux, uy, bc)
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        wall_error = max(abs(Cxx[i0, j0] - cxx), abs(Cxy[i0, j0] - cxy),
+                         abs(Cyy[i0, j0] - cyy))
+        max_wall_error = max(max_wall_error, wall_error)
+
+        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                   ux, uy, is_solid, λ)
+        cde_error = max(abs(Cxx[i0, j0] - cxx), abs(Cxy[i0, j0] - cxy),
+                        abs(Cyy[i0, j0] - cyy))
+        max_cde_error = max(max_cde_error, cde_error)
+        min_eig = min(min_eig, _min_eig_spd_2x2(Cxx[i0, j0], Cxy[i0, j0], Cyy[i0, j0]))
+    end
+    return (; max_wall_error, max_cde_error, min_eig)
 end
 
 @testset "P18e single cut-link q-aware Couette canary before curved geometry" begin
@@ -2047,6 +2207,183 @@ end
     @test maximum(cutlink_errors) > 1e-6
 end
 
+@testset "P18f repeated single cut-link Couette canary before curved geometry" begin
+    broken_errors = Float64[]
+    for case in _wall_bc_cases(),
+        q_out in 2:9,
+        q_wall_value in (0.3, 0.7)
+
+        result = _single_cutlink_wall_aligned_couette_repeated(
+            q_out, q_wall_value, case.bc; steps=12,
+        )
+        @test result.min_eig > 0.9
+        if case.name === :cnebb_field
+            @test result.max_wall_error < P0_ATOL
+            @test result.max_cde_error < P0_ATOL
+        else
+            push!(broken_errors, result.max_wall_error)
+            @test result.max_wall_error > 1e-6
+            @test result.max_cde_error > 1e-6
+        end
+    end
+    @test maximum(broken_errors) > 1e-6
+end
+
+_is_cut_cell(q_wall, i, j) = any(q -> q > 0.0, view(q_wall, i, j, :))
+
+function _reset_cut_cells_to_equilibrium!(g, C, ux, uy, is_solid, q_wall)
+    Nx, Ny = size(C)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        _is_cut_cell(q_wall, i, j) || continue
+        ϕ = C[i, j]
+        u = ux[i, j]
+        v = uy[i, j]
+        for q in 1:9
+            g[i, j, q] = equilibrium(D2Q9(), ϕ, u, v, q)
+        end
+    end
+    return nothing
+end
+
+function _inclined_straight_couette_patch(; normal=(3.0, 4.0))
+    Nx = Ny = 48
+    norm_n = hypot(normal[1], normal[2])
+    nx = normal[1] / norm_n
+    ny = normal[2] / norm_n
+    tx = -ny
+    ty = nx
+    γ = 0.01
+    λ = 3.0
+    x0 = 22.37
+    y0 = 19.81
+    signed_distance(i, j) = nx * ((i - 1.0) - x0) + ny * ((j - 1.0) - y0)
+
+    is_solid = falses(Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] = signed_distance(i, j) < 0.0
+    end
+
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        φ0 = signed_distance(i, j)
+        for q in 2:9
+            ni = i + Int(D2Q9_CX[q])
+            nj = j + Int(D2Q9_CY[q])
+            if 1 <= ni <= Nx && 1 <= nj <= Ny && is_solid[ni, nj]
+                φ1 = signed_distance(ni, nj)
+                q_wall[i, j, q] = φ0 / (φ0 - φ1)
+            end
+        end
+    end
+
+    ux = zeros(Float64, Nx, Ny)
+    uy = zeros(Float64, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        distance = signed_distance(i, j)
+        ux[i, j] = γ * distance * tx
+        uy[i, j] = γ * distance * ty
+    end
+
+    dudx = γ * tx * nx
+    dudy = γ * tx * ny
+    dvdx = γ * ty * nx
+    dvdy = γ * ty * ny
+    cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+        dudx, dudy, dvdx, dvdy, λ,
+    )
+    return (; Nx, Ny, λ, q_wall, is_solid, ux, uy, cxx, cxy, cyy)
+end
+
+function _inclined_straight_couette_repeated(bc; normal=(3.0, 4.0), steps=4,
+                                             reset_cut_equilibrium=false)
+    p = _inclined_straight_couette_patch(; normal)
+    Cxx = fill(p.cxx, p.Nx, p.Ny)
+    Cxy = fill(p.cxy, p.Nx, p.Ny)
+    Cyy = fill(p.cyy, p.Nx, p.Ny)
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+
+    margin = steps + 4
+    max_cut = 0.0
+    max_far = 0.0
+    n_cut = 0
+    n_far = 0
+    min_eig = Inf
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+        stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+        stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+        apply_polymer_wall_bc!(bxx, gxx, p.is_solid, p.q_wall, Cxx, p.ux, p.uy, bc)
+        apply_polymer_wall_bc!(bxy, gxy, p.is_solid, p.q_wall, Cxy, p.ux, p.uy, bc)
+        apply_polymer_wall_bc!(byy, gyy, p.is_solid, p.q_wall, Cyy, p.ux, p.uy, bc)
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+
+        if reset_cut_equilibrium
+            _reset_cut_cells_to_equilibrium!(gxx, Cxx, p.ux, p.uy, p.is_solid, p.q_wall)
+            _reset_cut_cells_to_equilibrium!(gxy, Cxy, p.ux, p.uy, p.is_solid, p.q_wall)
+            _reset_cut_cells_to_equilibrium!(gyy, Cyy, p.ux, p.uy, p.is_solid, p.q_wall)
+        end
+
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                   p.ux, p.uy, p.is_solid, p.λ)
+
+        for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
+            p.is_solid[i, j] && continue
+            err = max(abs(Cxx[i, j] - p.cxx), abs(Cxy[i, j] - p.cxy),
+                      abs(Cyy[i, j] - p.cyy))
+            min_eig = min(min_eig, _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j]))
+            if _is_cut_cell(p.q_wall, i, j)
+                n_cut += 1
+                max_cut = max(max_cut, err)
+            else
+                n_far += 1
+                max_far = max(max_far, err)
+            end
+        end
+    end
+    return (; max_cut, max_far, min_eig, n_cut, n_far)
+end
+
+@testset "P18g inclined straight Couette q-variable canary before curved geometry" begin
+    broken_errors = Float64[]
+    for case in _wall_bc_cases(), normal in ((3.0, 4.0), (4.0, 3.0))
+        result = _inclined_straight_couette_repeated(case.bc; normal, steps=4)
+        @test result.n_cut > 0
+        @test result.n_far > 0
+        @test result.min_eig > 0.9
+        if case.name === :cnebb_field
+            @test result.max_cut < P0_ATOL
+            @test result.max_far > 1e-4
+
+            oracle = _inclined_straight_couette_repeated(
+                case.bc; normal, steps=4, reset_cut_equilibrium=true,
+            )
+            @test oracle.max_cut < P0_ATOL
+            @test oracle.max_far < 5e-5
+            @test result.max_far > 50 * oracle.max_far
+        else
+            push!(broken_errors, result.max_cut)
+            @test result.max_cut > 1e-6
+        end
+    end
+    @test maximum(broken_errors) > 1e-6
+end
+
 function _curved_affine_oldroydb_patch()
     Nx, Ny = 56, 48
     cx, cy, R = 27.31, 23.67, 9.0
@@ -2068,8 +2405,6 @@ function _curved_affine_oldroydb_patch()
     return (; Nx, Ny, cx, cy, R, q_wall, is_solid,
             dudx, dudy, dvdx, dvdy, λ, G, cxx, cxy, cyy, ux, uy)
 end
-
-_is_cut_cell(q_wall, i, j) = any(q -> q > 0.0, view(q_wall, i, j, :))
 
 function _max_curved_cut_error(q_wall, is_solid, Cxx, Cxy, Cyy, cxx, cxy, cyy)
     Nx, Ny = size(Cxx)
