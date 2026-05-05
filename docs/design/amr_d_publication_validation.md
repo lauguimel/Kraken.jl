@@ -55,6 +55,9 @@ Required local validation sequence:
    oracle on short local canaries;
 8. aqua ladder for square/cylinder scales 1 and 2 with
    `patch_strategy=:interface_buffered`.
+9. publication table with `cartesian_coarse`, `leaf_oracle` and
+   `amr_route_native` rows for square/cylinder, including `u/v`, `Cd`,
+   error versus leaf oracle, elapsed time and MLUPS.
 
 Required 3D validation sequence:
 
@@ -82,6 +85,17 @@ Local baseline recorded in
 Aqua baseline recorded in
 `benchmarks/results/amr_obstacle_convergence_2d_aqua_interface_buffered_20260505.csv`
 matches the local values for Cd and mass drift. PBS job: `20808208.aqua`.
+
+Publication-table local canary recorded in
+`benchmarks/results/amr_d_publication_summary_2d_local_D_pub_canary_20260505.csv`.
+It verifies the reporting path for:
+
+- `cartesian_coarse`;
+- `leaf_oracle`;
+- `amr_route_native`;
+- square `u/v` accuracy and mass conservation;
+- cylinder `u`, `Cd`, `Fx/Fy` and mass conservation;
+- elapsed-time, speedup and MLUPS columns.
 
 3D local fixed-patch channel smoke:
 
@@ -144,4 +158,21 @@ Aqua:
 ```bash
 KRK_AMR_CONV_PATCH_STRATEGY=interface_buffered \
 qsub hpc/amr_obstacle_convergence_2d_aqua.pbs
+```
+
+Publication accuracy/efficiency table:
+
+```bash
+KRK_AMR_D_PATCH_STRATEGY=interface_buffered \
+KRK_AMR_D_SCALES=1,2,4 \
+KRK_AMR_D_BASE_STEPS=2400 \
+KRK_AMR_D_AVG_WINDOW=600 \
+julia --project=. benchmarks/amr_d_publication_table_2d.jl
+```
+
+Aqua:
+
+```bash
+KRK_AMR_D_PATCH_STRATEGY=interface_buffered \
+qsub hpc/amr_d_publication_table_2d_aqua.pbs
 ```

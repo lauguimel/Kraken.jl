@@ -1582,6 +1582,11 @@ function _scale_leaf_range_2d(range::UnitRange{Int}, scale::Int)
     return ((first(range) - 1) * scale + 1):(last(range) * scale)
 end
 
+function _coarsen_leaf_range_2d(range::UnitRange{Int})
+    isempty(range) && throw(ArgumentError("range must be nonempty"))
+    return ((first(range) + 1) >>> 1):((last(range) + 1) >>> 1)
+end
+
 function _conservative_tree_obstacle_convergence_row_2d(
         flow::Symbol,
         method::Symbol,
@@ -1658,6 +1663,7 @@ function convergence_conservative_tree_obstacles_2d(;
         step_exponent::Real=1,
         avg_window::Int=300,
         patch_strategy::Symbol=:default,
+        include_coarse_cartesian::Bool=false,
         T::Type{<:Real}=Float64)
     avg_window > 0 || throw(ArgumentError("avg_window must be positive"))
     rows = ConservativeTreeConvergenceRow2D[]
@@ -1677,6 +1683,25 @@ function convergence_conservative_tree_obstacles_2d(;
                 patch_j = patch_ranges.j_range
                 obstacle_i = _scale_leaf_range_2d(22:27, scale)
                 obstacle_j = _scale_leaf_range_2d(12:17, scale)
+
+                if include_coarse_cartesian
+                    Nx_coarse = max(2, Nx >>> 1)
+                    Ny_coarse = max(2, Ny >>> 1)
+                    coarse_obstacle_i = _coarsen_leaf_range_2d(obstacle_i)
+                    coarse_obstacle_j = _coarsen_leaf_range_2d(obstacle_j)
+                    coarse_cart = nothing
+                    coarse_elapsed = @elapsed coarse_cart =
+                        run_conservative_tree_square_obstacle_macroflow_2d(
+                            ; Nx=Nx_coarse, Ny=Ny_coarse,
+                            patch_i_range=1:Nx_coarse,
+                            patch_j_range=1:Ny_coarse,
+                            obstacle_i_range=coarse_obstacle_i,
+                            obstacle_j_range=coarse_obstacle_j,
+                            steps=steps, T=T)
+                    push!(rows, _conservative_tree_obstacle_convergence_row_2d(
+                        :square, :cartesian_coarse, scale,
+                        Nx_coarse, Ny_coarse, coarse_cart, coarse_elapsed))
+                end
 
                 leaf = nothing
                 leaf_elapsed = @elapsed leaf = run_conservative_tree_square_obstacle_macroflow_2d(
@@ -1702,6 +1727,24 @@ function convergence_conservative_tree_obstacles_2d(;
                 cx_leaf = 24 * scale
                 cy_leaf = 14 * scale
                 radius_leaf = 3 * scale
+
+                if include_coarse_cartesian
+                    Nx_coarse = max(2, Nx >>> 1)
+                    Ny_coarse = max(2, Ny >>> 1)
+                    coarse_cart = nothing
+                    coarse_elapsed = @elapsed coarse_cart =
+                        run_conservative_tree_cylinder_macroflow_2d(
+                            ; Nx=Nx_coarse, Ny=Ny_coarse,
+                            patch_i_range=1:Nx_coarse,
+                            patch_j_range=1:Ny_coarse,
+                            cx_leaf=cx_leaf / 2,
+                            cy_leaf=cy_leaf / 2,
+                            radius_leaf=radius_leaf / 2,
+                            steps=steps, avg_window=avg, T=T)
+                    push!(rows, _conservative_tree_obstacle_convergence_row_2d(
+                        :cylinder, :cartesian_coarse, scale,
+                        Nx_coarse, Ny_coarse, coarse_cart, coarse_elapsed))
+                end
 
                 leaf = nothing
                 leaf_elapsed = @elapsed leaf = run_conservative_tree_cylinder_macroflow_2d(

@@ -655,6 +655,21 @@ end
         @test all(isnan(row.Cd) for row in square_rows)
     end
 
+    @testset "obstacle convergence ladder includes coarse Cartesian baseline" begin
+        rows = convergence_conservative_tree_obstacles_2d(
+            ; flows=(:cylinder,), scales=(1,), base_steps=20,
+            step_exponent=0, avg_window=10,
+            patch_strategy=:interface_buffered,
+            include_coarse_cartesian=true)
+
+        @test length(rows) == 3
+        @test Set(row.method for row in rows) ==
+              Set([:cartesian_coarse, :leaf_oracle, :amr_route_native])
+        @test all(row.flow == :cylinder for row in rows)
+        @test all(isfinite(row.ux_mean) for row in rows)
+        @test all(isfinite(row.Cd) for row in rows)
+    end
+
     @testset "interface-buffered cylinder patch is near leaf oracle" begin
         rows = convergence_conservative_tree_obstacles_2d(
             ; flows=(:cylinder,), scales=(1,), base_steps=80,

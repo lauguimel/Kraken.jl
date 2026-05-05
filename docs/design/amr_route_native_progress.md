@@ -185,6 +185,13 @@ Aqua runs:
   The CPU aqua values match local: cylinder Cd ratios are `1.060x` at scale 1
   and `1.052x` at scale 2, with route-native relative mass drift below
   `1e-12`.
+- 2026-05-05 D publication table: `amr_d_publication_table_2d.jl` now emits
+  raw and summary CSVs with `cartesian_coarse`, `leaf_oracle` and
+  `amr_route_native` rows. The summary reports `u/v`, `Cd`, errors against the
+  dense leaf oracle, elapsed time, speedup versus leaf and MLUPS. Local canary:
+  `benchmarks/results/amr_d_publication_summary_2d_local_D_pub_canary_20260505.csv`.
+  Long scale `{1,2,4}` runs belong on aqua via
+  `hpc/amr_d_publication_table_2d_aqua.pbs`.
 
 Notes:
 
