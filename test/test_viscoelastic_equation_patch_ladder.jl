@@ -4047,6 +4047,213 @@ function _wall_constrained_polyfit_gradient_2d(a, component::Symbol,
               rank = Arank, wall_points = nwall, fallback = false)
 end
 
+@inline function _push_stencil_fluid_term!(terms, coeff, di, dj)
+    abs(coeff) > 0.0 && push!(terms, (Float64(coeff), Int(di), Int(dj)))
+    return nothing
+end
+
+@inline function _push_stencil_wall_term!(terms, coeff, wx, wy)
+    abs(coeff) > 0.0 && push!(terms, (Float64(coeff), Float64(wx), Float64(wy)))
+    return nothing
+end
+
+function _derivative_rhs_weights_at_zero(positions)
+    n = length(positions)
+    if n >= 2
+        rows = Float64[]
+        for s in positions
+            append!(rows, (s, s^2))
+        end
+        A = transpose(reshape(rows, 2, n))
+        return vec((A \ Matrix{Float64}(I, n, n))[1, :])
+    elseif n == 1
+        return [1.0 / positions[1]]
+    else
+        return Float64[]
+    end
+end
+
+function _eval_scalar_gradient_stencil_2d(a, component::Symbol, stencil,
+                                          i, j, p)
+    value = 0.0
+    for (coeff, di, dj) in stencil.fluid_terms
+        value += coeff * a[i + di, j + dj]
+    end
+    for (coeff, wx, wy) in stencil.wall_terms
+        value += coeff * _couette_wall_component(wx, wy, p, component)
+    end
+    return value
+end
+
+function _embedded_axis_derivative_stencil_2d(is_solid, q_wall, i, j,
+                                              Nx, Ny, axis::Symbol)
+    samples = NamedTuple{(:s, :is_wall, :di, :dj, :wx, :wy),
+                         Tuple{Float64,Bool,Int,Int,Float64,Float64}}[]
+    dirs = axis === :x ? ((2, 1.0), (4, -1.0)) : ((3, 1.0), (5, -1.0))
+    for (q, sfluid) in dirs
+        cx = Int(D2Q9_CX[q])
+        cy = Int(D2Q9_CY[q])
+        ii = i + cx
+        jj = j + cy
+        if 1 <= ii <= Nx && 1 <= jj <= Ny && !is_solid[ii, jj]
+            push!(samples, (s=Float64(sfluid), is_wall=false,
+                            di=cx, dj=cy, wx=0.0, wy=0.0))
+        elseif q_wall[i, j, q] > 0.0
+            qw = q_wall[i, j, q]
+            wx = (i - 1.0) + qw * cx
+            wy = (j - 1.0) + qw * cy
+            push!(samples, (s=Float64(sfluid * qw), is_wall=true,
+                            di=0, dj=0, wx=wx, wy=wy))
+        end
+    end
+
+    weights = _derivative_rhs_weights_at_zero([sample.s for sample in samples])
+    fluid_terms = Tuple{Float64,Int,Int}[]
+    wall_terms = Tuple{Float64,Float64,Float64}[]
+    _push_stencil_fluid_term!(fluid_terms, -sum(weights), 0, 0)
+    for (weight, sample) in zip(weights, samples)
+        if sample.is_wall
+            _push_stencil_wall_term!(wall_terms, weight, sample.wx, sample.wy)
+        else
+            _push_stencil_fluid_term!(fluid_terms, weight, sample.di, sample.dj)
+        end
+    end
+    return (; fluid_terms, wall_terms, fallback=false, points=length(samples),
+              rank=length(samples))
+end
+
+function _embedded_axis_coeff_gradient_2d(a, component::Symbol, is_solid,
+                                          q_wall, i, j, Nx, Ny, p)
+    sx = _embedded_axis_derivative_stencil_2d(
+        is_solid, q_wall, i, j, Nx, Ny, :x,
+    )
+    sy = _embedded_axis_derivative_stencil_2d(
+        is_solid, q_wall, i, j, Nx, Ny, :y,
+    )
+    return (;
+        dx = _eval_scalar_gradient_stencil_2d(a, component, sx, i, j, p),
+        dy = _eval_scalar_gradient_stencil_2d(a, component, sy, i, j, p),
+        fallback = sx.fallback || sy.fallback,
+        points = sx.points + sy.points,
+        max_terms = max(length(sx.fluid_terms) + length(sx.wall_terms),
+                        length(sy.fluid_terms) + length(sy.wall_terms)),
+    )
+end
+
+function _wallfit_stencil_from_samples(rows, samples, ncoef)
+    nrows = length(samples)
+    if nrows < ncoef
+        return (;
+            dx = nothing, dy = nothing, fallback = true,
+            points = nrows, rank = 0, wall_points = count(s -> s.is_wall, samples),
+        )
+    end
+    A = transpose(reshape(rows, ncoef, nrows))
+    Arank = rank(A)
+    if Arank < ncoef
+        return (;
+            dx = nothing, dy = nothing, fallback = true,
+            points = nrows, rank = Arank, wall_points = count(s -> s.is_wall, samples),
+        )
+    end
+
+    W = A \ Matrix{Float64}(I, nrows, nrows)
+    function build_stencil(row)
+        fluid_terms = Tuple{Float64,Int,Int}[]
+        wall_terms = Tuple{Float64,Float64,Float64}[]
+        center_coeff = 0.0
+        for (weight, sample) in zip(vec(W[row, :]), samples)
+            coeff = weight * sample.rhs_scale
+            center_coeff -= coeff
+            if sample.is_wall
+                _push_stencil_wall_term!(wall_terms, coeff, sample.wx, sample.wy)
+            else
+                _push_stencil_fluid_term!(fluid_terms, coeff, sample.di, sample.dj)
+            end
+        end
+        _push_stencil_fluid_term!(fluid_terms, center_coeff, 0, 0)
+        return (; fluid_terms, wall_terms, fallback=false,
+                  points=nrows, rank=Arank,
+                  wall_points=count(s -> s.is_wall, samples))
+    end
+
+    return (;
+        dx = build_stencil(1),
+        dy = build_stencil(2),
+        fallback = false,
+        points = nrows,
+        rank = Arank,
+        wall_points = count(s -> s.is_wall, samples),
+    )
+end
+
+function _wall_constrained_polyfit_gradient_stencils_2d(
+        is_solid, q_wall, i, j, Nx, Ny, p;
+        degree::Int=4, radius::Int=3, wall_weight::Float64=16.0)
+    ncoef = length(_polyfit_features_2d(1.0, 0.0, degree))
+    rows = Float64[]
+    samples = NamedTuple{(:is_wall, :di, :dj, :wx, :wy, :rhs_scale),
+                         Tuple{Bool,Int,Int,Float64,Float64,Float64}}[]
+    x0 = i - 1.0
+    y0 = j - 1.0
+
+    for dj in -radius:radius, di in -radius:radius
+        ii = i + di
+        jj = j + dj
+        1 <= ii <= Nx && 1 <= jj <= Ny || continue
+        is_solid[ii, jj] && continue
+        di^2 + dj^2 <= radius^2 || continue
+
+        if !(di == 0 && dj == 0)
+            dist2 = di^2 + dj^2
+            rhs_scale = sqrt(1.0 / max(1.0, dist2))
+            append!(rows, rhs_scale .* _polyfit_features_2d(di, dj, degree))
+            push!(samples, (is_wall=false, di=di, dj=dj,
+                            wx=0.0, wy=0.0, rhs_scale=rhs_scale))
+        end
+
+        for q in 2:9
+            qw = q_wall[ii, jj, q]
+            qw > 0.0 || continue
+            wx = (ii - 1.0) + qw * D2Q9_CX[q]
+            wy = (jj - 1.0) + qw * D2Q9_CY[q]
+            dx = wx - x0
+            dy = wy - y0
+            dx^2 + dy^2 <= (radius + 0.5)^2 || continue
+            rhs_scale = sqrt(wall_weight / max(0.25, dx^2 + dy^2))
+            append!(rows, rhs_scale .* _polyfit_features_2d(dx, dy, degree))
+            push!(samples, (is_wall=true, di=0, dj=0,
+                            wx=wx, wy=wy, rhs_scale=rhs_scale))
+        end
+    end
+
+    return _wallfit_stencil_from_samples(rows, samples, ncoef)
+end
+
+function _wallfit_coeff_gradient_2d(a, component::Symbol, is_solid, q_wall,
+                                    i, j, Nx, Ny, p)
+    stencils = _wall_constrained_polyfit_gradient_stencils_2d(
+        is_solid, q_wall, i, j, Nx, Ny, p;
+        degree=4, radius=3, wall_weight=16.0,
+    )
+    if stencils.fallback
+        fallback = _wall_constrained_polyfit_gradient_2d(
+            a, component, is_solid, q_wall, i, j, Nx, Ny, p;
+            degree=4, radius=3, wall_weight=16.0,
+        )
+        return (; dx=fallback.dx, dy=fallback.dy, fallback=true,
+                  points=stencils.points, max_terms=0)
+    end
+    return (;
+        dx = _eval_scalar_gradient_stencil_2d(a, component, stencils.dx, i, j, p),
+        dy = _eval_scalar_gradient_stencil_2d(a, component, stencils.dy, i, j, p),
+        fallback = false,
+        points = stencils.points,
+        max_terms = max(length(stencils.dx.fluid_terms) + length(stencils.dx.wall_terms),
+                        length(stencils.dy.fluid_terms) + length(stencils.dy.wall_terms)),
+    )
+end
+
 function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
                                  gradient_mode::Symbol)
     if gradient_mode === :analytic_couette
@@ -4080,6 +4287,15 @@ function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
         )
         return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
                   fallback=uxg.fallback || uyg.fallback)
+    elseif gradient_mode === :embedded_axis_coeff
+        uxg = _embedded_axis_coeff_gradient_2d(
+            ux, :ux, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        uyg = _embedded_axis_coeff_gradient_2d(
+            uy, :uy, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
+                  fallback=uxg.fallback || uyg.fallback)
     elseif gradient_mode === :normal_tangent
         uxg = _normal_tangent_gradient_2d(
             ux, :ux, is_solid, p.q_wall, i, j, Nx, Ny, p,
@@ -4100,6 +4316,15 @@ function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
         )
         return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
                   fallback=uxg.fallback || uyg.fallback)
+    elseif gradient_mode === :wallfit4_coeff
+        uxg = _wallfit_coeff_gradient_2d(
+            ux, :ux, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        uyg = _wallfit_coeff_gradient_2d(
+            uy, :uy, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
+                  fallback=uxg.fallback || uyg.fallback)
     else
         return (;
             dudx = Kraken._wall_aware_dx_2d(ux, is_solid, i, j, Nx, Float64),
@@ -4109,6 +4334,54 @@ function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
             fallback = false,
         )
     end
+end
+
+function _gradient_coeff_stencil_shape_stats(mode::Symbol)
+    p = _curved_couette_oldroydb_patch()
+    max_terms = 0
+    max_wall_terms = 0
+    max_points = 0
+    max_rank = 0
+    fallback_count = 0
+    fluid_cells = 0
+
+    for j in 1:p.Ny, i in 1:p.Nx
+        p.is_solid[i, j] && continue
+        hypot((i - 1.0) - p.cx, (j - 1.0) - p.cy) < p.Ro || continue
+        fluid_cells += 1
+        if mode === :embedded_axis_coeff
+            stencils = (
+                _embedded_axis_derivative_stencil_2d(
+                    p.is_solid, p.q_wall, i, j, p.Nx, p.Ny, :x,
+                ),
+                _embedded_axis_derivative_stencil_2d(
+                    p.is_solid, p.q_wall, i, j, p.Nx, p.Ny, :y,
+                ),
+            )
+        elseif mode === :wallfit4_coeff
+            wallfit = _wall_constrained_polyfit_gradient_stencils_2d(
+                p.is_solid, p.q_wall, i, j, p.Nx, p.Ny, p;
+                degree=4, radius=3, wall_weight=16.0,
+            )
+            fallback_count += wallfit.fallback ? 1 : 0
+            wallfit.fallback && continue
+            stencils = (wallfit.dx, wallfit.dy)
+        else
+            error("unsupported coefficient stencil mode $(mode)")
+        end
+
+        for stencil in stencils
+            total_terms = length(stencil.fluid_terms) + length(stencil.wall_terms)
+            max_terms = max(max_terms, total_terms)
+            max_wall_terms = max(max_wall_terms, length(stencil.wall_terms))
+            max_points = max(max_points, stencil.points)
+            max_rank = max(max_rank, stencil.rank)
+            fallback_count += stencil.fallback ? 1 : 0
+        end
+    end
+
+    return (; fluid_cells, max_terms, max_wall_terms, max_points,
+              max_rank, fallback_count)
 end
 
 function _collide_scalar_cde_state_test_gradient!(
@@ -4834,4 +5107,52 @@ end
     @test cde[:ghost_axis].max_cut > 10.0 * cde[:embedded_axis].max_cut
     @test cde[:normal_tangent].max_cut > 5e-3
     @test cde[:normal_tangent].max_cut > 5.0 * cde[:ghost_axis].max_cut
+end
+
+@testset "P18l prototype extrap-eq BC: M8 embedded and wallfit gradients are coefficient paths" begin
+    embedded_shape = _gradient_coeff_stencil_shape_stats(:embedded_axis_coeff)
+    wallfit_shape = _gradient_coeff_stencil_shape_stats(:wallfit4_coeff)
+
+    @test embedded_shape.fallback_count == 0
+    @test embedded_shape.max_terms <= 3
+    @test embedded_shape.max_wall_terms <= 2
+    @test embedded_shape.max_points <= 2
+    @test embedded_shape.max_rank <= 2
+
+    @test wallfit_shape.fallback_count == 0
+    @test wallfit_shape.max_terms <= 48
+    @test wallfit_shape.max_wall_terms <= 24
+    @test wallfit_shape.max_points <= 48
+    @test wallfit_shape.max_rank == 14
+
+    for (direct_mode, coeff_mode) in (
+            (:embedded_axis, :embedded_axis_coeff),
+            (:wallfit4, :wallfit4_coeff))
+        direct_source = _curved_couette_source_residual_stats(
+            ; gradient_mode=direct_mode,
+        )
+        coeff_source = _curved_couette_source_residual_stats(
+            ; gradient_mode=coeff_mode,
+        )
+        direct_cde = _extrap_repeated_curved_couette(
+            ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+            gradient_mode=direct_mode,
+        )
+        coeff_cde = _extrap_repeated_curved_couette(
+            ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+            gradient_mode=coeff_mode,
+        )
+
+        @test coeff_source.fallback_count == direct_source.fallback_count
+        @test isapprox(coeff_source.max_cut_source, direct_source.max_cut_source;
+                       atol=1e-12, rtol=0.0)
+        @test isapprox(coeff_source.max_near_source, direct_source.max_near_source;
+                       atol=1e-12, rtol=0.0)
+        @test isapprox(coeff_source.max_far_source, direct_source.max_far_source;
+                       atol=1e-12, rtol=0.0)
+
+        @test isapprox(coeff_cde.max_cut, direct_cde.max_cut; atol=1e-12, rtol=0.0)
+        @test isapprox(coeff_cde.max_near, direct_cde.max_near; atol=1e-12, rtol=0.0)
+        @test isapprox(coeff_cde.max_far, direct_cde.max_far; atol=1e-12, rtol=0.0)
+    end
 end
