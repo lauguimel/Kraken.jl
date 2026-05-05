@@ -511,6 +511,61 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
     return bank
 end
 
+function _conservative_tree_inactive_parent_coalesce_routes_2d(
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int)
+    src = spec.cells[src_id]
+    src.level > 0 || return ConservativeTreeRoute2D[]
+    src.active && return ConservativeTreeRoute2D[]
+    spec.children[src_id] == (0, 0, 0, 0) && return ConservativeTreeRoute2D[]
+
+    i_dst = src.i + d2q9_cx(q)
+    j_dst = src.j + d2q9_cy(q)
+    nx_level = _conservative_tree_level_size_2d(spec.Nx, src.level)
+    ny_level = _conservative_tree_level_size_2d(spec.Ny, src.level)
+    1 <= i_dst <= nx_level && 1 <= j_dst <= ny_level ||
+        return ConservativeTreeRoute2D[]
+
+    parent = spec.cells[src.parent]
+    in_parent = (2 * parent.i - 1 <= i_dst <= 2 * parent.i) &&
+                (2 * parent.j - 1 <= j_dst <= 2 * parent.j)
+    in_parent && return ConservativeTreeRoute2D[]
+
+    dst_i = div(i_dst + 1, 2)
+    dst_j = div(j_dst + 1, 2)
+    dst_id = conservative_tree_cell_id_2d(
+        spec, parent.level, dst_i, dst_j)
+    dst_id == 0 && return ConservativeTreeRoute2D[]
+    kind = (i_dst < 2 * parent.i - 1 || i_dst > 2 * parent.i) &&
+           (j_dst < 2 * parent.j - 1 || j_dst > 2 * parent.j) ?
+           COALESCE_CORNER : COALESCE_FACE
+    return [ConservativeTreeRoute2D(src_id, dst_id, q, 1.0, kind)]
+end
+
+function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D,
+        F::AbstractMatrix)
+    parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
+        bank, event)
+    child_level = parent_level + 1
+
+    @inbounds for (src_id, cell) in pairs(bank.spec.cells)
+        cell.level == child_level || continue
+        cell.active && continue
+        bank.spec.children[src_id] == (0, 0, 0, 0) && continue
+        for q in 1:9
+            for route in _conservative_tree_inactive_parent_coalesce_routes_2d(
+                    bank.spec, src_id, q)
+                conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
+                    bank, F, route, substep)
+            end
+        end
+    end
+    return bank
+end
+
 function conservative_tree_subcycle_apply_coarse_to_fine_F_2d!(
         F::AbstractMatrix,
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
@@ -725,8 +780,12 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
             fill!(Fscratch, zero(eltype(Fscratch)))
             level = event.src_level
             if level > 0
+                _add_and_clear_conservative_tree_level_rows_2d!(
+                    Fstate, Fpending, spec, level)
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
                     bank, event, Fstate, table)
+                conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
+                    bank, event, Fstate)
             end
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch, Fstate, spec, table, level, policy)

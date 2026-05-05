@@ -473,3 +473,34 @@ Remaining blocker:
   patch should repeat this route-spatial audit recursively: likely the
   intermediate inactive parent rows need their own pending destination maps
   before the next `sync_down`.
+
+## ML4e Nested Rest-State Diagnostic
+
+Started the recursive inactive-parent path needed by nested transport.
+
+Implemented:
+
+- inactive parent rows at level `L` can now generate coalesce routes toward
+  level `L-1` during an `advance L` event;
+- pending packets received from level `L+1` are made visible to level `L`
+  before `advance L`, except for level 0 where applying them before streaming
+  would double-stream the reflux;
+- nested rest-state is captured as an explicit broken canary in
+  `test_conservative_tree_subcycling_2d.jl`.
+
+Current nested status:
+
+- one-level subcycled transport remains green to roundoff;
+- two-level nested rest still has a mass/local residual. The remaining gap is
+  now narrower and points to recursive `sync_down`: packets injected from
+  `L-1` into inactive `L` parent rows must be made available to `L -> L+1`
+  before the child schedule starts, without double-applying them to active
+  level rows.
+
+Next patch:
+
+- split pending buffers by direction (`down` vs `up`) instead of using one
+  generic pending matrix;
+- apply `down` pending immediately before recursive child `sync_down`;
+- keep `up` pending delayed until the receiver level output buffer, as in the
+  one-level fix.
