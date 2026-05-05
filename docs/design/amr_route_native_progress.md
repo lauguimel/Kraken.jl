@@ -498,13 +498,16 @@ Currently publishable inside the D stream only as:
 ```text
 2D, single fixed patch, route-native conservative AMR:
 Couette + Poiseuille + square obstacle + VFS
+interface-buffered cylinder ladder as static fixed-patch validation
+BFS/open-channel short canaries, not long-horizon production BCs
 ```
 
 The wording must not claim:
 
-- BFS route-native, because it is not implemented in this D stream;
-- robust open boundaries, because only one-step/short smokes are covered and
-  long inlet-spanning drift remains unresolved;
+- arbitrary compact-patch obstacle convergence, because the compact default
+  patch still exposes the non-subcycled interface error;
+- robust long-horizon open boundaries, because only one-step/short smokes and
+  the 1200-step BFS canary are covered;
 - multi-patch route-native transport or adaptation, because only ownership and
   `.krk` setup helpers are started;
 - subcycling;
@@ -513,9 +516,9 @@ The wording must not claim:
 
 Next commits should continue in this order:
 
-1. production-grade adaptation plan helpers and DSL-facing guards;
-2. route tests over multi-patch ownership tables;
-3. subcycling ledger and packet canaries;
-4. GPU packing parity canaries;
-5. debug long inlet-spanning open-channel drift with packet-level canaries;
-6. route-native BFS macro-flow only after those open-boundary tests.
+1. run and record the interface-buffered obstacle ladder on aqua;
+2. add paper-facing tables for coarse Cartesian vs AMR vs leaf oracle;
+3. keep compact-patch cylinder as the subcycling stress test;
+4. route tests over multi-patch ownership tables;
+5. wire the subcycling ledger into the time integrator;
+6. GPU packing parity canaries only after the CPU D publication gate.
