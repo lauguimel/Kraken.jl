@@ -378,25 +378,35 @@ function conformation_gradient_stencil_stats_2d(stencils::ConformationGradientSt
               max_terms=stencils.max_terms, mode=stencils.mode)
 end
 
-@inline function _conformation_gradient_from_stencil_2d(
-        a, uwall, stencils::ConformationGradientStencils2D, i, j,
-        axis::Int, ::Type{T}) where {T}
+@inline function _conformation_gradient_from_stencil_arrays_2d(
+        a, uwall, coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+        i, j, axis::Int, ::Type{T}) where {T}
     value = zero(T)
-    n = Int(stencils.count[i, j, axis])
+    n = Int(count[i, j, axis])
     @inbounds for slot in 1:n
-        c = T(stencils.coeff[i, j, axis, slot])
-        if stencils.is_wall[i, j, axis, slot]
-            wi = Int(stencils.wall_i[i, j, axis, slot])
-            wj = Int(stencils.wall_j[i, j, axis, slot])
-            wq = Int(stencils.wall_q[i, j, axis, slot])
+        c = T(coeff[i, j, axis, slot])
+        if is_wall[i, j, axis, slot]
+            wi = Int(wall_i[i, j, axis, slot])
+            wj = Int(wall_j[i, j, axis, slot])
+            wq = Int(wall_q[i, j, axis, slot])
             value += c * T(uwall[wi, wj, wq])
         else
-            ii = i + Int(stencils.di[i, j, axis, slot])
-            jj = j + Int(stencils.dj[i, j, axis, slot])
+            ii = i + Int(di[i, j, axis, slot])
+            jj = j + Int(dj[i, j, axis, slot])
             value += c * T(a[ii, jj])
         end
     end
     return value
+end
+
+@inline function _conformation_gradient_from_stencil_2d(
+        a, uwall, stencils::ConformationGradientStencils2D, i, j,
+        axis::Int, ::Type{T}) where {T}
+    return _conformation_gradient_from_stencil_arrays_2d(
+        a, uwall, stencils.coeff, stencils.di, stencils.dj,
+        stencils.wall_i, stencils.wall_j, stencils.wall_q,
+        stencils.is_wall, stencils.count, i, j, axis, T,
+    )
 end
 
 function conformation_velocity_gradient_from_stencils_2d(
@@ -558,6 +568,124 @@ function collide_conformation_2d!(g, C_field, ux, uy, C_xx, C_xy, C_yy, is_solid
     tau_minus = magic / (tau_plus - 0.5) + 0.5
     kernel! = collide_conformation_2d_kernel!(backend)
     kernel!(g, C_field, ux, uy, C_xx, C_xy, C_yy, is_solid,
+            T(tau_plus), T(tau_minus), T(lambda),
+            Int(component), _conformation_divergence_mode_code(divergence_mode),
+            Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+@kernel function collide_conformation_2d_gradient_stencils_kernel!(
+        g, @Const(C_field), @Const(ux), @Const(uy),
+        @Const(C_xx_f), @Const(C_xy_f), @Const(C_yy_f), @Const(is_solid),
+        @Const(uwx), @Const(uwy),
+        @Const(grad_coeff), @Const(grad_di), @Const(grad_dj),
+        @Const(grad_wall_i), @Const(grad_wall_j), @Const(grad_wall_q),
+        @Const(grad_is_wall), @Const(grad_count),
+        tau_plus, tau_minus, lambda, component, divergence_mode, Nx, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds if !is_solid[i, j]
+        T = eltype(g)
+        φ = C_field[i, j]
+        u = ux[i, j]
+        v = uy[i, j]
+        usq = u*u + v*v
+
+        dudx = _conformation_gradient_from_stencil_arrays_2d(
+            ux, uwx, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 1, T,
+        )
+        dudy = _conformation_gradient_from_stencil_arrays_2d(
+            ux, uwx, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 2, T,
+        )
+        dvdx = _conformation_gradient_from_stencil_arrays_2d(
+            uy, uwy, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 1, T,
+        )
+        dvdy = _conformation_gradient_from_stencil_arrays_2d(
+            uy, uwy, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 2, T,
+        )
+        dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
+            dudx, dudy, dvdx, dvdy, divergence_mode)
+
+        cxx = C_xx_f[i, j]; cxy = C_xy_f[i, j]; cyy = C_yy_f[i, j]
+        S = conformation_source_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
+                                   T(lambda), component)
+
+        g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
+        g6 = g[i,j,6]; g7 = g[i,j,7]; g8 = g[i,j,8]; g9 = g[i,j,9]
+
+        ge1 = feq_2d(Val(1), φ, u, v, usq)
+        ge2 = feq_2d(Val(2), φ, u, v, usq)
+        ge3 = feq_2d(Val(3), φ, u, v, usq)
+        ge4 = feq_2d(Val(4), φ, u, v, usq)
+        ge5 = feq_2d(Val(5), φ, u, v, usq)
+        ge6 = feq_2d(Val(6), φ, u, v, usq)
+        ge7 = feq_2d(Val(7), φ, u, v, usq)
+        ge8 = feq_2d(Val(8), φ, u, v, usq)
+        ge9 = feq_2d(Val(9), φ, u, v, usq)
+
+        ωp = one(T) / T(tau_plus)
+        ωm = one(T) / T(tau_minus)
+        half = T(0.5)
+        wr = T(4/9); wa = T(1/9); we = T(1/36)
+        source_linear = (one(T) - ωp * half) * T(3) * S
+
+        S1 = wr * S
+        S2 = wa * (S + source_linear*u)
+        S3 = wa * (S + source_linear*v)
+        S4 = wa * (S - source_linear*u)
+        S5 = wa * (S - source_linear*v)
+        S6 = we * (S + source_linear*(u + v))
+        S7 = we * (S + source_linear*(-u + v))
+        S8 = we * (S - source_linear*(u + v))
+        S9 = we * (S + source_linear*(u - v))
+
+        g[i,j,1] = g1 - ωp * (g1 - ge1) + S1
+
+        gp24 = (g2 + g4) * half;  gm24 = (g2 - g4) * half
+        ep24 = (ge2 + ge4) * half; em24 = (ge2 - ge4) * half
+        g[i,j,2] = g2 - ωp*(gp24 - ep24) - ωm*(gm24 - em24) + S2
+        g[i,j,4] = g4 - ωp*(gp24 - ep24) - ωm*(-(gm24 - em24)) + S4
+
+        gp35 = (g3 + g5) * half;  gm35 = (g3 - g5) * half
+        ep35 = (ge3 + ge5) * half; em35 = (ge3 - ge5) * half
+        g[i,j,3] = g3 - ωp*(gp35 - ep35) - ωm*(gm35 - em35) + S3
+        g[i,j,5] = g5 - ωp*(gp35 - ep35) - ωm*(-(gm35 - em35)) + S5
+
+        gp68 = (g6 + g8) * half;  gm68 = (g6 - g8) * half
+        ep68 = (ge6 + ge8) * half; em68 = (ge6 - ge8) * half
+        g[i,j,6] = g6 - ωp*(gp68 - ep68) - ωm*(gm68 - em68) + S6
+        g[i,j,8] = g8 - ωp*(gp68 - ep68) - ωm*(-(gm68 - em68)) + S8
+
+        gp79 = (g7 + g9) * half;  gm79 = (g7 - g9) * half
+        ep79 = (ge7 + ge9) * half; em79 = (ge7 - ge9) * half
+        g[i,j,7] = g7 - ωp*(gp79 - ep79) - ωm*(gm79 - em79) + S7
+        g[i,j,9] = g9 - ωp*(gp79 - ep79) - ωm*(-(gm79 - em79)) + S9
+    end
+end
+
+function collide_conformation_2d_with_gradient_stencils!(
+        g, C_field, ux, uy, C_xx, C_xy, C_yy, is_solid,
+        uwx, uwy, stencils::ConformationGradientStencils2D,
+        tau_plus, lambda; magic=0.25, component=1,
+        divergence_mode::Symbol=:numerical)
+    backend = KernelAbstractions.get_backend(g)
+    Nx, Ny = size(C_field)
+    T = eltype(g)
+    tau_minus = magic / (tau_plus - 0.5) + 0.5
+    kernel! = collide_conformation_2d_gradient_stencils_kernel!(backend)
+    kernel!(g, C_field, ux, uy, C_xx, C_xy, C_yy, is_solid,
+            uwx, uwy,
+            stencils.coeff, stencils.di, stencils.dj,
+            stencils.wall_i, stencils.wall_j, stencils.wall_q,
+            stencils.is_wall, stencils.count,
             T(tau_plus), T(tau_minus), T(lambda),
             Int(component), _conformation_divergence_mode_code(divergence_mode),
             Nx, Ny; ndrange=(Nx, Ny))

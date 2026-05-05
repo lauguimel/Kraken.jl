@@ -4454,6 +4454,19 @@ end
 function _collide_direct_cde_state_test_gradient!(
         gxx, gxy, gyy, Cxx, Cxy, Cyy, ux, uy, is_solid, λ, p;
         gradient_mode::Symbol)
+    if gradient_mode in (:embedded_axis_prod, :wallfit4_prod)
+        prod_mode = gradient_mode === :embedded_axis_prod ? :embedded_axis : :wallfit4
+        max_terms = gradient_mode === :embedded_axis_prod ? 4 : 64
+        stencils = Kraken.precompute_conformation_gradient_stencils_2d(
+            is_solid, p.q_wall; mode=prod_mode, max_terms, FT=Float64,
+        )
+        uwx, uwy = _curved_couette_wall_velocity_arrays(p)
+        _collide_direct_cde_state_prod_gradient!(
+            gxx, gxy, gyy, Cxx, Cxy, Cyy, ux, uy, is_solid, λ,
+            stencils, uwx, uwy,
+        )
+        return nothing
+    end
     _collide_scalar_cde_state_test_gradient!(
         gxx, Cxx, ux, uy, Cxx, Cxy, Cyy, is_solid, λ, 1, p, gradient_mode,
     )
@@ -4462,6 +4475,30 @@ function _collide_direct_cde_state_test_gradient!(
     )
     _collide_scalar_cde_state_test_gradient!(
         gyy, Cyy, ux, uy, Cxx, Cxy, Cyy, is_solid, λ, 3, p, gradient_mode,
+    )
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    return nothing
+end
+
+function _collide_direct_cde_state_prod_gradient!(
+        gxx, gxy, gyy, Cxx, Cxy, Cyy, ux, uy, is_solid, λ,
+        stencils, uwx, uwy)
+    Kraken.collide_conformation_2d_with_gradient_stencils!(
+        gxx, Cxx, ux, uy, Cxx, Cxy, Cyy, is_solid,
+        uwx, uwy, stencils, 1.0, λ; magic=1e-6,
+        component=1, divergence_mode=:trace_free,
+    )
+    Kraken.collide_conformation_2d_with_gradient_stencils!(
+        gxy, Cxy, ux, uy, Cxx, Cxy, Cyy, is_solid,
+        uwx, uwy, stencils, 1.0, λ; magic=1e-6,
+        component=2, divergence_mode=:trace_free,
+    )
+    Kraken.collide_conformation_2d_with_gradient_stencils!(
+        gyy, Cyy, ux, uy, Cxx, Cxy, Cyy, is_solid,
+        uwx, uwy, stencils, 1.0, λ; magic=1e-6,
+        component=3, divergence_mode=:trace_free,
     )
     compute_conformation_macro_2d!(Cxx, gxx)
     compute_conformation_macro_2d!(Cxy, gxy)
@@ -5222,5 +5259,42 @@ end
         @test max_dudy < 1e-12
         @test max_dvdx < 1e-12
         @test max_dvdy < 1e-12
+    end
+end
+
+@testset "P18l prototype extrap-eq BC: M10 production stencil collision reproduces prototypes" begin
+    cases = (
+        (; prod_mode=:embedded_axis_prod, ref_mode=:embedded_axis_coeff,
+           max_cut=1e-4),
+        (; prod_mode=:wallfit4_prod, ref_mode=:wallfit4_coeff,
+           max_cut=5e-5),
+    )
+
+    for case in cases
+        ref_collision = _curved_couette_collision_only_stats(
+            ; gradient_mode=case.ref_mode,
+        )
+        prod_collision = _curved_couette_collision_only_stats(
+            ; gradient_mode=case.prod_mode,
+        )
+        ref_cde = _extrap_repeated_curved_couette(
+            ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+            gradient_mode=case.ref_mode,
+        )
+        prod_cde = _extrap_repeated_curved_couette(
+            ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+            gradient_mode=case.prod_mode,
+        )
+
+        @test prod_collision.max_cut < case.max_cut
+        @test isapprox(prod_collision.max_cut, ref_collision.max_cut;
+                       atol=1e-12, rtol=0.0)
+        @test isapprox(prod_collision.max_near, ref_collision.max_near;
+                       atol=1e-12, rtol=0.0)
+        @test isapprox(prod_collision.max_far, ref_collision.max_far;
+                       atol=1e-12, rtol=0.0)
+        @test isapprox(prod_cde.max_cut, ref_cde.max_cut; atol=1e-12, rtol=0.0)
+        @test isapprox(prod_cde.max_near, ref_cde.max_near; atol=1e-12, rtol=0.0)
+        @test isapprox(prod_cde.max_far, ref_cde.max_far; atol=1e-12, rtol=0.0)
     end
 end
