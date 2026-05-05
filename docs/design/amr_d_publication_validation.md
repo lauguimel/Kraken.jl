@@ -64,6 +64,10 @@ Local baseline recorded in
   drift;
 - all route-native obstacle rows: relative mass drift below `1e-12`.
 
+Aqua baseline recorded in
+`benchmarks/results/amr_obstacle_convergence_2d_aqua_interface_buffered_20260505.csv`
+matches the local values for Cd and mass drift. PBS job: `20808208.aqua`.
+
 ## Limits
 
 The default compact patch is still useful as a stress test. Its cylinder Cd

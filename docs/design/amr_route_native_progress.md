@@ -178,6 +178,12 @@ Aqua runs:
   `1.060x` at scale 1 and `1.052x` at scale 2. This is the
   publication path for static fixed-patch D; the compact default patch remains
   the stress test for future subcycling.
+- `20808208.aqua` completed the same 1200/2400-step interface-buffered ladder
+  on aqua and produced
+  `benchmarks/results/amr_obstacle_convergence_2d_aqua_interface_buffered_20260505.csv`.
+  The CPU aqua values match local: cylinder Cd ratios are `1.060x` at scale 1
+  and `1.052x` at scale 2, with route-native relative mass drift below
+  `1e-12`.
 
 Notes:
 
