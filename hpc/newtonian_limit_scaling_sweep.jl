@@ -71,10 +71,11 @@ function _polymer_bc(name::Symbol)
     name in (:cnebb_eq_gradient, :cnebb_eqgrad, :eq_gradient) && return CNEBBEqGradient()
     name in (:cnebb_cutlink_eq_gradient, :cnebb_cutlink_eqgrad, :cutlink_eq_gradient) &&
         return CNEBBCutLinkEqGradient()
+    name in (:extrap_eq, :extrapeq, :extrap_eq_wall_bc) && return ExtrapEqWallBC()
     name === :ylw_a && return YLW_A()
     name === :ylw_b && return YLW_B()
     name === :ylw_balance && return YLWBalanceOnly()
-    error("unknown polymer BC $(name); expected cnebb, cnebb_qaware, cnebb_eq_gradient, cnebb_cutlink_eq_gradient, ylw_a, ylw_b, or ylw_balance")
+    error("unknown polymer BC $(name); expected cnebb, cnebb_qaware, cnebb_eq_gradient, cnebb_cutlink_eq_gradient, extrap_eq, ylw_a, ylw_b, or ylw_balance")
 end
 
 function _run_newtonian(; backend, FT, R, u_mean, max_steps, avg_window,
@@ -95,6 +96,7 @@ function _run_visco(; backend, FT, R, u_mean, beta, Wi, model_name,
                     momentum_exchange_mode, solvent_magic,
                     conformation_magic, conformation_collision,
                     conformation_divergence_mode,
+                    conformation_gradient_mode,
                     source_stress_reconstruction,
                     source_stress_reconstruction_order,
                     source_scale_dynamics,
@@ -119,7 +121,7 @@ function _run_visco(; backend, FT, R, u_mean, beta, Wi, model_name,
         max_steps, avg_window, drag_stride,
         drag_mode, hermite_source_mode, solvent_source_mode,
         solvent_magic, conformation_magic, conformation_collision,
-        conformation_divergence_mode,
+        conformation_divergence_mode, conformation_gradient_mode,
         momentum_exchange_mode,
         source_stress_reconstruction, source_stress_reconstruction_order,
         source_scale_dynamics, diagnostic_interval,
@@ -171,6 +173,7 @@ solvent_magic = parse(Float64, get(ENV, "KRAKEN_SOLVENT_MAGIC", string(3/16)))
 conformation_magic = parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "1e-6"))
 conformation_collision = Symbol(get(ENV, "KRAKEN_CONFORMATION_COLLISION", "trt"))
 conformation_divergence_mode = Symbol(get(ENV, "KRAKEN_CONFORMATION_DIVERGENCE_MODE", "trace_free"))
+conformation_gradient_mode = Symbol(get(ENV, "KRAKEN_CONFORMATION_GRADIENT_MODE", "wall_aware"))
 source_stress_reconstruction = Symbol(get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION", "interior"))
 source_stress_reconstruction_order = parse(Int, get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER", "2"))
 source_scale_dynamics = parse(Float64, get(ENV, "KRAKEN_SOURCE_SCALE_DYNAMICS", "1.0"))
@@ -202,7 +205,7 @@ println("Date/time: $(Dates.now())")
 println("Backend: $backend_label, FT=$FT")
 println("R_LIST=$(join(R_list, ",")) BETA_LIST=$(join(beta_list, ",")) WI_LIST=$(join(Wi_list, ","))")
 println("MODELS=$(join(models, ",")) POLYMER_BCS=$(join(polymer_bcs, ",")) DRAG_MODES=$(join(drag_modes, ",")) HERMITE=$(join(hermite_source_modes, ","))")
-println("CONFORMATION_COLLISION=$(conformation_collision), CONFORMATION_DIVERGENCE_MODE=$(conformation_divergence_mode), SOURCE_SCALE_DYNAMICS=$(source_scale_dynamics)")
+println("CONFORMATION_COLLISION=$(conformation_collision), CONFORMATION_DIVERGENCE_MODE=$(conformation_divergence_mode), CONFORMATION_GRADIENT_MODE=$(conformation_gradient_mode), SOURCE_SCALE_DYNAMICS=$(source_scale_dynamics)")
 println("DIAGNOSTIC_INTERVAL=$(diagnostic_interval)")
 println("SOURCE_STRESS_RECONSTRUCTION=$(source_stress_reconstruction), ORDER=$(source_stress_reconstruction_order)")
 println("CONTROL beta=$(control_beta), R=$(control_R), all_R=$(control_all_R)")
@@ -216,6 +219,7 @@ newtonian_by_R = Dict{Int,Any}()
 open(sweep_csv, "w") do io
     println(io, join((
         "kind", "R", "beta", "Wi", "model", "polymer_bc", "drag_mode", "hermite_source_mode",
+        "conformation_gradient_mode",
         "Cd_Newt", "Cl_Newt", "Cd", "Cl", "ratio", "err", "pass",
         "Cd_s", "Cd_p", "Cd_post", "Cd_scaled", "Cd_split",
         "G", "lambda", "nu_total", "nu_s", "nu_p",
@@ -235,6 +239,7 @@ open(sweep_csv, "w") do io
         newtonian_by_R[R] = newt
         println(io, join((
             "newtonian", R, 1.0, 0.0, "-", "-", "-", "-",
+            "-",
             newt.Cd, newt.Cl, newt.Cd, newt.Cl, 1.0, 0.0, true,
             newt.Cd, NaN, NaN, NaN, NaN,
             0.0, 0.0, u_mean * R, u_mean * R, 0.0,
@@ -262,7 +267,7 @@ open(sweep_csv, "w") do io
             max_steps, avg_window, drag_stride, drag_mode, hermite_source_mode,
             solvent_source_mode, momentum_exchange_mode, solvent_magic,
             conformation_magic, conformation_collision,
-            conformation_divergence_mode,
+            conformation_divergence_mode, conformation_gradient_mode,
             source_stress_reconstruction, source_stress_reconstruction_order,
             source_scale_dynamics, diagnostic_interval,
             allow_diagnostic_conformation_collision)
@@ -273,6 +278,7 @@ open(sweep_csv, "w") do io
         row = (kind="sweep", R=R, beta=beta, Wi=Wi, model=model,
                polymer_bc=bc_name,
                drag_mode=drag_mode, hermite_source_mode=hermite_source_mode,
+               conformation_gradient_mode=conformation_gradient_mode,
                Cd_Newt=newt.Cd, Cl_Newt=newt.Cl, Cd=result.Cd, Cl=result.Cl,
                ratio=ratio, err=err, pass=pass, Cd_s=result.Cd_s,
                Cd_p=result.Cd_p, Cd_post=result.Cd_mea_post_source,
@@ -283,7 +289,8 @@ open(sweep_csv, "w") do io
         push!(rows, row)
         println(io, join((
             row.kind, row.R, row.beta, row.Wi, row.model, row.polymer_bc, row.drag_mode,
-            row.hermite_source_mode, row.Cd_Newt, row.Cl_Newt, row.Cd, row.Cl,
+            row.hermite_source_mode, row.conformation_gradient_mode,
+            row.Cd_Newt, row.Cl_Newt, row.Cd, row.Cl,
             row.ratio, row.err, row.pass, row.Cd_s, row.Cd_p, row.Cd_post,
             row.Cd_scaled, row.Cd_split, row.G, row.λ, row.ν_total, row.ν_s,
             row.ν_p, row.max_steps, row.avg_window, row.drag_stride, row.time_s
@@ -312,7 +319,7 @@ open(sweep_csv, "w") do io
             model_name=model, polymer_bc, max_steps, avg_window, drag_stride, drag_mode,
             hermite_source_mode, solvent_source_mode, momentum_exchange_mode,
             solvent_magic, conformation_magic, conformation_collision,
-            conformation_divergence_mode,
+            conformation_divergence_mode, conformation_gradient_mode,
             source_stress_reconstruction, source_stress_reconstruction_order,
             source_scale_dynamics, diagnostic_interval,
             allow_diagnostic_conformation_collision)
@@ -322,6 +329,7 @@ open(sweep_csv, "w") do io
         pass = abs(err) ≤ 1e-10
         println(io, join((
             "control", R, control_beta, Wi, model, bc_name, drag_mode, hermite_source_mode,
+            conformation_gradient_mode,
             newt.Cd, newt.Cl, result.Cd, result.Cl, ratio, err, pass,
             result.Cd_s, result.Cd_p, result.Cd_mea_post_source,
             result.Cd_mea_source_scaled, result.Cd_split_explicit,
@@ -336,6 +344,7 @@ end
 
 open(fit_csv, "w") do io
     println(io, join(("Wi", "beta", "model", "polymer_bc", "drag_mode", "hermite_source_mode",
+                      "conformation_gradient_mode",
                       "p", "A", "B", "rmse", "n", "R_values", "err_values"), ","))
     println()
     println("Fits: 1 - ratio = A + B/R^p")
@@ -348,6 +357,7 @@ open(fit_csv, "w") do io
                  row.polymer_bc == bc_name &&
                  row.drag_mode == drag_mode &&
                  row.hermite_source_mode == hermite_source_mode &&
+                 row.conformation_gradient_mode == conformation_gradient_mode &&
                  row.beta == beta]
         sort!(group; by = row -> row.R)
         for p in (1.0, 2.0)
@@ -355,6 +365,7 @@ open(fit_csv, "w") do io
             R_values = join((row.R for row in group), ";")
             err_values = join((row.err for row in group), ";")
             println(io, join((Wi, beta, model, bc_name, drag_mode, hermite_source_mode,
+                              conformation_gradient_mode,
                               p, fit.A, fit.B, fit.rmse, length(group),
                               R_values, err_values), ","))
             @printf("%-8.4g %-8.3f %-8s %-12s %-16s %-8.1f %-14.6g %-14.6g %-14.6g %-4d\n",

@@ -9,6 +9,8 @@ cd $PBS_O_WORKDIR
 
 export PATH="$HOME/.juliaup/bin:$PATH"
 export JULIA_CUDA_USE_COMPAT=false
+# Default reproduces Liu/CNEBB. Uncomment to compare the production wall fix:
+# export KRAKEN_LIU_VARIANTS=cnebb_wall_aware,extrap_eq_embedded,extrap_eq_wallfit4
 
 nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
 julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'

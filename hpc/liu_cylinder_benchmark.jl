@@ -4,7 +4,7 @@
 #   - Fused TRT + Bouzidi LI-BB V2 for the solvent flow (curved cylinder)
 #   - Modular BCSpec: ZouHeVelocity(Poiseuille) inlet + ZouHePressure outlet
 #   - Mei-consistent MEA drag on cut-link q_wall
-#   - TRT conformation LBM + CNEBB + Hermite stress source
+#   - TRT conformation LBM + selectable polymer wall BC + Hermite stress source
 #
 # Liu setup (Table 3, CNEBB, Sc=10⁴):
 #   - Domain 30R × 4R, cylinder at (15R, 2R), B = 0.5
@@ -17,12 +17,39 @@
 #   Wi=0.5 → Cd ≈ 126.31
 #   Wi=1.0 → Cd ≈ 151.31
 #
-# Usage: julia --project=. hpc/liu_cylinder_benchmark.jl
+# Usage:
+#   julia --project=. hpc/liu_cylinder_benchmark.jl
+#   KRAKEN_LIU_VARIANTS=cnebb_wall_aware,extrap_eq_wallfit4 \
+#       julia --project=. hpc/liu_cylinder_benchmark.jl
 
 using Kraken, Printf, CUDA
 
 backend = CUDABackend()
 FT = Float64
+
+function _parse_list(::Type{T}, raw::AbstractString) where {T}
+    return [parse(T, strip(x)) for x in split(raw, ',') if !isempty(strip(x))]
+end
+
+function _parse_symbol_list(raw::AbstractString)
+    return [Symbol(strip(x)) for x in split(raw, ',') if !isempty(strip(x))]
+end
+
+function _liu_variant(name::Symbol)
+    name === :cnebb_wall_aware &&
+        return (; label="CNEBB/wall_aware", bc=CNEBB(), gradient=:wall_aware)
+    name === :cnebb_embedded &&
+        return (; label="CNEBB/embedded_axis", bc=CNEBB(), gradient=:embedded_axis)
+    name === :cnebb_wallfit4 &&
+        return (; label="CNEBB/wallfit4", bc=CNEBB(), gradient=:wallfit4)
+    name === :extrap_eq_embedded &&
+        return (; label="ExtrapEq/embedded_axis", bc=ExtrapEqWallBC(),
+                  gradient=:embedded_axis)
+    name === :extrap_eq_wallfit4 &&
+        return (; label="ExtrapEq/wallfit4", bc=ExtrapEqWallBC(),
+                  gradient=:wallfit4)
+    error("unknown Liu benchmark variant $(name); expected cnebb_wall_aware, cnebb_embedded, cnebb_wallfit4, extrap_eq_embedded, or extrap_eq_wallfit4")
+end
 
 println("="^70)
 println("Liu et al. 2025 cylinder benchmark — LI-BB V2 driver")
@@ -35,12 +62,24 @@ liu_ref = Dict(
     (30, 0.1) => 130.36, (30, 0.5) => 126.31, (30, 1.0) => 151.31,
 )
 
-for R in [20, 30]
+R_values = _parse_list(Int, get(ENV, "KRAKEN_R_LIST", "20,30"))
+Wi_values = _parse_list(Float64, get(ENV, "KRAKEN_WI_LIST", "0.001,0.1,0.5,1.0"))
+variants = [_liu_variant(name) for name in
+            _parse_symbol_list(get(ENV, "KRAKEN_LIU_VARIANTS", "cnebb_wall_aware"))]
+β = parse(Float64, get(ENV, "KRAKEN_BETA", "0.59"))
+u_mean = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.02"))
+steps_low_wi = parse(Int, get(ENV, "KRAKEN_STEPS_LOW_WI", "100000"))
+steps = parse(Int, get(ENV, "KRAKEN_STEPS", "200000"))
+avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR", "5"))
+
+println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
+println("VARIANTS=$(join((v.label for v in variants), ","))")
+println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps")
+
+for R in R_values
     # Liu uses Re = U_avg · R / ν → solve for ν_total given u_mean, R, Re
-    # Then split ν_s, ν_p with β = 0.59
+    # Then split ν_s, ν_p with β.
     Re_target = 1.0
-    β = 0.59
-    u_mean = 0.02   # keeps ω_s in [0.5, 1.5] safely
     ν_total = u_mean * R / Re_target
     ν_s = β * ν_total
     ν_p = (1 - β) * ν_total
@@ -50,14 +89,15 @@ for R in [20, 30]
     cy = 2 * R
 
     println("\n>>> R = $R  (Nx=$Nx, Ny=$Ny, ν_s=$ν_s, ν_p=$ν_p)")
-    @printf("%-6s %-10s %-10s %-8s\n", "Wi", "Cd_sim", "Cd_Liu", "err%")
-    println("-"^38)
+    @printf("%-22s %-6s %-10s %-10s %-8s %-14s\n",
+            "variant", "Wi", "Cd_sim", "Cd_Liu", "err%", "gradient")
+    println("-"^76)
 
-    for Wi in [0.001, 0.1, 0.5, 1.0]
+    for variant in variants, Wi in Wi_values
         # Liu: Wi = λ · U_c / R with U_c = U_avg = u_mean
         λ = Wi * R / u_mean
-        max_steps = Wi < 0.01 ? 100_000 : 200_000
-        avg_window = max_steps ÷ 5
+        max_steps = Wi < 0.01 ? steps_low_wi : steps
+        avg_window = max_steps ÷ avg_divisor
 
         t0 = time()
         r = run_conformation_cylinder_libb_2d(;
@@ -65,13 +105,15 @@ for R in [20, 30]
                 u_mean=u_mean, ν_s=ν_s, ν_p=ν_p, lambda=λ, tau_plus=1.0,
                 inlet=:parabolic, ρ_out=1.0,
                 max_steps=max_steps, avg_window=avg_window,
+                polymer_bc=variant.bc,
+                conformation_gradient_mode=variant.gradient,
                 backend=backend, FT=FT)
         dt = time() - t0
 
         ref = get(liu_ref, (R, Wi), NaN)
         err = isnan(ref) ? NaN : (r.Cd - ref) / ref * 100
-        @printf("%-6.3f %-10.3f %-10.3f %-8.2f  (%.0fs)\n",
-                Wi, r.Cd, ref, err, dt)
+        @printf("%-22s %-6.3f %-10.3f %-10.3f %-8.2f %-14s (%.0fs)\n",
+                variant.label, Wi, r.Cd, ref, err, string(variant.gradient), dt)
     end
 end
 
