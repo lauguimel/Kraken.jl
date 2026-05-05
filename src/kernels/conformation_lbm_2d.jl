@@ -1,4 +1,5 @@
 using KernelAbstractions
+using LinearAlgebra
 
 # --- Conformation tensor LBM (TRT, D2Q9) for viscoelastic flows ---
 #
@@ -60,6 +61,354 @@ end
     else
         return zero(T)
     end
+end
+
+struct ConformationGradientStencils2D{CT,DI,DJ,WI,WJ,WQ,IW,COUNT,FB}
+    coeff::CT
+    di::DI
+    dj::DJ
+    wall_i::WI
+    wall_j::WJ
+    wall_q::WQ
+    is_wall::IW
+    count::COUNT
+    fallback::FB
+    max_terms::Int
+    mode::Symbol
+end
+
+function _upload_gradient_stencil_array(backend, a)
+    b = KernelAbstractions.allocate(backend, eltype(a), size(a)...)
+    copyto!(b, a)
+    return b
+end
+
+function _push_gradient_stencil_term!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                      is_wall, count, i, j, axis, c, δi, δj,
+                                      wi, wj, wq, wall_term::Bool, max_terms)
+    abs(c) > 0 || return nothing
+    slot = Int(count[i, j, axis]) + 1
+    slot <= max_terms ||
+        error("conformation gradient stencil exceeded max_terms=$(max_terms)")
+    coeff[i, j, axis, slot] = c
+    di[i, j, axis, slot] = Int32(δi)
+    dj[i, j, axis, slot] = Int32(δj)
+    wall_i[i, j, axis, slot] = Int32(wi)
+    wall_j[i, j, axis, slot] = Int32(wj)
+    wall_q[i, j, axis, slot] = Int32(wq)
+    is_wall[i, j, axis, slot] = wall_term
+    count[i, j, axis] = Int32(slot)
+    return nothing
+end
+
+function _wall_aware_axis_terms_2d(is_solid, i, j, Nx, Ny, axis::Int)
+    if axis == 1
+        plus_ok = i < Nx && !is_solid[i + 1, j]
+        minus_ok = i > 1 && !is_solid[i - 1, j]
+        plus2_ok = i < Nx - 1 && plus_ok && !is_solid[i + 2, j]
+        minus2_ok = i > 2 && minus_ok && !is_solid[i - 2, j]
+        plus_ok && minus_ok && return ((0.5, 1, 0), (-0.5, -1, 0))
+        plus2_ok && return ((-1.5, 0, 0), (2.0, 1, 0), (-0.5, 2, 0))
+        minus2_ok && return ((1.5, 0, 0), (-2.0, -1, 0), (0.5, -2, 0))
+        plus_ok && return ((-1.0, 0, 0), (1.0, 1, 0))
+        minus_ok && return ((1.0, 0, 0), (-1.0, -1, 0))
+    else
+        plus_ok = j < Ny && !is_solid[i, j + 1]
+        minus_ok = j > 1 && !is_solid[i, j - 1]
+        plus2_ok = j < Ny - 1 && plus_ok && !is_solid[i, j + 2]
+        minus2_ok = j > 2 && minus_ok && !is_solid[i, j - 2]
+        plus_ok && minus_ok && return ((0.5, 0, 1), (-0.5, 0, -1))
+        plus2_ok && return ((-1.5, 0, 0), (2.0, 0, 1), (-0.5, 0, 2))
+        minus2_ok && return ((1.5, 0, 0), (-2.0, 0, -1), (0.5, 0, -2))
+        plus_ok && return ((-1.0, 0, 0), (1.0, 0, 1))
+        minus_ok && return ((1.0, 0, 0), (-1.0, 0, -1))
+    end
+    return ()
+end
+
+function _fill_wall_aware_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                        is_wall, count, fallback,
+                                        is_solid, i, j, Nx, Ny, axis,
+                                        ::Type{T}, max_terms) where {T}
+    fallback[i, j, axis] = true
+    for (c, δi, δj) in _wall_aware_axis_terms_2d(is_solid, i, j, Nx, Ny, axis)
+        _push_gradient_stencil_term!(
+            coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+            i, j, axis, T(c), δi, δj, 0, 0, 0, false, max_terms,
+        )
+    end
+    return nothing
+end
+
+function _derivative_rhs_weights_at_zero_2d(positions, ::Type{T}) where {T}
+    n = length(positions)
+    if n >= 2
+        rows = T[]
+        for s in positions
+            push!(rows, T(s))
+            push!(rows, T(s) * T(s))
+        end
+        A = transpose(reshape(rows, 2, n))
+        return vec((A \ Matrix{T}(LinearAlgebra.I, n, n))[1, :])
+    elseif n == 1
+        return T[one(T) / T(positions[1])]
+    else
+        return T[]
+    end
+end
+
+function _fill_embedded_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                      is_wall, count, is_solid, q_wall,
+                                      i, j, Nx, Ny, axis, ::Type{T},
+                                      max_terms) where {T}
+    samples = NamedTuple[]
+    dirs = axis == 1 ? ((2, 1.0), (4, -1.0)) : ((3, 1.0), (5, -1.0))
+    for (q, sfluid) in dirs
+        cx = Int(_D2Q9_CX[q])
+        cy = Int(_D2Q9_CY[q])
+        ii = i + cx
+        jj = j + cy
+        if 1 <= ii <= Nx && 1 <= jj <= Ny && !is_solid[ii, jj]
+            push!(samples, (s=T(sfluid), is_wall=false,
+                            di=cx, dj=cy, wi=0, wj=0, wq=0))
+        elseif q_wall[i, j, q] > 0
+            push!(samples, (s=T(sfluid) * T(q_wall[i, j, q]),
+                            is_wall=true, di=0, dj=0,
+                            wi=i, wj=j, wq=q))
+        end
+    end
+
+    weights = _derivative_rhs_weights_at_zero_2d(
+        [sample.s for sample in samples], T,
+    )
+    _push_gradient_stencil_term!(
+        coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+        i, j, axis, -sum(weights), 0, 0, 0, 0, 0, false, max_terms,
+    )
+    for (weight, sample) in zip(weights, samples)
+        _push_gradient_stencil_term!(
+            coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+            i, j, axis, weight, sample.di, sample.dj,
+            sample.wi, sample.wj, sample.wq, sample.is_wall, max_terms,
+        )
+    end
+    return nothing
+end
+
+function _polyfit_features_conformation_2d(dx, dy, degree::Int)
+    if degree == 4
+        return [
+            dx, dy,
+            0.5 * dx^2, dx * dy, 0.5 * dy^2,
+            dx^3 / 6, 0.5 * dx^2 * dy, 0.5 * dx * dy^2, dy^3 / 6,
+            dx^4 / 24, dx^3 * dy / 6, 0.25 * dx^2 * dy^2,
+            dx * dy^3 / 6, dy^4 / 24,
+        ]
+    elseif degree == 3
+        return [
+            dx, dy,
+            0.5 * dx^2, dx * dy, 0.5 * dy^2,
+            dx^3 / 6, 0.5 * dx^2 * dy, 0.5 * dx * dy^2, dy^3 / 6,
+        ]
+    else
+        error("unsupported conformation gradient polynomial degree $(degree)")
+    end
+end
+
+function _fill_wallfit_stencils!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                 is_wall, count, fallback, is_solid, q_wall,
+                                 i, j, Nx, Ny, degree, radius, wall_weight,
+                                 ::Type{T}, max_terms) where {T}
+    ncoef = length(_polyfit_features_conformation_2d(one(T), zero(T), degree))
+    rows = T[]
+    samples = NamedTuple[]
+    x0 = T(i - 1)
+    y0 = T(j - 1)
+
+    for δj in -radius:radius, δi in -radius:radius
+        ii = i + δi
+        jj = j + δj
+        1 <= ii <= Nx && 1 <= jj <= Ny || continue
+        is_solid[ii, jj] && continue
+        δi^2 + δj^2 <= radius^2 || continue
+
+        if !(δi == 0 && δj == 0)
+            dist2 = δi^2 + δj^2
+            rhs_scale = sqrt(one(T) / T(max(1, dist2)))
+            append!(rows, rhs_scale .* _polyfit_features_conformation_2d(
+                T(δi), T(δj), degree,
+            ))
+            push!(samples, (is_wall=false, di=δi, dj=δj,
+                            wi=0, wj=0, wq=0, rhs_scale=rhs_scale))
+        end
+
+        for q in 2:9
+            qw = q_wall[ii, jj, q]
+            qw > 0 || continue
+            wx = T(ii - 1) + T(qw) * T(_D2Q9_CX[q])
+            wy = T(jj - 1) + T(qw) * T(_D2Q9_CY[q])
+            dx = wx - x0
+            dy = wy - y0
+            dx^2 + dy^2 <= T(radius + 0.5)^2 || continue
+            rhs_scale = sqrt(T(wall_weight) / max(T(0.25), dx^2 + dy^2))
+            append!(rows, rhs_scale .* _polyfit_features_conformation_2d(
+                dx, dy, degree,
+            ))
+            push!(samples, (is_wall=true, di=0, dj=0,
+                            wi=ii, wj=jj, wq=q, rhs_scale=rhs_scale))
+        end
+    end
+
+    nrows = length(samples)
+    if nrows < ncoef
+        _fill_wall_aware_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                       is_wall, count, fallback, is_solid,
+                                       i, j, Nx, Ny, 1, T, max_terms)
+        _fill_wall_aware_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                       is_wall, count, fallback, is_solid,
+                                       i, j, Nx, Ny, 2, T, max_terms)
+        return nothing
+    end
+
+    A = transpose(reshape(rows, ncoef, nrows))
+    if LinearAlgebra.rank(A) < ncoef
+        _fill_wall_aware_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                       is_wall, count, fallback, is_solid,
+                                       i, j, Nx, Ny, 1, T, max_terms)
+        _fill_wall_aware_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                       is_wall, count, fallback, is_solid,
+                                       i, j, Nx, Ny, 2, T, max_terms)
+        return nothing
+    end
+
+    weights = A \ Matrix{T}(LinearAlgebra.I, nrows, nrows)
+    for axis in 1:2
+        center_coeff = zero(T)
+        row = axis
+        for (weight, sample) in zip(vec(weights[row, :]), samples)
+            c = weight * sample.rhs_scale
+            center_coeff -= c
+            _push_gradient_stencil_term!(
+                coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+                i, j, axis, c, sample.di, sample.dj,
+                sample.wi, sample.wj, sample.wq, sample.is_wall, max_terms,
+            )
+        end
+        _push_gradient_stencil_term!(
+            coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+            i, j, axis, center_coeff, 0, 0, 0, 0, 0, false, max_terms,
+        )
+    end
+    return nothing
+end
+
+function precompute_conformation_gradient_stencils_2d(
+        is_solid, q_wall; mode::Symbol=:embedded_axis,
+        max_terms::Union{Nothing,Integer}=nothing, degree::Int=4,
+        radius::Int=3, wall_weight::Real=16.0,
+        backend=KernelAbstractions.CPU(), FT=eltype(q_wall))
+    mode in (:embedded_axis, :wallfit4) ||
+        error("unknown conformation gradient stencil mode $(mode); expected :embedded_axis or :wallfit4")
+    Nx, Ny, _ = size(q_wall)
+    slots = Int(something(max_terms, mode === :wallfit4 ? 64 : 4))
+    coeff = zeros(FT, Nx, Ny, 2, slots)
+    di = zeros(Int32, Nx, Ny, 2, slots)
+    dj = zeros(Int32, Nx, Ny, 2, slots)
+    wall_i = zeros(Int32, Nx, Ny, 2, slots)
+    wall_j = zeros(Int32, Nx, Ny, 2, slots)
+    wall_q = zeros(Int32, Nx, Ny, 2, slots)
+    is_wall = falses(Nx, Ny, 2, slots)
+    count = zeros(Int32, Nx, Ny, 2)
+    fallback = falses(Nx, Ny, 2)
+
+    @inbounds for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        if mode === :embedded_axis
+            _fill_embedded_axis_stencil!(
+                coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+                is_solid, q_wall, i, j, Nx, Ny, 1, FT, slots,
+            )
+            _fill_embedded_axis_stencil!(
+                coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+                is_solid, q_wall, i, j, Nx, Ny, 2, FT, slots,
+            )
+        else
+            _fill_wallfit_stencils!(
+                coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
+                fallback, is_solid, q_wall, i, j, Nx, Ny, degree, radius,
+                wall_weight, FT, slots,
+            )
+        end
+    end
+
+    return ConformationGradientStencils2D(
+        _upload_gradient_stencil_array(backend, coeff),
+        _upload_gradient_stencil_array(backend, di),
+        _upload_gradient_stencil_array(backend, dj),
+        _upload_gradient_stencil_array(backend, wall_i),
+        _upload_gradient_stencil_array(backend, wall_j),
+        _upload_gradient_stencil_array(backend, wall_q),
+        _upload_gradient_stencil_array(backend, is_wall),
+        _upload_gradient_stencil_array(backend, count),
+        _upload_gradient_stencil_array(backend, fallback),
+        slots,
+        mode,
+    )
+end
+
+function conformation_gradient_stencil_stats_2d(stencils::ConformationGradientStencils2D)
+    count = Array(stencils.count)
+    is_wall = Array(stencils.is_wall)
+    fallback = Array(stencils.fallback)
+    Nx, Ny, _, _ = size(is_wall)
+    max_count = 0
+    max_wall_count = 0
+    fallback_count = 0
+    @inbounds for axis in 1:2, j in 1:Ny, i in 1:Nx
+        n = Int(count[i, j, axis])
+        max_count = max(max_count, n)
+        nw = 0
+        for slot in 1:n
+            nw += is_wall[i, j, axis, slot] ? 1 : 0
+        end
+        max_wall_count = max(max_wall_count, nw)
+        fallback_count += fallback[i, j, axis] ? 1 : 0
+    end
+    return (; max_count, max_wall_count, fallback_count,
+              max_terms=stencils.max_terms, mode=stencils.mode)
+end
+
+@inline function _conformation_gradient_from_stencil_2d(
+        a, uwall, stencils::ConformationGradientStencils2D, i, j,
+        axis::Int, ::Type{T}) where {T}
+    value = zero(T)
+    n = Int(stencils.count[i, j, axis])
+    @inbounds for slot in 1:n
+        c = T(stencils.coeff[i, j, axis, slot])
+        if stencils.is_wall[i, j, axis, slot]
+            wi = Int(stencils.wall_i[i, j, axis, slot])
+            wj = Int(stencils.wall_j[i, j, axis, slot])
+            wq = Int(stencils.wall_q[i, j, axis, slot])
+            value += c * T(uwall[wi, wj, wq])
+        else
+            ii = i + Int(stencils.di[i, j, axis, slot])
+            jj = j + Int(stencils.dj[i, j, axis, slot])
+            value += c * T(a[ii, jj])
+        end
+    end
+    return value
+end
+
+function conformation_velocity_gradient_from_stencils_2d(
+        ux, uy, uwx, uwy, stencils::ConformationGradientStencils2D, i, j)
+    T = promote_type(eltype(ux), eltype(uy), eltype(uwx), eltype(uwy),
+                     eltype(stencils.coeff))
+    return (;
+        dudx = _conformation_gradient_from_stencil_2d(ux, uwx, stencils, i, j, 1, T),
+        dudy = _conformation_gradient_from_stencil_2d(ux, uwx, stencils, i, j, 2, T),
+        dvdx = _conformation_gradient_from_stencil_2d(uy, uwy, stencils, i, j, 1, T),
+        dvdy = _conformation_gradient_from_stencil_2d(uy, uwy, stencils, i, j, 2, T),
+    )
 end
 
 @inline function conformation_source_2d(cxx::T, cxy::T, cyy::T,

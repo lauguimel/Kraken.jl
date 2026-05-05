@@ -4384,6 +4384,21 @@ function _gradient_coeff_stencil_shape_stats(mode::Symbol)
               max_rank, fallback_count)
 end
 
+function _curved_couette_wall_velocity_arrays(p)
+    uwx = zeros(Float64, p.Nx, p.Ny, 9)
+    uwy = zeros(Float64, p.Nx, p.Ny, 9)
+    for q in 2:9, j in 1:p.Ny, i in 1:p.Nx
+        qw = p.q_wall[i, j, q]
+        qw > 0.0 || continue
+        wx = (i - 1.0) + qw * D2Q9_CX[q]
+        wy = (j - 1.0) + qw * D2Q9_CY[q]
+        uw = _couette_wall_velocity(wx, wy, p)
+        uwx[i, j, q] = uw.ux
+        uwy[i, j, q] = uw.uy
+    end
+    return uwx, uwy
+end
+
 function _collide_scalar_cde_state_test_gradient!(
         g, C_field, ux, uy, Cxx, Cxy, Cyy, is_solid, λ, component, p,
         gradient_mode::Symbol)
@@ -5154,5 +5169,58 @@ end
         @test isapprox(coeff_cde.max_cut, direct_cde.max_cut; atol=1e-12, rtol=0.0)
         @test isapprox(coeff_cde.max_near, direct_cde.max_near; atol=1e-12, rtol=0.0)
         @test isapprox(coeff_cde.max_far, direct_cde.max_far; atol=1e-12, rtol=0.0)
+    end
+end
+
+@testset "P18l prototype extrap-eq BC: M9 production gradient stencils reproduce prototypes" begin
+    p = _curved_couette_oldroydb_patch()
+    uwx, uwy = _curved_couette_wall_velocity_arrays(p)
+    cases = (
+        (; prod_mode=:embedded_axis, test_mode=:embedded_axis_coeff,
+           max_terms=4, max_cut=1e-4),
+        (; prod_mode=:wallfit4, test_mode=:wallfit4_coeff,
+           max_terms=64, max_cut=5e-5),
+    )
+
+    for case in cases
+        stencils = Kraken.precompute_conformation_gradient_stencils_2d(
+            p.is_solid, p.q_wall; mode=case.prod_mode,
+            max_terms=case.max_terms, FT=Float64,
+        )
+        stats = Kraken.conformation_gradient_stencil_stats_2d(stencils)
+        source = _curved_couette_source_residual_stats(
+            ; gradient_mode=case.test_mode,
+        )
+
+        max_dudx = 0.0
+        max_dudy = 0.0
+        max_dvdx = 0.0
+        max_dvdy = 0.0
+        active_fallback_count = 0
+        for j in 1:p.Ny, i in 1:p.Nx
+            p.is_solid[i, j] && continue
+            hypot((i - 1.0) - p.cx, (j - 1.0) - p.cy) < p.Ro || continue
+            active_fallback_count += stencils.fallback[i, j, 1] ? 1 : 0
+            active_fallback_count += stencils.fallback[i, j, 2] ? 1 : 0
+            prod = Kraken.conformation_velocity_gradient_from_stencils_2d(
+                p.ux, p.uy, uwx, uwy, stencils, i, j,
+            )
+            ref = _test_velocity_gradient(
+                p.ux, p.uy, p.is_solid, i, j, p.Nx, p.Ny, p, case.test_mode,
+            )
+            max_dudx = max(max_dudx, abs(prod.dudx - ref.dudx))
+            max_dudy = max(max_dudy, abs(prod.dudy - ref.dudy))
+            max_dvdx = max(max_dvdx, abs(prod.dvdx - ref.dvdx))
+            max_dvdy = max(max_dvdy, abs(prod.dvdy - ref.dvdy))
+        end
+
+        case.prod_mode === :embedded_axis && @test stats.fallback_count == 0
+        @test active_fallback_count == 0
+        @test stats.max_count <= case.max_terms
+        @test source.max_cut_source < case.max_cut
+        @test max_dudx < 1e-12
+        @test max_dudy < 1e-12
+        @test max_dvdx < 1e-12
+        @test max_dvdy < 1e-12
     end
 end
