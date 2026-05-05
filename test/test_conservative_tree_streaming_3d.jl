@@ -257,6 +257,42 @@ end
         @test isapprox(active_mass_F_3d(coarse, patch), mass0; atol=1e-10, rtol=0)
     end
 
+    @testset "periodic x wall yz solid cube conserves 3D mass" begin
+        patch = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        patch_next = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
+        topology_solid = create_conservative_tree_topology_3d(Nx, Ny, Nz, patch)
+        coarse = zeros(Float64, Nx, Ny, Nz, 19)
+        coarse_next = similar(coarse)
+        is_solid = falses(2 * Nx, 2 * Ny, 2 * Nz)
+        is_solid[6:7, 8:9, 4:5] .= true
+
+        for k in axes(coarse, 3), j in axes(coarse, 2), i in axes(coarse, 1)
+            if !(i in patch.parent_i_range &&
+                 j in patch.parent_j_range &&
+                 k in patch.parent_k_range)
+                fill_equilibrium_integrated_D3Q19!(
+                    @view(coarse[i, j, k, :]), 1.0, 1.0, 0.0, 0.0, 0.0)
+            end
+        end
+        fill_equilibrium_integrated_D3Q19!(patch.fine_F, 0.125, 1.0, 0.0, 0.0, 0.0)
+        patch.fine_F[2:3, 2:3, 2:3, :] .= 0
+        coalesce_patch_to_shadow_F_3d!(patch)
+        mass0 = active_mass_F_3d(coarse, patch)
+
+        for _ in 1:12
+            Kraken.collide_Guo_composite_solid_F_3d!(
+                coarse, patch, topology_solid, is_solid,
+                1.0, 0.125, 1.0, 1.0, 0.0, 0.0, 0.0)
+            Kraken.stream_composite_routes_periodic_x_wall_yz_solid_F_3d!(
+                coarse_next, patch_next, coarse, patch, topology_solid, is_solid)
+            coarse, coarse_next = coarse_next, coarse
+            patch, patch_next = patch_next, patch
+        end
+
+        @test isapprox(active_mass_F_3d(coarse, patch), mass0; atol=1e-10, rtol=0)
+        @test all(isfinite, active_momentum_F_3d(coarse, patch))
+    end
+
     @testset "route-native 3D fixed-patch forced channel accelerates conservatively" begin
         result = Kraken.run_conservative_tree_poiseuille_route_native_3d(; steps=80)
 

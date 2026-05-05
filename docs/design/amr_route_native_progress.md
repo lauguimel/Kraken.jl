@@ -508,6 +508,10 @@ Validated canaries:
   and leaves only x-direction coarse/fine interfaces. On the default domain it
   uses `2:7 x 1:8 x 1:6`, reduces the 80-step relative `linf` profile gap to
   `0.231`, and keeps mass drift at `1.41e-14`;
+- a 3D solid-mask route canary now covers a solid cube fully contained in the
+  refined patch under periodic-x/wall-yz routing. This gate currently asserts
+  mass conservation and finite momentum only; it is not a 3D drag or sphere
+  accuracy claim;
 - the same runner has a short Float32 compile/run canary;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.

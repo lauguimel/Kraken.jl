@@ -66,7 +66,9 @@ Required 3D validation sequence:
 4. periodic-x plus stationary y/z wall routing wraps and bounces both coarse
    and fine packets;
 5. fixed-patch D3Q19 forced-channel smoke remains finite, accelerates only in
-   x, and conserves active mass to roundoff.
+   x, and conserves active mass to roundoff;
+6. 3D solid-mask route canary conserves mass for a solid cube fully contained
+   in the refined patch.
 
 Local baseline recorded in
 `benchmarks/results/amr_obstacle_convergence_2d_local_interface_buffered_20260505.csv`:
@@ -115,7 +117,9 @@ passes.
 Do not claim 3D obstacle or sphere AMR yet. The current 3D gate is a
 fixed-patch D3Q19 channel smoke plus exact full-patch dense-oracle parity. The
 local-patch profile gap must be reduced by subcycling or a matched
-coarse/fine-time oracle before a 3D profile-level accuracy claim.
+coarse/fine-time oracle before a 3D profile-level accuracy claim. The current
+3D solid-mask canary is a mass-conservation gate only, not a drag or sphere
+accuracy claim.
 
 ## Commands
 

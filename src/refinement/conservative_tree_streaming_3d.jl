@@ -40,6 +40,21 @@ end
     return nothing
 end
 
+@inline function _cell_view_3d(coarse_F::AbstractArray{<:Any,4},
+                               patch::ConservativeTreePatch3D,
+                               cell::ConservativeTreeCell3D)
+    if cell.level == 0
+        return @view coarse_F[cell.i, cell.j, cell.k, :]
+    else
+        i0 = 2 * first(patch.parent_i_range) - 1
+        j0 = 2 * first(patch.parent_j_range) - 1
+        k0 = 2 * first(patch.parent_k_range) - 1
+        return @view patch.fine_F[cell.i - i0 + 1,
+                                  cell.j - j0 + 1,
+                                  cell.k - k0 + 1, :]
+    end
+end
+
 function _check_route_stream_topology_layout_3d(topology::ConservativeTreeTopology3D,
                                                 coarse_F::AbstractArray{<:Any,4},
                                                 patch::ConservativeTreePatch3D)
@@ -72,6 +87,39 @@ function _check_route_stream_topology_layout_3d(topology::ConservativeTreeTopolo
     return nothing
 end
 
+function _check_route_solid_mask_layout_3d(topology::ConservativeTreeTopology3D,
+                                           coarse_F::AbstractArray{<:Any,4},
+                                           patch::ConservativeTreePatch3D,
+                                           is_solid::AbstractArray{Bool,3})
+    size(is_solid) == (2 * size(coarse_F, 1),
+                       2 * size(coarse_F, 2),
+                       2 * size(coarse_F, 3)) ||
+        throw(ArgumentError("is_solid must have size (2*Nx, 2*Ny, 2*Nz)"))
+
+    @inbounds for id in topology.active_cells
+        cell = topology.cells[id]
+        cell.level == 1 && continue
+
+        i0 = 2 * cell.i - 1
+        j0 = 2 * cell.j - 1
+        k0 = 2 * cell.k - 1
+        s000 = is_solid[i0, j0, k0]
+        for dk in 0:1, dj in 0:1, di in 0:1
+            is_solid[i0 + di, j0 + dj, k0 + dk] == s000 ||
+                throw(ArgumentError("active coarse cells cannot be partially solid"))
+        end
+    end
+    return nothing
+end
+
+@inline function _cell_is_solid_3d(cell::ConservativeTreeCell3D,
+                                   is_solid::AbstractArray{Bool,3})
+    if cell.level == 0
+        return is_solid[2 * cell.i - 1, 2 * cell.j - 1, 2 * cell.k - 1]
+    end
+    return is_solid[cell.i, cell.j, cell.k]
+end
+
 @inline function _scatter_route_packet_3d!(
         coarse_out::AbstractArray{<:Any,4},
         patch_out::ConservativeTreePatch3D,
@@ -83,6 +131,28 @@ end
         weight)
     packet = _cell_Fq_3d(coarse_in, patch_in, src_cell, q)
     _add_cell_Fq_3d!(coarse_out, patch_out, dst_cell, q, weight * packet)
+    return nothing
+end
+
+@inline function _scatter_solid_route_packet_3d!(
+        coarse_out::AbstractArray{<:Any,4},
+        patch_out::ConservativeTreePatch3D,
+        coarse_in::AbstractArray{<:Any,4},
+        patch_in::ConservativeTreePatch3D,
+        src_cell::ConservativeTreeCell3D,
+        dst_cell::ConservativeTreeCell3D,
+        q::Int,
+        weight,
+        is_solid::AbstractArray{Bool,3})
+    _cell_is_solid_3d(src_cell, is_solid) && return nothing
+
+    packet = _cell_Fq_3d(coarse_in, patch_in, src_cell, q)
+    if _cell_is_solid_3d(dst_cell, is_solid)
+        _add_cell_Fq_3d!(coarse_out, patch_out, src_cell,
+                         d3q19_opposite(q), weight * packet)
+    else
+        _add_cell_Fq_3d!(coarse_out, patch_out, dst_cell, q, weight * packet)
+    end
     return nothing
 end
 
@@ -108,7 +178,8 @@ function _stream_periodic_x_boundary_route_3d!(
         route::ConservativeTreeRoute3D,
         nx::Int,
         ny::Int,
-        nz::Int)
+        nz::Int,
+        is_solid)
     src_cell = topology.cells[route.src]
     q = route.q
     cx = d3q19_cx(q)
@@ -136,16 +207,28 @@ function _stream_periodic_x_boundary_route_3d!(
             @inbounds for spec in specs
                 dst, weight, _ = spec
                 dst_cell = topology.cells[dst]
-                _scatter_route_packet_3d!(coarse_out, patch_out,
-                                           coarse_in, patch_in,
-                                           src_cell, dst_cell, q, weight)
+                if is_solid === nothing
+                    _scatter_route_packet_3d!(coarse_out, patch_out,
+                                               coarse_in, patch_in,
+                                               src_cell, dst_cell, q, weight)
+                else
+                    _scatter_solid_route_packet_3d!(
+                        coarse_out, patch_out, coarse_in, patch_in,
+                        src_cell, dst_cell, q, weight, is_solid)
+                end
             end
         else
             dst = cell_id_by_coord[_tree_topology_key_3d(0, i_dst, j_dst, k_dst)]
             dst_cell = topology.cells[dst]
-            _scatter_route_packet_3d!(coarse_out, patch_out,
-                                      coarse_in, patch_in,
-                                      src_cell, dst_cell, q, route.weight)
+            if is_solid === nothing
+                _scatter_route_packet_3d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          src_cell, dst_cell, q, route.weight)
+            else
+                _scatter_solid_route_packet_3d!(
+                    coarse_out, patch_out, coarse_in, patch_in,
+                    src_cell, dst_cell, q, route.weight, is_solid)
+            end
         end
         return true
     end
@@ -160,16 +243,28 @@ function _stream_periodic_x_boundary_route_3d!(
     if _inside_fine_patch_3d(i_dst, j_dst, k_dst, patch_in)
         dst = cell_id_by_coord[_tree_topology_key_3d(1, i_dst, j_dst, k_dst)]
         dst_cell = topology.cells[dst]
-        _scatter_route_packet_3d!(coarse_out, patch_out,
-                                  coarse_in, patch_in,
-                                  src_cell, dst_cell, q, route.weight)
+        if is_solid === nothing
+            _scatter_route_packet_3d!(coarse_out, patch_out,
+                                      coarse_in, patch_in,
+                                      src_cell, dst_cell, q, route.weight)
+        else
+            _scatter_solid_route_packet_3d!(
+                coarse_out, patch_out, coarse_in, patch_in,
+                src_cell, dst_cell, q, route.weight, is_solid)
+        end
     else
         I_dst, J_dst, K_dst = _coarse_parent_from_fine_3d(i_dst, j_dst, k_dst)
         dst = cell_id_by_coord[_tree_topology_key_3d(0, I_dst, J_dst, K_dst)]
         dst_cell = topology.cells[dst]
-        _scatter_route_packet_3d!(coarse_out, patch_out,
-                                  coarse_in, patch_in,
-                                  src_cell, dst_cell, q, route.weight)
+        if is_solid === nothing
+            _scatter_route_packet_3d!(coarse_out, patch_out,
+                                      coarse_in, patch_in,
+                                      src_cell, dst_cell, q, route.weight)
+        else
+            _scatter_solid_route_packet_3d!(
+                coarse_out, patch_out, coarse_in, patch_in,
+                src_cell, dst_cell, q, route.weight, is_solid)
+        end
     end
     return true
 end
@@ -211,10 +306,14 @@ function _stream_composite_routes_F_3d!(
         patch_in::ConservativeTreePatch3D,
         topology::ConservativeTreeTopology3D,
         boundary_policy::Symbol,
-        clear::Bool)
+        clear::Bool;
+        is_solid=nothing)
     _check_composite_pair_layout_3d(coarse_out, patch_out, coarse_in, patch_in)
     _check_route_stream_topology_layout_3d(topology, coarse_in, patch_in)
     _check_route_stream_topology_layout_3d(topology, coarse_out, patch_out)
+    if is_solid !== nothing
+        _check_route_solid_mask_layout_3d(topology, coarse_in, patch_in, is_solid)
+    end
 
     if clear
         coarse_out .= 0
@@ -231,6 +330,8 @@ function _stream_composite_routes_F_3d!(
     @inbounds for route in topology.routes
         if route.kind == ROUTE_BOUNDARY_3D
             boundary_policy == :skip && continue
+            src_cell = topology.cells[route.src]
+            is_solid !== nothing && _cell_is_solid_3d(src_cell, is_solid) && continue
             boundary_policy in (:periodic_x, :periodic_x_wall_yz) ||
                 throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
             handled = false
@@ -241,14 +342,20 @@ function _stream_composite_routes_F_3d!(
             end
             handled || _stream_periodic_x_boundary_route_3d!(
                 coarse_out, patch_out, coarse_in, patch_in, topology,
-                cell_id_by_coord, route, nx, ny, nz)
+                cell_id_by_coord, route, nx, ny, nz, is_solid)
             continue
         end
 
         src_cell = topology.cells[route.src]
         dst_cell = topology.cells[route.dst]
-        _scatter_route_packet_3d!(coarse_out, patch_out, coarse_in, patch_in,
-                                  src_cell, dst_cell, route.q, route.weight)
+        if is_solid === nothing
+            _scatter_route_packet_3d!(coarse_out, patch_out, coarse_in, patch_in,
+                                      src_cell, dst_cell, route.q, route.weight)
+        else
+            _scatter_solid_route_packet_3d!(
+                coarse_out, patch_out, coarse_in, patch_in,
+                src_cell, dst_cell, route.q, route.weight, is_solid)
+        end
     end
     coalesce_patch_to_shadow_F_3d!(patch_out)
     return coarse_out, patch_out
@@ -300,6 +407,48 @@ function stream_composite_routes_periodic_x_wall_yz_F_3d!(
     return _stream_composite_routes_F_3d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
                                           topology, :periodic_x_wall_yz, clear)
+end
+
+function stream_composite_routes_periodic_x_wall_yz_solid_F_3d!(
+        coarse_out::AbstractArray{<:Any,4},
+        patch_out::ConservativeTreePatch3D,
+        coarse_in::AbstractArray{<:Any,4},
+        patch_in::ConservativeTreePatch3D,
+        topology::ConservativeTreeTopology3D,
+        is_solid::AbstractArray{Bool,3};
+        clear::Bool=true)
+    return _stream_composite_routes_F_3d!(coarse_out, patch_out,
+                                          coarse_in, patch_in,
+                                          topology, :periodic_x_wall_yz, clear;
+                                          is_solid=is_solid)
+end
+
+function collide_Guo_composite_solid_F_3d!(
+        coarse_F::AbstractArray{<:Any,4},
+        patch::ConservativeTreePatch3D,
+        topology::ConservativeTreeTopology3D,
+        is_solid::AbstractArray{Bool,3},
+        volume_coarse,
+        volume_fine,
+        omega_coarse,
+        omega_fine,
+        Fx,
+        Fy,
+        Fz)
+    _check_route_stream_topology_layout_3d(topology, coarse_F, patch)
+    _check_route_solid_mask_layout_3d(topology, coarse_F, patch, is_solid)
+
+    @inbounds for id in topology.active_cells
+        cell = topology.cells[id]
+        _cell_is_solid_3d(cell, is_solid) && continue
+        volume = cell.level == 0 ? volume_coarse : volume_fine
+        omega = cell.level == 0 ? omega_coarse : omega_fine
+        collide_Guo_integrated_D3Q19!(
+            _cell_view_3d(coarse_F, patch, cell),
+            volume, omega, Fx, Fy, Fz)
+    end
+    coalesce_patch_to_shadow_F_3d!(patch)
+    return coarse_F, patch
 end
 
 """
