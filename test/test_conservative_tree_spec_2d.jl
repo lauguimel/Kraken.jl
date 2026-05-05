@@ -204,4 +204,78 @@ using Random
         @test_throws ArgumentError coalesce_conservative_tree_ledgers_F_2d!(
             zeros(length(spec.cells), 8), spec)
     end
+
+    @testset "route table conserves one packet per source direction" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+
+        @test length(table.links) == length(spec.active_cells) * 9
+        @test !isempty(table.direct_routes)
+        @test !isempty(table.coarse_to_fine_links)
+        @test !isempty(table.fine_to_coarse_links)
+        @test !isempty(table.boundary_links)
+
+        route_weights = Dict{Tuple{Int,Int},Float64}()
+        for route in table.routes
+            key = (route.src, route.q)
+            route_weights[key] = get(route_weights, key, 0.0) + route.weight
+            if route.dst != 0
+                src_level = spec.cells[route.src].level
+                dst_level = spec.cells[route.dst].level
+                @test abs(src_level - dst_level) <= 1
+            end
+        end
+        for src in spec.active_cells, q in 1:9
+            @test isapprox(route_weights[(src, q)], 1.0; atol=1e-14, rtol=0)
+        end
+
+        coarse_west = conservative_tree_cell_id_2d(spec, 0, 2, 2)
+        split_routes = [route for route in table.routes
+                        if route.src == coarse_west && route.q == 2]
+        @test any(route.kind == SPLIT_FACE for route in split_routes)
+        @test isapprox(sum(route.weight for route in split_routes),
+                       1.0; atol=1e-14, rtol=0)
+
+        fine_west = conservative_tree_cell_id_2d(spec, 1, 5, 3)
+        coalesce_routes = [route for route in table.routes
+                           if route.src == fine_west && route.q == 4]
+        @test length(coalesce_routes) == 1
+        @test coalesce_routes[1].kind == COALESCE_FACE
+        @test spec.cells[coalesce_routes[1].dst].level == 0
+    end
+
+    @testset "route table handles direct and boundary packets" begin
+        spec = create_conservative_tree_spec_2d(4, 4, ConservativeTreeRefineBlock2D[])
+        table = create_conservative_tree_route_table_2d(spec)
+
+        center = conservative_tree_cell_id_2d(spec, 0, 2, 2)
+        east = conservative_tree_cell_id_2d(spec, 0, 3, 2)
+        east_routes = [route for route in table.routes
+                       if route.src == center && route.q == 2]
+        @test length(east_routes) == 1
+        @test east_routes[1].dst == east
+        @test east_routes[1].kind == DIRECT
+        @test isapprox(east_routes[1].weight, 1.0; atol=1e-14, rtol=0)
+
+        west_boundary_src = conservative_tree_cell_id_2d(spec, 0, 1, 1)
+        west_routes = [route for route in table.routes
+                       if route.src == west_boundary_src && route.q == 4]
+        @test length(west_routes) == 1
+        @test west_routes[1].dst == 0
+        @test west_routes[1].kind == ROUTE_BOUNDARY
+        @test isapprox(west_routes[1].weight, 1.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "route table builds for the existing nested4 cylinder canary" begin
+        setup = load_kraken("benchmarks/krk/amr_d_convergence_2d/cylinder_nested4_probe.krk")
+        spec = create_conservative_tree_spec_from_krk_2d(setup)
+        table = create_conservative_tree_route_table_2d(spec)
+
+        @test length(table.links) == length(spec.active_cells) * 9
+        @test !isempty(table.coarse_to_fine_links)
+        @test !isempty(table.fine_to_coarse_links)
+        @test !isempty(table.interface_routes)
+    end
 end

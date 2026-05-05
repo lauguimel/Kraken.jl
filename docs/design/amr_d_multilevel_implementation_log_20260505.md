@@ -100,15 +100,49 @@ Updated observed result:
 
 - `test_conservative_tree_spec_2d.jl`: 1772 pass.
 
+## ML2 Static Route Table
+
+Implemented static multilevel route-table construction without applying
+streaming.
+
+New public APIs:
+
+- `ConservativeTreeRouteTable2D`;
+- `create_conservative_tree_route_table_2d`.
+
+The route builder:
+
+- loops over active leaves and D2Q9 populations;
+- samples each source cell at one leaf-equivalent level below the source;
+- maps samples back to the active leaf that owns them;
+- accumulates duplicate destination/kind pairs;
+- classifies routes as `DIRECT`, `SPLIT_FACE`, `SPLIT_CORNER`,
+  `COALESCE_FACE`, `COALESCE_CORNER`, or `ROUTE_BOUNDARY`;
+- rejects route construction if a route crosses more than one AMR level.
+
+Additional tests:
+
+- every `(src, q)` route group has total weight 1;
+- direct same-level packet route;
+- boundary packet route;
+- coarse-to-fine face split;
+- fine-to-coarse face coalesce;
+- no non-boundary route crosses more than one level;
+- route table builds for the existing four-level cylinder `.krk` canary.
+
+Updated observed result:
+
+- `test_conservative_tree_spec_2d.jl`: 2868 pass.
+
 ## Next Patch
 
-Next target is ML2: multilevel route table without collision.
+Next target is ML3: stream-only rest-state canary on the route table.
 
-Required before stream/collide:
+Required before collision:
 
-- build same/fine/coarse/boundary route records from active leaves;
-- check route weight conservation for each source packet;
-- reject route construction if a neighbor would cross more than one level;
-- add single-packet same-level, fine-to-coarse, coarse-to-fine, face, corner,
-  and boundary tests;
-- keep runtime dispatch disabled until route-table rest-state tests pass.
+- add a CPU `stream_conservative_tree_routes_F_2d!` over the route table;
+- keep boundary routes explicit and initially skipped or bounced by a test-only
+  policy;
+- verify periodic closed rest state on 1, 2, 3, and 4 levels;
+- verify one-packet scatter for direct, split, coalesce, and boundary routes;
+- keep macro-flow runners disabled until stream-only tests are green.
