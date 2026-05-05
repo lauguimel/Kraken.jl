@@ -167,7 +167,7 @@ using Kraken
                              if route.src == coarse_west &&
                                 route.q == 2 &&
                                 (route.kind == SPLIT_FACE ||
-                                 route.kind == SPLIT_CORNER))
+                                 route.kind == SPLIT_CORNER)) * 2
 
         Kraken.conservative_tree_subcycle_sync_down_routes_F_2d!(
             bank, down, Fin, table)
@@ -192,7 +192,7 @@ using Kraken
             bank, advances[2], Fin, table)
         Kraken.conservative_tree_subcycle_apply_sync_up_F_2d!(
             Fout, bank, up)
-        @test isapprox(Fout[coarse_west, 4], 4.0; atol=1e-14, rtol=0)
+        @test isapprox(Fout[coarse_west, 4], 2.0; atol=1e-14, rtol=0)
     end
 
     @testset "spatial route ledgers recurse over all adjacent pairs" begin

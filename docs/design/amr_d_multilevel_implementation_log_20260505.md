@@ -352,8 +352,7 @@ Contract:
 - one ledger is allocated per refined parent cell, grouped by adjacent level
   pair `L/L+1`;
 - `sync_down` consumes split routes from the static route table and deposits the
-  routed coarse packet fraction into the child slot, split over the fine
-  substeps;
+  routed coarse packet fraction into the child slot;
 - child `advance` events accumulate coalesce routes into the owning parent-cell
   ledger for the correct local substep;
 - child advance injection applies the coarse-to-fine substep contribution to
@@ -363,16 +362,18 @@ Contract:
 
 Important design point:
 
-- the spatial ledger follows the route table weights. With
-  leaf-equivalent coarse routing, a coarse source adjacent to a refined region
-  may split only the fraction of its leaf-equivalent samples that truly enter
-  the fine patch. The ledger must preserve that route-table contract rather
-  than assume that the full source population crosses the interface.
+- the spatial ledger follows the route table topology, but the subcycled
+  transport applies time weights: coarse-to-fine split packets are distributed
+  over the fine substeps, and fine-to-coarse packets are accumulated with
+  `dt_f / dt_c = 1 / ratio` per fine advance. This preserves active mass in the
+  transport skeleton and reduces the local rest residual, while leaving the
+  remaining corner closure visible as a broken canary.
 
 Validated by:
 
 - one `L/L+1` interface deposits coarse-to-fine packets over two child
-  substeps, then accumulates fine-to-coarse packets back to the coarse row;
+  substeps, then accumulates time-weighted fine-to-coarse packets back to the
+  coarse row;
 - a two-level nested tree recursively allocates and uses ledgers for every
   adjacent pair;
 - existing nested route/spec/topology tests remain green.
@@ -429,12 +430,12 @@ Validated by:
 Known open canary:
 
 - local active-leaf rest equality is still broken with max residual
-  approximately `5.56e-2` on the small one-level patch. This is now isolated to
-  the transport skeleton rather than the scheduler or spatial ledger
-  ownership. The failed full-packet experiment confirmed that a naive
-  full-packet coarse-to-fine closure fixes neither mass nor corners; the next
-  patch must solve the residual-on-coarse/interface closure algebra
-  explicitly before collision is enabled.
+  approximately `1.39e-2` on the small one-level patch after time weighting.
+  The remaining mismatch is localized on diagonal corner populations. This is
+  now isolated to the corner closure algebra rather than the scheduler,
+  spatial ownership, or face timing. A naive full-packet coarse-to-fine
+  experiment fixed neither mass nor corners; collision remains disabled until
+  this broken canary is closed.
 
 Observed result:
 

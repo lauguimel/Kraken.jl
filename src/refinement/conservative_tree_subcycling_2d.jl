@@ -419,7 +419,7 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
     ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
     ix, iy = _conservative_tree_child_index_in_parent_2d(parent, child)
     qi = _check_d2q9_q(route.q)
-    packet = _subcycle_route_packet_2d(F, route)
+    packet = ledger.ratio * _subcycle_route_packet_2d(F, route)
 
     @inbounds for substep in 1:ledger.ratio
         ledger.coarse_to_fine[ix, iy, qi, substep] += packet / ledger.ratio
@@ -447,7 +447,8 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
     ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
     step = _check_subcycle_step_2d(ledger, substep)
     qi = _check_d2q9_q(route.q)
-    ledger.fine_to_coarse[qi, step] += _subcycle_route_packet_2d(F, route)
+    ledger.fine_to_coarse[qi, step] +=
+        _subcycle_route_packet_2d(F, route) / ledger.ratio
     return ledger
 end
 
