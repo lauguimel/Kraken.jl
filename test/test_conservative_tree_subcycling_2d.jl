@@ -55,6 +55,100 @@ using Kraken
             schedule, 5)
     end
 
+    @testset "subcycle state buffers keep algorithm roles disjoint" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("outer", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("inner", 7:8, 5:6; parent="outer"),
+        ])
+        bank = Kraken.create_conservative_tree_subcycle_buffer_bank_2d(spec)
+        F = allocate_conservative_tree_F_2d(spec)
+        for cell_id in spec.active_cells, q in 1:9
+            F[cell_id, q] = 10 * spec.cells[cell_id].level + cell_id + q / 10
+        end
+
+        Kraken.conservative_tree_subcycle_store_active_owned_2d!(bank, F)
+        level1_id = first(id for id in spec.active_cells
+                          if spec.cells[id].level == 1)
+        buffers = bank.levels[2]
+        owned_before = buffers.owned[level1_id, 2]
+        buffers.ghost_from_coarse[level1_id, 2] = 7.0
+        buffers.reflux_to_coarse[level1_id, 2] = 3.0
+
+        @test buffers.owned[level1_id, 2] == owned_before
+        Kraken.conservative_tree_subcycle_apply_reflux_to_owned_level_2d!(
+            bank, 1)
+        @test buffers.owned[level1_id, 2] == owned_before + 3.0
+        @test buffers.reflux_to_coarse[level1_id, 2] == 0.0
+        @test buffers.ghost_from_coarse[level1_id, 2] == 7.0
+
+        Frestored = allocate_conservative_tree_F_2d(spec)
+        Kraken.conservative_tree_subcycle_restore_owned_level_2d!(
+            Frestored, bank, 1)
+        @test Frestored[level1_id, 2] == owned_before + 3.0
+        level0_id = first(id for id in spec.active_cells
+                          if spec.cells[id].level == 0)
+        @test Frestored[level0_id, 2] == 0.0
+    end
+
+    @testset "subcycle restriction is conservative bottom-up" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("outer", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("inner", 7:8, 5:6; parent="outer"),
+        ])
+        bank = Kraken.create_conservative_tree_subcycle_buffer_bank_2d(spec)
+        for cell_id in spec.active_cells, q in 1:9
+            level = spec.cells[cell_id].level
+            bank.levels[level + 1].owned[cell_id, q] =
+                cell_id + q / 10 + 100 * level
+        end
+
+        function active_descendant_sum(parent_id, q)
+            children = spec.children[parent_id]
+            if children == (0, 0, 0, 0)
+                cell = spec.cells[parent_id]
+                return cell.active ?
+                    bank.levels[cell.level + 1].owned[parent_id, q] : 0.0
+            end
+            return sum(active_descendant_sum(child_id, q)
+                       for child_id in children)
+        end
+
+        Kraken.conservative_tree_subcycle_restrict_all_levels_2d!(bank)
+        for (cell_id, cell) in pairs(spec.cells)
+            spec.children[cell_id] == (0, 0, 0, 0) && continue
+            buffers = bank.levels[cell.level + 1]
+            for q in 1:9
+                @test buffers.restrict_to_parent[cell_id, q] ==
+                      active_descendant_sum(cell_id, q)
+            end
+        end
+    end
+
+    @testset "subcycle coarse ghosts are conservative and non-owned" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        bank = Kraken.create_conservative_tree_subcycle_buffer_bank_2d(spec)
+        Fparent = allocate_conservative_tree_F_2d(spec)
+        parent_id = conservative_tree_cell_id_2d(spec, 0, 3, 2)
+        children = conservative_tree_children_2d(spec, parent_id)
+        for q in 1:9
+            Fparent[parent_id, q] = 4q
+        end
+
+        Kraken.conservative_tree_subcycle_prolong_F_to_child_ghost_2d!(
+            bank, Fparent, 0)
+        child_buffers = bank.levels[2]
+        for q in 1:9
+            @test sum(child_buffers.ghost_from_coarse[collect(children), q]) ==
+                  Fparent[parent_id, q]
+            @test all(child_buffers.ghost_from_coarse[child_id, q] == q
+                      for child_id in children)
+            @test all(child_buffers.owned[child_id, q] == 0
+                      for child_id in children)
+        end
+    end
+
     @testset "scheduler binds one L/L+1 interface ledger" begin
         schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(1)
         bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)

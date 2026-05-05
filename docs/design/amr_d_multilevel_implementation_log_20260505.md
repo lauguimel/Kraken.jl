@@ -535,3 +535,50 @@ Negative experiments kept out of source:
 - coalescing inactive parent rows before `sync_down` and splitting from those
   rows amplified the nested residual. The route-spatial source of truth must
   remain active-route based until a stricter recursive closure is derived.
+
+## ML4g Algorithm Step-Back And Buffer Contract
+
+The nested subcycling blocker was reclassified as an algorithmic state
+separation problem, not as a local route-weight tuning problem.
+
+New reference document:
+
+- `docs/design/amr_d_subcycling_algorithm.md`.
+
+New internal APIs:
+
+- `ConservativeTreeSubcycleLevelBuffers2D`;
+- `ConservativeTreeSubcycleBufferBank2D`;
+- `create_conservative_tree_subcycle_buffer_bank_2d`;
+- `reset_conservative_tree_subcycle_level_buffers_2d!`;
+- `reset_conservative_tree_subcycle_buffer_bank_2d!`;
+- `conservative_tree_subcycle_store_owned_level_2d!`;
+- `conservative_tree_subcycle_store_active_owned_2d!`;
+- `conservative_tree_subcycle_restore_owned_level_2d!`;
+- `conservative_tree_subcycle_apply_reflux_to_owned_level_2d!`;
+- `conservative_tree_subcycle_restrict_level_2d!`;
+- `conservative_tree_subcycle_restrict_all_levels_2d!`;
+- `conservative_tree_subcycle_prolong_F_to_child_ghost_2d!`.
+
+Contract:
+
+- `owned` is the committed level state;
+- `ghost_from_coarse` is the parent-to-child reconstruction buffer;
+- `reflux_to_coarse` is child-to-parent correction waiting for synchronization;
+- `restrict_to_parent` is the conservative child sum used for bottom-up
+  synchronization.
+
+Important decision:
+
+- the existing transport skeleton is not changed by this patch;
+- the nested rest-state canary remains broken on purpose;
+- the next patch must route the scheduler through these buffers instead of
+  mutating one shared `Fstate` during every phase.
+
+New surgical tests:
+
+- buffer roles are disjoint;
+- reflux is explicit and clearable;
+- bottom-up restriction sums active descendants through nested inactive parents;
+- coarse-to-fine ghost prolongation is conservative and does not touch owned
+  child rows.
