@@ -192,6 +192,14 @@ Aqua runs:
   `benchmarks/results/amr_d_publication_summary_2d_local_D_pub_canary_20260505.csv`.
   Long scale `{1,2,4}` runs belong on aqua via
   `hpc/amr_d_publication_table_2d_aqua.pbs`.
+- `20812821.aqua` completed the D publication table at scales `{1,2,4}` and
+  produced
+  `benchmarks/results/amr_d_publication_summary_2d_aqua_D_pub_20260505_long.csv`.
+  Accuracy closes: AMR cylinder `Cd` relative error is `5.98%`, `5.63%`,
+  `3.63%`, versus coarse Cartesian errors above `500%`. Runtime speedup does
+  not close on CPU: AMR uses `87.5%` of the dense leaf cells but runs at
+  roughly `0.67x-0.75x` leaf speed on the larger cases. See
+  `docs/design/amr_d_closure_report_20260505.md`.
 
 Notes:
 

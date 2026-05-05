@@ -97,6 +97,18 @@ It verifies the reporting path for:
 - cylinder `u`, `Cd`, `Fx/Fy` and mass conservation;
 - elapsed-time, speedup and MLUPS columns.
 
+Publication-table aqua closure recorded in
+`benchmarks/results/amr_d_publication_summary_2d_aqua_D_pub_20260505_long.csv`
+from PBS job `20812821.aqua`. The detailed verdict is in
+`docs/design/amr_d_closure_report_20260505.md`.
+
+Accuracy passes for D: AMR is much closer than coarse Cartesian for square
+`u/v` and cylinder `Cd` on scales `{1,2,4}`.
+
+Runtime speedup does not pass on CPU: AMR uses fewer active cells but is slower
+than the dense leaf oracle in this route-native prototype. Do not claim CPU
+speedup for D.
+
 3D local fixed-patch channel smoke:
 
 - runner: `run_conservative_tree_poiseuille_route_native_3d`;
