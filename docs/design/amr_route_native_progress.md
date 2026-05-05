@@ -173,7 +173,9 @@ Aqua runs:
   from the body. A local short cylinder canary is within 10% of the leaf oracle
   while conserving mass to roundoff
   (`benchmarks/results/amr_obstacle_convergence_2d_local_interface_buffered_smoke.csv`:
-  Cd ratios `1.054x` at scale 1 and `1.032x` at scale 2). This is the
+  Cd ratios `1.029x` at scale 1 and `1.016x` at scale 2). A local 1200/2400
+  step ladder with the widened publication patch gives Cd ratios around
+  `1.060x` at scale 1 and `1.052x` at scale 2. This is the
   publication path for static fixed-patch D; the compact default patch remains
   the stress test for future subcycling.
 

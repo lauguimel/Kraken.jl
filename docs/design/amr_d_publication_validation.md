@@ -28,12 +28,13 @@ interface-buffered patch:
 ```text
 base obstacle domain: Nx=24, Ny=14
 default patch:         8:17 x 4:11
-publication patch:     5:20 x 1:14
+publication patch:     3:22 x 1:14
 ```
 
 The publication patch makes the obstacle and near wake live in a fine,
 wall-to-wall band. The coarse/fine interfaces are moved upstream/downstream
-instead of cutting through the obstacle boundary layer.
+instead of cutting through the obstacle boundary layer, while retaining two
+active coarse columns on each periodic-x side in the base case.
 
 This is not a trick: it is the expected static-AMR usage pattern for body
 flows. A body-fitted or locally refined solver should not place its strongest
@@ -53,6 +54,15 @@ Required local validation sequence:
    oracle on short local canaries;
 8. aqua ladder for square/cylinder scales 1 and 2 with
    `patch_strategy=:interface_buffered`.
+
+Local baseline recorded in
+`benchmarks/results/amr_obstacle_convergence_2d_local_interface_buffered_20260505.csv`:
+
+- cylinder scale 1: route-native Cd/oracle Cd = `1.060x`;
+- cylinder scale 2: route-native Cd/oracle Cd = `1.052x`;
+- square scales 1 and 2: finite positive streamwise velocity and roundoff mass
+  drift;
+- all route-native obstacle rows: relative mass drift below `1e-12`.
 
 ## Limits
 

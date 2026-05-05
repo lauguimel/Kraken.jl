@@ -1641,7 +1641,7 @@ function _conservative_tree_obstacle_patch_ranges_2d(flow::Symbol,
     elseif patch_strategy == :interface_buffered
         if flow == :square || flow == :cylinder
             return (
-                i_range=_scale_parent_range_2d(5:20, scale),
+                i_range=_scale_parent_range_2d(3:22, scale),
                 j_range=1:Ny,
             )
         end
