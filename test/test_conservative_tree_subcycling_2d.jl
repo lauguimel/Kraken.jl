@@ -237,6 +237,51 @@ using Kraken
         @test sum(Fout) > 0
     end
 
+    @testset "subcycled transport matches route scatter without refinement" begin
+        spec = create_conservative_tree_spec_2d(
+            4, 4, ConservativeTreeRefineBlock2D[])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Froute = allocate_conservative_tree_F_2d(spec)
+        Fsub = allocate_conservative_tree_F_2d(spec)
+        for cell_id in spec.active_cells
+            for q in 1:9
+                Fin[cell_id, q] = cell_id + q / 10
+            end
+        end
+
+        stream_conservative_tree_routes_F_2d!(
+            Froute, Fin, spec, table; boundary=:bounceback)
+        Kraken.stream_conservative_tree_subcycled_routes_F_2d!(
+            Fsub, Fin, spec, table; boundary=:bounceback)
+        @test Fsub == Froute
+    end
+
+    @testset "single-level subcycled transport preserves closed rest mass" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:bounceback)
+
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
+                                  Fin[spec.active_cells, :])) <= 1e-14
+    end
+
     @testset "scheduled ledger binding rejects wrong events" begin
         schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(2)
         bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)

@@ -398,3 +398,44 @@ Next implementation patch:
   scatter from interface route ledgers;
 - keep collision disabled until the transport-only rest-state canary is green;
 - then add BGK/Guo active-leaf collision and channel patch tests.
+
+## ML4c Reference Subcycled Transport Skeleton
+
+Added a CPU matrix reference transport driven by the recursive schedule.
+
+New internal API:
+
+- `stream_conservative_tree_subcycled_routes_F_2d!`.
+
+Contract:
+
+- `max_level = 0` delegates to the existing one-shot route scatter;
+- each `:advance` event scatters only direct/boundary routes whose source cell
+  belongs to the event level;
+- split routes are collected on `:sync_down` into the spatial ledgers;
+- child advance events inject the relevant coarse-to-fine substep into the
+  child-level output rows;
+- child advance events also accumulate coalesce routes into the owning
+  parent-cell ledger;
+- `:sync_up` applies fine-to-coarse packets into a pending parent-level output
+  buffer so they are not streamed a second time by the parent advance.
+
+Validated by:
+
+- no-refinement subcycled transport is exactly equal to
+  `stream_conservative_tree_routes_F_2d!`;
+- one-level closed rest state conserves active mass to roundoff.
+
+Known open canary:
+
+- local active-leaf rest equality is still broken with max residual
+  approximately `5.56e-2` on the small one-level patch. This is now isolated to
+  the transport skeleton rather than the scheduler or spatial ledger
+  ownership. The failed full-packet experiment confirmed that a naive
+  full-packet coarse-to-fine closure fixes neither mass nor corners; the next
+  patch must solve the residual-on-coarse/interface closure algebra
+  explicitly before collision is enabled.
+
+Observed result:
+
+- `test_conservative_tree_subcycling_2d.jl`: 182 pass, 1 broken.
