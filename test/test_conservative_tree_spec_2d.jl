@@ -278,4 +278,75 @@ using Random
         @test !isempty(table.fine_to_coarse_links)
         @test !isempty(table.interface_routes)
     end
+
+    @testset "route streaming scatters direct split and coalesce packets" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+
+        coarse_west = conservative_tree_cell_id_2d(spec, 0, 2, 2)
+        Fin[coarse_west, 2] = 4.0
+        stream_conservative_tree_routes_F_2d!(Fout, Fin, spec, table)
+        @test isapprox(sum(Fout[:, 2]), 4.0; atol=1e-14, rtol=0)
+        @test count(!iszero, Fout[:, 2]) > 1
+
+        fill!(Fin, 0.0)
+        fine_west = conservative_tree_cell_id_2d(spec, 1, 5, 3)
+        coarse_dst = conservative_tree_cell_id_2d(spec, 0, 2, 2)
+        Fin[fine_west, 4] = 2.5
+        stream_conservative_tree_routes_F_2d!(Fout, Fin, spec, table)
+        @test isapprox(Fout[coarse_dst, 4], 2.5; atol=1e-14, rtol=0)
+
+        base_spec = create_conservative_tree_spec_2d(
+            4, 4, ConservativeTreeRefineBlock2D[])
+        base_table = create_conservative_tree_route_table_2d(base_spec)
+        base_in = allocate_conservative_tree_F_2d(base_spec)
+        base_out = allocate_conservative_tree_F_2d(base_spec)
+        src = conservative_tree_cell_id_2d(base_spec, 0, 2, 2)
+        dst = conservative_tree_cell_id_2d(base_spec, 0, 3, 2)
+        base_in[src, 2] = 7.0
+        stream_conservative_tree_routes_F_2d!(base_out, base_in,
+                                              base_spec, base_table)
+        @test isapprox(base_out[dst, 2], 7.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "bounceback route streaming preserves closed nested mass" begin
+        spec = create_conservative_tree_spec_2d(16, 12, [
+            ConservativeTreeRefineBlock2D("L1", 5:12, 3:10),
+            ConservativeTreeRefineBlock2D("L2", 13:20, 7:14; parent="L1"),
+            ConservativeTreeRefineBlock2D("L3", 29:36, 17:24; parent="L2"),
+            ConservativeTreeRefineBlock2D("L4", 61:68, 37:44; parent="L3"),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        stream_conservative_tree_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:bounceback)
+
+        @test isapprox(sum(Fout), sum(Fin); atol=1e-14, rtol=0)
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+    end
+
+    @testset "route streaming rejects bad matrices and boundary policies" begin
+        spec = create_conservative_tree_spec_2d(4, 4, ConservativeTreeRefineBlock2D[])
+        table = create_conservative_tree_route_table_2d(spec)
+        F = allocate_conservative_tree_F_2d(spec)
+        @test_throws ArgumentError stream_conservative_tree_routes_F_2d!(
+            zeros(3, 9), F, spec, table)
+        @test_throws ArgumentError stream_conservative_tree_routes_F_2d!(
+            F, F, spec, table; boundary=:periodic)
+    end
 end

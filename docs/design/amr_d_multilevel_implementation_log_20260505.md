@@ -134,15 +134,49 @@ Updated observed result:
 
 - `test_conservative_tree_spec_2d.jl`: 2868 pass.
 
+## ML3 CPU Route Scatter
+
+Implemented a CPU reference scatter over the static route table.
+
+New public API:
+
+- `stream_conservative_tree_routes_F_2d!`.
+
+Boundary policy is explicit:
+
+- `:skip` drops boundary routes for packet-level route tests;
+- `:bounceback` reflects boundary routes into `opposite(q)` on the source cell.
+
+Additional tests:
+
+- direct packet scatter;
+- coarse-to-fine split packet scatter;
+- fine-to-coarse packet scatter;
+- invalid output/input matrix rejection;
+- invalid boundary policy rejection;
+- closed nested mass conservation with test-only bounceback.
+
+Important limitation found while testing:
+
+- local rest-state equality on a nested tree is not green yet. Packet weights
+  and global closed mass are conserved, but interface cells do not remain
+  exactly at rest after one scatter. This must be solved before collision or
+  macro-flow runners are enabled on the multilevel path.
+
+Updated observed result:
+
+- `test_conservative_tree_spec_2d.jl`: 2876 pass.
+
 ## Next Patch
 
-Next target is ML3: stream-only rest-state canary on the route table.
+Next target is ML3b: debug route-interface rest state before any collide step.
 
 Required before collision:
 
-- add a CPU `stream_conservative_tree_routes_F_2d!` over the route table;
-- keep boundary routes explicit and initially skipped or bounced by a test-only
-  policy;
-- verify periodic closed rest state on 1, 2, 3, and 4 levels;
-- verify one-packet scatter for direct, split, coalesce, and boundary routes;
-- keep macro-flow runners disabled until stream-only tests are green.
+- isolate the smallest one-interface rest-state failure;
+- compare against the existing 0/1-level route-native table;
+- decide whether the multilevel route table needs source reconstruction,
+  destination accumulation rescaling, or a two-stage ledger synchronization;
+- add a rest-state surgical test for direct, face interface, and corner
+  interface separately;
+- keep macro-flow runners disabled until rest-state tests are green.
