@@ -141,6 +141,102 @@ using Kraken
         end
     end
 
+    @testset "spatial route ledgers apply one L/L+1 interface to F rows" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(spec.max_level)
+        bank = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+            spec; schedule=schedule)
+        down = only(event for event in schedule.events
+                    if event.phase == :sync_down)
+        up = only(event for event in schedule.events
+                  if event.phase == :sync_up)
+        advances = [event for event in schedule.events
+                    if event.phase == :advance && event.src_level == 1]
+
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        coarse_west = conservative_tree_cell_id_2d(spec, 0, 2, 2)
+        refined_parent = conservative_tree_cell_id_2d(spec, 0, 3, 2)
+        children = conservative_tree_children_2d(spec, refined_parent)
+        Fin[coarse_west, 2] = 12.0
+        split_expected = sum(route.weight * Fin[route.src, route.q]
+                             for route in table.routes
+                             if route.src == coarse_west &&
+                                route.q == 2 &&
+                                (route.kind == SPLIT_FACE ||
+                                 route.kind == SPLIT_CORNER))
+
+        Kraken.conservative_tree_subcycle_sync_down_routes_F_2d!(
+            bank, down, Fin, table)
+        Kraken.conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
+            Fout, bank, advances[1])
+        @test isapprox(sum(Fout[collect(children), 2]), split_expected / 2;
+                       atol=1e-14, rtol=0)
+        Kraken.conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
+            Fout, bank, advances[2])
+        @test isapprox(sum(Fout[collect(children), 2]), split_expected;
+                       atol=1e-14, rtol=0)
+
+        Kraken.reset_conservative_tree_subcycle_spatial_bank_2d!(bank)
+        fill!(Fin, 0.0)
+        fill!(Fout, 0.0)
+        fine_west = conservative_tree_cell_id_2d(spec, 1, 5, 3)
+        Fin[fine_west, 4] = 1.25
+        Kraken.conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
+            bank, advances[1], Fin, table)
+        Fin[fine_west, 4] = 2.75
+        Kraken.conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
+            bank, advances[2], Fin, table)
+        Kraken.conservative_tree_subcycle_apply_sync_up_F_2d!(
+            Fout, bank, up)
+        @test isapprox(Fout[coarse_west, 4], 4.0; atol=1e-14, rtol=0)
+    end
+
+    @testset "spatial route ledgers recurse over all adjacent pairs" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("outer", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("inner", 7:8, 5:6; parent="outer"),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(spec.max_level)
+        bank = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+            spec; schedule=schedule)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        for cell_id in spec.active_cells
+            for q in 1:9
+                Fin[cell_id, q] = spec.cells[cell_id].metrics.volume
+            end
+        end
+
+        for event in schedule.events
+            if event.phase == :sync_down
+                Kraken.conservative_tree_subcycle_sync_down_routes_F_2d!(
+                    bank, event, Fin, table)
+            elseif event.phase == :advance && event.src_level > 0
+                Kraken.conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
+                    bank, event, Fin, table)
+                Kraken.conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
+                    Fout, bank, event)
+            elseif event.phase == :sync_up
+                Kraken.conservative_tree_subcycle_apply_sync_up_F_2d!(
+                    Fout, bank, event)
+            end
+        end
+
+        for parent_level in 0:(spec.max_level - 1)
+            pair = Kraken.conservative_tree_subcycle_spatial_pair_ledgers_2d(
+                bank, parent_level)
+            @test !isempty(pair)
+            @test sum(sum(ledger.coarse_to_fine) for ledger in values(pair)) > 0
+            @test sum(sum(ledger.fine_to_coarse) for ledger in values(pair)) > 0
+        end
+        @test sum(Fout) > 0
+    end
+
     @testset "scheduled ledger binding rejects wrong events" begin
         schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(2)
         bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)

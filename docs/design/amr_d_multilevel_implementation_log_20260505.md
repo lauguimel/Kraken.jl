@@ -328,3 +328,73 @@ Ledger binding:
 
 This is still an accounting layer. It does not yet apply the completed ledger
 to population arrays.
+
+## ML4b Spatial Ledger Binding
+
+Added the missing spatial ownership layer between the recursive schedule and
+real population matrices.
+
+New internal APIs:
+
+- `ConservativeTreeSubcycleSpatialLedgerBank2D`;
+- `create_conservative_tree_subcycle_spatial_ledger_bank_2d`;
+- `conservative_tree_subcycle_spatial_pair_ledgers_2d`;
+- `conservative_tree_subcycle_spatial_ledger_2d`;
+- `reset_conservative_tree_subcycle_spatial_bank_2d!`;
+- `reset_conservative_tree_subcycle_spatial_pair_2d!`;
+- `conservative_tree_subcycle_sync_down_routes_F_2d!`;
+- `conservative_tree_subcycle_accumulate_advance_routes_F_2d!`;
+- `conservative_tree_subcycle_apply_child_advance_injection_F_2d!`;
+- `conservative_tree_subcycle_apply_sync_up_F_2d!`.
+
+Contract:
+
+- one ledger is allocated per refined parent cell, grouped by adjacent level
+  pair `L/L+1`;
+- `sync_down` consumes split routes from the static route table and deposits the
+  routed coarse packet fraction into the child slot, split over the fine
+  substeps;
+- child `advance` events accumulate coalesce routes into the owning parent-cell
+  ledger for the correct local substep;
+- child advance injection applies the coarse-to-fine substep contribution to
+  `F[child_cell, q]`;
+- `sync_up` applies the accumulated fine-to-coarse packets to the parent-level
+  destination cell derived from `(parent.i + c_qx, parent.j + c_qy)`.
+
+Important design point:
+
+- the spatial ledger follows the route table weights. With
+  leaf-equivalent coarse routing, a coarse source adjacent to a refined region
+  may split only the fraction of its leaf-equivalent samples that truly enter
+  the fine patch. The ledger must preserve that route-table contract rather
+  than assume that the full source population crosses the interface.
+
+Validated by:
+
+- one `L/L+1` interface deposits coarse-to-fine packets over two child
+  substeps, then accumulates fine-to-coarse packets back to the coarse row;
+- a two-level nested tree recursively allocates and uses ledgers for every
+  adjacent pair;
+- existing nested route/spec/topology tests remain green.
+
+Commands run:
+
+```bash
+julia --project=. -e 'using Test; include("test/test_conservative_tree_subcycling_2d.jl")'
+julia --project=. -e 'using Test; include("test/test_conservative_tree_spec_2d.jl")'
+julia --project=. -e 'using Test; include("test/test_conservative_tree_topology_2d.jl")'
+```
+
+Observed results:
+
+- `test_conservative_tree_subcycling_2d.jl`: 180 pass;
+- `test_conservative_tree_spec_2d.jl`: 2906 pass, 1 broken known nested
+  one-pass rest-state gap;
+- `test_conservative_tree_topology_2d.jl`: 13794 pass.
+
+Next implementation patch:
+
+- add a reference subcycled transport step that separates same-level route
+  scatter from interface route ledgers;
+- keep collision disabled until the transport-only rest-state canary is green;
+- then add BGK/Guo active-leaf collision and channel patch tests.
