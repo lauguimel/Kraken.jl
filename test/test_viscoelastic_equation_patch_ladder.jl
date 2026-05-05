@@ -2895,6 +2895,463 @@ end
     end
 end
 
+# ---------------------------------------------------------------------
+# Prototype wall BC: linear extrapolation of (C, u) to the virtual
+# upstream position x_v = x_b - c_q for each src_solid q at a cut
+# cell, then feq(C_v, u_v, q). No rest rebalance — the rest pop is
+# left at its post-stream value local_eq_init[1]. Conservation is
+# automatic via the bulk-affine canary (sum of pure-stream feq over
+# all q evaluates to C(x_b) for affine fields).
+#
+# This is a TEST-ONLY helper. It exists in the test file so we can
+# canary the scheme on patches before promoting any of it to src/.
+# ---------------------------------------------------------------------
+
+function _extrap_eq_wall_bc!(g_post, is_solid, q_wall, C, ux, uy)
+    Nx, Ny = size(C)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        _is_cut_cell(q_wall, i, j) || continue
+        dCdx = Kraken._wall_aware_dx_2d(C, is_solid, i, j, Nx, Float64)
+        dCdy = Kraken._wall_aware_dy_2d(C, is_solid, i, j, Ny, Float64)
+        dudx = Kraken._wall_aware_dx_2d(ux, is_solid, i, j, Nx, Float64)
+        dudy = Kraken._wall_aware_dy_2d(ux, is_solid, i, j, Ny, Float64)
+        dvdx = Kraken._wall_aware_dx_2d(uy, is_solid, i, j, Nx, Float64)
+        dvdy = Kraken._wall_aware_dy_2d(uy, is_solid, i, j, Ny, Float64)
+        for q in 2:9
+            cx = Int(D2Q9_CX[q]); cy = Int(D2Q9_CY[q])
+            si = i - cx; sj = j - cy
+            in_dom = 1 <= si <= Nx && 1 <= sj <= Ny
+            src_solid = !in_dom || is_solid[si, sj]
+            src_solid || continue
+            offx = -cx; offy = -cy
+            C_v = C[i, j] + offx * dCdx + offy * dCdy
+            u_v = ux[i, j] + offx * dudx + offy * dudy
+            v_v = uy[i, j] + offx * dvdx + offy * dvdy
+            g_post[i, j, q] = equilibrium(D2Q9(), C_v, u_v, v_v, q)
+        end
+    end
+    return nothing
+end
+
+@inline function _wall_aware_d2x_2d(a, is_solid, i, j, Nx, ::Type{T}) where {T}
+    plus_ok = i < Nx && !is_solid[i + 1, j]
+    minus_ok = i > 1 && !is_solid[i - 1, j]
+    plus2_ok = i < Nx - 1 && plus_ok && !is_solid[i + 2, j]
+    minus2_ok = i > 2 && minus_ok && !is_solid[i - 2, j]
+    if plus_ok && minus_ok
+        return a[i + 1, j] - T(2) * a[i, j] + a[i - 1, j]
+    elseif plus2_ok
+        return a[i, j] - T(2) * a[i + 1, j] + a[i + 2, j]
+    elseif minus2_ok
+        return a[i, j] - T(2) * a[i - 1, j] + a[i - 2, j]
+    else
+        return zero(T)
+    end
+end
+
+@inline function _wall_aware_d2y_2d(a, is_solid, i, j, Ny, ::Type{T}) where {T}
+    plus_ok = j < Ny && !is_solid[i, j + 1]
+    minus_ok = j > 1 && !is_solid[i, j - 1]
+    plus2_ok = j < Ny - 1 && plus_ok && !is_solid[i, j + 2]
+    minus2_ok = j > 2 && minus_ok && !is_solid[i, j - 2]
+    if plus_ok && minus_ok
+        return a[i, j + 1] - T(2) * a[i, j] + a[i, j - 1]
+    elseif plus2_ok
+        return a[i, j] - T(2) * a[i, j + 1] + a[i, j + 2]
+    elseif minus2_ok
+        return a[i, j] - T(2) * a[i, j - 1] + a[i, j - 2]
+    else
+        return zero(T)
+    end
+end
+
+@inline function _wall_aware_dxdy_2d(a, is_solid, i, j, Nx, Ny,
+                                    ::Type{T}) where {T}
+    plus_ok = i < Nx && !is_solid[i + 1, j]
+    minus_ok = i > 1 && !is_solid[i - 1, j]
+    plus2_ok = i < Nx - 1 && plus_ok && !is_solid[i + 2, j]
+    minus2_ok = i > 2 && minus_ok && !is_solid[i - 2, j]
+
+    dy0 = Kraken._wall_aware_dy_2d(a, is_solid, i, j, Ny, T)
+    if plus_ok && minus_ok
+        dyp = Kraken._wall_aware_dy_2d(a, is_solid, i + 1, j, Ny, T)
+        dym = Kraken._wall_aware_dy_2d(a, is_solid, i - 1, j, Ny, T)
+        return (dyp - dym) / T(2)
+    elseif plus2_ok
+        dy1 = Kraken._wall_aware_dy_2d(a, is_solid, i + 1, j, Ny, T)
+        dy2 = Kraken._wall_aware_dy_2d(a, is_solid, i + 2, j, Ny, T)
+        return (-T(3) * dy0 + T(4) * dy1 - dy2) / T(2)
+    elseif minus2_ok
+        dy1 = Kraken._wall_aware_dy_2d(a, is_solid, i - 1, j, Ny, T)
+        dy2 = Kraken._wall_aware_dy_2d(a, is_solid, i - 2, j, Ny, T)
+        return (T(3) * dy0 - T(4) * dy1 + dy2) / T(2)
+    elseif plus_ok
+        dy1 = Kraken._wall_aware_dy_2d(a, is_solid, i + 1, j, Ny, T)
+        return dy1 - dy0
+    elseif minus_ok
+        dy1 = Kraken._wall_aware_dy_2d(a, is_solid, i - 1, j, Ny, T)
+        return dy0 - dy1
+    else
+        return zero(T)
+    end
+end
+
+function _extrap_eq_wall_bc_quadratic!(g_post, is_solid, q_wall, C, ux, uy)
+    Nx, Ny = size(C)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        _is_cut_cell(q_wall, i, j) || continue
+        dCdx = Kraken._wall_aware_dx_2d(C, is_solid, i, j, Nx, Float64)
+        dCdy = Kraken._wall_aware_dy_2d(C, is_solid, i, j, Ny, Float64)
+        d2Cdx = _wall_aware_d2x_2d(C, is_solid, i, j, Nx, Float64)
+        d2Cdy = _wall_aware_d2y_2d(C, is_solid, i, j, Ny, Float64)
+        d2Cdxdy = _wall_aware_dxdy_2d(C, is_solid, i, j, Nx, Ny, Float64)
+
+        dudx = Kraken._wall_aware_dx_2d(ux, is_solid, i, j, Nx, Float64)
+        dudy = Kraken._wall_aware_dy_2d(ux, is_solid, i, j, Ny, Float64)
+        d2udx = _wall_aware_d2x_2d(ux, is_solid, i, j, Nx, Float64)
+        d2udy = _wall_aware_d2y_2d(ux, is_solid, i, j, Ny, Float64)
+        d2udxdy = _wall_aware_dxdy_2d(ux, is_solid, i, j, Nx, Ny, Float64)
+
+        dvdx = Kraken._wall_aware_dx_2d(uy, is_solid, i, j, Nx, Float64)
+        dvdy = Kraken._wall_aware_dy_2d(uy, is_solid, i, j, Ny, Float64)
+        d2vdx = _wall_aware_d2x_2d(uy, is_solid, i, j, Nx, Float64)
+        d2vdy = _wall_aware_d2y_2d(uy, is_solid, i, j, Ny, Float64)
+        d2vdxdy = _wall_aware_dxdy_2d(uy, is_solid, i, j, Nx, Ny, Float64)
+
+        for q in 2:9
+            cx = Int(D2Q9_CX[q]); cy = Int(D2Q9_CY[q])
+            si = i - cx; sj = j - cy
+            in_dom = 1 <= si <= Nx && 1 <= sj <= Ny
+            src_solid = !in_dom || is_solid[si, sj]
+            src_solid || continue
+            offx = -cx; offy = -cy
+            quad_C = offx^2 * d2Cdx + 2.0 * offx * offy * d2Cdxdy +
+                     offy^2 * d2Cdy
+            quad_u = offx^2 * d2udx + 2.0 * offx * offy * d2udxdy +
+                     offy^2 * d2udy
+            quad_v = offx^2 * d2vdx + 2.0 * offx * offy * d2vdxdy +
+                     offy^2 * d2vdy
+            C_v = C[i, j] + offx * dCdx + offy * dCdy + 0.5 * quad_C
+            u_v = ux[i, j] + offx * dudx + offy * dudy + 0.5 * quad_u
+            v_v = uy[i, j] + offx * dvdx + offy * dvdy + 0.5 * quad_v
+            g_post[i, j, q] = equilibrium(D2Q9(), C_v, u_v, v_v, q)
+        end
+    end
+    return nothing
+end
+
+function _rebalance_cut_cell_rest_to_field!(g_post, is_solid, q_wall, C)
+    Nx, Ny = size(C)
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        _is_cut_cell(q_wall, i, j) || continue
+        nonrest = 0.0
+        for q in 2:9
+            nonrest += g_post[i, j, q]
+        end
+        g_post[i, j, 1] = C[i, j] - nonrest
+    end
+    return nothing
+end
+
+function _extrap_eq_wall_bc_rebalanced!(g_post, is_solid, q_wall, C, ux, uy)
+    _extrap_eq_wall_bc!(g_post, is_solid, q_wall, C, ux, uy)
+    _rebalance_cut_cell_rest_to_field!(g_post, is_solid, q_wall, C)
+    return nothing
+end
+
+function _extrap_eq_wall_bc_quadratic_rebalanced!(g_post, is_solid, q_wall,
+                                                  C, ux, uy)
+    _extrap_eq_wall_bc_quadratic!(g_post, is_solid, q_wall, C, ux, uy)
+    _rebalance_cut_cell_rest_to_field!(g_post, is_solid, q_wall, C)
+    return nothing
+end
+
+@testset "P18l prototype extrap-eq BC: M0 quadratic Hessian stencils" begin
+    Nx, Ny = 9, 10
+    c0, ax, ay = 1.4, 0.11, -0.07
+    bxx, bxy, byy = -0.017, 0.023, 0.021
+    field = [
+        c0 + ax * (i - 1) + ay * (j - 1) +
+        0.5 * bxx * (i - 1)^2 + bxy * (i - 1) * (j - 1) +
+        0.5 * byy * (j - 1)^2
+        for i in 1:Nx, j in 1:Ny
+    ]
+    solid = falses(Nx, Ny)
+
+    for (si, sj) in ((3, 5), (5, 5), (4, 3), (4, 5))
+        solid .= false
+        solid[si, sj] = true
+        @test _wall_aware_d2x_2d(field, solid, 4, 4, Nx, Float64) ≈ bxx atol=P0_ATOL
+        @test _wall_aware_d2y_2d(field, solid, 4, 4, Ny, Float64) ≈ byy atol=P0_ATOL
+        @test _wall_aware_dxdy_2d(field, solid, 4, 4, Nx, Ny, Float64) ≈ bxy atol=P0_ATOL
+    end
+end
+
+# Per-population residual against the n-step pure-transport
+# prediction feq(field(x − n·c_q), q) (q≥2) and feq(field(x), 1) for
+# the rest. For affine fields and the extrapolation BC, this must be
+# machine zero everywhere — even after multiple steps — provided the
+# inspection margin clears domain-edge halfway-BB pollution.
+function _extrap_population_residual(; normal=(3.0, 4.0), γ=0.01,
+                                     constant_velocity=false,
+                                     steps::Int=1,
+                                     wall_bc=_extrap_eq_wall_bc!)
+    p = _inclined_straight_couette_patch(; normal, γ)
+    C_const = 1.234
+    norm_n = hypot(normal[1], normal[2])
+    nx_an = normal[1] / norm_n; ny_an = normal[2] / norm_n
+    tx_an = -ny_an; ty_an = nx_an
+    x0_an = 22.37; y0_an = 19.81
+    if constant_velocity
+        u0x, u0y = 0.02, -0.01
+        analytical_u = (i, j) -> u0x
+        analytical_v = (i, j) -> u0y
+    else
+        analytical_u = (i, j) -> γ * (nx_an * ((i - 1.0) - x0_an) +
+                                      ny_an * ((j - 1.0) - y0_an)) * tx_an
+        analytical_v = (i, j) -> γ * (nx_an * ((i - 1.0) - x0_an) +
+                                      ny_an * ((j - 1.0) - y0_an)) * ty_an
+    end
+    analytical_C = (i, j) -> C_const
+
+    C = [analytical_C(i, j) for i in 1:p.Nx, j in 1:p.Ny]
+    ux = [analytical_u(i, j) for i in 1:p.Nx, j in 1:p.Ny]
+    uy = [analytical_v(i, j) for i in 1:p.Nx, j in 1:p.Ny]
+    # Solid-cell velocity: leave at analytical extension (init writes
+    # the populations there too, but the BC is what matters at the
+    # fluid side).
+
+    g = zeros(Float64, p.Nx, p.Ny, 9)
+    init_conformation_field_2d!(g, C, ux, uy)
+    buf = similar(g)
+    for _ in 1:steps
+        stream_2d!(buf, g, p.Nx, p.Ny; sync=true)
+        wall_bc(buf, p.is_solid, p.q_wall, C, ux, uy)
+        g, buf = buf, g
+        compute_conformation_macro_2d!(C, g)
+    end
+
+    # Domain-edge halfway-BB in stream_2d! corrupts cells within
+    # `n` rings of the boundary after `n` steps; keep the inspection
+    # region clear of that pollution by enlarging the margin with the
+    # step count (mirrors _bulk_affine_transport_error).
+    margin = steps + 4
+    err_filled = 0.0; n_filled = 0
+    err_rest = 0.0; n_rest = 0
+    err_cut_outgoing = 0.0; n_cut_outgoing = 0
+    err_far_pure = 0.0; n_far_pure = 0
+    err_far_from_cut = 0.0; n_far_from_cut = 0
+    err_macro = 0.0; n_macro = 0
+    domain_boundary_touched = false
+
+    for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
+        p.is_solid[i, j] && continue
+        i_cut = _is_cut_cell(p.q_wall, i, j)
+        err_macro = max(err_macro, abs(C[i, j] - analytical_C(i, j)))
+        n_macro += 1
+        for q in 1:9
+            cx = Int(D2Q9_CX[q]); cy = Int(D2Q9_CY[q])
+            si = i - steps * cx
+            sj = j - steps * cy
+            if q == 1
+                si = i; sj = j
+            end
+            CC = analytical_C(si, sj)
+            uxx = analytical_u(si, sj)
+            uyy = analytical_v(si, sj)
+            target = equilibrium(D2Q9(), CC, uxx, uyy, q)
+            err = abs(g[i, j, q] - target)
+            # Source-solid classification uses the 1-step neighbor
+            # (the link the BC actually fills), independent of step
+            # count for the n-step transport target.
+            si1 = i - cx; sj1 = j - cy
+            in_dom1 = 1 <= si1 <= p.Nx && 1 <= sj1 <= p.Ny
+            src_solid_link = !in_dom1 || p.is_solid[si1, sj1]
+            if i_cut && q == 1
+                err_rest = max(err_rest, err); n_rest += 1
+            elseif i_cut && src_solid_link
+                err_filled = max(err_filled, err); n_filled += 1
+            elseif i_cut
+                err_cut_outgoing = max(err_cut_outgoing, err); n_cut_outgoing += 1
+            else
+                if q == 1
+                    err_far_pure = max(err_far_pure, err); n_far_pure += 1
+                elseif src_solid_link
+                    domain_boundary_touched = true
+                else
+                    if _is_cut_cell(p.q_wall, si1, sj1)
+                        err_far_from_cut = max(err_far_from_cut, err)
+                        n_far_from_cut += 1
+                    else
+                        err_far_pure = max(err_far_pure, err)
+                        n_far_pure += 1
+                    end
+                end
+            end
+        end
+    end
+    return (; err_filled, n_filled, err_rest, n_rest,
+              err_cut_outgoing, n_cut_outgoing,
+              err_far_pure, n_far_pure,
+              err_far_from_cut, n_far_from_cut,
+              err_macro, n_macro,
+              domain_boundary_touched)
+end
+
+@testset "P18l prototype extrap-eq BC: M1 const velocity inclined wall" begin
+    # Constant velocity, constant C, inclined straight wall.
+    # Linear extrapolation of u (which is constant) is exact, so every
+    # filled population must match the pure-stream feq at eps.
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        r = _extrap_population_residual(; normal, γ=0.01,
+                                        constant_velocity=true, steps=1)
+        @test !r.domain_boundary_touched
+        @test r.n_filled > 0 && r.n_rest > 0 && r.n_cut_outgoing > 0
+        @test r.n_far_pure > 0 && r.n_far_from_cut > 0
+        @test r.err_filled < P0_ATOL
+        @test r.err_rest < P0_ATOL
+        @test r.err_cut_outgoing < P0_ATOL
+        @test r.err_far_pure < P0_ATOL
+        @test r.err_far_from_cut < P0_ATOL
+        @test r.err_macro < P0_ATOL
+    end
+end
+
+@testset "P18l prototype extrap-eq BC: M2 affine velocity inclined wall" begin
+    # Variable velocity (γ ≠ 0), constant C, inclined straight wall.
+    # Velocity is affine in space (γ × distance × tangent), so linear
+    # extrapolation through the wall is exact. Every population must
+    # match the pure-stream feq at eps.
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        r = _extrap_population_residual(; normal, γ=0.01,
+                                        constant_velocity=false, steps=1)
+        @test !r.domain_boundary_touched
+        @test r.err_filled < P0_ATOL
+        @test r.err_rest < P0_ATOL
+        @test r.err_cut_outgoing < P0_ATOL
+        @test r.err_far_pure < P0_ATOL
+        @test r.err_far_from_cut < P0_ATOL
+        @test r.err_macro < P0_ATOL
+    end
+end
+
+@testset "P18l prototype extrap-eq BC: M3 transport-only repeated steps" begin
+    # Pure transport (no collision) is a stress test for any local BC:
+    # the cut cell's filled populations carry "1-step backward"
+    # extrapolation while the rest of the lattice has advected by n
+    # steps, so the two go out of phase. We measure the magnitude
+    # rather than asserting eps — production runs use collision,
+    # which resynchronises populations to local equilibrium each
+    # step (M3b). The expectation here is that drift stays in the
+    # 1e-3 band typical of CNEBBField on the same patch (P18i).
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        r = _extrap_population_residual(; normal, γ=0.01,
+                                        constant_velocity=false, steps=4)
+        @test !r.domain_boundary_touched
+        @test r.err_macro < 5e-3
+        @test r.err_far_pure < 5e-3
+        @test r.err_far_from_cut < 5e-3
+        @test r.err_rest < P0_ATOL
+    end
+end
+
+# Full CDE pipeline test: stream → extrap-eq BC → macro recompute →
+# TRT collide (τ_plus = 1) → next step. Mirrors
+# _inclined_straight_couette_repeated. With collision active, every
+# cell relaxes back to local equilibrium each step, so the BC's
+# "1-step extrapolation" assumption is self-consistent at every step
+# and the analytical stationary C field must be preserved at eps.
+function _extrap_repeated_cde(; normal=(3.0, 4.0), γ=0.01, steps::Int=4,
+                              wall_bc=_extrap_eq_wall_bc!)
+    p = _inclined_straight_couette_patch(; normal, γ)
+    Cxx = fill(p.cxx, p.Nx, p.Ny)
+    Cxy = fill(p.cxy, p.Nx, p.Ny)
+    Cyy = fill(p.cyy, p.Nx, p.Ny)
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    bxx = similar(gxx); bxy = similar(gxy); byy = similar(gyy)
+
+    margin = steps + 4
+    max_cut = 0.0; max_far = 0.0
+    n_cut = 0; n_far = 0
+    min_eig = Inf
+
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+        stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+        stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+        wall_bc(bxx, p.is_solid, p.q_wall, Cxx, p.ux, p.uy)
+        wall_bc(bxy, p.is_solid, p.q_wall, Cxy, p.ux, p.uy)
+        wall_bc(byy, p.is_solid, p.q_wall, Cyy, p.ux, p.uy)
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                   p.ux, p.uy, p.is_solid, p.λ)
+
+        for j in margin:p.Ny-margin+1, i in margin:p.Nx-margin+1
+            p.is_solid[i, j] && continue
+            err = max(abs(Cxx[i, j] - p.cxx),
+                      abs(Cxy[i, j] - p.cxy),
+                      abs(Cyy[i, j] - p.cyy))
+            min_eig = min(min_eig,
+                          _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j]))
+            if _is_cut_cell(p.q_wall, i, j)
+                n_cut += 1
+                max_cut = max(max_cut, err)
+            else
+                n_far += 1
+                max_far = max(max_far, err)
+            end
+        end
+    end
+    return (; max_cut, max_far, min_eig, n_cut, n_far)
+end
+
+@testset "P18l prototype extrap-eq BC: M3b repeated CDE inclined wall" begin
+    # Stationary affine CDE on inclined wall: with TRT collision
+    # (τ_plus = 1) the new BC stabilises at ~1e-5 residual through
+    # step 16 — well below the 1e-3 ceiling of CNEBB / CNEBBField on
+    # the same patch (compare in P18m). Stronger expectations would
+    # need a physically motivated bound; for now we lock in the
+    # observed magnitude as a non-regression guard.
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        r4 = _extrap_repeated_cde(; normal, γ=0.01, steps=4)
+        @test r4.n_cut > 0 && r4.n_far > 0
+        @test r4.min_eig > 0.9
+        @test r4.max_cut < 2e-5
+        @test r4.max_far < 1e-5
+
+        r16 = _extrap_repeated_cde(; normal, γ=0.01, steps=16)
+        @test r16.max_cut < 2e-5
+        @test r16.max_far < 1e-5
+    end
+end
+
+@testset "P18l prototype extrap-eq BC: M3c beats CNEBB on inclined wall" begin
+    # Side-by-side comparison — frozen as a non-regression: the new
+    # extrap-eq BC must dominate the strict CNEBB recovery by at
+    # least two orders of magnitude on cut-cell error.
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        r_new = _extrap_repeated_cde(; normal, γ=0.01, steps=4)
+        r_cnebb = _inclined_straight_couette_repeated(
+            CNEBB(); normal, γ=0.01, steps=4,
+        )
+        @test r_cnebb.max_cut > 100 * r_new.max_cut
+        @test r_cnebb.max_far > 10 * r_new.max_far
+    end
+end
+
 function _curved_affine_oldroydb_patch()
     Nx, Ny = 56, 48
     cx, cy, R = 27.31, 23.67, 9.0
@@ -3270,6 +3727,53 @@ end
     return (; ux, uy, dudx, dudy, dvdx, dvdy)
 end
 
+@inline function _couette_circular_velocity_hessian(x, y; cx, cy, Ri, Ro, Ω)
+    xr = x - cx
+    yr = y - cy
+    r2 = xr^2 + yr^2
+    r6 = r2^3
+    _, B = _couette_circular_constants(Ri, Ro, Ω)
+    sx_xx = 2B * xr * (xr^2 - 3yr^2) / r6
+    sx_xy = 2B * yr * (3xr^2 - yr^2) / r6
+    sx_yy = -sx_xx
+    sy_xx = sx_xy
+    sy_xy = -sx_xx
+    sy_yy = -sx_xy
+    return (;
+        ux_xx = -sy_xx,
+        ux_xy = -sy_xy,
+        ux_yy = -sy_yy,
+        uy_xx = sx_xx,
+        uy_xy = sx_xy,
+        uy_yy = sx_yy,
+    )
+end
+
+@inline function _couette_circular_conformation_tuple(x, y, p)
+    vg = _couette_circular_velocity_gradient(x, y; cx=p.cx, cy=p.cy,
+                                             Ri=p.Ri, Ro=p.Ro, Ω=p.Ω)
+    return _stationary_direct_conformation_incompressible(
+        vg.dudx, vg.dudy, vg.dvdx, vg.dvdy, p.λ,
+    )
+end
+
+function _continuous_hessian_2d(f, x, y; h=1e-3)
+    f00 = f(x, y)
+    fpx = f(x + h, y)
+    fmx = f(x - h, y)
+    fpy = f(x, y + h)
+    fmy = f(x, y - h)
+    fpp = f(x + h, y + h)
+    fpm = f(x + h, y - h)
+    fmp = f(x - h, y + h)
+    fmm = f(x - h, y - h)
+    return (;
+        xx = (fpx - 2 * f00 + fmx) / h^2,
+        xy = (fpp - fpm - fmp + fmm) / (4h^2),
+        yy = (fpy - 2 * f00 + fmy) / h^2,
+    )
+end
+
 function _curved_couette_oldroydb_patch(; Nx=72, Ny=72, Ri=12.0,
                                         Ro=28.0, Ω=0.006, λ=4.0)
     cx = (Nx - 1) / 2
@@ -3318,6 +3822,69 @@ function _curved_couette_error_stats(p, Axx, Axy, Ayy)
     return (; max_cut, max_near, max_far)
 end
 
+function _curved_couette_hessian_error_stats(p)
+    max_cut_velocity = 0.0
+    max_near_velocity = 0.0
+    max_far_velocity = 0.0
+    max_cut_conformation = 0.0
+    max_near_conformation = 0.0
+    max_far_conformation = 0.0
+    for j in 3:p.Ny-2, i in 3:p.Nx-2
+        p.is_solid[i, j] && continue
+        x = i - 1.0
+        y = j - 1.0
+        href = _couette_circular_velocity_hessian(x, y; cx=p.cx, cy=p.cy,
+                                                  Ri=p.Ri, Ro=p.Ro, Ω=p.Ω)
+        velocity_err = maximum(abs, (
+            _wall_aware_d2x_2d(p.ux, p.is_solid, i, j, p.Nx, Float64) - href.ux_xx,
+            _wall_aware_dxdy_2d(p.ux, p.is_solid, i, j, p.Nx, p.Ny, Float64) - href.ux_xy,
+            _wall_aware_d2y_2d(p.ux, p.is_solid, i, j, p.Ny, Float64) - href.ux_yy,
+            _wall_aware_d2x_2d(p.uy, p.is_solid, i, j, p.Nx, Float64) - href.uy_xx,
+            _wall_aware_dxdy_2d(p.uy, p.is_solid, i, j, p.Nx, p.Ny, Float64) - href.uy_xy,
+            _wall_aware_d2y_2d(p.uy, p.is_solid, i, j, p.Ny, Float64) - href.uy_yy,
+        ))
+
+        cxx_h = _continuous_hessian_2d(
+            (xx, yy) -> _couette_circular_conformation_tuple(xx, yy, p)[1],
+            x, y,
+        )
+        cxy_h = _continuous_hessian_2d(
+            (xx, yy) -> _couette_circular_conformation_tuple(xx, yy, p)[2],
+            x, y,
+        )
+        cyy_h = _continuous_hessian_2d(
+            (xx, yy) -> _couette_circular_conformation_tuple(xx, yy, p)[3],
+            x, y,
+        )
+        conformation_err = maximum(abs, (
+            _wall_aware_d2x_2d(p.Cxx, p.is_solid, i, j, p.Nx, Float64) - cxx_h.xx,
+            _wall_aware_dxdy_2d(p.Cxx, p.is_solid, i, j, p.Nx, p.Ny, Float64) - cxx_h.xy,
+            _wall_aware_d2y_2d(p.Cxx, p.is_solid, i, j, p.Ny, Float64) - cxx_h.yy,
+            _wall_aware_d2x_2d(p.Cxy, p.is_solid, i, j, p.Nx, Float64) - cxy_h.xx,
+            _wall_aware_dxdy_2d(p.Cxy, p.is_solid, i, j, p.Nx, p.Ny, Float64) - cxy_h.xy,
+            _wall_aware_d2y_2d(p.Cxy, p.is_solid, i, j, p.Ny, Float64) - cxy_h.yy,
+            _wall_aware_d2x_2d(p.Cyy, p.is_solid, i, j, p.Nx, Float64) - cyy_h.xx,
+            _wall_aware_dxdy_2d(p.Cyy, p.is_solid, i, j, p.Nx, p.Ny, Float64) - cyy_h.xy,
+            _wall_aware_d2y_2d(p.Cyy, p.is_solid, i, j, p.Ny, Float64) - cyy_h.yy,
+        ))
+
+        r = hypot(x - p.cx, y - p.cy)
+        if _is_cut_cell(p.q_wall, i, j)
+            max_cut_velocity = max(max_cut_velocity, velocity_err)
+            max_cut_conformation = max(max_cut_conformation, conformation_err)
+        elseif r < p.Ri + 3.5
+            max_near_velocity = max(max_near_velocity, velocity_err)
+            max_near_conformation = max(max_near_conformation, conformation_err)
+        elseif r < p.Ro
+            max_far_velocity = max(max_far_velocity, velocity_err)
+            max_far_conformation = max(max_far_conformation, conformation_err)
+        end
+    end
+    return (; max_cut_velocity, max_near_velocity, max_far_velocity,
+              max_cut_conformation, max_near_conformation,
+              max_far_conformation)
+end
+
 @testset "P28 circular Couette Oldroyd-B analytic closure is exact" begin
     p = _curved_couette_oldroydb_patch()
     max_source = 0.0
@@ -3363,7 +3930,7 @@ end
     @test max_cut_source > 5 * max_far_source
 end
 
-@testset "P30 circular Couette collision-only drift localizes gradient/source error" begin
+function _curved_couette_collision_only_stats()
     p = _curved_couette_oldroydb_patch()
     gxx = zeros(Float64, p.Nx, p.Ny, 9)
     gxy = zeros(Float64, p.Nx, p.Ny, 9)
@@ -3386,7 +3953,11 @@ end
     compute_conformation_macro_2d!(Cxx, gxx)
     compute_conformation_macro_2d!(Cxy, gxy)
     compute_conformation_macro_2d!(Cyy, gyy)
-    stats = _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
+    return _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
+end
+
+@testset "P30 circular Couette collision-only drift localizes gradient/source error" begin
+    stats = _curved_couette_collision_only_stats()
     @test stats.max_cut > 1e-5
     @test stats.max_cut > stats.max_far
 end
@@ -3486,4 +4057,221 @@ end
     @test stats[:eq_gradient].max_cut > stats[:field_equilibrium].max_cut
     @test stats[:field_equilibrium].max_near < stats[:field].max_near
     @test stats[:field_equilibrium].max_far < stats[:field].max_far
+end
+
+@testset "P18l prototype extrap-eq BC: M4-pre curved Couette Hessians" begin
+    # The quadratic BC needs local second derivatives at cut cells.
+    # This canary checks the wall-aware stencils against the continuous
+    # circular-Couette solution before those derivatives are allowed to
+    # enter a population fill.
+    p = _curved_couette_oldroydb_patch()
+    h = _curved_couette_hessian_error_stats(p)
+    @test h.max_cut_velocity < 3.5e-4
+    @test h.max_near_velocity < 1e-5
+    @test h.max_far_velocity < 5e-6
+    @test h.max_cut_conformation < 1e-3
+    @test h.max_near_conformation < 3e-5
+    @test h.max_far_conformation < 1e-5
+end
+
+# ---------------------------------------------------------------------
+# M4: prototype extrap-eq BC on curved circular Couette. Linear
+# extrapolation truncates at O(|c_q|² · ∇²u) when the analytical
+# velocity field is not affine in space (circular Couette has 1/r²
+# dependence). The canary measures the actual residual so we can
+# judge whether quadratic extrapolation is required before the BC
+# is generalisable. Setup mirrors P31/P32.
+# ---------------------------------------------------------------------
+
+function _extrap_repeated_curved_couette(; steps::Int=4,
+                                         wall_bc=_extrap_eq_wall_bc!)
+    p = _curved_couette_oldroydb_patch()
+    Cxx = copy(p.Cxx); Cxy = copy(p.Cxy); Cyy = copy(p.Cyy)
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = similar(gxx); gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    bxx = similar(gxx); bxy = similar(gxy); byy = similar(gyy)
+
+    max_cut = 0.0; max_near = 0.0; max_far = 0.0
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, p.Nx, p.Ny; sync=true)
+        stream_2d!(bxy, gxy, p.Nx, p.Ny; sync=true)
+        stream_2d!(byy, gyy, p.Nx, p.Ny; sync=true)
+        wall_bc(bxx, p.is_solid, p.q_wall, Cxx, p.ux, p.uy)
+        wall_bc(bxy, p.is_solid, p.q_wall, Cxy, p.ux, p.uy)
+        wall_bc(byy, p.is_solid, p.q_wall, Cyy, p.ux, p.uy)
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                   p.ux, p.uy, p.is_solid, p.λ)
+        stats = _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
+        max_cut = max(max_cut, stats.max_cut)
+        max_near = max(max_near, stats.max_near)
+        max_far = max(max_far, stats.max_far)
+    end
+    return (; max_cut, max_near, max_far)
+end
+
+function _extrap_curved_couette_fill_residual(wall_bc)
+    p = _curved_couette_oldroydb_patch()
+    components = (
+        (field=p.Cxx, ref=1),
+        (field=p.Cxy, ref=2),
+        (field=p.Cyy, ref=3),
+    )
+    max_filled = 0.0
+    max_macro = 0.0
+    n_filled = 0
+    for comp in components
+        C = copy(comp.field)
+        g = zeros(Float64, p.Nx, p.Ny, 9)
+        init_conformation_field_2d!(g, C, p.ux, p.uy)
+        buf = similar(g)
+        stream_2d!(buf, g, p.Nx, p.Ny; sync=true)
+        wall_bc(buf, p.is_solid, p.q_wall, C, p.ux, p.uy)
+        for j in 3:p.Ny-2, i in 3:p.Nx-2
+            p.is_solid[i, j] && continue
+            _is_cut_cell(p.q_wall, i, j) || continue
+            φ = 0.0
+            for q in 1:9
+                φ += buf[i, j, q]
+            end
+            max_macro = max(max_macro, abs(φ - comp.field[i, j]))
+            for q in 2:9
+                cx = Int(D2Q9_CX[q]); cy = Int(D2Q9_CY[q])
+                si = i - cx; sj = j - cy
+                in_dom = 1 <= si <= p.Nx && 1 <= sj <= p.Ny
+                src_solid = !in_dom || p.is_solid[si, sj]
+                src_solid || continue
+                cref = _couette_circular_conformation_tuple(
+                    (i - 1.0) - cx, (j - 1.0) - cy, p,
+                )[comp.ref]
+                vg = _couette_circular_velocity_gradient(
+                    (i - 1.0) - cx, (j - 1.0) - cy;
+                    cx=p.cx, cy=p.cy, Ri=p.Ri, Ro=p.Ro, Ω=p.Ω,
+                )
+                target = equilibrium(D2Q9(), cref, vg.ux, vg.uy, q)
+                max_filled = max(max_filled, abs(buf[i, j, q] - target))
+                n_filled += 1
+            end
+        end
+    end
+    return (; max_filled, max_macro, n_filled)
+end
+
+@testset "P18l prototype extrap-eq BC: M4 curved Couette CDE" begin
+    # Curved circular Couette: u = (-F·yr, F·xr) with F = A + B/r²
+    # is NOT affine in space, so first-order linear extrapolation
+    # truncates at O(|c_q|² · ∇²u). The canary records the actual
+    # residual structure so we can decide whether quadratic
+    # extrapolation (or a Filippova-Hänel-style q_w-aware scheme) is
+    # the next development step.
+    #
+    # Frozen findings (steps = 4):
+    #   * extrap-eq beats strict CNEBB by an order of magnitude on
+    #     cut cells (14× in current measurements) — the inclined-wall
+    #     asymmetry signature is gone.
+    #   * extrap-eq is competitive with CNEBBField / FieldEq at near-
+    #     wall and far-field cells (≤ 1× to 1.5×).
+    #   * BUT linear extrapolation at the cut cells is ≈10× worse
+    #     than Field-pinned variants at cut cells on curved walls.
+    #     This is the open development item: curved-wall BC needs
+    #     either quadratic extrapolation or a wall-position-aware
+    #     fictitious-equilibrium step (FH / MLS-like).
+    r = _extrap_repeated_curved_couette(; steps=4)
+    cnebb = _curved_couette_cde_repeated_stats(CNEBB(); steps=4)
+    field = _curved_couette_cde_repeated_stats(CNEBBField(); steps=4)
+    field_eq = _curved_couette_cde_repeated_stats(
+        CNEBBFieldEquilibrium(); steps=4,
+    )
+    @test r.max_cut > 1e-3            # truncation floor on curved wall
+    @test r.max_cut < 1e-2            # but bounded
+    @test r.max_cut < 0.1 * cnebb.max_cut
+    @test r.max_near < 1.5 * field.max_near
+    @test r.max_near < 1.5 * field_eq.max_near
+    @test r.max_far < 1.5 * field_eq.max_far
+end
+
+@testset "P18l prototype extrap-eq BC: M5a quadratic fill is not enough" begin
+    # Quadratic full-link extrapolation does improve the missing
+    # populations against the pure-stream analytic oracle, but without
+    # a conservative rest rebalance it worsens the cut-cell macro
+    # moment. This freezes why the raw quadratic helper is not a
+    # promotable wall BC by itself.
+    linear_fill = _extrap_curved_couette_fill_residual(_extrap_eq_wall_bc!)
+    quadratic_fill = _extrap_curved_couette_fill_residual(
+        _extrap_eq_wall_bc_quadratic!,
+    )
+    @test linear_fill.n_filled > 0
+    @test quadratic_fill.max_filled < 0.5 * linear_fill.max_filled
+    @test quadratic_fill.max_macro > linear_fill.max_macro
+
+    linear = _extrap_repeated_curved_couette(; steps=4)
+    quadratic = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_quadratic!,
+    )
+    @test quadratic.max_cut > linear.max_cut
+    @test quadratic.max_far < 1.1 * linear.max_far
+end
+
+@testset "P18l prototype extrap-eq BC: M5b rest rebalance closes curved cut floor" begin
+    # The curved-wall channel left open by M4 is local conservation:
+    # affine bulk cancellation is no longer exact for curved fields.
+    # Rebalancing only the rest population restores the local macro
+    # moment without overwriting outgoing pure-stream populations.
+    for normal in ((3.0, 4.0), (4.0, 3.0))
+        r_const = _extrap_population_residual(
+            ; normal, γ=0.01, constant_velocity=true, steps=1,
+            wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        )
+        @test r_const.err_filled < P0_ATOL
+        @test r_const.err_rest < P0_ATOL
+        @test r_const.err_macro < P0_ATOL
+
+        r_affine = _extrap_population_residual(
+            ; normal, γ=0.01, constant_velocity=false, steps=1,
+            wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        )
+        @test r_affine.err_filled < P0_ATOL
+        @test r_affine.err_rest < P0_ATOL
+        @test r_affine.err_macro < P0_ATOL
+
+        r_transport = _extrap_population_residual(
+            ; normal, γ=0.01, constant_velocity=false, steps=4,
+            wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        )
+        @test r_transport.err_macro < 5e-3
+
+        r_cde = _extrap_repeated_cde(
+            ; normal, γ=0.01, steps=16,
+            wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        )
+        @test r_cde.max_cut < P0_ATOL
+        @test r_cde.max_far < 1e-5
+    end
+
+    linear = _extrap_repeated_curved_couette(; steps=4)
+    rebalanced = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+    )
+    quadratic_rebalanced = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_quadratic_rebalanced!,
+    )
+    collision = _curved_couette_collision_only_stats()
+    field_eq = _curved_couette_cde_repeated_stats(
+        CNEBBFieldEquilibrium(); steps=4,
+    )
+    @test rebalanced.max_cut < 0.12 * linear.max_cut
+    @test rebalanced.max_cut < 4e-4
+    @test rebalanced.max_cut < 1.1 * field_eq.max_cut
+    @test rebalanced.max_cut > 2.0 * collision.max_cut
+    @test rebalanced.max_near < linear.max_near
+    @test rebalanced.max_far < linear.max_far
+    @test quadratic_rebalanced.max_cut < 4e-4
 end
