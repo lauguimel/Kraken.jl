@@ -7,6 +7,7 @@ Date: 2026-05-05
 The publication-facing D stream is a static fixed-patch AMR feature:
 
 - 2D D2Q9;
+- 3D D3Q19 smoke coverage;
 - ratio-2 refinement;
 - one fixed patch known before the run;
 - no dynamic regrid during the time loop;
@@ -55,6 +56,18 @@ Required local validation sequence:
 8. aqua ladder for square/cylinder scales 1 and 2 with
    `patch_strategy=:interface_buffered`.
 
+Required 3D validation sequence:
+
+1. D3Q19 coalesce/explode/moment/collision primitives remain green;
+2. 3D route topology keeps face/edge split/coalesce weights conservative and
+   explicitly rejects corner transfers;
+3. 3D route-native streaming preserves active population sums for zeroed
+   boundary packets;
+4. periodic-x plus stationary y/z wall routing wraps and bounces both coarse
+   and fine packets;
+5. fixed-patch D3Q19 forced-channel smoke remains finite, accelerates only in
+   x, and conserves active mass to roundoff.
+
 Local baseline recorded in
 `benchmarks/results/amr_obstacle_convergence_2d_local_interface_buffered_20260505.csv`:
 
@@ -68,6 +81,16 @@ Aqua baseline recorded in
 `benchmarks/results/amr_obstacle_convergence_2d_aqua_interface_buffered_20260505.csv`
 matches the local values for Cd and mass drift. PBS job: `20808208.aqua`.
 
+3D local fixed-patch channel smoke:
+
+- runner: `run_conservative_tree_poiseuille_route_native_3d`;
+- default domain: `Nx=8, Ny=8, Nz=6`;
+- default patch: `3:6 x 3:6 x 2:5`;
+- boundary policy: periodic x, stationary bounce-back y/z;
+- forcing: Guo D3Q19, `Fx=2e-5`;
+- `steps=80`: `ux_mean=2.5897914250811675e-4`, transverse means below
+  `4e-17`, relative mass drift `1.08e-13`.
+
 ## Limits
 
 The default compact patch is still useful as a stress test. Its cylinder Cd
@@ -78,12 +101,18 @@ Do not claim that D has solved arbitrary coarse/fine obstacle placement until
 the subcycling time integrator is wired and the compact-patch ladder also
 passes.
 
+Do not claim 3D obstacle or sphere AMR yet. The current 3D gate is a
+fixed-patch D3Q19 channel smoke. The next 3D steps are a dense-oracle channel
+profile comparison, then a static refined sphere only after the channel gate
+has a profile-level accuracy target.
+
 ## Commands
 
 Local surgical checks:
 
 ```bash
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_subcycling_2d.jl"); include("test/test_conservative_tree_obstacle_interface_2d.jl"); include("test/test_conservative_tree_open_boundary_2d.jl"); include("test/test_conservative_tree_streaming_2d.jl")'
+julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_3d.jl"); include("test/test_conservative_tree_topology_3d.jl"); include("test/test_conservative_tree_streaming_3d.jl")'
 ```
 
 Publication obstacle ladder:

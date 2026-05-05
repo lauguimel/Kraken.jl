@@ -301,3 +301,125 @@ function stream_composite_routes_periodic_x_wall_yz_F_3d!(
                                           coarse_in, patch_in,
                                           topology, :periodic_x_wall_yz, clear)
 end
+
+"""
+Result bundle for a fixed-patch route-native 3D AMR macro-flow canary.
+"""
+struct ConservativeTreeMacroFlow3D{T}
+    flow::Symbol
+    coarse_F::Array{T,4}
+    patch::ConservativeTreePatch3D{T}
+    ux_mean::T
+    uy_mean::T
+    uz_mean::T
+    mass_initial::T
+    mass_final::T
+    mass_drift::T
+    relative_mass_drift::T
+    steps::Int
+end
+
+function _fill_rest_composite_F_3d!(coarse_F::AbstractArray{T,4},
+                                    patch::ConservativeTreePatch3D{T},
+                                    rho::T) where {T}
+    _check_composite_coarse_layout_3d(coarse_F, patch)
+    z = zero(T)
+    @inbounds for k in axes(coarse_F, 3), j in axes(coarse_F, 2), i in axes(coarse_F, 1)
+        _inside_range_3d(i, j, k,
+                         patch.parent_i_range,
+                         patch.parent_j_range,
+                         patch.parent_k_range) && continue
+        fill_equilibrium_integrated_D3Q19!(
+            @view(coarse_F[i, j, k, :]), one(T), rho, z, z, z)
+    end
+    fill_equilibrium_integrated_D3Q19!(
+        patch.fine_F, one(T) / T(8), rho, z, z, z)
+    coalesce_patch_to_shadow_F_3d!(patch)
+    return coarse_F, patch
+end
+
+function _mean_velocity_with_force_3d(coarse_F::AbstractArray{T,4},
+                                      patch::ConservativeTreePatch3D{T},
+                                      Fx::T,
+                                      Fy::T,
+                                      Fz::T) where {T}
+    m, mx, my, mz = active_moments_F_3d(coarse_F, patch)
+    active_vol = T(size(coarse_F, 1) * size(coarse_F, 2) * size(coarse_F, 3))
+    half_force = T(0.5) * active_vol
+    return (mx + half_force * Fx) / m,
+           (my + half_force * Fy) / m,
+           (mz + half_force * Fz) / m
+end
+
+"""
+    run_conservative_tree_poiseuille_route_native_3d(; kwargs...)
+
+Run a small fixed-patch D3Q19 route-native 3D channel canary. The domain is
+periodic in x, bounce-back walled in y/z, and driven by a uniform Guo force.
+
+This is the publication-D 3D smoke gate: it validates conservative fixed-patch
+transport plus collision in 3D before any sphere or open-boundary claim.
+"""
+function run_conservative_tree_poiseuille_route_native_3d(;
+        Nx::Int=8,
+        Ny::Int=8,
+        Nz::Int=6,
+        patch_i_range::AbstractUnitRange{<:Integer}=3:6,
+        patch_j_range::AbstractUnitRange{<:Integer}=3:6,
+        patch_k_range::AbstractUnitRange{<:Integer}=2:5,
+        rho=1.0,
+        omega=1.0,
+        Fx=2.0e-5,
+        Fy=0.0,
+        Fz=0.0,
+        steps::Int=120,
+        T::Type{<:Real}=Float64)
+    isconcretetype(T) || throw(ArgumentError("T must be a concrete Real type"))
+    Nx > 2 || throw(ArgumentError("Nx must be > 2"))
+    Ny > 2 || throw(ArgumentError("Ny must be > 2"))
+    Nz > 2 || throw(ArgumentError("Nz must be > 2"))
+    steps >= 0 || throw(ArgumentError("steps must be nonnegative"))
+
+    coarse = zeros(T, Nx, Ny, Nz, 19)
+    coarse_next = similar(coarse)
+    patch = create_conservative_tree_patch_3d(
+        patch_i_range, patch_j_range, patch_k_range; T=T)
+    patch_next = create_conservative_tree_patch_3d(
+        patch_i_range, patch_j_range, patch_k_range; T=T)
+    topology = create_conservative_tree_topology_3d(Nx, Ny, Nz, patch)
+
+    rho_T = T(rho)
+    omega_T = T(omega)
+    Fx_T = T(Fx)
+    Fy_T = T(Fy)
+    Fz_T = T(Fz)
+    _fill_rest_composite_F_3d!(coarse, patch, rho_T)
+    mass0 = T(active_mass_F_3d(coarse, patch))
+
+    @inbounds for _ in 1:steps
+        collide_Guo_composite_F_3d!(
+            coarse, patch, one(T), one(T) / T(8), omega_T, omega_T,
+            Fx_T, Fy_T, Fz_T)
+        stream_composite_routes_periodic_x_wall_yz_F_3d!(
+            coarse_next, patch_next, coarse, patch, topology)
+        coarse, coarse_next = coarse_next, coarse
+        patch, patch_next = patch_next, patch
+    end
+
+    mass1 = T(active_mass_F_3d(coarse, patch))
+    drift = mass1 - mass0
+    ux_mean, uy_mean, uz_mean =
+        _mean_velocity_with_force_3d(coarse, patch, Fx_T, Fy_T, Fz_T)
+    return ConservativeTreeMacroFlow3D{T}(
+        :poiseuille_route_native_3d,
+        coarse,
+        patch,
+        T(ux_mean),
+        T(uy_mean),
+        T(uz_mean),
+        mass0,
+        mass1,
+        drift,
+        abs(drift) / mass0,
+        steps)
+end

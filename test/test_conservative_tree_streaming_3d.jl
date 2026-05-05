@@ -257,6 +257,26 @@ end
         @test isapprox(active_mass_F_3d(coarse, patch), mass0; atol=1e-10, rtol=0)
     end
 
+    @testset "route-native 3D fixed-patch forced channel accelerates conservatively" begin
+        result = Kraken.run_conservative_tree_poiseuille_route_native_3d(; steps=80)
+
+        @test result.flow == :poiseuille_route_native_3d
+        @test isfinite(result.ux_mean)
+        @test result.ux_mean > 0
+        @test abs(result.uy_mean) < 1e-10
+        @test abs(result.uz_mean) < 1e-10
+        @test isapprox(result.mass_final, result.mass_initial; atol=1e-10, rtol=0)
+        @test result.relative_mass_drift < 1e-12
+    end
+
+    @testset "route-native 3D fixed-patch forced channel is Float32-clean" begin
+        result = Kraken.run_conservative_tree_poiseuille_route_native_3d(;
+            steps=4, T=Float32)
+
+        @test result.ux_mean > 0f0
+        @test isfinite(result.relative_mass_drift)
+    end
+
     @testset "layout checks catch mismatched patch" begin
         patch_in = create_conservative_tree_patch_3d(3:4, 4:5, 2:3)
         wrong_patch = create_conservative_tree_patch_3d(4:5, 4:5, 2:3)

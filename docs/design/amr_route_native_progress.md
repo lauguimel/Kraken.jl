@@ -16,6 +16,7 @@ julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_subcycling_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_adaptation_2d.jl"); include("test/test_conservative_tree_multipatch_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_topology_2d.jl"); include("test/test_conservative_tree_2d.jl")'
+julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_3d.jl"); include("test/test_conservative_tree_topology_3d.jl"); include("test/test_conservative_tree_streaming_3d.jl")'
 ```
 
 ## 1. Streaming Composite Natif 2D
@@ -440,7 +441,7 @@ First target:
 
 ## 8. Topologie Et Primitives 3D
 
-Status: primitive, active-topology and interior-streaming canaries started.
+Status: fixed-patch D3Q19 route-native smoke gate active.
 
 Existing 3D refinement utilities are not yet the complete conservative-tree
 D3Q19 route topology. The first accepted 3D slice is deliberately small:
@@ -451,7 +452,8 @@ D3Q19 route topology. The first accepted 3D slice is deliberately small:
 - split/coalesce weights for face and edge crossings;
 - explicit empty corner route set, because D3Q19 has no body-diagonal
   populations;
-- topology canaries only, no 3D macro-flow until these pass.
+- topology canaries first, then one fixed-patch channel macro-flow before any
+  sphere or open-boundary claim.
 
 Validated canaries:
 
@@ -488,6 +490,12 @@ Validated canaries:
   collision conserves mass while driving momentum in the force direction;
 - a tiny fixed-patch 3D transport+BGK loop with periodic x and stationary
   wall-y/z conserves active mass;
+- `run_conservative_tree_poiseuille_route_native_3d` runs a small fixed-patch
+  D3Q19 channel with periodic x, stationary y/z walls and Guo forcing. At
+  `steps=80`, the current canary gives mean velocity
+  `ux=2.5897914250811675e-4`, transverse means below `4e-17`, and relative
+  mass drift `1.08e-13`;
+- the same runner has a short Float32 compile/run canary;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.
 
@@ -495,7 +503,8 @@ Exit gate:
 
 - orientation-wise conservation for every D3Q19 route primitive;
 - active mass and momentum agree before and after projection/restriction;
-- 3D route-native macro-flow remains pending; no 3D AMR flow claim yet.
+- fixed-patch 3D route-native channel smoke remains finite, accelerates in x
+  only, and conserves active mass to roundoff.
 
 ## Publication-P Milestone Gate
 
@@ -506,6 +515,8 @@ Currently publishable inside the D stream only as:
 Couette + Poiseuille + square obstacle + VFS
 interface-buffered cylinder ladder as static fixed-patch validation
 BFS/open-channel short canaries, not long-horizon production BCs
+3D, single fixed patch, route-native conservative AMR:
+D3Q19 topology/streaming/collision + forced channel smoke
 ```
 
 The wording must not claim:
@@ -518,11 +529,11 @@ The wording must not claim:
   `.krk` setup helpers are started;
 - subcycling;
 - GPU AMR;
-- 3D AMR.
+- 3D obstacle/sphere AMR.
 
 Next commits should continue in this order:
 
-1. run and record the interface-buffered obstacle ladder on aqua;
+1. add a 3D channel profile check against a dense D3Q19 oracle;
 2. add paper-facing tables for coarse Cartesian vs AMR vs leaf oracle;
 3. keep compact-patch cylinder as the subcycling stress test;
 4. route tests over multi-patch ownership tables;
