@@ -78,8 +78,9 @@ struct ConformationGradientStencils2D{CT,DI,DJ,WI,WJ,WQ,IW,COUNT,FB}
 end
 
 function _upload_gradient_stencil_array(backend, a)
-    b = KernelAbstractions.allocate(backend, eltype(a), size(a)...)
-    copyto!(b, a)
+    host = a isa BitArray ? Array(a) : a
+    b = KernelAbstractions.allocate(backend, eltype(host), size(host)...)
+    copyto!(b, host)
     return b
 end
 
