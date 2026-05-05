@@ -89,7 +89,13 @@ matches the local values for Cd and mass drift. PBS job: `20808208.aqua`.
 - boundary policy: periodic x, stationary bounce-back y/z;
 - forcing: Guo D3Q19, `Fx=2e-5`;
 - `steps=80`: `ux_mean=2.5897914250811675e-4`, transverse means below
-  `4e-17`, relative mass drift `1.08e-13`.
+  `4e-17`, relative mass drift `1.08e-13`;
+- local-patch profile diagnostic versus dense leaf oracle:
+  `linf=6.879e-4`, relative `linf=0.583`, mean-velocity ratio `0.389`.
+  This is a diagnostic, not a publication accuracy gate;
+- full-domain refined patch parity canary:
+  `Nx=4, Ny=4, Nz=3`, patch `1:4 x 1:4 x 1:3`, `steps=20`,
+  dense-leaf oracle errors `l2=0`, `linf=0`.
 
 ## Limits
 
@@ -102,9 +108,9 @@ the subcycling time integrator is wired and the compact-patch ladder also
 passes.
 
 Do not claim 3D obstacle or sphere AMR yet. The current 3D gate is a
-fixed-patch D3Q19 channel smoke. The next 3D steps are a dense-oracle channel
-profile comparison, then a static refined sphere only after the channel gate
-has a profile-level accuracy target.
+fixed-patch D3Q19 channel smoke plus exact full-patch dense-oracle parity. The
+local-patch profile gap must be reduced by subcycling or a matched
+coarse/fine-time oracle before a 3D profile-level accuracy claim.
 
 ## Commands
 

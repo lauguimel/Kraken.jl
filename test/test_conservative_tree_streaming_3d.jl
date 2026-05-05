@@ -267,6 +267,24 @@ end
         @test abs(result.uz_mean) < 1e-10
         @test isapprox(result.mass_final, result.mass_initial; atol=1e-10, rtol=0)
         @test result.relative_mass_drift < 1e-12
+        @test size(result.ux_profile) == (16, 12)
+        @test size(result.oracle_ux_profile) == size(result.ux_profile)
+        @test isfinite(result.l2_error)
+        @test isfinite(result.linf_error)
+        @test result.linf_error < 1e-3
+    end
+
+    @testset "route-native 3D full-domain patch matches dense leaf oracle" begin
+        result = Kraken.run_conservative_tree_poiseuille_route_native_3d(;
+            Nx=4, Ny=4, Nz=3,
+            patch_i_range=1:4,
+            patch_j_range=1:4,
+            patch_k_range=1:3,
+            steps=20)
+
+        @test result.l2_error < 1e-14
+        @test result.linf_error < 1e-14
+        @test result.relative_mass_drift < 1e-12
     end
 
     @testset "route-native 3D fixed-patch forced channel is Float32-clean" begin

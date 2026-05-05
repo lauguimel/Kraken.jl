@@ -309,6 +309,10 @@ struct ConservativeTreeMacroFlow3D{T}
     flow::Symbol
     coarse_F::Array{T,4}
     patch::ConservativeTreePatch3D{T}
+    ux_profile::Matrix{T}
+    oracle_ux_profile::Matrix{T}
+    l2_error::T
+    linf_error::T
     ux_mean::T
     uy_mean::T
     uz_mean::T
@@ -349,6 +353,97 @@ function _mean_velocity_with_force_3d(coarse_F::AbstractArray{T,4},
     return (mx + half_force * Fx) / m,
            (my + half_force * Fy) / m,
            (mz + half_force * Fz) / m
+end
+
+function _profile_errors_3d(profile::AbstractMatrix, reference::AbstractMatrix)
+    size(profile) == size(reference) ||
+        throw(ArgumentError("profile and reference must have the same size"))
+    T = promote_type(eltype(profile), eltype(reference))
+    n = length(profile)
+    l2 = sqrt(sum((T(profile[i]) - T(reference[i]))^2 for i in eachindex(profile)) /
+              T(n))
+    linf = maximum(abs(T(profile[i]) - T(reference[i])) for i in eachindex(profile))
+    return l2, linf
+end
+
+function _leaf_mean_ux_yz_profile_3d(F::AbstractArray{T,4};
+                                     volume::T,
+                                     force_x::T=zero(T)) where {T}
+    size(F, 4) == 19 ||
+        throw(ArgumentError("F must have 19 D3Q19 populations in dimension 4"))
+    profile = zeros(T, size(F, 2), size(F, 3))
+    @inbounds for k in axes(F, 3), j in axes(F, 2)
+        ux_sum = zero(T)
+        for i in axes(F, 1)
+            cell = @view F[i, j, k, :]
+            rho = mass_F_3d(cell) / volume
+            mx = momentum_F_3d(cell)[1]
+            ux_sum += (mx / volume + force_x / T(2)) / rho
+        end
+        profile[j, k] = ux_sum / T(size(F, 1))
+    end
+    return profile
+end
+
+function composite_leaf_mean_ux_yz_profile_3d(coarse_F::AbstractArray{T,4},
+                                              patch::ConservativeTreePatch3D{T};
+                                              volume_leaf::T=T(0.125),
+                                              force_x::T=zero(T)) where {T}
+    leaf = zeros(T, 2 * size(coarse_F, 1), 2 * size(coarse_F, 2),
+                 2 * size(coarse_F, 3), 19)
+    composite_to_leaf_F_3d!(leaf, coarse_F, patch)
+    return _leaf_mean_ux_yz_profile_3d(leaf;
+                                       volume=volume_leaf,
+                                       force_x=force_x)
+end
+
+function _stream_leaf_periodic_x_wall_yz_F_3d!(out::AbstractArray{T,4},
+                                               F::AbstractArray{T,4}) where {T}
+    size(out) == size(F) ||
+        throw(ArgumentError("out and F must have the same size"))
+    size(F, 4) == 19 ||
+        throw(ArgumentError("F must have 19 D3Q19 populations in dimension 4"))
+    out .= 0
+    nx, ny, nz = size(F, 1), size(F, 2), size(F, 3)
+    @inbounds for k in axes(F, 3), j in axes(F, 2), i in axes(F, 1), q in 1:19
+        i_dst = i + d3q19_cx(q)
+        j_dst = j + d3q19_cy(q)
+        k_dst = k + d3q19_cz(q)
+        if j_dst < 1 || j_dst > ny || k_dst < 1 || k_dst > nz
+            out[i, j, k, d3q19_opposite(q)] += F[i, j, k, q]
+        else
+            i_wrap = _periodic_x_wrapped_3d(i_dst, nx)
+            out[i_wrap, j_dst, k_dst, q] += F[i, j, k, q]
+        end
+    end
+    return out
+end
+
+function _run_leaf_poiseuille_oracle_3d(;
+        Nx::Int,
+        Ny::Int,
+        Nz::Int,
+        rho,
+        omega,
+        Fx,
+        Fy,
+        Fz,
+        steps::Int,
+        T::Type{<:Real})
+    F = zeros(T, 2 * Nx, 2 * Ny, 2 * Nz, 19)
+    F_next = similar(F)
+    volume = one(T) / T(8)
+    fill_equilibrium_integrated_D3Q19!(
+        F, volume, T(rho), zero(T), zero(T), zero(T))
+
+    @inbounds for _ in 1:steps
+        collide_Guo_integrated_D3Q19!(
+            F, volume, T(omega), T(Fx), T(Fy), T(Fz))
+        _stream_leaf_periodic_x_wall_yz_F_3d!(F_next, F)
+        F, F_next = F_next, F
+    end
+
+    return F
 end
 
 """
@@ -410,10 +505,24 @@ function run_conservative_tree_poiseuille_route_native_3d(;
     drift = mass1 - mass0
     ux_mean, uy_mean, uz_mean =
         _mean_velocity_with_force_3d(coarse, patch, Fx_T, Fy_T, Fz_T)
+    profile = composite_leaf_mean_ux_yz_profile_3d(coarse, patch;
+                                                   volume_leaf=one(T) / T(8),
+                                                   force_x=Fx_T)
+    oracle = _run_leaf_poiseuille_oracle_3d(;
+        Nx=Nx, Ny=Ny, Nz=Nz, rho=rho_T, omega=omega_T,
+        Fx=Fx_T, Fy=Fy_T, Fz=Fz_T, steps=steps, T=T)
+    oracle_profile = _leaf_mean_ux_yz_profile_3d(oracle;
+                                                 volume=one(T) / T(8),
+                                                 force_x=Fx_T)
+    l2, linf = _profile_errors_3d(profile, oracle_profile)
     return ConservativeTreeMacroFlow3D{T}(
         :poiseuille_route_native_3d,
         coarse,
         patch,
+        profile,
+        oracle_profile,
+        T(l2),
+        T(linf),
         T(ux_mean),
         T(uy_mean),
         T(uz_mean),

@@ -305,6 +305,39 @@ function _check_composite_pair_layout_3d(coarse_out::AbstractArray{<:Any,4},
     return nothing
 end
 
+function composite_to_leaf_F_3d!(leaf_F::AbstractArray{<:Any,4},
+                                 coarse_F::AbstractArray{<:Any,4},
+                                 patch::ConservativeTreePatch3D)
+    _check_composite_coarse_layout_3d(coarse_F, patch)
+    size(leaf_F) == (2 * size(coarse_F, 1),
+                     2 * size(coarse_F, 2),
+                     2 * size(coarse_F, 3),
+                     19) ||
+        throw(ArgumentError("leaf_F must have size (2*Nx, 2*Ny, 2*Nz, 19)"))
+
+    leaf_F .= 0
+    @inbounds for k in axes(coarse_F, 3), j in axes(coarse_F, 2), i in axes(coarse_F, 1)
+        _inside_range_3d(i, j, k,
+                         patch.parent_i_range,
+                         patch.parent_j_range,
+                         patch.parent_k_range) && continue
+        i0 = 2 * i - 1
+        j0 = 2 * j - 1
+        k0 = 2 * k - 1
+        explode_uniform_F_3d!(
+            @view(leaf_F[i0:i0+1, j0:j0+1, k0:k0+1, :]),
+            @view(coarse_F[i, j, k, :]))
+    end
+
+    i0 = 2 * first(patch.parent_i_range) - 1
+    j0 = 2 * first(patch.parent_j_range) - 1
+    k0 = 2 * first(patch.parent_k_range) - 1
+    leaf_F[i0:i0+size(patch.fine_F, 1)-1,
+           j0:j0+size(patch.fine_F, 2)-1,
+           k0:k0+size(patch.fine_F, 3)-1, :] .= patch.fine_F
+    return leaf_F
+end
+
 function active_mass_F_3d(coarse_F::AbstractArray{<:Any,4},
                           patch::ConservativeTreePatch3D)
     _check_composite_coarse_layout_3d(coarse_F, patch)

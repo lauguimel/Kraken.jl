@@ -495,6 +495,15 @@ Validated canaries:
   `steps=80`, the current canary gives mean velocity
   `ux=2.5897914250811675e-4`, transverse means below `4e-17`, and relative
   mass drift `1.08e-13`;
+- the same runner now builds a dense D3Q19 leaf oracle. A full-domain refined
+  patch matches that oracle exactly (`l2=0`, `linf=0` on the
+  `4 x 4 x 3`, 20-step canary), proving the 3D route tables are leaf-equivalent
+  when no coarse/fine interface remains;
+- the default local patch is conservative but not profile-accurate against the
+  dense leaf oracle yet: at 80 steps its profile relative `linf` error is
+  `0.583` and the mean-velocity ratio is `0.389`. This is the 3D analogue of
+  the non-subcycled interface limitation, so it is not a publication profile
+  claim;
 - the same runner has a short Float32 compile/run canary;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.
@@ -504,7 +513,8 @@ Exit gate:
 - orientation-wise conservation for every D3Q19 route primitive;
 - active mass and momentum agree before and after projection/restriction;
 - fixed-patch 3D route-native channel smoke remains finite, accelerates in x
-  only, and conserves active mass to roundoff.
+  only, conserves active mass to roundoff, and matches the dense leaf oracle
+  exactly when the refined patch covers the full domain.
 
 ## Publication-P Milestone Gate
 
@@ -517,6 +527,7 @@ interface-buffered cylinder ladder as static fixed-patch validation
 BFS/open-channel short canaries, not long-horizon production BCs
 3D, single fixed patch, route-native conservative AMR:
 D3Q19 topology/streaming/collision + forced channel smoke
+full-patch dense-leaf parity, but no local-patch 3D profile claim yet
 ```
 
 The wording must not claim:
@@ -533,7 +544,8 @@ The wording must not claim:
 
 Next commits should continue in this order:
 
-1. add a 3D channel profile check against a dense D3Q19 oracle;
+1. reduce the local-patch 3D channel profile gap with subcycling or a matched
+   coarse/fine-time oracle;
 2. add paper-facing tables for coarse Cartesian vs AMR vs leaf oracle;
 3. keep compact-patch cylinder as the subcycling stress test;
 4. route tests over multi-patch ownership tables;
