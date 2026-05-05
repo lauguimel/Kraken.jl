@@ -1,5 +1,6 @@
 using Test
 using Kraken
+using Random
 
 @testset "Conservative tree nested spec 2D" begin
     @testset "programmatic nested tree preserves active volume" begin
@@ -139,5 +140,68 @@ using Kraken
         Run 1 steps
         """)
         @test_throws ArgumentError create_conservative_tree_spec_from_krk_2d(child_outside)
+    end
+
+    @testset "recursive ledger coalesce preserves active populations" begin
+        spec = create_conservative_tree_spec_2d(16, 12, [
+            ConservativeTreeRefineBlock2D("L1", 5:12, 3:10),
+            ConservativeTreeRefineBlock2D("L2", 13:20, 7:14; parent="L1"),
+            ConservativeTreeRefineBlock2D("L3", 29:36, 17:24; parent="L2"),
+        ])
+        F = allocate_conservative_tree_F_2d(spec)
+        rng = MersenneTwister(0x51d)
+        for cell_id in spec.active_cells, q in 1:9
+            F[cell_id, q] = rand(rng)
+        end
+
+        active_before = active_population_sums_F_2d(F, spec)
+        coalesce_conservative_tree_ledgers_F_2d!(F, spec)
+
+        @test isapprox(level_population_sums_F_2d(F, spec, 0),
+                       active_before; atol=1e-11, rtol=0)
+        for (cell_id, children) in pairs(spec.children)
+            children == (0, 0, 0, 0) && continue
+            for q in 1:9
+                child_sum = F[children[1], q] + F[children[2], q] +
+                            F[children[3], q] + F[children[4], q]
+                @test isapprox(F[cell_id, q], child_sum; atol=1e-12, rtol=0)
+            end
+        end
+    end
+
+    @testset "recursive ledger explosion roundtrips coarse populations" begin
+        spec = create_conservative_tree_spec_2d(16, 12, [
+            ConservativeTreeRefineBlock2D("L1", 5:12, 3:10),
+            ConservativeTreeRefineBlock2D("L2", 13:20, 7:14; parent="L1"),
+            ConservativeTreeRefineBlock2D("L3", 29:36, 17:24; parent="L2"),
+            ConservativeTreeRefineBlock2D("L4", 61:68, 37:44; parent="L3"),
+        ])
+        F = allocate_conservative_tree_F_2d(spec)
+        rng = MersenneTwister(0x5eaf)
+        for (cell_id, cell) in pairs(spec.cells)
+            cell.level == 0 || continue
+            for q in 1:9
+                F[cell_id, q] = rand(rng)
+            end
+        end
+        F_level0 = copy(F[1:(spec.Nx * spec.Ny), :])
+        level0_before = level_population_sums_F_2d(F, spec, 0)
+
+        explode_conservative_tree_ledgers_F_2d!(F, spec)
+        @test isapprox(active_population_sums_F_2d(F, spec),
+                       level0_before; atol=1e-12, rtol=0)
+
+        coalesce_conservative_tree_ledgers_F_2d!(F, spec)
+        @test isapprox(F[1:(spec.Nx * spec.Ny), :],
+                       F_level0; atol=1e-12, rtol=0)
+    end
+
+    @testset "ledger helpers reject incompatible matrices" begin
+        spec = create_conservative_tree_spec_2d(4, 4, [
+            ConservativeTreeRefineBlock2D("L1", 2:3, 2:3),
+        ])
+        @test_throws ArgumentError active_population_sums_F_2d(zeros(3, 9), spec)
+        @test_throws ArgumentError coalesce_conservative_tree_ledgers_F_2d!(
+            zeros(length(spec.cells), 8), spec)
     end
 end

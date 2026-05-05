@@ -71,12 +71,44 @@ Observed results:
 
 ## Next Patch
 
-Next target is ML1: recursive conservative projection on the static tree.
+ML1 is now implemented as recursive conservative projection on the static tree.
+
+New public APIs:
+
+- `allocate_conservative_tree_F_2d`;
+- `active_population_sums_F_2d`;
+- `level_population_sums_F_2d`;
+- `coalesce_conservative_tree_ledgers_F_2d!`;
+- `explode_conservative_tree_ledgers_F_2d!`.
+
+The storage contract is deliberately minimal:
+
+- one dense CPU matrix row per tree cell;
+- nine D2Q9 integrated populations per row;
+- active leaves and inactive parent ledgers share the same matrix;
+- no runtime stream/collide state is implied yet.
+
+Additional tests:
+
+- random active-leaf populations coalesce bottom-up to level-0 ledgers;
+- every inactive parent ledger equals the sum of its four children;
+- random level-0 populations explode top-down to active leaves;
+- explode then coalesce recovers level-0 populations to roundoff;
+- incompatible matrix dimensions are rejected.
+
+Updated observed result:
+
+- `test_conservative_tree_spec_2d.jl`: 1772 pass.
+
+## Next Patch
+
+Next target is ML2: multilevel route table without collision.
 
 Required before stream/collide:
 
-- allocate a minimal cell-id population ledger for tests;
-- recursively coalesce deepest active leaves to parent ledgers;
-- recursively explode parent ledgers to children;
-- test random D2Q9 populations on 2, 3, and 4 levels;
+- build same/fine/coarse/boundary route records from active leaves;
+- check route weight conservation for each source packet;
+- reject route construction if a neighbor would cross more than one level;
+- add single-packet same-level, fine-to-coarse, coarse-to-fine, face, corner,
+  and boundary tests;
 - keep runtime dispatch disabled until route-table rest-state tests pass.

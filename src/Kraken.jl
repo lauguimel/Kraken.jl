@@ -104,6 +104,7 @@ include("refinement/conservative_tree_multipatch_2d.jl")
 include("refinement/conservative_tree_3d.jl")
 include("refinement/conservative_tree_topology_2d.jl")
 include("refinement/conservative_tree_spec_2d.jl")
+include("refinement/conservative_tree_projection_2d.jl")
 include("refinement/conservative_tree_topology_3d.jl")
 include("refinement/conservative_tree_streaming_3d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
@@ -340,6 +341,10 @@ export conservative_tree_cell_id_2d, conservative_tree_children_2d
 export conservative_tree_is_active_leaf_2d
 export conservative_tree_refine_blocks_from_krk_2d
 export create_conservative_tree_spec_from_krk_2d
+export allocate_conservative_tree_F_2d
+export active_population_sums_F_2d, level_population_sums_F_2d
+export coalesce_conservative_tree_ledgers_F_2d!
+export explode_conservative_tree_ledgers_F_2d!
 export coalesce_patch_to_shadow_F_2d!, explode_shadow_to_patch_uniform_F_2d!
 export active_population_sums_F, active_mass_F, active_momentum_F, active_moments_F
 export composite_to_leaf_F_2d!, leaf_to_composite_F_2d!
