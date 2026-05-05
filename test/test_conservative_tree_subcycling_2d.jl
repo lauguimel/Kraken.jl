@@ -55,6 +55,117 @@ using Kraken
             schedule, 5)
     end
 
+    @testset "scheduler binds one L/L+1 interface ledger" begin
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(1)
+        bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)
+        down = only(event for event in schedule.events
+                    if event.phase == :sync_down)
+        up = only(event for event in schedule.events
+                  if event.phase == :sync_up)
+        advances = [event for event in schedule.events
+                    if event.phase == :advance && event.src_level == 1]
+
+        @test Kraken.conservative_tree_subcycle_local_substep_2d(
+            schedule, 0, advances[1].tick) == 1
+        @test Kraken.conservative_tree_subcycle_local_substep_2d(
+            schedule, 0, advances[2].tick) == 2
+
+        ledger = Kraken.conservative_tree_subcycle_sync_down_face_2d!(
+            bank, down, 12.0, 2, :west)
+        half1 = zeros(Float64, 2, 2, 9)
+        half2 = zeros(Float64, 2, 2, 9)
+        half1[2, 1, 2] = 1.25
+        half1[2, 2, 2] = 2.75
+        half2[2, 1, 2] = 2.0
+        half2[2, 2, 2] = 3.0
+        Kraken.conservative_tree_subcycle_accumulate_advance_face_2d!(
+            bank, advances[1], half1, 2, :east)
+        Kraken.conservative_tree_subcycle_accumulate_advance_face_2d!(
+            bank, advances[2], half2, 2, :east)
+
+        @test Kraken.conservative_tree_subcycle_sync_up_ledger_2d(bank, up) ===
+              ledger
+        sums = conservative_tree_subcycle_orientation_sums_2d(ledger)
+        @test sums.coarse_to_fine[2] == 12.0
+        @test sums.fine_to_coarse[2] == 9.0
+
+        Kraken.reset_conservative_tree_subcycle_pair_2d!(bank, 0)
+        ledger = Kraken.conservative_tree_subcycle_pair_ledger_2d(bank, 0)
+        Kraken.conservative_tree_subcycle_sync_down_corner_2d!(
+            bank, down, 7.0, 6, :southwest)
+        corner_half = zeros(Float64, 2, 2, 9)
+        corner_half[2, 2, 6] = 2.0
+        for event in advances
+            Kraken.conservative_tree_subcycle_accumulate_advance_corner_2d!(
+                bank, event, corner_half, 6, :northeast)
+        end
+        sums = conservative_tree_subcycle_orientation_sums_2d(ledger)
+        @test sums.coarse_to_fine[6] == 7.0
+        @test sums.fine_to_coarse[6] == 4.0
+    end
+
+    @testset "scheduler binds all adjacent level-pair ledgers recursively" begin
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(3)
+        bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)
+
+        for event in schedule.events
+            if event.phase == :sync_down
+                Fq = 10.0 * (event.src_level + 1)
+                Kraken.conservative_tree_subcycle_sync_down_face_2d!(
+                    bank, event, Fq, 2, :west)
+            elseif event.phase == :advance && event.src_level > 0
+                half = zeros(Float64, 2, 2, 9)
+                half[2, 1, 2] = 1.0
+                half[2, 2, 2] = 1.0
+                Kraken.conservative_tree_subcycle_accumulate_advance_face_2d!(
+                    bank, event, half, 2, :east)
+            elseif event.phase == :sync_up
+                @test Kraken.conservative_tree_subcycle_sync_up_ledger_2d(
+                    bank, event) ===
+                      Kraken.conservative_tree_subcycle_pair_ledger_2d(
+                          bank, event.dst_level)
+            end
+        end
+
+        for parent in 0:2
+            ledger = Kraken.conservative_tree_subcycle_pair_ledger_2d(bank, parent)
+            sums = conservative_tree_subcycle_orientation_sums_2d(ledger)
+            sync_down_count = 2^parent
+            child_advance_count = 2^(parent + 1)
+
+            @test sums.coarse_to_fine[2] ==
+                  sync_down_count * 10.0 * (parent + 1)
+            @test sums.fine_to_coarse[2] == child_advance_count * 2.0
+            @test ledger.fine_to_coarse[2, 1] == sync_down_count * 2.0
+            @test ledger.fine_to_coarse[2, 2] == sync_down_count * 2.0
+        end
+    end
+
+    @testset "scheduled ledger binding rejects wrong events" begin
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(2)
+        bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)
+        down = first(event for event in schedule.events
+                     if event.phase == :sync_down)
+        advance0 = first(event for event in schedule.events
+                         if event.phase == :advance && event.src_level == 0)
+        advance1 = first(event for event in schedule.events
+                         if event.phase == :advance && event.src_level == 1)
+
+        half = zeros(Float64, 2, 2, 9)
+        @test_throws ArgumentError Kraken.conservative_tree_subcycle_sync_down_face_2d!(
+            bank, advance1, 1.0, 2, :west)
+        @test_throws ArgumentError Kraken.conservative_tree_subcycle_accumulate_advance_face_2d!(
+            bank, down, half, 2, :east)
+        @test_throws ArgumentError Kraken.conservative_tree_subcycle_accumulate_advance_face_2d!(
+            bank, advance0, half, 2, :east)
+        @test_throws ArgumentError Kraken.conservative_tree_subcycle_sync_up_ledger_2d(
+            bank, down)
+        @test_throws ArgumentError Kraken.conservative_tree_subcycle_pair_ledger_2d(
+            bank, 2)
+        @test_throws ArgumentError Kraken.conservative_tree_subcycle_local_substep_2d(
+            schedule, 0, 1)
+    end
+
     @testset "coarse-to-fine face packet is consumed once over two half steps" begin
         ledger = create_conservative_tree_subcycle_ledger_2d()
         conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!(

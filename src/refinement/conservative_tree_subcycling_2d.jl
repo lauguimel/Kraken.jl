@@ -25,6 +25,11 @@ struct ConservativeTreeSubcycleSchedule2D
     events::Vector{ConservativeTreeSubcycleEvent2D}
 end
 
+struct ConservativeTreeSubcycleLedgerBank2D{T}
+    schedule::ConservativeTreeSubcycleSchedule2D
+    pair_ledgers::Vector{ConservativeTreeSubcycleLedger2D{T}}
+end
+
 function create_conservative_tree_subcycle_ledger_2d(;
         T::Type{<:Real}=Float64,
         ratio::Integer=2)
@@ -112,6 +117,24 @@ function create_conservative_tree_subcycle_schedule_2d(max_level::Integer;
         ml, r, finest_ticks, level_step_ticks, events)
 end
 
+function create_conservative_tree_subcycle_ledger_bank_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D;
+        T::Type{<:Real}=Float64)
+    pair_ledgers = ConservativeTreeSubcycleLedger2D{T}[
+        create_conservative_tree_subcycle_ledger_2d(T=T, ratio=schedule.ratio)
+        for _ in 1:schedule.max_level
+    ]
+    return ConservativeTreeSubcycleLedgerBank2D{T}(schedule, pair_ledgers)
+end
+
+function create_conservative_tree_subcycle_ledger_bank_2d(max_level::Integer;
+                                                          ratio::Integer=2,
+                                                          T::Type{<:Real}=Float64)
+    schedule = create_conservative_tree_subcycle_schedule_2d(
+        max_level; ratio=ratio)
+    return create_conservative_tree_subcycle_ledger_bank_2d(schedule; T=T)
+end
+
 function conservative_tree_subcycle_events_at_tick_2d(
         schedule::ConservativeTreeSubcycleSchedule2D,
         tick::Integer)
@@ -140,6 +163,158 @@ function conservative_tree_subcycle_sync_counts_2d(
         counts[key] = get(counts, key, 0) + 1
     end
     return counts
+end
+
+function _check_conservative_tree_pair_level_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D,
+        parent_level::Integer)
+    parent = Int(parent_level)
+    0 <= parent < schedule.max_level ||
+        throw(ArgumentError("parent_level must identify an adjacent level pair"))
+    return parent
+end
+
+function conservative_tree_subcycle_pair_ledger_2d(
+        bank::ConservativeTreeSubcycleLedgerBank2D,
+        parent_level::Integer)
+    parent = _check_conservative_tree_pair_level_2d(
+        bank.schedule, parent_level)
+    return bank.pair_ledgers[parent + 1]
+end
+
+function reset_conservative_tree_subcycle_bank_2d!(
+        bank::ConservativeTreeSubcycleLedgerBank2D)
+    for ledger in bank.pair_ledgers
+        reset_conservative_tree_subcycle_ledger_2d!(ledger)
+    end
+    return bank
+end
+
+function reset_conservative_tree_subcycle_pair_2d!(
+        bank::ConservativeTreeSubcycleLedgerBank2D,
+        parent_level::Integer)
+    reset_conservative_tree_subcycle_ledger_2d!(
+        conservative_tree_subcycle_pair_ledger_2d(bank, parent_level))
+    return bank
+end
+
+function conservative_tree_subcycle_local_substep_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D,
+        parent_level::Integer,
+        tick::Integer)
+    parent = _check_conservative_tree_pair_level_2d(schedule, parent_level)
+    t = Int(tick)
+    0 < t <= schedule.finest_ticks ||
+        throw(ArgumentError("tick must be a positive schedule tick"))
+
+    parent_ticks = schedule.level_step_ticks[parent + 1]
+    child_ticks = schedule.level_step_ticks[parent + 2]
+    t % child_ticks == 0 ||
+        throw(ArgumentError("tick is not aligned with the child level"))
+
+    parent_start = div(t - 1, parent_ticks) * parent_ticks
+    local_step = div(t - parent_start, child_ticks)
+    1 <= local_step <= schedule.ratio ||
+        throw(ArgumentError("tick is outside the parent subcycle interval"))
+    return local_step
+end
+
+function _check_subcycle_sync_down_event_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D,
+        event::ConservativeTreeSubcycleEvent2D)
+    event.phase == :sync_down ||
+        throw(ArgumentError("event must be :sync_down"))
+    event.dst_level == event.src_level + 1 ||
+        throw(ArgumentError("sync_down event must target an adjacent child level"))
+    _check_conservative_tree_pair_level_2d(schedule, event.src_level)
+    return event.src_level
+end
+
+function _check_subcycle_sync_up_event_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D,
+        event::ConservativeTreeSubcycleEvent2D)
+    event.phase == :sync_up ||
+        throw(ArgumentError("event must be :sync_up"))
+    event.src_level == event.dst_level + 1 ||
+        throw(ArgumentError("sync_up event must target an adjacent parent level"))
+    _check_conservative_tree_pair_level_2d(schedule, event.dst_level)
+    return event.dst_level
+end
+
+function _check_subcycle_child_advance_event_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D,
+        event::ConservativeTreeSubcycleEvent2D)
+    event.phase == :advance ||
+        throw(ArgumentError("event must be :advance"))
+    event.src_level == event.dst_level ||
+        throw(ArgumentError("advance event must have identical src/dst levels"))
+    event.src_level > 0 ||
+        throw(ArgumentError("level-0 advance has no parent subcycle ledger"))
+    parent = event.src_level - 1
+    substep = conservative_tree_subcycle_local_substep_2d(
+        schedule, parent, event.tick)
+    return parent, substep
+end
+
+function conservative_tree_subcycle_sync_down_face_2d!(
+        bank::ConservativeTreeSubcycleLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D,
+        Fq,
+        q::Integer,
+        face::Symbol)
+    parent = _check_subcycle_sync_down_event_2d(bank.schedule, event)
+    ledger = conservative_tree_subcycle_pair_ledger_2d(bank, parent)
+    conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!(
+        ledger, Fq, q, face)
+    return ledger
+end
+
+function conservative_tree_subcycle_sync_down_corner_2d!(
+        bank::ConservativeTreeSubcycleLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D,
+        Fq,
+        q::Integer,
+        corner::Symbol)
+    parent = _check_subcycle_sync_down_event_2d(bank.schedule, event)
+    ledger = conservative_tree_subcycle_pair_ledger_2d(bank, parent)
+    conservative_tree_subcycle_deposit_coarse_to_fine_corner_2d!(
+        ledger, Fq, q, corner)
+    return ledger
+end
+
+function conservative_tree_subcycle_accumulate_advance_face_2d!(
+        bank::ConservativeTreeSubcycleLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D,
+        fine_half_step::AbstractArray{<:Any,3},
+        q::Integer,
+        face::Symbol)
+    parent, substep = _check_subcycle_child_advance_event_2d(
+        bank.schedule, event)
+    ledger = conservative_tree_subcycle_pair_ledger_2d(bank, parent)
+    conservative_tree_subcycle_accumulate_fine_to_coarse_face_2d!(
+        ledger, fine_half_step, q, face, substep)
+    return ledger
+end
+
+function conservative_tree_subcycle_accumulate_advance_corner_2d!(
+        bank::ConservativeTreeSubcycleLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D,
+        fine_half_step::AbstractArray{<:Any,3},
+        q::Integer,
+        corner::Symbol)
+    parent, substep = _check_subcycle_child_advance_event_2d(
+        bank.schedule, event)
+    ledger = conservative_tree_subcycle_pair_ledger_2d(bank, parent)
+    conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!(
+        ledger, fine_half_step, q, corner, substep)
+    return ledger
+end
+
+function conservative_tree_subcycle_sync_up_ledger_2d(
+        bank::ConservativeTreeSubcycleLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D)
+    parent = _check_subcycle_sync_up_event_2d(bank.schedule, event)
+    return conservative_tree_subcycle_pair_ledger_2d(bank, parent)
 end
 
 function reset_conservative_tree_subcycle_ledger_2d!(

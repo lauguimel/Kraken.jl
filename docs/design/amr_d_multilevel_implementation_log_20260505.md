@@ -283,7 +283,9 @@ New concepts:
 
 - `ConservativeTreeSubcycleEvent2D`;
 - `ConservativeTreeSubcycleSchedule2D`;
+- `ConservativeTreeSubcycleLedgerBank2D`;
 - `create_conservative_tree_subcycle_schedule_2d`;
+- `create_conservative_tree_subcycle_ledger_bank_2d`;
 - `conservative_tree_subcycle_events_at_tick_2d`;
 - `conservative_tree_subcycle_advance_counts_2d`;
 - `conservative_tree_subcycle_sync_counts_2d`.
@@ -311,3 +313,18 @@ This schedule owns no populations and performs no physics. It is the future
 dispatch spine for route streaming, subcycling ledgers, and reflux. The next
 implementation patch should bind the existing face/corner ledgers to this
 schedule for a minimal `L/L+1` interface, then recurse over all adjacent pairs.
+
+Ledger binding:
+
+- one runtime ledger buffer is allocated per adjacent pair `L/L+1`;
+- `sync_down L -> L+1` deposits coarse-to-fine face/corner packets into that
+  pair ledger;
+- every `advance L+1` event maps to a local substep of the parent interval and
+  accumulates fine-to-coarse face/corner packets into the same pair ledger;
+- `sync_up L+1 -> L` exposes the completed pair ledger for the future reflux /
+  parent update;
+- the same helpers work for a single `L/L+1` pair and recursively for all
+  adjacent pairs in `L0..Lmax`.
+
+This is still an accounting layer. It does not yet apply the completed ledger
+to population arrays.
