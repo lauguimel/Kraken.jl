@@ -278,8 +278,8 @@ using Kraken
         @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
                        sum(active_population_sums_F_2d(Fin, spec));
                        atol=1e-12, rtol=0)
-        @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
-                                  Fin[spec.active_cells, :])) <= 1e-14
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
     end
 
     @testset "scheduled ledger binding rejects wrong events" begin

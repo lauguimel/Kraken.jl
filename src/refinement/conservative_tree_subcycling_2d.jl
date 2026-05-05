@@ -34,6 +34,7 @@ struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     spec::ConservativeTreeSpec2D
     schedule::ConservativeTreeSubcycleSchedule2D
     pair_parent_ledgers::Vector{Dict{Int,ConservativeTreeSubcycleLedger2D{T}}}
+    fine_to_coarse_route_packets::Vector{Dict{Tuple{Int,Int},Vector{T}}}
 end
 
 function create_conservative_tree_subcycle_ledger_2d(;
@@ -161,6 +162,10 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
         Dict{Int,ConservativeTreeSubcycleLedger2D{T}}()
         for _ in 1:spec.max_level
     ]
+    fine_to_coarse_route_packets = [
+        Dict{Tuple{Int,Int},Vector{T}}()
+        for _ in 1:spec.max_level
+    ]
 
     @inbounds for (cell_id, cell) in pairs(spec.cells)
         cell.level < spec.max_level || continue
@@ -170,7 +175,7 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
             create_conservative_tree_subcycle_ledger_2d(T=T, ratio=schedule.ratio)
     end
     return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
-        spec, schedule, pair_parent_ledgers)
+        spec, schedule, pair_parent_ledgers, fine_to_coarse_route_packets)
 end
 
 function conservative_tree_subcycle_events_at_tick_2d(
@@ -265,6 +270,9 @@ function reset_conservative_tree_subcycle_spatial_bank_2d!(
             reset_conservative_tree_subcycle_ledger_2d!(ledger)
         end
     end
+    for packets in bank.fine_to_coarse_route_packets
+        empty!(packets)
+    end
     return bank
 end
 
@@ -276,6 +284,9 @@ function reset_conservative_tree_subcycle_spatial_pair_2d!(
     for ledger in values(pair)
         reset_conservative_tree_subcycle_ledger_2d!(ledger)
     end
+    parent = _check_conservative_tree_pair_level_2d(
+        bank.schedule, parent_level)
+    empty!(bank.fine_to_coarse_route_packets[parent + 1])
     return bank
 end
 
@@ -447,8 +458,15 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
     ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
     step = _check_subcycle_step_2d(ledger, substep)
     qi = _check_d2q9_q(route.q)
-    ledger.fine_to_coarse[qi, step] +=
-        _subcycle_route_packet_2d(F, route) / ledger.ratio
+    packet = _subcycle_route_packet_2d(F, route) / ledger.ratio
+    ledger.fine_to_coarse[qi, step] += packet
+    route.dst != 0 ||
+        throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
+    packets = get!(bank.fine_to_coarse_route_packets[parent.level + 1],
+                   (route.dst, qi)) do
+        zeros(eltype(ledger.fine_to_coarse), ledger.ratio)
+    end
+    packets[step] += packet
     return ledger
 end
 
@@ -594,6 +612,16 @@ function conservative_tree_subcycle_apply_sync_up_F_2d!(
         event::ConservativeTreeSubcycleEvent2D;
         boundary::Symbol=:skip)
     parent_level = _check_subcycle_spatial_sync_up_event_2d(bank, event)
+    packets = bank.fine_to_coarse_route_packets[parent_level + 1]
+    if !isempty(packets)
+        _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
+        for ((dst_id, q), substep_packets) in packets
+            packet = sum(substep_packets)
+            iszero(packet) && continue
+            F[dst_id, q] += packet
+        end
+        return F
+    end
     return conservative_tree_subcycle_apply_fine_to_coarse_pair_F_2d!(
         F, bank, parent_level; boundary=boundary)
 end

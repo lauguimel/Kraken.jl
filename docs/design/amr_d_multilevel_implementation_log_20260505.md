@@ -429,14 +429,47 @@ Validated by:
 
 Known open canary:
 
-- local active-leaf rest equality is still broken with max residual
-  approximately `1.39e-2` on the small one-level patch after time weighting.
-  The remaining mismatch is localized on diagonal corner populations. This is
-  now isolated to the corner closure algebra rather than the scheduler,
-  spatial ownership, or face timing. A naive full-packet coarse-to-fine
-  experiment fixed neither mass nor corners; collision remains disabled until
-  this broken canary is closed.
+- closed one-level local active-leaf rest equality is now green after preserving
+  route-level fine-to-coarse destinations. Nested `Lmax >= 2` transport still
+  needs the same closure audit across recursive parent ledgers before collision
+  is enabled.
 
 Observed result:
 
-- `test_conservative_tree_subcycling_2d.jl`: 182 pass, 1 broken.
+- `test_conservative_tree_subcycling_2d.jl`: 183 pass.
+
+## ML4d Fine-To-Coarse Spatial Destinations
+
+Closed the one-level subcycled rest-state canary.
+
+Finding:
+
+- the spatial ledger kept fine-to-coarse orientation totals per refined parent,
+  but applying those totals by `(parent.i + c_qx, parent.j + c_qy)` is not
+  sufficient for diagonal corner routes;
+- several children of the same refined parent can have the same diagonal `q`
+  while routing to different coarse cells;
+- aggregating only by `(parent, q)` preserves mass but redistributes diagonal
+  populations locally.
+
+Implemented:
+
+- `ConservativeTreeSubcycleSpatialLedgerBank2D` now carries
+  `fine_to_coarse_route_packets`, grouped by adjacent pair and keyed by the
+  actual route destination `(dst_cell, q)`;
+- route accumulation still updates the orientation ledger for diagnostics, but
+  `sync_up` applies the route-spatial packets when present;
+- reset helpers clear both orientation ledgers and route-spatial packet maps.
+
+Gate now green:
+
+- no-refinement subcycled transport equals the existing route scatter exactly;
+- one-level closed rest state preserves active mass and every active population
+  to roundoff.
+
+Remaining blocker:
+
+- nested rest-state (`Lmax >= 2`) still has a mass/local residual. The next
+  patch should repeat this route-spatial audit recursively: likely the
+  intermediate inactive parent rows need their own pending destination maps
+  before the next `sync_down`.
