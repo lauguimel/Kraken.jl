@@ -89,11 +89,11 @@ function _accumulate_route_spec_2d!(dsts::Vector{Int},
     return nothing
 end
 
-function _route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
-                                         src_id::Int,
-                                         q::Int)
+function _sampled_route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
+                                                 src_id::Int,
+                                                 q::Int,
+                                                 sample_level::Int)
     src = spec.cells[src_id]
-    sample_level = min(src.level + 1, spec.max_level)
     scale = 1 << (sample_level - src.level)
     cx = d2q9_cx(q)
     cy = d2q9_cy(q)
@@ -118,6 +118,63 @@ function _route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
         end
     end
     return dsts, weights, kinds
+end
+
+function _route_source_touches_finer_2d(spec::ConservativeTreeSpec2D,
+                                        src::ConservativeTreeCell2D)
+    src.level < spec.max_level || return false
+    nx = _conservative_tree_level_size_2d(spec.Nx, src.level)
+    ny = _conservative_tree_level_size_2d(spec.Ny, src.level)
+
+    for dj in -1:1, di in -1:1
+        di == 0 && dj == 0 && continue
+        i = src.i + di
+        j = src.j + dj
+        1 <= i <= nx || continue
+        1 <= j <= ny || continue
+        cell_id = conservative_tree_cell_id_2d(spec, src.level, i, j)
+        cell_id == 0 && continue
+        spec.cells[cell_id].active || return true
+    end
+    return false
+end
+
+function _route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
+                                         src_id::Int,
+                                         q::Int)
+    src = spec.cells[src_id]
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+
+    if src.level < spec.max_level &&
+            (src.level == 0 || _route_source_touches_finer_2d(spec, src))
+        return _sampled_route_specs_for_active_cell_2d(
+            spec, src_id, q, src.level + 1)
+    end
+
+    i_dst = src.i + cx
+    j_dst = src.j + cy
+    nx_level = _conservative_tree_level_size_2d(spec.Nx, src.level)
+    ny_level = _conservative_tree_level_size_2d(spec.Ny, src.level)
+    if !(1 <= i_dst <= nx_level && 1 <= j_dst <= ny_level)
+        return [0], [1.0], [ROUTE_BOUNDARY]
+    end
+
+    same_level_dst = conservative_tree_cell_id_2d(spec, src.level, i_dst, j_dst)
+    if same_level_dst == 0 || spec.cells[same_level_dst].active
+        dst_id = _active_leaf_covering_sample_2d(spec, src.level, i_dst, j_dst)
+        if dst_id == 0
+            return [0], [1.0], [ROUTE_BOUNDARY]
+        end
+        dst = spec.cells[dst_id]
+        kind = _route_kind_for_level_pair_2d(src, dst, q)
+        return [dst_id], [1.0], [kind]
+    end
+
+    src.level < spec.max_level ||
+        throw(ArgumentError("inactive route target at max_level"))
+    return _sampled_route_specs_for_active_cell_2d(
+        spec, src_id, q, src.level + 1)
 end
 
 function _push_multilevel_link_routes_2d!(

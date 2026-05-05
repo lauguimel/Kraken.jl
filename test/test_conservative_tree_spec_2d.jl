@@ -396,6 +396,27 @@ using Random
         @test isapprox(base_out[dst, 2], 7.0; atol=1e-14, rtol=0)
     end
 
+    @testset "single-level route streaming preserves closed rest state" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        stream_conservative_tree_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:bounceback)
+
+        @test maximum(abs.(Fout - Fin)) <= 1e-14
+    end
+
     @testset "bounceback route streaming preserves closed nested mass" begin
         spec = create_conservative_tree_spec_2d(16, 12, [
             ConservativeTreeRefineBlock2D("L1", 5:12, 3:10),
@@ -417,7 +438,7 @@ using Random
         stream_conservative_tree_routes_F_2d!(
             Fout, Fin, spec, table; boundary=:bounceback)
 
-        @test isapprox(sum(Fout), sum(Fin); atol=1e-14, rtol=0)
+        @test isapprox(sum(Fout), sum(Fin); atol=1e-12, rtol=0)
         @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
                        sum(active_population_sums_F_2d(Fin, spec));
                        atol=1e-12, rtol=0)

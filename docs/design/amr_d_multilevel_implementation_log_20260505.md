@@ -236,3 +236,40 @@ Required before collision:
 - add a rest-state surgical test for direct, face interface, and corner
   interface separately;
 - keep macro-flow runners disabled until rest-state tests are green.
+
+## ML3c Route Rest-State Diagnostic
+
+Debugged the nested rest-state failure down to route-table construction.
+
+Finding:
+
+- the 0/1-level route table preserves closed rest state exactly;
+- the first multilevel route table sampled every intermediate active source at
+  `level + 1`, even when that source was leaving toward a coarser level;
+- that underfilled coarse destinations at the outer boundary of an
+  intermediate patch;
+- switching intermediate sources to direct/coalesced routes away from the next
+  finer halo reduces the nested rest-state residual, but does not close it.
+
+Implemented:
+
+- level-0 sources keep the historical leaf-equivalent route convention;
+- intermediate-level sources use leaf-equivalent sampling only when their
+  same-level Moore neighborhood touches an inactive parent refined to the next
+  level;
+- intermediate-level sources away from a finer halo route directly to same
+  level or coalesce to the parent level.
+
+Current surgical status:
+
+- single-level closed rest-state route streaming is now explicitly tested green;
+- nested closed mass remains conserved to roundoff;
+- local nested rest-state equality remains `@test_broken`.
+
+Remaining interpretation:
+
+- the unresolved residual is now concentrated around corners/faces of the next
+  finer level;
+- this is consistent with the existing subcycling ledger tests: face balance
+  needs two fine substeps per coarse step, and corner balance needs the reflux /
+  time-integration closure rather than a pure one-pass scatter table.
