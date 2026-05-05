@@ -123,6 +123,17 @@ Approche retenue:
    free stack preallouee pour adaptation. Pas d'allocation dans le hot loop.
 3. **Phase GPU**: layout packed actif, route tables packees, masks GPU-friendly.
 
+Calendrier explicite:
+
+- Phases 2-6, Lmax=2: dense per-level ou arrays simples autorises pour fermer
+  vite les invariants.
+- Debut Phase 7, Lmax>=3: migration vers block-pool obligatoire avant
+  d'ajouter de nouveaux macro-flows. Rejouer les tests Phases 2-6 sur le
+  block-pool avant de continuer.
+- Phase 7+: documenter le budget memoire 2D et 3D au constructeur, incluant
+  populations, metadata, route tables, ledger subcycling et buffers AD/GPU si
+  presents.
+
 ### Ne pas supposer que `F[i,j,q]` est AoS contigu
 
 Julia est column-major. Dans `F[i,j,q]`, les populations `q` d'une cellule sont
@@ -139,6 +150,9 @@ Layouts a benchmarker avant de figer:
 
 Regle: le design expose une API de layout, pas un layout grave dans le marbre.
 Le layout GPU final doit etre choisi par microbench dans le repo.
+Le choix CPU de Phase 0 est revisitable en Phase 11 si les benchmarks device
+Metal/CUDA contredisent le compromis CPU; toute migration de layout doit avoir
+un ADR court et un test de roundtrip.
 
 ### Reutiliser les lattices existants
 
@@ -203,6 +217,17 @@ Contrats code AD-friendly:
 - objectifs scalaires purs: drag, lift, debit, perte de masse, energie;
 - reductions deterministes, testables CPU d'abord.
 
+Representation obstacle pour AD:
+
+- un `Bool` solid mask est une decision topologique, pas une variable
+  differentiable;
+- le cylindre AD doit passer par une representation continue: fractions de
+  cut-link, fraction fluide par cellule, ou SDF lissee;
+- le chemin v04 doit fournir un helper de drag compatible poids continus
+  (`solid_weight`/`fluid_fraction`) au lieu d'imposer uniquement un mask `Bool`;
+- `compute_drag_mea_solid_F_2d` peut rester le chemin voie D, mais la v04 AD
+  doit ajouter un equivalent pondere avant tout gradient rayon/centre.
+
 ## Architecture cible minimale
 
 ### Module v04
@@ -246,23 +271,21 @@ utiliser un export minimal dans un commit dedie apres inspection.
 
 #### Cell id compacte
 
-Utiliser un id stable et packable:
+Utiliser un id stable, compact et directement indexable:
 
 ```julia
 struct AMRCellId
-    value::UInt64
+    value::Int32
 end
 ```
 
-Encodage recommande:
+Decision:
 
-- bits pour level;
-- bits pour block id;
-- bits pour local id dans block;
-- decode inline, sans allocation.
-
-Pour la premiere phase CPU, un `Int32` linear id suffit si la table de decode
-est claire et testee. Ne pas optimiser trop tot.
+- `Int32` est le format interne production tant que la capacity reste sous
+  `typemax(Int32)`;
+- `level`, `block id`, `local id` vivent dans les metadata du block-pool;
+- `UInt64` n'est a introduire que plus tard pour serialization stable ou
+  simulations depassant explicitement la borne `Int32`.
 
 #### Block-tree field
 
@@ -404,6 +427,11 @@ Comparer au minimum:
 
 Gate:
 
+- au moins 3 layouts mesures sur le meme hot loop BGK + stream same-level;
+- baseline = LBM cartesien dense Kraken existant;
+- viser >= 70% du baseline MLUPS sur CPU local pour le layout retenu;
+- si aucun layout ne passe 70%, documenter le bottleneck et ajuster la cible
+  avant GPU;
 - documenter le layout choisi pour CPU phase 1;
 - documenter le layout cible GPU;
 - ne pas pretendre AoS/SoA sans mesure.
@@ -496,6 +524,10 @@ Gate:
 
 - rest-state preserve a roundoff;
 - domaine level 1 bit-identique au chemin leaf;
+- kernels parametrises par `T<:Real` des l'ecriture initiale;
+- constantes physiques ecrites `T(0.5)`, `T(1)`, etc., aucun `Float64`
+  hardcode dans les boucles physiques;
+- smoke `Float64` et `Float32` passent le rest-state;
 - pas encore de claim obstacle convergence.
 
 ### Phase 5 - Subcycling 2D ratio 2
@@ -515,6 +547,12 @@ Tests obligatoires:
 
 Gate:
 
+- Phase 5 valide seulement `omega_coarse == omega_fine`;
+- le rescaling Filippova-Hanel de `tau` devient obligatoire en Phase 7 quand
+  le multi-level introduit `omega_l = f(level)`;
+- kernels parametrises par `T<:Real`, aucun `Float64` hardcode dans les
+  boucles physiques;
+- smoke `Float64` et `Float32` passent le rest-state subcycle;
 - pas de regression open-channel/BFS;
 - reduction claire du diff route-vs-oracle sur le diagnostic obstacle existant.
 
@@ -537,22 +575,32 @@ Gate cible initiale:
 
 - masse roundoff;
 - BFS proche oracle comme voie D corrigee;
-- cylinder Cd ratio meilleur que voie D leaf-equivalent actuelle;
-- ne pas exiger `<1.10x` avant étude de convergence plus robuste.
+- aucun NaN sur 5000 steps courts locaux;
+- cylinder Cd ratio scale 2 explicitement `<= 1.30x` vs oracle leaf, en
+  prenant la reference voie D actuelle autour de `1.86x`;
+- si la reference voie D est recalculee, garder une cible numerique explicite
+  dans `docs/design/amr_v04_status.md`, pas seulement "meilleur";
+- ne pas exiger `<1.10x` avant l'etude multi-level de Phase 7.
 
 ### Phase 7 - Multi-level Lmax>2 et 2:1 balance production
 
 Livrables:
 
+- migration block-pool sparse/capacity/free-stack;
 - tree multi-level;
 - topology multi-level;
 - tests Lmax=3 puis Lmax=4.
 
 Gate:
 
+- tests Phases 2-6 rejoues sur block-pool avant nouveaux macro-flows;
 - no adjacent level jump > 1;
 - rest-state multi-level;
 - subcycling nested correct;
+- rescaling Filippova-Hanel `tau` si `omega` varie par niveau;
+- ladder formelle square/cylinder scale `{1,2,4}`;
+- ratio obstacle `<= 1.10x` sur au moins 2/3 des scales ou regression
+  d'erreur d'ordre `>= 1.5` vs maillage;
 - memory budget documente.
 
 Lmax=5 est un objectif de support, pas une obligation pour le premier runner
@@ -576,6 +624,12 @@ Tests:
 - coarsen wake;
 - conservation during adapt;
 - no double ownership.
+
+Regle temporelle:
+
+- `adapt!` s'execute uniquement entre deux coarse steps complets;
+- jamais de refine/coarsen entre deux demi-pas fine;
+- ne jamais reconstruire `PullTopology` mid-cycle.
 
 ### Phase 9 - DSL `.krk`
 
@@ -621,6 +675,10 @@ end
 
 Tests chirurgicaux:
 
+- representation obstacle differentiable pour cylindre:
+  `fluid_fraction`/`solid_weight` ou SDF lissee;
+- helper de drag pondere compatible avec `compute_drag_mea_solid_F_2d`, mais
+  sans imposer un `Bool` mask dans le chemin AD;
 - `dq_wall/dR` cylindre: analytique vs finite difference;
 - `q_wall` et wall velocity type Couette/Taylor-Couette type-stables pour
   `ForwardDiff.Dual`;
@@ -679,6 +737,12 @@ Gate:
 - pas de BitArray dans kernel GPU;
 - pas d'allocations dans streaming kernel.
 
+Priorite device:
+
+- Metal local d'abord pour iteration rapide;
+- CUDA H100 aqua ensuite pour production;
+- garder la meme API KernelAbstractions pour les deux.
+
 AD GPU:
 
 - hors scope du premier GPU pack;
@@ -707,12 +771,20 @@ Regle:
 
 Apres hydro AMR stable.
 
-Premier couplage recommande:
+Scope v0.4:
 
 - Hydro + Thermal.
 
-Ne pas bloquer l'AMR hydro sur viscoelastic/phase-field. Ajouter `FieldKind`
-progressivement quand l'interface streaming/topology est stable.
+Hors scope v0.4:
+
+- viscoelastic;
+- phase-field;
+- CIJ;
+- multiphase.
+
+Ces couplages passent en v0.5+ et doivent etre documentes dans
+`docs/design/amr_v05_roadmap.md`. Ne pas bloquer l'AMR hydro sur eux. Ajouter
+`FieldKind` progressivement quand l'interface streaming/topology est stable.
 
 ## Quality gates globaux
 
@@ -723,6 +795,10 @@ Une phase est terminee seulement si:
 3. pas de changements hors perimetre stages;
 4. doc `docs/design/amr_v04_status.md` mise a jour;
 5. commit separe.
+
+La voie D peut etre marquee "legacy" apres Phase 6 verte, mais elle n'est
+supprimable qu'apres succes v0.4 complet, parite avec les runners aqua
+existants, et au moins un mois sans regression AMR observee.
 
 ## Ce qu'il faut supprimer du prompt original
 
