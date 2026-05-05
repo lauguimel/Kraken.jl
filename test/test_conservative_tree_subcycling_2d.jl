@@ -280,6 +280,11 @@ using Kraken
                        atol=1e-12, rtol=0)
         @test maximum(abs.(Fout[spec.active_cells, :] .-
                            Fin[spec.active_cells, :])) <= 1e-14
+        diag = Kraken.diagnose_conservative_tree_subcycled_rest_2d(spec, table)
+        @test abs(diag.active_drift) <= 1e-12
+        @test diag.max_active_abs <= 1e-14
+        @test maximum(abs.(diag.level_drift)) <= 1e-12
+        @test maximum(abs.(diag.orientation_drift)) <= 1e-12
     end
 
     @testset "nested subcycled transport rest state is the next closure gate" begin
@@ -300,12 +305,15 @@ using Kraken
 
         Kraken.stream_conservative_tree_subcycled_routes_F_2d!(
             Fout, Fin, spec, table; boundary=:bounceback)
+        diag = Kraken.diagnose_conservative_tree_subcycled_rest_2d(spec, table)
 
         @test_broken isapprox(sum(active_population_sums_F_2d(Fout, spec)),
                               sum(active_population_sums_F_2d(Fin, spec));
                               atol=1e-12, rtol=0)
         @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
                                   Fin[spec.active_cells, :])) <= 1e-14
+        @test_broken abs(diag.active_drift) <= 1e-12
+        @test_broken diag.max_active_abs <= 1e-14
     end
 
     @testset "scheduled ledger binding rejects wrong events" begin

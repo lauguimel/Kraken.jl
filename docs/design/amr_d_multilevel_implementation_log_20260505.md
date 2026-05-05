@@ -504,3 +504,34 @@ Next patch:
 - apply `down` pending immediately before recursive child `sync_down`;
 - keep `up` pending delayed until the receiver level output buffer, as in the
   one-level fix.
+
+## ML4f Rest Diagnostic Helper
+
+Added a reusable rest-state diagnostic for the subcycled transport skeleton.
+
+New internal API:
+
+- `diagnose_conservative_tree_subcycled_rest_2d`.
+
+It returns:
+
+- active initial/final mass;
+- active mass drift;
+- maximum active-population residual;
+- per-level mass drift;
+- per-orientation D2Q9 drift.
+
+Validated:
+
+- the diagnostic reports roundoff drift for the green one-level subcycled
+  rest canary;
+- the nested canary now records the same failure through both direct
+  `Fout - Fin` checks and diagnostic fields.
+
+Negative experiments kept out of source:
+
+- applying `L2 -> L1` pending packets as a source before `advance L1`
+  reduced one part of the residual but worsened the final nested mass;
+- coalescing inactive parent rows before `sync_down` and splitting from those
+  rows amplified the nested residual. The route-spatial source of truth must
+  remain active-route based until a stricter recursive closure is derived.

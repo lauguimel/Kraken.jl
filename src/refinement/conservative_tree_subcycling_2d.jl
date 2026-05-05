@@ -809,6 +809,42 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
     return Fout
 end
 
+function diagnose_conservative_tree_subcycled_rest_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D;
+        boundary::Symbol=:bounceback,
+        T::Type{<:Real}=Float64)
+    Fin = allocate_conservative_tree_F_2d(spec; T=T)
+    Fout = allocate_conservative_tree_F_2d(spec; T=T)
+    w = weights(D2Q9())
+    @inbounds for cell_id in spec.active_cells
+        volume = T(spec.cells[cell_id].metrics.volume)
+        for q in 1:9
+            Fin[cell_id, q] = T(w[q]) * volume
+        end
+    end
+
+    stream_conservative_tree_subcycled_routes_F_2d!(
+        Fout, Fin, spec, table; boundary=boundary)
+
+    active_initial = sum(Fin[spec.active_cells, :])
+    active_final = sum(Fout[spec.active_cells, :])
+    level_drift = zeros(T, spec.max_level + 1)
+    @inbounds for level in 0:spec.max_level
+        ids = [id for id in spec.active_cells if spec.cells[id].level == level]
+        level_drift[level + 1] = sum(Fout[ids, :]) - sum(Fin[ids, :])
+    end
+    orientation_drift = active_population_sums_F_2d(Fout, spec) -
+                        active_population_sums_F_2d(Fin, spec)
+    return (active_initial=active_initial,
+            active_final=active_final,
+            active_drift=active_final - active_initial,
+            max_active_abs=maximum(abs.(Fout[spec.active_cells, :] .-
+                                        Fin[spec.active_cells, :])),
+            level_drift=level_drift,
+            orientation_drift=orientation_drift)
+end
+
 function conservative_tree_subcycle_sync_down_face_2d!(
         bank::ConservativeTreeSubcycleLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D,
