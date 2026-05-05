@@ -5379,3 +5379,119 @@ end
         @test isapprox(prod_cde.max_far, ref_cde.max_far; atol=1e-12, rtol=0.0)
     end
 end
+
+function _square_obstacle_affine_velocity_patch(;
+        dudx=0.002, dudy=0.003, dvdx=-0.001, dvdy=-0.002,
+        u0=0.015, v0=-0.01)
+    geom = square_obstacle_channel_geometry_2d(; H=24, side=6, L_up=3, L_down=4)
+    Nx, Ny = geom.Nx, geom.Ny
+    cx0 = geom.i_step + (geom.H_ref - 1) / 2
+    cy0 = (Ny - 1) / 2
+    ux = [
+        u0 + dudx * ((i - 1) - cx0) + dudy * ((j - 1) - cy0)
+        for i in 1:Nx, j in 1:Ny
+    ]
+    uy = [
+        v0 + dvdx * ((i - 1) - cx0) + dvdy * ((j - 1) - cy0)
+        for i in 1:Nx, j in 1:Ny
+    ]
+    uwx = zeros(Float64, Nx, Ny, 9)
+    uwy = zeros(Float64, Nx, Ny, 9)
+    for q in 2:9, j in 1:Ny, i in 1:Nx
+        qw = geom.q_wall[i, j, q]
+        qw > 0.0 || continue
+        wx = (i - 1.0) + qw * D2Q9_CX[q]
+        wy = (j - 1.0) + qw * D2Q9_CY[q]
+        uwx[i, j, q] = u0 + dudx * (wx - cx0) + dudy * (wy - cy0)
+        uwy[i, j, q] = v0 + dvdx * (wx - cx0) + dvdy * (wy - cy0)
+    end
+    return (; geom, ux, uy, uwx, uwy, dudx, dudy, dvdx, dvdy,
+              cx0, cy0)
+end
+
+function _square_obstacle_prod_gradient_stats(mode::Symbol)
+    p = _square_obstacle_affine_velocity_patch()
+    stencils = Kraken.precompute_conformation_gradient_stencils_2d(
+        p.geom.is_solid, p.geom.q_wall; mode,
+        max_terms=mode === :embedded_axis ? 4 : 64,
+        FT=Float64,
+    )
+    max_cut_gradient = 0.0
+    max_near_gradient = 0.0
+    active_fallback_count = 0
+    n_cut = 0
+    n_near = 0
+    for j in 1:p.geom.Ny, i in 1:p.geom.Nx
+        p.geom.is_solid[i, j] && continue
+        is_cut = _is_cut_cell(p.geom.q_wall, i, j)
+        near = is_cut || any(
+            1 <= i + Int(D2Q9_CX[q]) <= p.geom.Nx &&
+            1 <= j + Int(D2Q9_CY[q]) <= p.geom.Ny &&
+            p.geom.is_solid[i + Int(D2Q9_CX[q]), j + Int(D2Q9_CY[q])]
+            for q in 2:9
+        )
+        near || continue
+        grad = Kraken.conformation_velocity_gradient_from_stencils_2d(
+            p.ux, p.uy, p.uwx, p.uwy, stencils, i, j,
+        )
+        err = maximum(abs, (
+            grad.dudx - p.dudx, grad.dudy - p.dudy,
+            grad.dvdx - p.dvdx, grad.dvdy - p.dvdy,
+        ))
+        active_fallback_count += stencils.fallback[i, j, 1] ? 1 : 0
+        active_fallback_count += stencils.fallback[i, j, 2] ? 1 : 0
+        if is_cut
+            n_cut += 1
+            max_cut_gradient = max(max_cut_gradient, err)
+        else
+            n_near += 1
+            max_near_gradient = max(max_near_gradient, err)
+        end
+    end
+    return (; max_cut_gradient, max_near_gradient, active_fallback_count,
+              n_cut, n_near,
+              stats=Kraken.conformation_gradient_stencil_stats_2d(stencils))
+end
+
+function _square_obstacle_extrap_eq_affine_once_stats()
+    p = _square_obstacle_affine_velocity_patch()
+    Nx, Ny = p.geom.Nx, p.geom.Ny
+    C = [
+        1.0 + 0.02 * ((i - 1) - p.cx0) - 0.015 * ((j - 1) - p.cy0)
+        for i in 1:Nx, j in 1:Ny
+    ]
+    g = zeros(Float64, Nx, Ny, 9)
+    init_conformation_field_2d!(g, C, p.ux, p.uy)
+    buf = similar(g)
+    stream_2d!(buf, g, Nx, Ny; sync=true)
+    _extrap_eq_wall_bc_rebalanced!(buf, p.geom.is_solid, p.geom.q_wall,
+                                   C, p.ux, p.uy)
+
+    max_macro = 0.0
+    max_sum = 0.0
+    n_cut = 0
+    for j in 1:Ny, i in 1:Nx
+        _is_cut_cell(p.geom.q_wall, i, j) || continue
+        n_cut += 1
+        macro_value = sum(buf[i, j, q] for q in 1:9)
+        max_macro = max(max_macro, abs(macro_value - C[i, j]))
+        max_sum = max(max_sum, abs(macro_value - sum(buf[i, j, :])))
+    end
+    return (; max_macro, max_sum, n_cut)
+end
+
+@testset "P18l prototype extrap-eq BC: M11 square obstacle remontée" begin
+    for mode in (:embedded_axis, :wallfit4)
+        stats = _square_obstacle_prod_gradient_stats(mode)
+        @test stats.n_cut > 0
+        @test stats.max_cut_gradient < 5e-14
+        @test stats.max_near_gradient < 5e-14
+        @test stats.active_fallback_count <= 4
+        @test stats.stats.max_count <= (mode === :embedded_axis ? 4 : 64)
+    end
+
+    fill_stats = _square_obstacle_extrap_eq_affine_once_stats()
+    @test fill_stats.n_cut > 0
+    @test fill_stats.max_macro < P0_ATOL
+    @test fill_stats.max_sum < P0_ATOL
+end
