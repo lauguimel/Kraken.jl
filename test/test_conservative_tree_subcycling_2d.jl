@@ -2,6 +2,59 @@ using Test
 using Kraken
 
 @testset "Conservative tree subcycling ledger 2D" begin
+    @testset "generic recursive schedule is level agnostic" begin
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(3)
+
+        @test schedule.max_level == 3
+        @test schedule.ratio == 2
+        @test schedule.finest_ticks == 8
+        @test schedule.level_step_ticks == [8, 4, 2, 1]
+        @test Kraken.conservative_tree_subcycle_advance_counts_2d(schedule) ==
+              [1, 2, 4, 8]
+
+        sync_counts = Kraken.conservative_tree_subcycle_sync_counts_2d(schedule)
+        for level in 0:2
+            expected = 2^level
+            @test sync_counts[(:sync_down, level, level + 1)] == expected
+            @test sync_counts[(:sync_up, level + 1, level)] == expected
+        end
+
+        tick0 = Kraken.conservative_tree_subcycle_events_at_tick_2d(schedule, 0)
+        @test [(event.phase, event.src_level, event.dst_level)
+               for event in tick0] == [(:sync_down, 0, 1),
+                                       (:sync_down, 1, 2),
+                                       (:sync_down, 2, 3)]
+
+        tick2 = Kraken.conservative_tree_subcycle_events_at_tick_2d(schedule, 2)
+        @test (:advance, 3, 3) in
+              [(event.phase, event.src_level, event.dst_level)
+               for event in tick2]
+        @test (:sync_up, 3, 2) in
+              [(event.phase, event.src_level, event.dst_level)
+               for event in tick2]
+        @test (:advance, 2, 2) in
+              [(event.phase, event.src_level, event.dst_level)
+               for event in tick2]
+        @test (:sync_down, 2, 3) in
+              [(event.phase, event.src_level, event.dst_level)
+               for event in tick2]
+
+        tick8 = Kraken.conservative_tree_subcycle_events_at_tick_2d(schedule, 8)
+        @test [(event.phase, event.src_level, event.dst_level)
+               for event in tick8][end-1:end] == [(:sync_up, 1, 0),
+                                                  (:advance, 0, 0)]
+    end
+
+    @testset "schedule contracts reject invalid inputs" begin
+        @test Kraken.create_conservative_tree_subcycle_schedule_2d(0).events ==
+              [Kraken.ConservativeTreeSubcycleEvent2D(1, :advance, 0, 0)]
+        @test_throws ArgumentError Kraken.create_conservative_tree_subcycle_schedule_2d(-1)
+        @test_throws ArgumentError Kraken.create_conservative_tree_subcycle_schedule_2d(2; ratio=1)
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(2)
+        @test_throws ArgumentError Kraken.conservative_tree_subcycle_events_at_tick_2d(
+            schedule, 5)
+    end
+
     @testset "coarse-to-fine face packet is consumed once over two half steps" begin
         ledger = create_conservative_tree_subcycle_ledger_2d()
         conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!(

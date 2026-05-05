@@ -273,3 +273,41 @@ Remaining interpretation:
 - this is consistent with the existing subcycling ledger tests: face balance
   needs two fine substeps per coarse step, and corner balance needs the reflux /
   time-integration closure rather than a pure one-pass scatter table.
+
+## ML4 Level-Agnostic Subcycling Architecture
+
+Added a recursive subcycling schedule layer. This is the architectural split
+needed to avoid hard-coding `L0/L1`, `L1/L2`, or any specific number of levels.
+
+New concepts:
+
+- `ConservativeTreeSubcycleEvent2D`;
+- `ConservativeTreeSubcycleSchedule2D`;
+- `create_conservative_tree_subcycle_schedule_2d`;
+- `conservative_tree_subcycle_events_at_tick_2d`;
+- `conservative_tree_subcycle_advance_counts_2d`;
+- `conservative_tree_subcycle_sync_counts_2d`.
+
+Contract:
+
+- one level-0 step is represented in finest-level integer ticks;
+- with ratio 2 and `Lmax = N`, level `l` advances every
+  `2^(N-l)` finest ticks;
+- each parent interval is:
+  1. `sync_down parent -> child`;
+  2. recursively execute child sub-intervals;
+  3. `sync_up child -> parent`;
+  4. `advance parent`.
+
+Example for `Lmax = 3`:
+
+- level 0 advances once;
+- level 1 advances twice;
+- level 2 advances four times;
+- level 3 advances eight times;
+- sync events exist only between adjacent levels.
+
+This schedule owns no populations and performs no physics. It is the future
+dispatch spine for route streaming, subcycling ledgers, and reflux. The next
+implementation patch should bind the existing face/corner ledgers to this
+schedule for a minimal `L/L+1` interface, then recurse over all adjacent pairs.

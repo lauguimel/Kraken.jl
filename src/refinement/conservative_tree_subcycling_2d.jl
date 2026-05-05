@@ -10,6 +10,21 @@ struct ConservativeTreeSubcycleLedger2D{T}
     fine_to_coarse::Matrix{T}
 end
 
+struct ConservativeTreeSubcycleEvent2D
+    tick::Int
+    phase::Symbol
+    src_level::Int
+    dst_level::Int
+end
+
+struct ConservativeTreeSubcycleSchedule2D
+    max_level::Int
+    ratio::Int
+    finest_ticks::Int
+    level_step_ticks::Vector{Int}
+    events::Vector{ConservativeTreeSubcycleEvent2D}
+end
+
 function create_conservative_tree_subcycle_ledger_2d(;
         T::Type{<:Real}=Float64,
         ratio::Integer=2)
@@ -17,6 +32,114 @@ function create_conservative_tree_subcycle_ledger_2d(;
     r == 2 || throw(ArgumentError("conservative-tree subcycling currently requires ratio = 2"))
     return ConservativeTreeSubcycleLedger2D{T}(
         r, zeros(T, 2, 2, 9, r), zeros(T, 9, r))
+end
+
+function _check_conservative_tree_schedule_ratio_2d(ratio::Integer)
+    r = Int(ratio)
+    r >= 2 || throw(ArgumentError("subcycling ratio must be >= 2"))
+    return r
+end
+
+function _conservative_tree_level_step_ticks_2d(max_level::Int, ratio::Int)
+    return [ratio^(max_level - level) for level in 0:max_level]
+end
+
+function _push_conservative_tree_schedule_interval_2d!(
+        events::Vector{ConservativeTreeSubcycleEvent2D},
+        level::Int,
+        max_level::Int,
+        ratio::Int,
+        tick_start::Int,
+        tick_end::Int)
+    if level == max_level
+        push!(events, ConservativeTreeSubcycleEvent2D(
+            tick_end, :advance, level, level))
+        return events
+    end
+
+    child = level + 1
+    push!(events, ConservativeTreeSubcycleEvent2D(
+        tick_start, :sync_down, level, child))
+
+    interval_ticks = tick_end - tick_start
+    interval_ticks % ratio == 0 ||
+        throw(ArgumentError("subcycle interval is not divisible by ratio"))
+    child_ticks = div(interval_ticks, ratio)
+    for substep in 1:ratio
+        child_start = tick_start + (substep - 1) * child_ticks
+        child_end = child_start + child_ticks
+        _push_conservative_tree_schedule_interval_2d!(
+            events, child, max_level, ratio, child_start, child_end)
+    end
+
+    push!(events, ConservativeTreeSubcycleEvent2D(
+        tick_end, :sync_up, child, level))
+    push!(events, ConservativeTreeSubcycleEvent2D(
+        tick_end, :advance, level, level))
+    return events
+end
+
+"""
+    create_conservative_tree_subcycle_schedule_2d(max_level; ratio=2)
+
+Build a level-agnostic recursive subcycling calendar for one level-0 coarse
+step. Time is expressed in integer ticks of the finest level. For `ratio = 2`,
+level `l` advances every `2^(max_level-l)` finest ticks.
+
+The event order is recursive and deterministic:
+
+1. `:sync_down` from a parent level to its child at the beginning of that
+   parent interval;
+2. all child sub-intervals;
+3. `:sync_up` from child to parent at the synchronization point;
+4. `:advance` of the parent level.
+
+This object owns no populations and performs no physics. It is the dispatch
+contract that the future route/reflux kernels must follow for any number of
+levels.
+"""
+function create_conservative_tree_subcycle_schedule_2d(max_level::Integer;
+                                                       ratio::Integer=2)
+    ml = Int(max_level)
+    ml >= 0 || throw(ArgumentError("max_level must be nonnegative"))
+    r = _check_conservative_tree_schedule_ratio_2d(ratio)
+    finest_ticks = r^ml
+    level_step_ticks = _conservative_tree_level_step_ticks_2d(ml, r)
+    events = ConservativeTreeSubcycleEvent2D[]
+    _push_conservative_tree_schedule_interval_2d!(
+        events, 0, ml, r, 0, finest_ticks)
+    return ConservativeTreeSubcycleSchedule2D(
+        ml, r, finest_ticks, level_step_ticks, events)
+end
+
+function conservative_tree_subcycle_events_at_tick_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D,
+        tick::Integer)
+    t = Int(tick)
+    0 <= t <= schedule.finest_ticks ||
+        throw(ArgumentError("tick is outside the schedule"))
+    return [event for event in schedule.events if event.tick == t]
+end
+
+function conservative_tree_subcycle_advance_counts_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D)
+    counts = zeros(Int, schedule.max_level + 1)
+    @inbounds for event in schedule.events
+        event.phase == :advance || continue
+        counts[event.src_level + 1] += 1
+    end
+    return counts
+end
+
+function conservative_tree_subcycle_sync_counts_2d(
+        schedule::ConservativeTreeSubcycleSchedule2D)
+    counts = Dict{Tuple{Symbol,Int,Int},Int}()
+    @inbounds for event in schedule.events
+        event.phase == :advance && continue
+        key = (event.phase, event.src_level, event.dst_level)
+        counts[key] = get(counts, key, 0) + 1
+    end
+    return counts
 end
 
 function reset_conservative_tree_subcycle_ledger_2d!(
