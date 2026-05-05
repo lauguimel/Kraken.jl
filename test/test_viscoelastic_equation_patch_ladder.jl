@@ -3774,6 +3774,165 @@ function _continuous_hessian_2d(f, x, y; h=1e-3)
     )
 end
 
+function _polyfit_features_2d(dx, dy, degree::Int)
+    if degree == 3
+        return [
+            dx, dy,
+            0.5 * dx^2, dx * dy, 0.5 * dy^2,
+            dx^3 / 6, 0.5 * dx^2 * dy, 0.5 * dx * dy^2, dy^3 / 6,
+        ]
+    elseif degree == 4
+        return [
+            dx, dy,
+            0.5 * dx^2, dx * dy, 0.5 * dy^2,
+            dx^3 / 6, 0.5 * dx^2 * dy, 0.5 * dx * dy^2, dy^3 / 6,
+            dx^4 / 24, dx^3 * dy / 6, 0.25 * dx^2 * dy^2,
+            dx * dy^3 / 6, dy^4 / 24,
+        ]
+    else
+        error("unsupported local polynomial degree $(degree)")
+    end
+end
+
+function _fluid_polyfit_gradient_2d(a, is_solid, i, j, Nx, Ny;
+                                    degree::Int=4, radius::Int=4)
+    ncoef = length(_polyfit_features_2d(1.0, 0.0, degree))
+    rows = Float64[]
+    rhs = Float64[]
+    a0 = a[i, j]
+    for dj in -radius:radius, di in -radius:radius
+        (di == 0 && dj == 0) && continue
+        di^2 + dj^2 <= radius^2 || continue
+        ii = i + di
+        jj = j + dj
+        1 <= ii <= Nx && 1 <= jj <= Ny || continue
+        is_solid[ii, jj] && continue
+        w = 1.0 / max(1.0, di^2 + dj^2)
+        append!(rows, sqrt(w) .* _polyfit_features_2d(di, dj, degree))
+        push!(rhs, sqrt(w) * (a[ii, jj] - a0))
+    end
+    nrows = length(rhs)
+    if nrows < ncoef
+        return (;
+            dx = Kraken._wall_aware_dx_2d(a, is_solid, i, j, Nx, Float64),
+            dy = Kraken._wall_aware_dy_2d(a, is_solid, i, j, Ny, Float64),
+            points = nrows,
+            rank = 0,
+            fallback = true,
+        )
+    end
+    A = transpose(reshape(rows, ncoef, nrows))
+    Arank = rank(A)
+    if Arank < ncoef
+        return (;
+            dx = Kraken._wall_aware_dx_2d(a, is_solid, i, j, Nx, Float64),
+            dy = Kraken._wall_aware_dy_2d(a, is_solid, i, j, Ny, Float64),
+            points = nrows,
+            rank = Arank,
+            fallback = true,
+        )
+    end
+    coeffs = A \ rhs
+    return (; dx = coeffs[1], dy = coeffs[2], points = nrows,
+              rank = Arank, fallback = false)
+end
+
+function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
+                                 gradient_mode::Symbol)
+    if gradient_mode === :analytic_couette
+        vg = _couette_circular_velocity_gradient(i - 1.0, j - 1.0;
+                                                 cx=p.cx, cy=p.cy,
+                                                 Ri=p.Ri, Ro=p.Ro, Ω=p.Ω)
+        return (; dudx=vg.dudx, dudy=vg.dudy, dvdx=vg.dvdx, dvdy=vg.dvdy,
+                  fallback=false)
+    elseif gradient_mode === :polyfit4
+        uxg = _fluid_polyfit_gradient_2d(ux, is_solid, i, j, Nx, Ny;
+                                         degree=4, radius=4)
+        uyg = _fluid_polyfit_gradient_2d(uy, is_solid, i, j, Nx, Ny;
+                                         degree=4, radius=4)
+        return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
+                  fallback=uxg.fallback || uyg.fallback)
+    else
+        return (;
+            dudx = Kraken._wall_aware_dx_2d(ux, is_solid, i, j, Nx, Float64),
+            dudy = Kraken._wall_aware_dy_2d(ux, is_solid, i, j, Ny, Float64),
+            dvdx = Kraken._wall_aware_dx_2d(uy, is_solid, i, j, Nx, Float64),
+            dvdy = Kraken._wall_aware_dy_2d(uy, is_solid, i, j, Ny, Float64),
+            fallback = false,
+        )
+    end
+end
+
+function _collide_scalar_cde_state_test_gradient!(
+        g, C_field, ux, uy, Cxx, Cxy, Cyy, is_solid, λ, component, p,
+        gradient_mode::Symbol)
+    Nx, Ny = size(C_field)
+    tau_plus = 1.0
+    tau_minus = 1e-6 / (tau_plus - 0.5) + 0.5
+    ωp = 1.0 / tau_plus
+    ωm = 1.0 / tau_minus
+    half = 0.5
+    source_linear_coeff = (1.0 - 0.5 * ωp) * 3.0
+    pairs = ((2, 4), (3, 5), (6, 8), (7, 9))
+    for j in 1:Ny, i in 1:Nx
+        is_solid[i, j] && continue
+        φ = C_field[i, j]
+        u = ux[i, j]
+        v = uy[i, j]
+        grad = _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
+                                       gradient_mode)
+        div_half = 0.5 * (grad.dudx + grad.dvdy)
+        dudx = grad.dudx - div_half
+        dudy = grad.dudy
+        dvdx = grad.dvdx
+        dvdy = grad.dvdy - div_half
+        S = conformation_source_2d(
+            Cxx[i, j], Cxy[i, j], Cyy[i, j],
+            dudx, dudy, dvdx, dvdy, λ, component,
+        )
+
+        old = [g[i, j, q] for q in 1:9]
+        ge = [equilibrium(D2Q9(), φ, u, v, q) for q in 1:9]
+        F = [
+            D2Q9_W[q] * (S + source_linear_coeff * S *
+                         (D2Q9_CX[q] * u + D2Q9_CY[q] * v))
+            for q in 1:9
+        ]
+        new = similar(old)
+        new[1] = old[1] - ωp * (old[1] - ge[1]) + F[1]
+        for (q, oq) in pairs
+            gp = (old[q] + old[oq]) * half
+            gm = (old[q] - old[oq]) * half
+            ep = (ge[q] + ge[oq]) * half
+            em = (ge[q] - ge[oq]) * half
+            new[q] = old[q] - ωp * (gp - ep) - ωm * (gm - em) + F[q]
+            new[oq] = old[oq] - ωp * (gp - ep) + ωm * (gm - em) + F[oq]
+        end
+        for q in 1:9
+            g[i, j, q] = new[q]
+        end
+    end
+    return nothing
+end
+
+function _collide_direct_cde_state_test_gradient!(
+        gxx, gxy, gyy, Cxx, Cxy, Cyy, ux, uy, is_solid, λ, p;
+        gradient_mode::Symbol)
+    _collide_scalar_cde_state_test_gradient!(
+        gxx, Cxx, ux, uy, Cxx, Cxy, Cyy, is_solid, λ, 1, p, gradient_mode,
+    )
+    _collide_scalar_cde_state_test_gradient!(
+        gxy, Cxy, ux, uy, Cxx, Cxy, Cyy, is_solid, λ, 2, p, gradient_mode,
+    )
+    _collide_scalar_cde_state_test_gradient!(
+        gyy, Cyy, ux, uy, Cxx, Cxy, Cyy, is_solid, λ, 3, p, gradient_mode,
+    )
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    return nothing
+end
+
 function _curved_couette_oldroydb_patch(; Nx=72, Ny=72, Ri=12.0,
                                         Ro=28.0, Ω=0.006, λ=4.0)
     cx = (Nx - 1) / 2
@@ -3930,7 +4089,61 @@ end
     @test max_cut_source > 5 * max_far_source
 end
 
-function _curved_couette_collision_only_stats()
+function _curved_couette_source_residual_stats(; gradient_mode::Symbol)
+    p = _curved_couette_oldroydb_patch()
+    max_cut_source = 0.0
+    max_near_source = 0.0
+    max_far_source = 0.0
+    fallback_count = 0
+    for j in 3:p.Ny-2, i in 3:p.Nx-2
+        p.is_solid[i, j] && continue
+        grad = _test_velocity_gradient(
+            p.ux, p.uy, p.is_solid, i, j, p.Nx, p.Ny, p, gradient_mode,
+        )
+        fallback_count += grad.fallback ? 1 : 0
+        half_trace = 0.5 * (grad.dudx + grad.dvdy)
+        source = _direct_source_tuple(
+            p.Cxx[i, j], p.Cxy[i, j], p.Cyy[i, j],
+            grad.dudx - half_trace, grad.dudy,
+            grad.dvdx, grad.dvdy - half_trace,
+            p.λ,
+        )
+        residual = maximum(abs, source)
+        r = hypot((i - 1.0) - p.cx, (j - 1.0) - p.cy)
+        if _is_cut_cell(p.q_wall, i, j)
+            max_cut_source = max(max_cut_source, residual)
+        elseif r < p.Ri + 3.5
+            max_near_source = max(max_near_source, residual)
+        elseif r < p.Ro
+            max_far_source = max(max_far_source, residual)
+        end
+    end
+    return (; max_cut_source, max_near_source, max_far_source,
+              fallback_count)
+end
+
+@testset "P29b circular Couette source-gradient floor has a gradient-only escape hatch" begin
+    kernel = _curved_couette_source_residual_stats(
+        ; gradient_mode=:wall_aware,
+    )
+    exact = _curved_couette_source_residual_stats(
+        ; gradient_mode=:analytic_couette,
+    )
+    polyfit = _curved_couette_source_residual_stats(
+        ; gradient_mode=:polyfit4,
+    )
+
+    @test kernel.max_cut_source > 1e-4
+    @test exact.max_cut_source < 5e-14
+    @test exact.max_near_source < 5e-14
+    @test exact.max_far_source < 5e-14
+    @test polyfit.fallback_count == 0
+    @test polyfit.max_cut_source < 5e-5
+    @test polyfit.max_cut_source < 0.5 * kernel.max_cut_source
+    @test polyfit.max_far_source < 5e-6
+end
+
+function _curved_couette_collision_only_stats(; gradient_mode::Symbol=:kernel)
     p = _curved_couette_oldroydb_patch()
     gxx = zeros(Float64, p.Nx, p.Ny, 9)
     gxy = zeros(Float64, p.Nx, p.Ny, 9)
@@ -3941,18 +4154,15 @@ function _curved_couette_collision_only_stats()
     init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
     init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
     init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
-    collide_conformation_2d!(gxx, Cxx, p.ux, p.uy, Cxx, Cxy, Cyy,
-                             p.is_solid, 1.0, p.λ;
-                             magic=1e-6, component=1, divergence_mode=:trace_free)
-    collide_conformation_2d!(gxy, Cxy, p.ux, p.uy, Cxx, Cxy, Cyy,
-                             p.is_solid, 1.0, p.λ;
-                             magic=1e-6, component=2, divergence_mode=:trace_free)
-    collide_conformation_2d!(gyy, Cyy, p.ux, p.uy, Cxx, Cxy, Cyy,
-                             p.is_solid, 1.0, p.λ;
-                             magic=1e-6, component=3, divergence_mode=:trace_free)
-    compute_conformation_macro_2d!(Cxx, gxx)
-    compute_conformation_macro_2d!(Cxy, gxy)
-    compute_conformation_macro_2d!(Cyy, gyy)
+    if gradient_mode === :kernel
+        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                   p.ux, p.uy, p.is_solid, p.λ)
+    else
+        _collide_direct_cde_state_test_gradient!(
+            gxx, gxy, gyy, Cxx, Cxy, Cyy,
+            p.ux, p.uy, p.is_solid, p.λ, p; gradient_mode,
+        )
+    end
     return _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
 end
 
@@ -3960,6 +4170,21 @@ end
     stats = _curved_couette_collision_only_stats()
     @test stats.max_cut > 1e-5
     @test stats.max_cut > stats.max_far
+end
+
+@testset "P30b circular Couette collision-only drift is gradient-limited" begin
+    kernel = _curved_couette_collision_only_stats()
+    exact = _curved_couette_collision_only_stats(
+        ; gradient_mode=:analytic_couette,
+    )
+    polyfit = _curved_couette_collision_only_stats(; gradient_mode=:polyfit4)
+
+    @test exact.max_cut < P0_ATOL
+    @test exact.max_near < P0_ATOL
+    @test exact.max_far < P0_ATOL
+    @test polyfit.max_cut < 5e-5
+    @test polyfit.max_cut < 0.5 * kernel.max_cut
+    @test polyfit.max_far < 5e-6
 end
 
 @testset "P31 circular Couette stream+BC-only drift localizes wall transport error" begin
@@ -4084,7 +4309,8 @@ end
 # ---------------------------------------------------------------------
 
 function _extrap_repeated_curved_couette(; steps::Int=4,
-                                         wall_bc=_extrap_eq_wall_bc!)
+                                         wall_bc=_extrap_eq_wall_bc!,
+                                         gradient_mode::Symbol=:kernel)
     p = _curved_couette_oldroydb_patch()
     Cxx = copy(p.Cxx); Cxy = copy(p.Cxy); Cyy = copy(p.Cyy)
     gxx = zeros(Float64, p.Nx, p.Ny, 9)
@@ -4108,8 +4334,15 @@ function _extrap_repeated_curved_couette(; steps::Int=4,
         compute_conformation_macro_2d!(Cxx, gxx)
         compute_conformation_macro_2d!(Cxy, gxy)
         compute_conformation_macro_2d!(Cyy, gyy)
-        _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
-                                   p.ux, p.uy, p.is_solid, p.λ)
+        if gradient_mode === :kernel
+            _collide_direct_cde_state!(gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                                       p.ux, p.uy, p.is_solid, p.λ)
+        else
+            _collide_direct_cde_state_test_gradient!(
+                gxx, gxy, gyy, Cxx, Cxy, Cyy,
+                p.ux, p.uy, p.is_solid, p.λ, p; gradient_mode,
+            )
+        end
         stats = _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
         max_cut = max(max_cut, stats.max_cut)
         max_near = max(max_near, stats.max_near)
@@ -4274,4 +4507,31 @@ end
     @test rebalanced.max_near < linear.max_near
     @test rebalanced.max_far < linear.max_far
     @test quadratic_rebalanced.max_cut < 4e-4
+end
+
+@testset "P18l prototype extrap-eq BC: M6 curved CDE is now gradient-limited" begin
+    # With rest rebalance active, replacing only the velocity gradient
+    # in the collision source by the analytic circular-Couette gradient
+    # removes the cut-cell floor. A generic fluid-only quartic fit gets
+    # close but still misses the <1e-4 promotion target over four CDE
+    # steps, so the remaining production work is a better curved-wall
+    # gradient, not another population fill tweak.
+    kernel = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+    )
+    exact = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        gradient_mode=:analytic_couette,
+    )
+    polyfit = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        gradient_mode=:polyfit4,
+    )
+
+    @test exact.max_cut < P0_ATOL
+    @test polyfit.max_cut < 0.4 * kernel.max_cut
+    @test polyfit.max_cut < 1.5e-4
+    @test polyfit.max_cut > 1e-4
+    @test polyfit.max_near < 1.01 * kernel.max_near
+    @test polyfit.max_far < 1.01 * kernel.max_far
 end
