@@ -27,12 +27,17 @@ using Kraken, Printf, CUDA
 backend = CUDABackend()
 FT = Float64
 
+function _env_items(raw::AbstractString)
+    return (strip(x) for x in split(replace(raw, ';' => ','), ',')
+            if !isempty(strip(x)))
+end
+
 function _parse_list(::Type{T}, raw::AbstractString) where {T}
-    return [parse(T, strip(x)) for x in split(raw, ',') if !isempty(strip(x))]
+    return [parse(T, x) for x in _env_items(raw)]
 end
 
 function _parse_symbol_list(raw::AbstractString)
-    return [Symbol(strip(x)) for x in split(raw, ',') if !isempty(strip(x))]
+    return [Symbol(x) for x in _env_items(raw)]
 end
 
 function _liu_variant(name::Symbol)
