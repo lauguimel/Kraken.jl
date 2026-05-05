@@ -504,6 +504,10 @@ Validated canaries:
   `0.583` and the mean-velocity ratio is `0.389`. This is the 3D analogue of
   the non-subcycled interface limitation, so it is not a publication profile
   claim;
+- `patch_strategy=:cross_section_buffered` refines the full y/z cross-section
+  and leaves only x-direction coarse/fine interfaces. On the default domain it
+  uses `2:7 x 1:8 x 1:6`, reduces the 80-step relative `linf` profile gap to
+  `0.231`, and keeps mass drift at `1.41e-14`;
 - the same runner has a short Float32 compile/run canary;
 - all corner transfer calls reject, documenting the empty D3Q19 corner route
   set.

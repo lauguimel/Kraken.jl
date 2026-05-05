@@ -446,6 +446,28 @@ function _run_leaf_poiseuille_oracle_3d(;
     return F
 end
 
+function _conservative_tree_channel_patch_ranges_3d(
+        Nx::Int,
+        Ny::Int,
+        Nz::Int,
+        patch_i_range::AbstractUnitRange{<:Integer},
+        patch_j_range::AbstractUnitRange{<:Integer},
+        patch_k_range::AbstractUnitRange{<:Integer},
+        patch_strategy::Symbol)
+    if patch_strategy == :compact
+        return Int(first(patch_i_range)):Int(last(patch_i_range)),
+               Int(first(patch_j_range)):Int(last(patch_j_range)),
+               Int(first(patch_k_range)):Int(last(patch_k_range))
+    elseif patch_strategy == :cross_section_buffered
+        Nx >= 4 || throw(ArgumentError("Nx must be >= 4 for :cross_section_buffered"))
+        margin_i = Nx >= 10 ? 2 : 1
+        return (1 + margin_i):(Nx - margin_i), 1:Ny, 1:Nz
+    elseif patch_strategy == :full
+        return 1:Nx, 1:Ny, 1:Nz
+    end
+    throw(ArgumentError("unsupported 3D channel patch_strategy: $patch_strategy"))
+end
+
 """
     run_conservative_tree_poiseuille_route_native_3d(; kwargs...)
 
@@ -462,6 +484,7 @@ function run_conservative_tree_poiseuille_route_native_3d(;
         patch_i_range::AbstractUnitRange{<:Integer}=3:6,
         patch_j_range::AbstractUnitRange{<:Integer}=3:6,
         patch_k_range::AbstractUnitRange{<:Integer}=2:5,
+        patch_strategy::Symbol=:compact,
         rho=1.0,
         omega=1.0,
         Fx=2.0e-5,
@@ -477,6 +500,11 @@ function run_conservative_tree_poiseuille_route_native_3d(;
 
     coarse = zeros(T, Nx, Ny, Nz, 19)
     coarse_next = similar(coarse)
+    patch_i_range, patch_j_range, patch_k_range =
+        _conservative_tree_channel_patch_ranges_3d(
+            Nx, Ny, Nz,
+            patch_i_range, patch_j_range, patch_k_range,
+            patch_strategy)
     patch = create_conservative_tree_patch_3d(
         patch_i_range, patch_j_range, patch_k_range; T=T)
     patch_next = create_conservative_tree_patch_3d(

@@ -85,14 +85,19 @@ matches the local values for Cd and mass drift. PBS job: `20808208.aqua`.
 
 - runner: `run_conservative_tree_poiseuille_route_native_3d`;
 - default domain: `Nx=8, Ny=8, Nz=6`;
-- default patch: `3:6 x 3:6 x 2:5`;
+- compact stress patch: `3:6 x 3:6 x 2:5`;
+- publication-style buffered patch:
+  `patch_strategy=:cross_section_buffered`, giving `2:7 x 1:8 x 1:6` for
+  the default domain;
 - boundary policy: periodic x, stationary bounce-back y/z;
 - forcing: Guo D3Q19, `Fx=2e-5`;
-- `steps=80`: `ux_mean=2.5897914250811675e-4`, transverse means below
+- compact `steps=80`: `ux_mean=2.5897914250811675e-4`, transverse means below
   `4e-17`, relative mass drift `1.08e-13`;
 - local-patch profile diagnostic versus dense leaf oracle:
   `linf=6.879e-4`, relative `linf=0.583`, mean-velocity ratio `0.389`.
   This is a diagnostic, not a publication accuracy gate;
+- buffered `steps=80`: relative dense-oracle `linf=0.231`,
+  mean-velocity ratio `0.768`, relative mass drift `1.41e-14`;
 - full-domain refined patch parity canary:
   `Nx=4, Ny=4, Nz=3`, patch `1:4 x 1:4 x 1:3`, `steps=20`,
   dense-leaf oracle errors `l2=0`, `linf=0`.

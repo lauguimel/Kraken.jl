@@ -277,13 +277,20 @@ end
     @testset "route-native 3D full-domain patch matches dense leaf oracle" begin
         result = Kraken.run_conservative_tree_poiseuille_route_native_3d(;
             Nx=4, Ny=4, Nz=3,
-            patch_i_range=1:4,
-            patch_j_range=1:4,
-            patch_k_range=1:3,
+            patch_strategy=:full,
             steps=20)
 
         @test result.l2_error < 1e-14
         @test result.linf_error < 1e-14
+        @test result.relative_mass_drift < 1e-12
+    end
+
+    @testset "route-native 3D cross-section buffered patch reduces dense-oracle gap" begin
+        result = Kraken.run_conservative_tree_poiseuille_route_native_3d(;
+            steps=80, patch_strategy=:cross_section_buffered)
+        relative_linf = result.linf_error / maximum(abs.(result.oracle_ux_profile))
+
+        @test relative_linf < 0.30
         @test result.relative_mass_drift < 1e-12
     end
 
