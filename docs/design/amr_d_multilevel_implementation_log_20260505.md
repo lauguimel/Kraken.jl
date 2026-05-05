@@ -169,7 +169,30 @@ Updated observed result:
 
 ## Next Patch
 
-Next target is ML3b: debug route-interface rest state before any collide step.
+ML3b diagnostic was started on route-interface rest state.
+
+Finding:
+
+- A single 0/1-level tree can keep local rest with the current leaf-equivalent
+  route table.
+- A nested tree with deeper levels conserves closed mass, but local rest is not
+  exact at coarse/fine interfaces.
+- A simple local halo rule for choosing leaf-equivalent routes is not sufficient:
+  it fixes one interface and breaks another. The remaining fix is not a
+  one-line routing predicate.
+
+Test status:
+
+- The known local rest-state gap is now captured as `@test_broken` in
+  `test/test_conservative_tree_spec_2d.jl`.
+- This keeps CI honest: global mass conservation remains tested, and the next
+  milestone is explicitly blocked until `maximum(abs.(Fout - Fin)) <= 1e-14`
+  becomes true on a nested rest state.
+
+## Next Patch
+
+Next target is ML3b completion: debug route-interface rest state before any
+collide step.
 
 Required before collision:
 
