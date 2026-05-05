@@ -3837,6 +3837,84 @@ function _fluid_polyfit_gradient_2d(a, is_solid, i, j, Nx, Ny;
               rank = Arank, fallback = false)
 end
 
+@inline function _couette_wall_velocity(x, y, p)
+    xr = x - p.cx
+    yr = y - p.cy
+    return (; ux = -p.Ω * yr, uy = p.Ω * xr)
+end
+
+function _wall_constrained_polyfit_gradient_2d(a, component::Symbol,
+                                               is_solid, q_wall, i, j,
+                                               Nx, Ny, p;
+                                               degree::Int=4, radius::Int=3,
+                                               wall_weight::Float64=16.0)
+    ncoef = length(_polyfit_features_2d(1.0, 0.0, degree))
+    rows = Float64[]
+    rhs = Float64[]
+    a0 = a[i, j]
+    x0 = i - 1.0
+    y0 = j - 1.0
+    nwall = 0
+
+    for dj in -radius:radius, di in -radius:radius
+        ii = i + di
+        jj = j + dj
+        1 <= ii <= Nx && 1 <= jj <= Ny || continue
+        is_solid[ii, jj] && continue
+        di^2 + dj^2 <= radius^2 || continue
+
+        if !(di == 0 && dj == 0)
+            dist2 = di^2 + dj^2
+            w = 1.0 / max(1.0, dist2)
+            append!(rows, sqrt(w) .* _polyfit_features_2d(di, dj, degree))
+            push!(rhs, sqrt(w) * (a[ii, jj] - a0))
+        end
+
+        for q in 2:9
+            qw = q_wall[ii, jj, q]
+            qw > 0.0 || continue
+            wx = (ii - 1.0) + qw * D2Q9_CX[q]
+            wy = (jj - 1.0) + qw * D2Q9_CY[q]
+            dx = wx - x0
+            dy = wy - y0
+            dx^2 + dy^2 <= (radius + 0.5)^2 || continue
+            uw = _couette_wall_velocity(wx, wy, p)
+            wall_value = component === :ux ? uw.ux : uw.uy
+            w = wall_weight / max(0.25, dx^2 + dy^2)
+            append!(rows, sqrt(w) .* _polyfit_features_2d(dx, dy, degree))
+            push!(rhs, sqrt(w) * (wall_value - a0))
+            nwall += 1
+        end
+    end
+
+    nrows = length(rhs)
+    if nrows < ncoef
+        return (;
+            dx = Kraken._wall_aware_dx_2d(a, is_solid, i, j, Nx, Float64),
+            dy = Kraken._wall_aware_dy_2d(a, is_solid, i, j, Ny, Float64),
+            points = nrows,
+            rank = 0,
+            wall_points = nwall,
+            fallback = true,
+        )
+    end
+    A = transpose(reshape(rows, ncoef, nrows))
+    Arank = rank(A)
+    if Arank < ncoef
+        return (;
+            dx = Kraken._wall_aware_dx_2d(a, is_solid, i, j, Nx, Float64),
+            dy = Kraken._wall_aware_dy_2d(a, is_solid, i, j, Ny, Float64),
+            points = nrows,
+            rank = Arank,
+            wall_points = nwall,
+            fallback = true,
+        )
+    end
+    coeffs = A \ rhs
+    return (; dx = coeffs[1], dy = coeffs[2], points = nrows,
+              rank = Arank, wall_points = nwall, fallback = false)
+end
+
 function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
                                  gradient_mode::Symbol)
     if gradient_mode === :analytic_couette
@@ -3850,6 +3928,17 @@ function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
                                          degree=4, radius=4)
         uyg = _fluid_polyfit_gradient_2d(uy, is_solid, i, j, Nx, Ny;
                                          degree=4, radius=4)
+        return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
+                  fallback=uxg.fallback || uyg.fallback)
+    elseif gradient_mode === :wallfit4
+        uxg = _wall_constrained_polyfit_gradient_2d(
+            ux, :ux, is_solid, p.q_wall, i, j, Nx, Ny, p;
+            degree=4, radius=3, wall_weight=16.0,
+        )
+        uyg = _wall_constrained_polyfit_gradient_2d(
+            uy, :uy, is_solid, p.q_wall, i, j, Nx, Ny, p;
+            degree=4, radius=3, wall_weight=16.0,
+        )
         return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
                   fallback=uxg.fallback || uyg.fallback)
     else
@@ -4132,6 +4221,9 @@ end
     polyfit = _curved_couette_source_residual_stats(
         ; gradient_mode=:polyfit4,
     )
+    wallfit = _curved_couette_source_residual_stats(
+        ; gradient_mode=:wallfit4,
+    )
 
     @test kernel.max_cut_source > 1e-4
     @test exact.max_cut_source < 5e-14
@@ -4141,6 +4233,10 @@ end
     @test polyfit.max_cut_source < 5e-5
     @test polyfit.max_cut_source < 0.5 * kernel.max_cut_source
     @test polyfit.max_far_source < 5e-6
+    @test wallfit.fallback_count == 0
+    @test wallfit.max_cut_source < 1.5e-5
+    @test wallfit.max_cut_source < 0.4 * polyfit.max_cut_source
+    @test wallfit.max_far_source < 2e-6
 end
 
 function _curved_couette_collision_only_stats(; gradient_mode::Symbol=:kernel)
@@ -4178,6 +4274,7 @@ end
         ; gradient_mode=:analytic_couette,
     )
     polyfit = _curved_couette_collision_only_stats(; gradient_mode=:polyfit4)
+    wallfit = _curved_couette_collision_only_stats(; gradient_mode=:wallfit4)
 
     @test exact.max_cut < P0_ATOL
     @test exact.max_near < P0_ATOL
@@ -4185,6 +4282,9 @@ end
     @test polyfit.max_cut < 5e-5
     @test polyfit.max_cut < 0.5 * kernel.max_cut
     @test polyfit.max_far < 5e-6
+    @test wallfit.max_cut < 1.5e-5
+    @test wallfit.max_cut < 0.4 * polyfit.max_cut
+    @test wallfit.max_far < 2e-6
 end
 
 @testset "P31 circular Couette stream+BC-only drift localizes wall transport error" begin
@@ -4514,8 +4614,10 @@ end
     # in the collision source by the analytic circular-Couette gradient
     # removes the cut-cell floor. A generic fluid-only quartic fit gets
     # close but still misses the <1e-4 promotion target over four CDE
-    # steps, so the remaining production work is a better curved-wall
-    # gradient, not another population fill tweak.
+    # steps. Adding q_wall intersection samples with the moving-wall
+    # velocity closes the target, so the remaining production work is
+    # to promote this geometric gradient path, not another population
+    # fill tweak.
     kernel = _extrap_repeated_curved_couette(
         ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
     )
@@ -4527,11 +4629,19 @@ end
         ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
         gradient_mode=:polyfit4,
     )
+    wallfit = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        gradient_mode=:wallfit4,
+    )
 
     @test exact.max_cut < P0_ATOL
     @test polyfit.max_cut < 0.4 * kernel.max_cut
     @test polyfit.max_cut < 1.5e-4
     @test polyfit.max_cut > 1e-4
+    @test wallfit.max_cut < 5e-5
+    @test wallfit.max_cut < 0.4 * polyfit.max_cut
     @test polyfit.max_near < 1.01 * kernel.max_near
     @test polyfit.max_far < 1.01 * kernel.max_far
+    @test wallfit.max_near < 1.01 * kernel.max_near
+    @test wallfit.max_far < 1.01 * kernel.max_far
 end
