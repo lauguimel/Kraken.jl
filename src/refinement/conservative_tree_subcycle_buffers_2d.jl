@@ -156,6 +156,42 @@ function conservative_tree_subcycle_apply_reflux_to_owned_level_2d!(
     return bank
 end
 
+function conservative_tree_subcycle_add_and_clear_reflux_to_F_level_2d!(
+        F::AbstractMatrix,
+        bank::ConservativeTreeSubcycleBufferBank2D,
+        level::Integer)
+    _check_conservative_tree_F_2d(F, bank.spec)
+    l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
+    buffers = bank.levels[l + 1]
+    @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
+            bank.spec, l; active_only=true)
+        for q in 1:9
+            F[cell_id, q] += buffers.reflux_to_coarse[cell_id, q]
+            buffers.reflux_to_coarse[cell_id, q] =
+                zero(eltype(buffers.reflux_to_coarse))
+        end
+    end
+    return F
+end
+
+function conservative_tree_subcycle_add_and_clear_ghost_to_F_level_2d!(
+        F::AbstractMatrix,
+        bank::ConservativeTreeSubcycleBufferBank2D,
+        level::Integer)
+    _check_conservative_tree_F_2d(F, bank.spec)
+    l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
+    buffers = bank.levels[l + 1]
+    @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
+            bank.spec, l; active_only=true)
+        for q in 1:9
+            F[cell_id, q] += buffers.ghost_from_coarse[cell_id, q]
+            buffers.ghost_from_coarse[cell_id, q] =
+                zero(eltype(buffers.ghost_from_coarse))
+        end
+    end
+    return F
+end
+
 function conservative_tree_subcycle_restrict_level_2d!(
         bank::ConservativeTreeSubcycleBufferBank2D,
         parent_level::Integer)
@@ -193,6 +229,24 @@ function conservative_tree_subcycle_restrict_all_levels_2d!(
     return bank
 end
 
+function conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
+        F::AbstractMatrix,
+        bank::ConservativeTreeSubcycleBufferBank2D,
+        level::Integer)
+    _check_conservative_tree_F_2d(F, bank.spec)
+    l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
+    buffers = bank.levels[l + 1]
+    @inbounds for (cell_id, cell) in pairs(bank.spec.cells)
+        cell.level == l || continue
+        cell.active && continue
+        bank.spec.children[cell_id] == (0, 0, 0, 0) && continue
+        for q in 1:9
+            F[cell_id, q] = buffers.restrict_to_parent[cell_id, q]
+        end
+    end
+    return F
+end
+
 function conservative_tree_subcycle_prolong_F_to_child_ghost_2d!(
         bank::ConservativeTreeSubcycleBufferBank2D,
         Fparent::AbstractMatrix,
@@ -216,4 +270,19 @@ function conservative_tree_subcycle_prolong_F_to_child_ghost_2d!(
         end
     end
     return bank
+end
+
+function conservative_tree_subcycle_collect_active_owned_F_2d!(
+        Fout::AbstractMatrix,
+        bank::ConservativeTreeSubcycleBufferBank2D)
+    _check_conservative_tree_F_2d(Fout, bank.spec)
+    fill!(Fout, zero(eltype(Fout)))
+    @inbounds for cell_id in bank.spec.active_cells
+        level = bank.spec.cells[cell_id].level
+        owned = bank.levels[level + 1].owned
+        for q in 1:9
+            Fout[cell_id, q] = owned[cell_id, q]
+        end
+    end
+    return Fout
 end

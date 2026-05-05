@@ -737,6 +737,21 @@ function _add_and_clear_conservative_tree_level_rows_2d!(
     return Fdst
 end
 
+function _copy_conservative_tree_active_level_rows_2d!(
+        Fdst::AbstractMatrix,
+        Fsrc::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        level::Int)
+    @inbounds for cell_id in spec.active_cells
+        cell = spec.cells[cell_id]
+        cell.level == level || continue
+        for q in 1:9
+            Fdst[cell_id, q] = Fsrc[cell_id, q]
+        end
+    end
+    return Fdst
+end
+
 """
     stream_conservative_tree_subcycled_routes_F_2d!(Fout, Fin, spec, table;
                                                     boundary=:skip)
@@ -808,6 +823,97 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
     end
 
     copyto!(Fout, Fstate)
+    return Fout
+end
+
+"""
+    stream_conservative_tree_subcycled_buffered_routes_F_2d!(Fout, Fin, spec, table;
+                                                             boundary=:skip)
+
+CPU reference transport that drives the recursive AMR-D schedule through the
+explicit subcycle buffer contract. Unlike the legacy skeleton, it keeps
+committed level state (`owned`), coarse-to-fine injections
+(`ghost_from_coarse`), fine-to-coarse reflux (`reflux_to_coarse`), and
+fine-to-parent restriction (`restrict_to_parent`) in distinct buffers.
+
+This remains transport-only: no collision, forcing, or physical open-boundary
+closure is performed here.
+"""
+function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+        Fout::AbstractMatrix,
+        Fin::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D;
+        boundary::Symbol=:skip)
+    _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
+    policy = _check_conservative_tree_boundary_policy_2d(boundary)
+    if spec.max_level == 0
+        return stream_conservative_tree_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=boundary)
+    end
+
+    schedule = create_conservative_tree_subcycle_schedule_2d(spec.max_level)
+    route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+        spec; schedule=schedule, T=eltype(Fout))
+    state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
+        spec; schedule=schedule, T=eltype(Fout))
+    conservative_tree_subcycle_store_active_owned_2d!(state_bank, Fin)
+
+    Fsource = similar(Fout)
+    Fscratch = similar(Fout)
+
+    for event in schedule.events
+        if event.phase == :sync_down
+            reset_conservative_tree_subcycle_spatial_pair_2d!(
+                route_bank, event.src_level)
+            parent_owned = state_bank.levels[event.src_level + 1].owned
+            conservative_tree_subcycle_sync_down_routes_F_2d!(
+                route_bank, event, parent_owned, table)
+        elseif event.phase == :advance
+            level = event.src_level
+            buffers = state_bank.levels[level + 1]
+            fill!(Fsource, zero(eltype(Fsource)))
+            _copy_conservative_tree_level_rows_2d!(
+                Fsource, buffers.owned, spec, level)
+            conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
+                Fsource, state_bank, level)
+
+            if level > 0
+                conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
+                    route_bank, event, Fsource, table)
+                conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
+                    route_bank, event, Fsource)
+            end
+
+            fill!(Fscratch, zero(eltype(Fscratch)))
+            _stream_conservative_tree_direct_level_routes_F_2d!(
+                Fscratch, Fsource, spec, table, level, policy)
+            if level > 0
+                fill!(buffers.ghost_from_coarse,
+                      zero(eltype(buffers.ghost_from_coarse)))
+                conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
+                    buffers.ghost_from_coarse, route_bank, event)
+                conservative_tree_subcycle_add_and_clear_ghost_to_F_level_2d!(
+                    Fscratch, state_bank, level)
+            end
+            conservative_tree_subcycle_add_and_clear_reflux_to_F_level_2d!(
+                Fscratch, state_bank, level)
+            _copy_conservative_tree_active_level_rows_2d!(
+                buffers.owned, Fscratch, spec, level)
+        elseif event.phase == :sync_up
+            parent_level = _check_subcycle_spatial_sync_up_event_2d(
+                route_bank, event)
+            conservative_tree_subcycle_restrict_level_2d!(
+                state_bank, parent_level)
+            parent_reflux = state_bank.levels[parent_level + 1].reflux_to_coarse
+            conservative_tree_subcycle_apply_sync_up_F_2d!(
+                parent_reflux, route_bank, event; boundary=boundary)
+        else
+            throw(ArgumentError("unknown subcycle event phase $(event.phase)"))
+        end
+    end
+
+    conservative_tree_subcycle_collect_active_owned_F_2d!(Fout, state_bank)
     return Fout
 end
 

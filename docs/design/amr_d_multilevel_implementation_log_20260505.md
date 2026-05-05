@@ -582,3 +582,36 @@ New surgical tests:
 - bottom-up restriction sums active descendants through nested inactive parents;
 - coarse-to-fine ghost prolongation is conservative and does not touch owned
   child rows.
+
+## ML4h Buffered Transport Reference
+
+Added a separate transport-only reference path that drives the existing
+recursive schedule through the explicit buffer contract.
+
+New internal API:
+
+- `stream_conservative_tree_subcycled_buffered_routes_F_2d!`.
+
+Implemented timing:
+
+- `sync_down` reads the committed parent `owned` buffer;
+- child advance writes coarse-to-fine injection through `ghost_from_coarse`;
+- `sync_up` writes fine-to-coarse packets into `reflux_to_coarse`;
+- child completion also refreshes `restrict_to_parent` for covered inactive
+  parent rows;
+- parent advance streams from committed `owned` rows and applies reflux as an
+  output correction for that parent interval.
+
+Validated:
+
+- no-refinement buffered transport delegates to the existing route scatter;
+- single-level buffered subcycling preserves closed rest state to roundoff;
+- the legacy one-level path remains green.
+
+Current nested status:
+
+- buffered nested rest is still broken, with the same local population residual
+  scale as the legacy path;
+- this confirms that separating buffers is necessary but not sufficient;
+- the next fix must add an explicit coarse/fine reconstruction rule at the
+  interface, likely `f_eq + alpha f_neq`, rather than tuning route weights.

@@ -351,6 +351,26 @@ using Kraken
         @test Fsub == Froute
     end
 
+    @testset "buffered subcycled transport matches route scatter without refinement" begin
+        spec = create_conservative_tree_spec_2d(
+            4, 4, ConservativeTreeRefineBlock2D[])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Froute = allocate_conservative_tree_F_2d(spec)
+        Fsub = allocate_conservative_tree_F_2d(spec)
+        for cell_id in spec.active_cells
+            for q in 1:9
+                Fin[cell_id, q] = 2cell_id + q / 7
+            end
+        end
+
+        stream_conservative_tree_routes_F_2d!(
+            Froute, Fin, spec, table; boundary=:bounceback)
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fsub, Fin, spec, table; boundary=:bounceback)
+        @test Fsub == Froute
+    end
+
     @testset "single-level subcycled transport preserves closed rest mass" begin
         spec = create_conservative_tree_spec_2d(6, 5, [
             ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
@@ -381,6 +401,31 @@ using Kraken
         @test maximum(abs.(diag.orientation_drift)) <= 1e-12
     end
 
+    @testset "single-level buffered subcycled transport preserves rest" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:bounceback)
+
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
+    end
+
     @testset "nested subcycled transport rest state is the next closure gate" begin
         spec = create_conservative_tree_spec_2d(8, 6, [
             ConservativeTreeRefineBlock2D("outer", 3:6, 2:5),
@@ -408,6 +453,32 @@ using Kraken
                                   Fin[spec.active_cells, :])) <= 1e-14
         @test_broken abs(diag.active_drift) <= 1e-12
         @test_broken diag.max_active_abs <= 1e-14
+    end
+
+    @testset "nested buffered subcycled transport rest state is the buffer wiring gate" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("outer", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("inner", 7:8, 5:6; parent="outer"),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:bounceback)
+
+        @test_broken isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                              sum(active_population_sums_F_2d(Fin, spec));
+                              atol=1e-12, rtol=0)
+        @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
+                                  Fin[spec.active_cells, :])) <= 1e-14
     end
 
     @testset "scheduled ledger binding rejects wrong events" begin
