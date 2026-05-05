@@ -559,6 +559,11 @@ Kraken's historical hydrodynamic value `0.25` is a diagnostic opt-in.
 TRT is validated at `tau_plus=1.0`, while `:regularized` and `:liu_eq26` are
 validated at `tau_plus=0.50001`. Other combinations require
 `allow_diagnostic_conformation_collision=true`.
+`conformation_gradient_mode` selects the velocity-gradient path used by the
+direct-C TRT source:
+- `:wall_aware` (default): existing in-kernel wall-aware finite differences.
+- `:embedded_axis`: precomputed compact axis stencils with wall samples.
+- `:wallfit4`: precomputed wall-constrained polynomial stencils.
 
 `momentum_exchange_mode` selects how cut-link force is evaluated from the
 post-boundary populations:
@@ -591,6 +596,11 @@ function run_conformation_cylinder_libb_2d(;
         conformation_magic::Real=1e-6,
         conformation_collision::Symbol=:trt,
         conformation_divergence_mode::Symbol=:trace_free,
+        conformation_gradient_mode::Symbol=:wall_aware,
+        conformation_gradient_max_terms::Union{Nothing,Integer}=nothing,
+        conformation_gradient_degree::Integer=4,
+        conformation_gradient_radius::Integer=3,
+        conformation_gradient_wall_weight::Real=16.0,
         wall_geometry::Symbol=:cutlink,
         momentum_exchange_mode::Symbol=:mei_reconstruct,
         source_stress_reconstruction::Symbol=:interior,
@@ -613,6 +623,8 @@ function run_conformation_cylinder_libb_2d(;
         error("unknown conformation_collision $(conformation_collision); expected :trt, :regularized, or :liu_eq26")
     conformation_divergence_mode in (:numerical, :trace_free) ||
         error("unknown conformation_divergence_mode $(conformation_divergence_mode); expected :numerical or :trace_free")
+    conformation_gradient_mode in (:wall_aware, :embedded_axis, :wallfit4) ||
+        error("unknown conformation_gradient_mode $(conformation_gradient_mode); expected :wall_aware, :embedded_axis, or :wallfit4")
     wall_geometry in (:cutlink, :staircase) ||
         error("unknown wall_geometry $(wall_geometry); expected :cutlink or :staircase")
     momentum_exchange_mode in (:mei_reconstruct, :liu_eq63, :simple_halfway, :postpair) ||
@@ -638,6 +650,10 @@ function run_conformation_cylinder_libb_2d(;
     end
     _assert_validation_log_wall_bc(polymer_model, polymer_bc;
         allow_diagnostic=allow_diagnostic_log_wall_bc)
+    if conformation_gradient_mode !== :wall_aware &&
+       (uses_log_conformation(polymer_model) || conformation_collision !== :trt)
+        error("conformation_gradient_mode=$(conformation_gradient_mode) is currently implemented only for direct-C conformation_collision=:trt")
+    end
     λ_p = polymer_relaxation_time(polymer_model)
     ν_p_eff = polymer_modulus(polymer_model) * λ_p   # G·λ = ν_p (Oldroyd-B)
 
@@ -665,7 +681,7 @@ function run_conformation_cylinder_libb_2d(;
         inv(1.0 - s_plus_s / 2.0) : 1.0
         ) : Float64(source_scale_dynamics)
 
-    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Re_R Re_D Wi beta λ_p tau_plus solvent_magic conformation_magic conformation_collision conformation_divergence_mode wall_geometry inlet u_max u_ref drag_mode hermite_source_mode solvent_source_mode momentum_exchange_mode source_stress_reconstruction source_stress_reconstruction_order source_scale_dynamics polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
+    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Re_R Re_D Wi beta λ_p tau_plus solvent_magic conformation_magic conformation_collision conformation_divergence_mode conformation_gradient_mode wall_geometry inlet u_max u_ref drag_mode hermite_source_mode solvent_source_mode momentum_exchange_mode source_stress_reconstruction source_stress_reconstruction_order source_scale_dynamics polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
 
     # Precompute cylinder cut-link geometry (q_wall ∈ [0,1] per link)
     q_wall_h, is_solid_h = precompute_q_wall_cylinder(Nx, Ny, cx_f, cy_f,
@@ -675,6 +691,18 @@ function run_conformation_cylinder_libb_2d(;
             q_wall_h[i, j, q] > 0 && (q_wall_h[i, j, q] = FT(0.5))
         end
     end
+    conformation_gradient_stencils =
+        conformation_gradient_mode === :wall_aware ? nothing :
+        precompute_conformation_gradient_stencils_2d(
+            is_solid_h, q_wall_h; mode=conformation_gradient_mode,
+            max_terms=conformation_gradient_max_terms,
+            degree=conformation_gradient_degree,
+            radius=conformation_gradient_radius,
+            wall_weight=conformation_gradient_wall_weight,
+            backend=backend, FT=FT,
+        )
+    conformation_gradient_stats = conformation_gradient_stencils === nothing ?
+        nothing : conformation_gradient_stencil_stats_2d(conformation_gradient_stencils)
 
     # Inlet velocity profile (only used if `bcspec === nothing`)
     u_prof_h = if inlet === :parabolic
@@ -922,6 +950,22 @@ function run_conformation_cylinder_libb_2d(;
             collide_conformation_liu_eq26_2d!(g_xx, Fe_xx_prev, Ψ_xx, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
             collide_conformation_liu_eq26_2d!(g_xy, Fe_xy_prev, Ψ_xy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
             collide_conformation_liu_eq26_2d!(g_yy, Fe_yy_prev, Ψ_yy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
+        elseif conformation_gradient_stencils !== nothing
+            collide_conformation_2d_with_gradient_stencils!(
+                g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
+                uw_x, uw_y, conformation_gradient_stencils,
+                tau_plus, λ_p; magic=magic_p, component=1,
+                divergence_mode=conformation_divergence_mode)
+            collide_conformation_2d_with_gradient_stencils!(
+                g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
+                uw_x, uw_y, conformation_gradient_stencils,
+                tau_plus, λ_p; magic=magic_p, component=2,
+                divergence_mode=conformation_divergence_mode)
+            collide_conformation_2d_with_gradient_stencils!(
+                g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
+                uw_x, uw_y, conformation_gradient_stencils,
+                tau_plus, λ_p; magic=magic_p, component=3,
+                divergence_mode=conformation_divergence_mode)
         else
             collide_conformation_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
             collide_conformation_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
@@ -998,6 +1042,8 @@ function run_conformation_cylinder_libb_2d(;
             conformation_magic=Float64(conformation_magic),
             conformation_collision=conformation_collision,
             conformation_divergence_mode=conformation_divergence_mode,
+            conformation_gradient_mode=conformation_gradient_mode,
+            conformation_gradient_stats=conformation_gradient_stats,
             wall_geometry=wall_geometry,
             momentum_exchange_mode=momentum_exchange_mode,
             Fx=Fx, Fy=Fy,

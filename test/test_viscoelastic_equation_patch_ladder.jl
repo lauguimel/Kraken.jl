@@ -1,6 +1,7 @@
 using Test
 using LinearAlgebra
 using Statistics
+using KernelAbstractions
 using Kraken
 
 const P0_ATOL = 1e-12
@@ -5529,4 +5530,24 @@ end
     @test isapprox(prod_curved.max_near, proto_curved.max_near; atol=P0_ATOL, rtol=0.0)
     @test isapprox(prod_curved.max_far, proto_curved.max_far; atol=P0_ATOL, rtol=0.0)
     @test prod_curved.max_cut < 5e-5
+end
+
+@testset "P18l production cylinder driver exposes gradient stencils" begin
+    model = OldroydB(G=0.004, λ=1.0)
+    for mode in (:embedded_axis, :wallfit4)
+        r = run_conformation_cylinder_libb_2d(
+            ; Nx=32, Ny=16, radius=3, cx=8.0, cy=7.5,
+            u_mean=0.005, ν_s=0.06, polymer_model=model,
+            polymer_bc=ExtrapEqWallBC(), max_steps=1, avg_window=1,
+            conformation_gradient_mode=mode,
+            backend=KernelAbstractions.CPU(), FT=Float64,
+        )
+        fluid = .!r.is_solid
+        @test r.conformation_gradient_mode === mode
+        @test r.conformation_gradient_stats.mode === mode
+        @test r.first_nonfinite_step == 0
+        @test all(isfinite, r.C_xx[fluid])
+        @test all(isfinite, r.C_xy[fluid])
+        @test all(isfinite, r.C_yy[fluid])
+    end
 end
