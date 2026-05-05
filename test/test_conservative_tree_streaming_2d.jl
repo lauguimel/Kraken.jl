@@ -655,6 +655,25 @@ end
         @test all(isnan(row.Cd) for row in square_rows)
     end
 
+    @testset "interface-buffered cylinder patch is near leaf oracle" begin
+        rows = convergence_conservative_tree_obstacles_2d(
+            ; flows=(:cylinder,), scales=(1,), base_steps=80,
+            step_exponent=0, avg_window=30,
+            patch_strategy=:interface_buffered)
+        leaf = only(filter(row -> row.method == :leaf_oracle, rows))
+        route = only(filter(row -> row.method == :amr_route_native, rows))
+
+        @test leaf.flow == :cylinder
+        @test route.flow == :cylinder
+        @test route.mass_rel_drift < 1e-9
+        @test isfinite(leaf.Cd)
+        @test isfinite(route.Cd)
+        @test route.Cd / leaf.Cd < 1.10
+        @test_throws ArgumentError convergence_conservative_tree_obstacles_2d(
+            ; flows=(:cylinder,), scales=(1,), base_steps=20,
+            patch_strategy=:unknown)
+    end
+
     @testset "vertical facing step mask is wall attached" begin
         mask = vertical_facing_step_solid_mask_leaf_2d(16, 12, 7:9, 5)
 

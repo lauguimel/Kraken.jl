@@ -167,6 +167,15 @@ Aqua runs:
   produced
   `benchmarks/results/amr_obstacle_convergence_2d_aqua_leafeq_obstacles_20260504.csv`
   with matching metrics and roundoff-level mass conservation.
+- 2026-05-05 publication-D patch strategy: the obstacle convergence runner now
+  accepts `patch_strategy=:interface_buffered`, which uses a fixed wall-to-wall
+  fine band around the cylinder/square and moves coarse/fine interfaces away
+  from the body. A local short cylinder canary is within 10% of the leaf oracle
+  while conserving mass to roundoff
+  (`benchmarks/results/amr_obstacle_convergence_2d_local_interface_buffered_smoke.csv`:
+  Cd ratios `1.054x` at scale 1 and `1.032x` at scale 2). This is the
+  publication path for static fixed-patch D; the compact default patch remains
+  the stress test for future subcycling.
 
 Notes:
 

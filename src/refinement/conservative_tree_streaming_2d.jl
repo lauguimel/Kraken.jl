@@ -1625,12 +1625,39 @@ function _conservative_tree_obstacle_steps(scale::Int,
     return max(1, round(Int, base_steps * scale^step_exponent))
 end
 
+function _conservative_tree_obstacle_patch_ranges_2d(flow::Symbol,
+                                                     scale::Int,
+                                                     Nx::Int,
+                                                     Ny::Int,
+                                                     patch_strategy::Symbol)
+    scale > 0 || throw(ArgumentError("scale must be positive"))
+    if patch_strategy == :default
+        if flow == :square || flow == :cylinder
+            return (
+                i_range=_scale_parent_range_2d(8:17, scale),
+                j_range=_scale_parent_range_2d(4:11, scale),
+            )
+        end
+    elseif patch_strategy == :interface_buffered
+        if flow == :square || flow == :cylinder
+            return (
+                i_range=_scale_parent_range_2d(5:20, scale),
+                j_range=1:Ny,
+            )
+        end
+    else
+        throw(ArgumentError("unsupported obstacle patch_strategy: $patch_strategy"))
+    end
+    throw(ArgumentError("unsupported obstacle convergence flow: $flow"))
+end
+
 function convergence_conservative_tree_obstacles_2d(;
         flows::Tuple=(:square, :cylinder),
         scales::Tuple=(1, 2),
         base_steps::Int=1200,
         step_exponent::Real=1,
         avg_window::Int=300,
+        patch_strategy::Symbol=:default,
         T::Type{<:Real}=Float64)
     avg_window > 0 || throw(ArgumentError("avg_window must be positive"))
     rows = ConservativeTreeConvergenceRow2D[]
@@ -1644,8 +1671,10 @@ function convergence_conservative_tree_obstacles_2d(;
             if flow == :square
                 Nx = 24 * scale
                 Ny = 14 * scale
-                patch_i = _scale_parent_range_2d(8:17, scale)
-                patch_j = _scale_parent_range_2d(4:11, scale)
+                patch_ranges = _conservative_tree_obstacle_patch_ranges_2d(
+                    :square, scale, Nx, Ny, patch_strategy)
+                patch_i = patch_ranges.i_range
+                patch_j = patch_ranges.j_range
                 obstacle_i = _scale_leaf_range_2d(22:27, scale)
                 obstacle_j = _scale_leaf_range_2d(12:17, scale)
 
@@ -1666,8 +1695,10 @@ function convergence_conservative_tree_obstacles_2d(;
             elseif flow == :cylinder
                 Nx = 24 * scale
                 Ny = 14 * scale
-                patch_i = _scale_parent_range_2d(8:17, scale)
-                patch_j = _scale_parent_range_2d(4:11, scale)
+                patch_ranges = _conservative_tree_obstacle_patch_ranges_2d(
+                    :cylinder, scale, Nx, Ny, patch_strategy)
+                patch_i = patch_ranges.i_range
+                patch_j = patch_ranges.j_range
                 cx_leaf = 24 * scale
                 cy_leaf = 14 * scale
                 radius_leaf = 3 * scale
