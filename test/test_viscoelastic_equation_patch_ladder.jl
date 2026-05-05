@@ -3843,6 +3843,138 @@ end
     return (; ux = -p.Ω * yr, uy = p.Ω * xr)
 end
 
+@inline function _couette_wall_component(x, y, p, component::Symbol)
+    uw = _couette_wall_velocity(x, y, p)
+    return component === :ux ? uw.ux : uw.uy
+end
+
+@inline function _quadratic_derivative_at_zero(samples, a0)
+    if length(samples) >= 2
+        rows = Float64[]
+        rhs = Float64[]
+        for (s, val) in samples
+            append!(rows, (s, s^2))
+            push!(rhs, val - a0)
+        end
+        A = transpose(reshape(rows, 2, length(samples)))
+        coeffs = A \ rhs
+        return coeffs[1]
+    elseif length(samples) == 1
+        s, val = samples[1]
+        return (val - a0) / s
+    else
+        return 0.0
+    end
+end
+
+function _axis_ghost_value(a, component::Symbol, is_solid, q_wall,
+                           i, j, q, Nx, Ny, p)
+    cx = Int(D2Q9_CX[q])
+    cy = Int(D2Q9_CY[q])
+    ii = i + cx
+    jj = j + cy
+    if 1 <= ii <= Nx && 1 <= jj <= Ny && !is_solid[ii, jj]
+        return a[ii, jj]
+    end
+    qw = q_wall[i, j, q]
+    if qw > 0.0
+        wx = (i - 1.0) + qw * cx
+        wy = (j - 1.0) + qw * cy
+        wall_value = _couette_wall_component(wx, wy, p, component)
+        return (wall_value - (1.0 - qw) * a[i, j]) / qw
+    end
+    return a[i, j]
+end
+
+function _ghost_axis_gradient_2d(a, component::Symbol, is_solid, q_wall,
+                                 i, j, Nx, Ny, p)
+    xp = _axis_ghost_value(a, component, is_solid, q_wall, i, j, 2, Nx, Ny, p)
+    xm = _axis_ghost_value(a, component, is_solid, q_wall, i, j, 4, Nx, Ny, p)
+    yp = _axis_ghost_value(a, component, is_solid, q_wall, i, j, 3, Nx, Ny, p)
+    ym = _axis_ghost_value(a, component, is_solid, q_wall, i, j, 5, Nx, Ny, p)
+    return (; dx = 0.5 * (xp - xm), dy = 0.5 * (yp - ym), fallback = false)
+end
+
+function _embedded_axis_derivative_2d(a, component::Symbol, is_solid, q_wall,
+                                      i, j, Nx, Ny, p, axis::Symbol)
+    a0 = a[i, j]
+    samples = Tuple{Float64,Float64}[]
+    dirs = axis === :x ? ((2, 1.0), (4, -1.0)) : ((3, 1.0), (5, -1.0))
+    for (q, sfluid) in dirs
+        cx = Int(D2Q9_CX[q])
+        cy = Int(D2Q9_CY[q])
+        ii = i + cx
+        jj = j + cy
+        if 1 <= ii <= Nx && 1 <= jj <= Ny && !is_solid[ii, jj]
+            push!(samples, (sfluid, a[ii, jj]))
+        elseif q_wall[i, j, q] > 0.0
+            qw = q_wall[i, j, q]
+            wx = (i - 1.0) + qw * cx
+            wy = (j - 1.0) + qw * cy
+            push!(samples, (sfluid * qw,
+                            _couette_wall_component(wx, wy, p, component)))
+        end
+    end
+    return _quadratic_derivative_at_zero(samples, a0)
+end
+
+function _embedded_axis_gradient_2d(a, component::Symbol, is_solid, q_wall,
+                                    i, j, Nx, Ny, p)
+    return (;
+        dx = _embedded_axis_derivative_2d(a, component, is_solid, q_wall,
+                                          i, j, Nx, Ny, p, :x),
+        dy = _embedded_axis_derivative_2d(a, component, is_solid, q_wall,
+                                          i, j, Nx, Ny, p, :y),
+        fallback = false,
+    )
+end
+
+function _normal_tangent_gradient_2d(a, component::Symbol, is_solid, q_wall,
+                                     i, j, Nx, Ny, p)
+    if !_is_cut_cell(q_wall, i, j)
+        return (;
+            dx = Kraken._wall_aware_dx_2d(a, is_solid, i, j, Nx, Float64),
+            dy = Kraken._wall_aware_dy_2d(a, is_solid, i, j, Ny, Float64),
+            fallback = false,
+        )
+    end
+
+    x0 = i - 1.0
+    y0 = j - 1.0
+    best_d = Inf
+    best_wx = x0
+    best_wy = y0
+    for q in 2:9
+        qw = q_wall[i, j, q]
+        qw > 0.0 || continue
+        wx = x0 + qw * D2Q9_CX[q]
+        wy = y0 + qw * D2Q9_CY[q]
+        d = hypot(x0 - wx, y0 - wy)
+        if d < best_d
+            best_d = d
+            best_wx = wx
+            best_wy = wy
+        end
+    end
+    isfinite(best_d) && best_d > 0.0 || return (;
+        dx = Kraken._wall_aware_dx_2d(a, is_solid, i, j, Nx, Float64),
+        dy = Kraken._wall_aware_dy_2d(a, is_solid, i, j, Ny, Float64),
+        fallback = true,
+    )
+
+    nx = (best_wx - p.cx) / p.Ri
+    ny = (best_wy - p.cy) / p.Ri
+    tx = -ny
+    ty = nx
+    wall_value = _couette_wall_component(best_wx, best_wy, p, component)
+    dn = ((a[i, j] - wall_value) / best_d)
+    # Rigid rotation wall velocity: grad(ux)=(-Ω y)_grad, grad(uy)=(Ω x)_grad.
+    dt = component === :ux ? -p.Ω * ty : p.Ω * tx
+    return (; dx = dn * nx + dt * tx, dy = dn * ny + dt * ty,
+              fallback = false)
+end
+
+
 function _wall_constrained_polyfit_gradient_2d(a, component::Symbol,
                                                is_solid, q_wall, i, j,
                                                Nx, Ny, p;
@@ -3928,6 +4060,33 @@ function _test_velocity_gradient(ux, uy, is_solid, i, j, Nx, Ny, p,
                                          degree=4, radius=4)
         uyg = _fluid_polyfit_gradient_2d(uy, is_solid, i, j, Nx, Ny;
                                          degree=4, radius=4)
+        return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
+                  fallback=uxg.fallback || uyg.fallback)
+    elseif gradient_mode === :ghost_axis
+        uxg = _ghost_axis_gradient_2d(
+            ux, :ux, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        uyg = _ghost_axis_gradient_2d(
+            uy, :uy, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
+                  fallback=uxg.fallback || uyg.fallback)
+    elseif gradient_mode === :embedded_axis
+        uxg = _embedded_axis_gradient_2d(
+            ux, :ux, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        uyg = _embedded_axis_gradient_2d(
+            uy, :uy, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
+                  fallback=uxg.fallback || uyg.fallback)
+    elseif gradient_mode === :normal_tangent
+        uxg = _normal_tangent_gradient_2d(
+            ux, :ux, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
+        uyg = _normal_tangent_gradient_2d(
+            uy, :uy, is_solid, p.q_wall, i, j, Nx, Ny, p,
+        )
         return (; dudx=uxg.dx, dudy=uxg.dy, dvdx=uyg.dx, dvdy=uyg.dy,
                   fallback=uxg.fallback || uyg.fallback)
     elseif gradient_mode === :wallfit4
@@ -4644,4 +4803,35 @@ end
     @test polyfit.max_far < 1.01 * kernel.max_far
     @test wallfit.max_near < 1.01 * kernel.max_near
     @test wallfit.max_far < 1.01 * kernel.max_far
+end
+
+@testset "P18l prototype extrap-eq BC: M7 compares curved gradient recovery strategies" begin
+    modes = (:ghost_axis, :embedded_axis, :normal_tangent, :polyfit4, :wallfit4)
+    source = Dict(
+        mode => _curved_couette_source_residual_stats(; gradient_mode=mode)
+        for mode in modes
+    )
+    cde = Dict(
+        mode => _extrap_repeated_curved_couette(
+            ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+            gradient_mode=mode,
+        )
+        for mode in modes
+    )
+
+    @test all(source[mode].fallback_count == 0 for mode in modes)
+
+    @test source[:embedded_axis].max_cut_source < 4e-5
+    @test source[:embedded_axis].max_cut_source < source[:polyfit4].max_cut_source
+    @test source[:wallfit4].max_cut_source < 0.5 * source[:embedded_axis].max_cut_source
+
+    @test cde[:embedded_axis].max_cut < 1e-4
+    @test cde[:embedded_axis].max_cut < cde[:polyfit4].max_cut
+    @test cde[:wallfit4].max_cut < 5e-5
+    @test cde[:wallfit4].max_cut < 0.5 * cde[:embedded_axis].max_cut
+
+    @test cde[:ghost_axis].max_cut > 1e-3
+    @test cde[:ghost_axis].max_cut > 10.0 * cde[:embedded_axis].max_cut
+    @test cde[:normal_tangent].max_cut > 5e-3
+    @test cde[:normal_tangent].max_cut > 5.0 * cde[:ghost_axis].max_cut
 end
