@@ -37,7 +37,40 @@ Artifacts:
 
 - `benchmarks/results/amr_d_publication_raw_2d_aqua_D_pub_20260505_long.csv`
 - `benchmarks/results/amr_d_publication_summary_2d_aqua_D_pub_20260505_long.csv`
-- `benchmarks/results/kraken_amrD_pub2d.o20812821`
+- `benchmarks/results/logs/amr_d_publication_2d_aqua_D_pub_20260505_long.log`
+
+## Reproducibility And Figures
+
+All retained publication-D outputs are indexed in:
+
+- `benchmarks/results/AMR_D_PUBLICATION_RESULTS.md`
+
+The reproducible case sources are the `.krk` files in:
+
+- `benchmarks/krk/amr_d_publication_2d/*.krk`
+
+They are executable through:
+
+```bash
+KRK_AMR_TAG=from_krk_20260505 \
+julia --project=. benchmarks/amr_d_publication_from_krk_2d.jl
+```
+
+The `.krk` runner emits the same raw and summary schema as the aqua runner.
+It also computes the AMR active-cell count directly from the parsed `Refine`
+block, so the result table remains tied to the case file rather than to a
+separate hardcoded patch table.
+
+Publication figures are generated from the retained summary CSV with:
+
+```bash
+julia --project=. benchmarks/plot_amr_d_publication_2d.jl
+```
+
+Stored outputs:
+
+- `benchmarks/results/figures/amr_d_publication_2d_summary.png`
+- `benchmarks/results/figures/amr_d_publication_2d_summary.pdf`
 
 ## Accuracy Verdict
 

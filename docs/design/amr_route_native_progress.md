@@ -200,6 +200,11 @@ Aqua runs:
   not close on CPU: AMR uses `87.5%` of the dense leaf cells but runs at
   roughly `0.67x-0.75x` leaf speed on the larger cases. See
   `docs/design/amr_d_closure_report_20260505.md`.
+- The publication-D result bundle is now reproducible from
+  `benchmarks/krk/amr_d_publication_2d/*.krk` via
+  `benchmarks/amr_d_publication_from_krk_2d.jl`. Retained artifacts are
+  indexed in `benchmarks/results/AMR_D_PUBLICATION_RESULTS.md`, and stored
+  figure outputs live under `benchmarks/results/figures/`.
 
 Notes:
 

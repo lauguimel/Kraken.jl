@@ -102,6 +102,11 @@ Publication-table aqua closure recorded in
 from PBS job `20812821.aqua`. The detailed verdict is in
 `docs/design/amr_d_closure_report_20260505.md`.
 
+The preserved artifact manifest is
+`benchmarks/results/AMR_D_PUBLICATION_RESULTS.md`. It indexes the primary aqua
+CSV files, the PBS log, local canary CSVs, `.krk` reproducibility sources and
+stored figure outputs.
+
 Accuracy passes for D: AMR is much closer than coarse Cartesian for square
 `u/v` and cylinder `Cd` on scales `{1,2,4}`.
 
@@ -187,4 +192,27 @@ Aqua:
 ```bash
 KRK_AMR_D_PATCH_STRATEGY=interface_buffered \
 qsub hpc/amr_d_publication_table_2d_aqua.pbs
+```
+
+Reproduce from `.krk` case files:
+
+```bash
+KRK_AMR_TAG=from_krk_20260505 \
+julia --project=. benchmarks/amr_d_publication_from_krk_2d.jl
+```
+
+Quick `.krk` canary:
+
+```bash
+KRK_AMR_D_CASES=square_scale1.krk,cylinder_scale1.krk \
+KRK_AMR_D_STEPS_OVERRIDE=40 \
+KRK_AMR_D_AVG_WINDOW_OVERRIDE=20 \
+KRK_AMR_TAG=from_krk_smoke \
+julia --project=. benchmarks/amr_d_publication_from_krk_2d.jl
+```
+
+Publication figure:
+
+```bash
+julia --project=. benchmarks/plot_amr_d_publication_2d.jl
 ```

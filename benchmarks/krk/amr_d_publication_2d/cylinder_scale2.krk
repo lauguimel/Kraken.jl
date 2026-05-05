@@ -1,0 +1,30 @@
+# AMR D publication cylinder obstacle, scale 2.
+
+Simulation amr_d_cylinder_scale2 D2Q9
+
+Define scale = 2
+Define Fx = 2e-5
+Define omega = 1.0
+Define rho0 = 1.0
+Define avg_window = 1200
+Define cx_leaf = 48
+Define cy_leaf = 28
+Define radius_leaf = 6
+Define cx = 24.0
+Define cy = 14.0
+Define R = 3.0
+
+Domain L = 48 x 28  N = 48 x 28
+Physics nu = 0.16666666666666666 Fx = 2e-5
+
+Obstacle cylinder { (x - cx)^2 + (y - cy)^2 <= R^2 }
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north wall
+
+Refine publication_patch { region = [4, 0, 44, 28], ratio = 2 }
+
+Run 4800 steps
+Diagnostics every 1200 [step, ux, uy, drag, lift]

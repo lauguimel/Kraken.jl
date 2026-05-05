@@ -1,0 +1,28 @@
+# AMR D publication square obstacle, scale 2.
+
+Simulation amr_d_square_scale2 D2Q9
+
+Define scale = 2
+Define Fx = 2e-5
+Define omega = 1.0
+Define rho0 = 1.0
+Define avg_window = 1200
+Define obstacle_i0 = 43
+Define obstacle_i1 = 54
+Define obstacle_j0 = 23
+Define obstacle_j1 = 34
+
+Domain L = 48 x 28  N = 48 x 28
+Physics nu = 0.16666666666666666 Fx = 2e-5
+
+Obstacle square { x >= 21.0 && x <= 27.0 && y >= 11.0 && y <= 17.0 }
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north wall
+
+Refine publication_patch { region = [4, 0, 44, 28], ratio = 2 }
+
+Run 4800 steps
+Diagnostics every 1200 [step, ux, uy, drag]
