@@ -1,0 +1,21 @@
+# AMR D convergence Couette, scale 1 source template.
+
+Simulation amr_d_couette_scale1 D2Q9
+
+Define scale = 1
+Define U = 0.04
+Define omega = 1.0
+Define rho0 = 1.0
+
+Domain L = 18 x 14  N = 18 x 14
+Physics nu = 0.16666666666666666
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north velocity(ux = 0.04, uy = 0)
+
+Refine yband { region = [0, 4, 18, 10], ratio = 2 }
+
+Run 80 steps
+Diagnostics every 20 [step, ux, uy]

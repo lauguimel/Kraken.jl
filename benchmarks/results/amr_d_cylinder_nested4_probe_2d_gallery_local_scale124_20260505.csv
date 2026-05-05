@@ -1,0 +1,2 @@
+case,parsed_levels,supported,reason
+cylinder_nested4,4,false,"ArgumentError: nested Refine parent blocks are not yet supported by conservative-tree AMR"

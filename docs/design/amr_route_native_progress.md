@@ -205,6 +205,14 @@ Aqua runs:
   `benchmarks/amr_d_publication_from_krk_2d.jl`. Retained artifacts are
   indexed in `benchmarks/results/AMR_D_PUBLICATION_RESULTS.md`, and stored
   figure outputs live under `benchmarks/results/figures/`.
+- 2026-05-05 D convergence gallery: `amr_d_convergence_gallery_2d.jl` now
+  generates Cartesian-vs-D plots for Couette, Poiseuille X/Y bands, BFS,
+  square and cylinder. Source templates are in
+  `benchmarks/krk/amr_d_convergence_2d/`; retained local smoke/ramp outputs
+  are indexed in `benchmarks/results/AMR_D_CONVERGENCE_GALLERY_RESULTS.md`.
+  The four-level cylinder nesting probe parses but is intentionally rejected
+  before conservative-tree runtime because nested `Refine parent` routing is
+  not implemented yet.
 
 Notes:
 
