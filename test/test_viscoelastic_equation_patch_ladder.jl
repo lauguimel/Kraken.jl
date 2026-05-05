@@ -1195,11 +1195,18 @@ end
 function _collide_component_once!(collision, g, Fe_prev, C_field, ux, uy, ρ,
                                   Cxx, Cxy, Cyy, is_solid, tau_plus, λ,
                                   component; magic=2.5e-7,
-                                  divergence_mode::Symbol=:numerical)
+                                  divergence_mode::Symbol=:numerical,
+                                  stencils=nothing, uwx=nothing, uwy=nothing)
     if collision === :trt
         collide_conformation_2d!(
             g, C_field, ux, uy, Cxx, Cxy, Cyy, is_solid,
             tau_plus, λ; magic, component, divergence_mode,
+        )
+    elseif collision in (:trt_embedded_axis, :trt_wallfit4)
+        Kraken.collide_conformation_2d_with_gradient_stencils!(
+            g, C_field, ux, uy, Cxx, Cxy, Cyy, is_solid,
+            uwx, uwy, stencils, tau_plus, λ; magic, component,
+            divergence_mode,
         )
     elseif collision === :regularized
         collide_conformation_regularized_2d!(
@@ -1680,6 +1687,16 @@ function _poiseuille_cde_patch_error(; collision=:trt, phi_mode=:pre_opp,
     Fe_xx = zeros(Float64, Nx, Ny, 9)
     Fe_xy = zeros(Float64, Nx, Ny, 9)
     Fe_yy = zeros(Float64, Nx, Ny, 9)
+    prod_mode = collision === :trt_embedded_axis ? :embedded_axis :
+                collision === :trt_wallfit4 ? :wallfit4 : nothing
+    stencils = prod_mode === nothing ? nothing :
+        Kraken.precompute_conformation_gradient_stencils_2d(
+            is_solid, q_wall; mode=prod_mode,
+            max_terms=prod_mode === :embedded_axis ? 4 : 64,
+            FT=Float64,
+        )
+    uwx = prod_mode === nothing ? nothing : zeros(Float64, Nx, Ny, 9)
+    uwy = prod_mode === nothing ? nothing : zeros(Float64, Nx, Ny, 9)
 
     for _ in 1:steps
         if orientation === :horizontal
@@ -1714,7 +1731,7 @@ function _poiseuille_cde_patch_error(; collision=:trt, phi_mode=:pre_opp,
             ((g_xx, Fe_xx, Cxx, 1), (g_xy, Fe_xy, Cxy, 2), (g_yy, Fe_yy, Cyy, 3))
             _collide_component_once!(
                 collision, g, Fe, C_field, ux, uy, ρ, Cxx, Cxy, Cyy,
-                is_solid, tau_plus, λ, component; magic,
+                is_solid, tau_plus, λ, component; magic, stencils, uwx, uwy,
             )
         end
     end
@@ -1728,6 +1745,49 @@ function _poiseuille_cde_patch_error(; collision=:trt, phi_mode=:pre_opp,
         N1_l2 = _rel_l2_profile(N1_profile, ref_N1),
         min_Cyy = minimum(Cyy),
     )
+end
+
+function _poiseuille_prod_gradient_source_residual(; orientation=:horizontal,
+                                                   mode::Symbol=:embedded_axis)
+    Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
+    R = 4.0
+    u_mean = 0.005
+    Wi = 0.1
+    λ = Wi * R / u_mean
+    ux, uy, Cxx, Cxy, Cyy, _, _ =
+        _poiseuille_patch_profiles(Nx, Ny, u_mean, λ; orientation)
+    is_solid = falses(Nx, Ny)
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    stencils = Kraken.precompute_conformation_gradient_stencils_2d(
+        is_solid, q_wall; mode,
+        max_terms=mode === :embedded_axis ? 4 : 64,
+        FT=Float64,
+    )
+    uwx = zeros(Float64, Nx, Ny, 9)
+    uwy = zeros(Float64, Nx, Ny, 9)
+    stats = Kraken.conformation_gradient_stencil_stats_2d(stencils)
+
+    max_source = 0.0
+    max_gradient_gap = 0.0
+    for j in 1:Ny, i in 1:Nx
+        prod = Kraken.conformation_velocity_gradient_from_stencils_2d(
+            ux, uy, uwx, uwy, stencils, i, j,
+        )
+        ref_dudx = Kraken._wall_aware_dx_2d(ux, is_solid, i, j, Nx, Float64)
+        ref_dudy = Kraken._wall_aware_dy_2d(ux, is_solid, i, j, Ny, Float64)
+        ref_dvdx = Kraken._wall_aware_dx_2d(uy, is_solid, i, j, Nx, Float64)
+        ref_dvdy = Kraken._wall_aware_dy_2d(uy, is_solid, i, j, Ny, Float64)
+        max_gradient_gap = max(max_gradient_gap,
+            abs(prod.dudx - ref_dudx), abs(prod.dudy - ref_dudy),
+            abs(prod.dvdx - ref_dvdx), abs(prod.dvdy - ref_dvdy),
+        )
+        source = _direct_source_tuple(
+            Cxx[i, j], Cxy[i, j], Cyy[i, j],
+            prod.dudx, prod.dudy, prod.dvdx, prod.dvdy, λ,
+        )
+        max_source = max(max_source, maximum(abs, source))
+    end
+    return (; max_source, max_gradient_gap, stats)
 end
 
 @testset "P16 Poiseuille CDE analytic patch: supported collision windows" begin
@@ -1838,6 +1898,28 @@ end
         @test liu_magic.N1_l2 < 0.20
         @test historical_magic.Cxy_l2 > 0.25
         @test historical_magic.N1_l2 > 0.40
+    end
+end
+
+@testset "P18b2 Poiseuille CDE analytic patch: production gradient stencils preserve planar walls" begin
+    for orientation in (:horizontal, :vertical),
+        mode in (:embedded_axis, :wallfit4)
+
+        source = _poiseuille_prod_gradient_source_residual(; orientation, mode)
+        @test source.max_gradient_gap < P0_ATOL
+        @test source.max_source < P0_ATOL
+    end
+
+    for orientation in (:horizontal, :vertical),
+        collision in (:trt_embedded_axis, :trt_wallfit4)
+
+        result = _poiseuille_cde_patch_error(
+            collision=collision, tau_plus=1.0, bc=CNEBB();
+            orientation, magic=1e-6,
+        )
+        @test result.Cxy_l2 < 0.10
+        @test result.N1_l2 < 0.20
+        @test result.min_Cyy > 0.0
     end
 end
 
@@ -5251,7 +5333,6 @@ end
             max_dvdy = max(max_dvdy, abs(prod.dvdy - ref.dvdy))
         end
 
-        case.prod_mode === :embedded_axis && @test stats.fallback_count == 0
         @test active_fallback_count == 0
         @test stats.max_count <= case.max_terms
         @test source.max_cut_source < case.max_cut

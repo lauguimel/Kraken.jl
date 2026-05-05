@@ -158,7 +158,8 @@ function _derivative_rhs_weights_at_zero_2d(positions, ::Type{T}) where {T}
 end
 
 function _fill_embedded_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
-                                      is_wall, count, is_solid, q_wall,
+                                      is_wall, count, fallback,
+                                      is_solid, q_wall,
                                       i, j, Nx, Ny, axis, ::Type{T},
                                       max_terms) where {T}
     samples = NamedTuple[]
@@ -176,6 +177,13 @@ function _fill_embedded_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
                             is_wall=true, di=0, dj=0,
                             wi=i, wj=j, wq=q))
         end
+    end
+
+    if length(samples) < 2 && !any(sample -> sample.is_wall, samples)
+        _fill_wall_aware_axis_stencil!(coeff, di, dj, wall_i, wall_j, wall_q,
+                                       is_wall, count, fallback, is_solid,
+                                       i, j, Nx, Ny, axis, T, max_terms)
+        return nothing
     end
 
     weights = _derivative_rhs_weights_at_zero_2d(
@@ -326,11 +334,11 @@ function precompute_conformation_gradient_stencils_2d(
         if mode === :embedded_axis
             _fill_embedded_axis_stencil!(
                 coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
-                is_solid, q_wall, i, j, Nx, Ny, 1, FT, slots,
+                fallback, is_solid, q_wall, i, j, Nx, Ny, 1, FT, slots,
             )
             _fill_embedded_axis_stencil!(
                 coeff, di, dj, wall_i, wall_j, wall_q, is_wall, count,
-                is_solid, q_wall, i, j, Nx, Ny, 2, FT, slots,
+                fallback, is_solid, q_wall, i, j, Nx, Ny, 2, FT, slots,
             )
         else
             _fill_wallfit_stencils!(
