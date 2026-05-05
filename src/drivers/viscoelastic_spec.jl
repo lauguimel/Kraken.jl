@@ -116,6 +116,7 @@ Boundary treatment for the conformation LBM populations g_* at fluid
 cells adjacent to solid walls. Concrete types: `CNEBB`, `CNEBBQAware`,
 `CNEBBField`, `CNEBBFieldEquilibrium`, `CNEBBEqGradient`,
 `CNEBBCutLinkEqGradient`, `YLW_A`, `YLW_B`, `YLWBalanceOnly`,
+`ExtrapEqWallBC`,
 `NoPolymerWallBC`.
 """
 abstract type AbstractPolymerWallBC end
@@ -179,6 +180,17 @@ walls keep the strict Yu/CNEBB recovery, avoiding the planar Poiseuille
 instability of the full `CNEBBEqGradient` canary.
 """
 struct CNEBBCutLinkEqGradient <: AbstractPolymerWallBC end
+
+"""
+    ExtrapEqWallBC()
+
+Production 2D cut-link boundary condition for conformation populations. For
+each population whose upstream node is solid, reconstruct the virtual upstream
+macro state by wall-aware linear extrapolation from the fluid cut cell, write
+that population to equilibrium, then rebalance the rest population to preserve
+the local conformation field exactly.
+"""
+struct ExtrapEqWallBC <: AbstractPolymerWallBC end
 
 function _assert_validation_polymer_wall_bc(bc::AbstractPolymerWallBC;
                                             allow_diagnostic::Bool=false)
@@ -430,6 +442,24 @@ function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
                                   ::CNEBBCutLinkEqGradient) where {T}
     apply_cnebb_conformation_2d!(g_post, g_pre, is_solid, q_wall, C, ux, uy;
                                  phi_mode=:eq_gradient_cutlink)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,
+                                  ::ExtrapEqWallBC) where {T}
+    error("ExtrapEqWallBC requires explicit q_wall, C, ux, and uy fields")
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,
+                                  ux, uy, ::ExtrapEqWallBC) where {T}
+    error("ExtrapEqWallBC requires explicit q_wall cut-link fractions")
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
+                                  q_wall, C, ::ExtrapEqWallBC) where {T}
+    error("ExtrapEqWallBC requires ux and uy fields")
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
+                                  q_wall, C, ux, uy,
+                                  ::ExtrapEqWallBC) where {T}
+    apply_extrap_eq_conformation_2d!(g_post, is_solid, q_wall, C, ux, uy)
     return nothing
 end
 function apply_polymer_wall_bc!(g_post::AbstractArray{T,4}, g_pre, is_solid, C,

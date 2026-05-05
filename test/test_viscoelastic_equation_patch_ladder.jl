@@ -5495,3 +5495,38 @@ end
     @test fill_stats.max_macro < P0_ATOL
     @test fill_stats.max_sum < P0_ATOL
 end
+
+function _prod_extrap_eq_wall_bc_rebalanced!(g_post, is_solid, q_wall, C, ux, uy)
+    apply_polymer_wall_bc!(
+        g_post, g_post, is_solid, q_wall, C, ux, uy, ExtrapEqWallBC(),
+    )
+    return nothing
+end
+
+@testset "P18l production ExtrapEqWallBC matches prototype ladder" begin
+    for normal in ((3.0, 4.0), (5.0, 2.0))
+        proto = _extrap_repeated_cde(
+            ; normal, γ=0.01, steps=4,
+            wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        )
+        prod = _extrap_repeated_cde(
+            ; normal, γ=0.01, steps=4,
+            wall_bc=_prod_extrap_eq_wall_bc_rebalanced!,
+        )
+        @test isapprox(prod.max_cut, proto.max_cut; atol=P0_ATOL, rtol=0.0)
+        @test isapprox(prod.max_far, proto.max_far; atol=P0_ATOL, rtol=0.0)
+    end
+
+    proto_curved = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_extrap_eq_wall_bc_rebalanced!,
+        gradient_mode=:wallfit4_prod,
+    )
+    prod_curved = _extrap_repeated_curved_couette(
+        ; steps=4, wall_bc=_prod_extrap_eq_wall_bc_rebalanced!,
+        gradient_mode=:wallfit4_prod,
+    )
+    @test isapprox(prod_curved.max_cut, proto_curved.max_cut; atol=P0_ATOL, rtol=0.0)
+    @test isapprox(prod_curved.max_near, proto_curved.max_near; atol=P0_ATOL, rtol=0.0)
+    @test isapprox(prod_curved.max_far, proto_curved.max_far; atol=P0_ATOL, rtol=0.0)
+    @test prod_curved.max_cut < 5e-5
+end

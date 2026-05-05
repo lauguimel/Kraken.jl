@@ -1752,6 +1752,56 @@ end
     end
 end
 
+@kernel function apply_extrap_eq_conformation_2d_kernel!(g_post,
+                                                         @Const(is_solid),
+                                                         @Const(q_wall),
+                                                         @Const(C_field),
+                                                         @Const(ux),
+                                                         @Const(uy),
+                                                         Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds if !is_solid[i, j]
+        any_cut = false
+        for q in 2:9
+            if q_wall[i, j, q] > 0
+                any_cut = true
+            end
+        end
+
+        if any_cut
+            T = eltype(g_post)
+            dCdx = _wall_aware_dx_2d(C_field, is_solid, i, j, Nx, T)
+            dCdy = _wall_aware_dy_2d(C_field, is_solid, i, j, Ny, T)
+            dudx = _wall_aware_dx_2d(ux, is_solid, i, j, Nx, T)
+            dudy = _wall_aware_dy_2d(ux, is_solid, i, j, Ny, T)
+            dvdx = _wall_aware_dx_2d(uy, is_solid, i, j, Nx, T)
+            dvdy = _wall_aware_dy_2d(uy, is_solid, i, j, Ny, T)
+
+            for q in 2:9
+                cx = _cx_q(q)
+                cy = _cy_q(q)
+                si = i - cx
+                sj = j - cy
+                src_solid = !(1 <= si <= Nx && 1 <= sj <= Ny) || is_solid[si, sj]
+                if src_solid
+                    offx = T(-cx)
+                    offy = T(-cy)
+                    Cv = C_field[i, j] + offx * dCdx + offy * dCdy
+                    uv = ux[i, j] + offx * dudx + offy * dudy
+                    vv = uy[i, j] + offx * dvdx + offy * dvdy
+                    g_post[i, j, q] = _feq_q_2d(q, Cv, uv, vv, uv * uv + vv * vv)
+                end
+            end
+
+            nonrest = zero(T)
+            for q in 2:9
+                nonrest += g_post[i, j, q]
+            end
+            g_post[i, j, 1] = C_field[i, j] - nonrest
+        end
+    end
+end
+
 @kernel function apply_ylw_a_dir_2d_kernel!(g_post, @Const(g_pre),
                                             @Const(is_solid), @Const(q_wall),
                                             C_field, @Const(ux_bc), @Const(uy_bc),
@@ -2267,6 +2317,22 @@ function apply_cnebb_qaware_simple_conformation_2d!(g_post, g_pre, is_solid,
     end
     rebalance_kernel! = rebalance_wall_rest_to_field_2d_kernel!(backend)
     rebalance_kernel!(g_post, is_solid, C_field, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+"""
+    apply_extrap_eq_conformation_2d!(g_post, is_solid, q_wall, C_field, ux, uy)
+
+Fill missing cut-link conformation populations from wall-aware extrapolated
+equilibrium states, then rebalance the rest population to `C_field`.
+"""
+function apply_extrap_eq_conformation_2d!(g_post, is_solid, q_wall, C_field,
+                                          ux, uy)
+    backend = KernelAbstractions.get_backend(g_post)
+    Nx, Ny = size(C_field)
+    kernel! = apply_extrap_eq_conformation_2d_kernel!(backend)
+    kernel!(g_post, is_solid, q_wall, C_field, ux, uy,
+            Nx, Ny; ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end
 

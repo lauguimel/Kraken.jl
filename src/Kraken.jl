@@ -320,7 +320,7 @@ export polymer_modulus, polymer_relaxation_time
 export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
        CNEBBFieldEquilibrium,
        CNEBBEqGradient, CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,
-       NoPolymerWallBC, apply_polymer_wall_bc!
+       ExtrapEqWallBC, NoPolymerWallBC, apply_polymer_wall_bc!
 
 # Conformation TRT-LBM (Liu et al. 2025)
 export collide_conformation_2d!, collide_conformation_regularized_2d!,
