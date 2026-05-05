@@ -51,6 +51,41 @@ end
     return (2 * first(r) - 1):(2 * last(r))
 end
 
+@inline function _conservative_tree_parent_range_from_child_2d(r::UnitRange{Int})
+    return (div(first(r) - 1, 2) + 1):(div(last(r) - 1, 2) + 1)
+end
+
+@inline function _conservative_tree_pad_range_2d(r::UnitRange{Int},
+                                                 pad::Int,
+                                                 upper::Int)
+    lo = max(1, first(r) - pad)
+    hi = min(upper, last(r) + pad)
+    return lo:hi
+end
+
+function _conservative_tree_ratio_levels_2d(ratio::Integer)
+    ratio_i = Int(ratio)
+    ratio_i >= 2 ||
+        throw(ArgumentError("conservative-tree specs require Refine ratio >= 2"))
+    ispow2(ratio_i) ||
+        throw(ArgumentError("conservative-tree specs require power-of-two Refine ratios"))
+
+    levels = 0
+    r = ratio_i
+    while r > 1
+        r = div(r, 2)
+        levels += 1
+    end
+    return levels
+end
+
+function _conservative_tree_auto_block_name_2d(name::String,
+                                               level_index::Int,
+                                               nlevels::Int)
+    level_index == nlevels && return name
+    return "$(name)_L$(level_index)"
+end
+
 @inline function _conservative_tree_cell_key_2d(level::Int, i::Int, j::Int)
     return (level, i, j)
 end
@@ -360,8 +395,7 @@ function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
             throw(ArgumentError("duplicate Refine name '$name'"))
         getproperty(ref, :is_3d) &&
             throw(ArgumentError("3D Refine blocks are not valid for 2D conservative-tree specs"))
-        getproperty(ref, :ratio) == 2 ||
-            throw(ArgumentError("conservative-tree specs currently require Refine ratio = 2"))
+        nlevels = _conservative_tree_ratio_levels_2d(getproperty(ref, :ratio))
 
         parent = String(getproperty(ref, :parent))
         if _conservative_tree_base_parent_name_2d(parent)
@@ -372,28 +406,56 @@ function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
             parent_level = refine_level[parent]
         end
 
-        nx_level = _conservative_tree_level_size_2d(Nx, parent_level)
-        ny_level = _conservative_tree_level_size_2d(Ny, parent_level)
-        i_range, j_range = _conservative_tree_region_to_parent_ranges_2d(
+        target_parent_level = parent_level + nlevels - 1
+        nx_level = _conservative_tree_level_size_2d(Nx, target_parent_level)
+        ny_level = _conservative_tree_level_size_2d(Ny, target_parent_level)
+        target_i_range, target_j_range = _conservative_tree_region_to_parent_ranges_2d(
             getproperty(ref, :region), nx_level, ny_level, Lx, Ly)
+
+        i_ranges = Vector{UnitRange{Int}}(undef, nlevels)
+        j_ranges = Vector{UnitRange{Int}}(undef, nlevels)
+        i_ranges[nlevels] = target_i_range
+        j_ranges[nlevels] = target_j_range
+        for k in (nlevels - 1):-1:1
+            child_level = parent_level + k
+            child_nx = _conservative_tree_level_size_2d(Nx, child_level)
+            child_ny = _conservative_tree_level_size_2d(Ny, child_level)
+            padded_i = _conservative_tree_pad_range_2d(i_ranges[k + 1], 1, child_nx)
+            padded_j = _conservative_tree_pad_range_2d(j_ranges[k + 1], 1, child_ny)
+            i_ranges[k] = _conservative_tree_parent_range_from_child_2d(padded_i)
+            j_ranges[k] = _conservative_tree_parent_range_from_child_2d(padded_j)
+        end
 
         if !_conservative_tree_base_parent_name_2d(parent)
             parent_i = refine_i_range[parent]
             parent_j = refine_j_range[parent]
-            first(i_range) >= first(parent_i) &&
-                last(i_range) <= last(parent_i) ||
+            first(i_ranges[1]) >= first(parent_i) &&
+                last(i_ranges[1]) <= last(parent_i) ||
                 throw(ArgumentError("Refine $name is outside parent '$parent' in x"))
-            first(j_range) >= first(parent_j) &&
-                last(j_range) <= last(parent_j) ||
+            first(j_ranges[1]) >= first(parent_j) &&
+                last(j_ranges[1]) <= last(parent_j) ||
                 throw(ArgumentError("Refine $name is outside parent '$parent' in y"))
         end
 
-        block = ConservativeTreeRefineBlock2D(name, i_range, j_range; parent=parent)
-        push!(blocks, block)
-        child_level = parent_level + 1
-        refine_level[name] = child_level
-        refine_i_range[name] = _conservative_tree_child_range_2d(i_range)
-        refine_j_range[name] = _conservative_tree_child_range_2d(j_range)
+        block_parent = parent
+        for k in 1:nlevels
+            block_name = _conservative_tree_auto_block_name_2d(name, k, nlevels)
+            block_name == "base" &&
+                throw(ArgumentError("Refine name 'base' is reserved"))
+            haskey(refine_level, block_name) &&
+                throw(ArgumentError("duplicate Refine name '$block_name'"))
+
+            block = ConservativeTreeRefineBlock2D(
+                block_name, i_ranges[k], j_ranges[k]; parent=block_parent)
+            push!(blocks, block)
+            child_level = parent_level + k
+            refine_level[block_name] = child_level
+            refine_i_range[block_name] =
+                _conservative_tree_child_range_2d(i_ranges[k])
+            refine_j_range[block_name] =
+                _conservative_tree_child_range_2d(j_ranges[k])
+            block_parent = block_name
+        end
     end
 
     return blocks

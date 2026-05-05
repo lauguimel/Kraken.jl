@@ -76,6 +76,19 @@ using Kraken
         """)
         @test_throws ArgumentError create_conservative_tree_patch_set_from_krk_2d(ratio3)
 
+        ratio4 = parse_kraken("""
+        Simulation bad_ratio4 D2Q9
+        Domain L = 1 x 1  N = 32 x 32
+        Physics nu = 0.1
+        Refine fine { region = [0.0, 0.0, 0.5, 0.5], ratio = 4 }
+        Boundary west wall
+        Boundary east wall
+        Boundary south wall
+        Boundary north wall
+        Run 1 steps
+        """)
+        @test_throws ArgumentError create_conservative_tree_patch_set_from_krk_2d(ratio4)
+
         nested = parse_kraken("""
         Simulation bad_parent D2Q9
         Domain L = 1 x 1  N = 32 x 32

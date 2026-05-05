@@ -23,7 +23,8 @@ The builder supports:
 - named root refine blocks;
 - nested child refine blocks with `parent = <name>`;
 - the `base` parent alias for explicit root-level `.krk` blocks;
-- ratio-2 only;
+- ratio-2 programmatic blocks;
+- power-of-two `.krk` ratios expanded into nested ratio-2 blocks;
 - active leaf extraction;
 - parent/child tables;
 - active volume checks;
@@ -36,6 +37,36 @@ Runtime status:
 - nested runtime streaming remains disabled;
 - `create_conservative_tree_patch_set_from_krk_2d` still rejects nested
   `Refine parent` blocks, as intended.
+
+## KRK Auto-Nesting Helper
+
+The static spec helper now accepts `.krk` `Refine` ratios greater than 2 when
+the ratio is a power of two.
+
+Example:
+
+```krk
+Refine cylinder_roi { region = [3, 1.5, 4, 2.5], ratio = 8 }
+```
+
+This expands to a nested chain of ratio-2 blocks:
+
+- `cylinder_roi_L1`;
+- `cylinder_roi_L2`;
+- `cylinder_roi`.
+
+The final block keeps the user-facing name. Intermediate blocks are generated
+with `_Lk` suffixes. The target fine region is quantized at the requested
+parent level, then every coarser level is reconstructed by padding the child
+range by one child-level cell before coarsening. This gives a simple 2:1
+nesting buffer while keeping the `.krk` file compact.
+
+Scope:
+
+- enabled for `conservative_tree_refine_blocks_from_krk_2d` and
+  `create_conservative_tree_spec_from_krk_2d`;
+- still state-free and runtime-disabled;
+- `create_conservative_tree_patch_set_from_krk_2d` remains ratio-2 only.
 
 ## Surgical Tests
 
@@ -53,6 +84,8 @@ Coverage:
 - child-outside-parent rejection;
 - 2:1 balance rejection;
 - `.krk` nested refine conversion;
+- `.krk` ratio 4 and 8 auto-nesting expansion;
+- non-power-of-two ratio rejection;
 - existing `cylinder_nested4_probe.krk` static build.
 
 Commands run:

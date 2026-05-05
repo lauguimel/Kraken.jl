@@ -104,6 +104,76 @@ using Random
         @test isapprox(active_volume(spec), 16 * 8; atol=1e-12, rtol=0)
     end
 
+    @testset ".krk ratio > 2 expands to buffered nested blocks" begin
+        setup = parse_kraken("""
+        Simulation auto_nested D2Q9
+        Domain L = 8 x 4  N = 16 x 8
+        Physics nu = 0.1
+
+        Refine zoom { region = [3.0, 1.5, 4.0, 2.5], ratio = 4 }
+
+        Boundary west periodic
+        Boundary east periodic
+        Boundary south wall
+        Boundary north wall
+        Run 1 steps
+        """)
+
+        blocks = conservative_tree_refine_blocks_from_krk_2d(
+            setup.domain, setup.refinements)
+        @test length(blocks) == 2
+        @test blocks[1].name == "zoom_L1"
+        @test blocks[1].parent == ""
+        @test blocks[1].i_range == 6:9
+        @test blocks[1].j_range == 3:6
+        @test blocks[2].name == "zoom"
+        @test blocks[2].parent == "zoom_L1"
+        @test blocks[2].i_range == 13:16
+        @test blocks[2].j_range == 7:10
+
+        spec = create_conservative_tree_spec_from_krk_2d(setup)
+        @test spec.max_level == 2
+        @test spec.refine_level["zoom"] == 2
+        @test isapprox(active_volume(spec), 16 * 8; atol=1e-12, rtol=0)
+    end
+
+    @testset ".krk ratio 8 expands to three nested levels" begin
+        setup = parse_kraken("""
+        Simulation auto_nested3 D2Q9
+        Domain L = 8 x 4  N = 16 x 8
+        Physics nu = 0.1
+
+        Refine zoom { region = [3.0, 1.5, 4.0, 2.5], ratio = 8 }
+
+        Boundary west periodic
+        Boundary east periodic
+        Boundary south wall
+        Boundary north wall
+        Run 1 steps
+        """)
+
+        blocks = conservative_tree_refine_blocks_from_krk_2d(
+            setup.domain, setup.refinements)
+        @test length(blocks) == 3
+        @test blocks[1].name == "zoom_L1"
+        @test blocks[1].parent == ""
+        @test blocks[1].i_range == 6:9
+        @test blocks[1].j_range == 3:6
+        @test blocks[2].name == "zoom_L2"
+        @test blocks[2].parent == "zoom_L1"
+        @test blocks[2].i_range == 12:17
+        @test blocks[2].j_range == 6:11
+        @test blocks[3].name == "zoom"
+        @test blocks[3].parent == "zoom_L2"
+        @test blocks[3].i_range == 25:32
+        @test blocks[3].j_range == 13:20
+
+        spec = create_conservative_tree_spec_from_krk_2d(setup)
+        @test spec.max_level == 3
+        @test spec.refine_level["zoom"] == 3
+        @test isapprox(active_volume(spec), 16 * 8; atol=1e-12, rtol=0)
+    end
+
     @testset "existing cylinder nested4 probe is a static DSL canary" begin
         setup = load_kraken("benchmarks/krk/amr_d_convergence_2d/cylinder_nested4_probe.krk")
         spec = create_conservative_tree_spec_from_krk_2d(setup)
@@ -140,6 +210,19 @@ using Random
         Run 1 steps
         """)
         @test_throws ArgumentError create_conservative_tree_spec_from_krk_2d(child_outside)
+
+        non_power_two = parse_kraken("""
+        Simulation non_power_two D2Q9
+        Domain L = 1 x 1  N = 16 x 16
+        Physics nu = 0.1
+        Refine odd { region = [0.25, 0.25, 0.5, 0.5], ratio = 6 }
+        Boundary west wall
+        Boundary east wall
+        Boundary south wall
+        Boundary north wall
+        Run 1 steps
+        """)
+        @test_throws ArgumentError create_conservative_tree_spec_from_krk_2d(non_power_two)
     end
 
     @testset "recursive ledger coalesce preserves active populations" begin
