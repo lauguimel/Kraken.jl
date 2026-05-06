@@ -115,8 +115,8 @@ end
 Boundary treatment for the conformation LBM populations g_* at fluid
 cells adjacent to solid walls. Concrete types: `CNEBB`, `CNEBBQAware`,
 `CNEBBField`, `CNEBBFieldEquilibrium`, `CNEBBEqGradient`,
-`CNEBBCutLinkEqGradient`, `YLW_A`, `YLW_B`, `YLWBalanceOnly`,
-`ExtrapEqWallBC`,
+`CNEBBCutLinkEqGradient`, `ExtrapEqWallBC`, `LogFieldWallBC`,
+`YLW_A`, `YLW_B`, `YLWBalanceOnly`,
 `NoPolymerWallBC`.
 """
 abstract type AbstractPolymerWallBC end
@@ -192,6 +192,17 @@ the local conformation field exactly.
 """
 struct ExtrapEqWallBC <: AbstractPolymerWallBC end
 
+"""
+    LogFieldWallBC()
+
+Wall treatment for `LogConfOldroydB` only. It applies field-pinned scalar
+NEBB to the evolved log-conformation components Ψ, preserving the node macro
+Ψ exactly at wall-adjacent cells. This is intentionally separate from
+`CNEBBField()`: it is a log-space closure, not the conservative C-space
+Yu/Liu CNEBB formula.
+"""
+struct LogFieldWallBC <: AbstractPolymerWallBC end
+
 function _assert_validation_polymer_wall_bc(bc::AbstractPolymerWallBC;
                                             allow_diagnostic::Bool=false)
     if !allow_diagnostic &&
@@ -220,8 +231,12 @@ function _assert_validation_log_wall_bc(model::AbstractPolymerModel,
                                         bc::AbstractPolymerWallBC;
                                         allow_diagnostic::Bool=false)
     allow_diagnostic && return nothing
-    if uses_log_conformation(model) && !(bc isa NoPolymerWallBC)
-        error("log-conformation with polymer wall BC $(typeof(bc)) applies scalar wall reconstruction to Ψ=log(C), while the published conservative wall BC is derived for C; pass allow_diagnostic_log_wall_bc=true in audit code or use a direct-C model for validation.")
+    if uses_log_conformation(model)
+        if !(bc isa NoPolymerWallBC || bc isa LogFieldWallBC)
+            error("log-conformation with polymer wall BC $(typeof(bc)) applies a C-space wall reconstruction to Ψ=log(C); use LogFieldWallBC() or pass allow_diagnostic_log_wall_bc=true in audit code.")
+        end
+    elseif bc isa LogFieldWallBC
+        error("LogFieldWallBC is defined only for LogConfOldroydB; use CNEBB() or ExtrapEqWallBC() for direct-C validation.")
     end
     return nothing
 end
@@ -460,6 +475,27 @@ function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
                                   q_wall, C, ux, uy,
                                   ::ExtrapEqWallBC) where {T}
     apply_extrap_eq_conformation_2d!(g_post, is_solid, q_wall, C, ux, uy)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,
+                                  ::LogFieldWallBC) where {T}
+    apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, C)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
+                                  q_wall, C, ::LogFieldWallBC) where {T}
+    apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, q_wall, C)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid, C,
+                                  ux, uy, ::LogFieldWallBC) where {T}
+    apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, C, ux, uy)
+    return nothing
+end
+function apply_polymer_wall_bc!(g_post::AbstractArray{T,3}, g_pre, is_solid,
+                                  q_wall, C, ux, uy, ::LogFieldWallBC) where {T}
+    apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, q_wall,
+                                       C, ux, uy)
     return nothing
 end
 function apply_polymer_wall_bc!(g_post::AbstractArray{T,4}, g_pre, is_solid, C,

@@ -313,14 +313,15 @@ export vortex_length_contraction_2d, outlet_centerline_N1_contraction_2d
 export run_conformation_sphere_libb_3d
 export AbstractPolymerModel, OldroydB, LogConfOldroydB, update_polymer_stress!
 export uses_log_conformation
-export collide_logconf_2d!, psi_to_C_2d!, C_to_psi_2d!, logconf_source_2d
+export collide_logconf_2d!, collide_logconf_2d_with_gradient_stencils!,
+       psi_to_C_2d!, C_to_psi_2d!, logconf_source_2d
 export reset_conformation_inlet_2d!, reset_conformation_outlet_2d!
 export reset_conformation_inlet_masked_2d!, reset_conformation_outlet_masked_2d!
 export polymer_modulus, polymer_relaxation_time
 export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
        CNEBBFieldEquilibrium,
        CNEBBEqGradient, CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,
-       ExtrapEqWallBC, NoPolymerWallBC, apply_polymer_wall_bc!
+       ExtrapEqWallBC, LogFieldWallBC, NoPolymerWallBC, apply_polymer_wall_bc!
 
 # Conformation TRT-LBM (Liu et al. 2025)
 export collide_conformation_2d!, collide_conformation_regularized_2d!,

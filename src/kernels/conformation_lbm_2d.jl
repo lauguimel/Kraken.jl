@@ -1607,6 +1607,79 @@ end
     end
 end
 
+@kernel function apply_cnebb_field_qaware_2d_kernel!(g_post, @Const(g_pre),
+                                                     @Const(is_solid),
+                                                     @Const(q_wall),
+                                                     use_q_wall, C_field,
+                                                     @Const(ux_bc), @Const(uy_bc),
+                                                     use_local_velocity,
+                                                     Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds if !is_solid[i, j]
+        T = eltype(g_post)
+        any_solid = false
+        for q in 2:9
+            ni = i + _cx_q(q)
+            nj = j + _cy_q(q)
+            if !(1 <= ni <= Nx && 1 <= nj <= Ny) || is_solid[ni, nj]
+                any_solid = true
+            end
+        end
+
+        if any_solid
+            φ = C_field[i, j]
+            ub = use_local_velocity ? ux_bc[i, j] : zero(T)
+            vb = use_local_velocity ? uy_bc[i, j] : zero(T)
+            usq = ub * ub + vb * vb
+
+            for q in 2:9
+                si = i - _cx_q(q)
+                sj = j - _cy_q(q)
+                src_solid = !(1 <= si <= Nx && 1 <= sj <= Ny) ||
+                            is_solid[si, sj]
+                if src_solid
+                    q_out = _opp_q(q)
+                    geq_q = _feq_q_2d(q, φ, ub, vb, usq)
+                    geq_out = _feq_q_2d(q_out, φ, ub, vb, usq)
+                    q_w = use_q_wall ? q_wall[i, j, q_out] : zero(T)
+                    if use_q_wall && q_w > zero(T) &&
+                       abs(q_w - T(0.5)) > T(100) * eps(T)
+                        neq_out = g_pre[i, j, q_out] - geq_out
+                        if q_w <= T(0.5)
+                            bi = i - _cx_q(q_out)
+                            bj = j - _cy_q(q_out)
+                            geq_back_out = geq_out
+                            if 1 <= bi <= Nx && 1 <= bj <= Ny && !is_solid[bi, bj]
+                                us = use_local_velocity ? ux_bc[bi, bj] : zero(T)
+                                vs = use_local_velocity ? uy_bc[bi, bj] : zero(T)
+                                Cs = C_field[bi, bj]
+                                geq_back_out = _feq_q_2d(q_out, Cs, us, vs,
+                                                         us * us + vs * vs)
+                            end
+                            neq_back_out = g_post[i, j, q_out] - geq_back_out
+                            g_post[i, j, q] = geq_q + T(2) * q_w * neq_out +
+                                              (one(T) - T(2) * q_w) * neq_back_out
+                        else
+                            inv_two_q = one(T) / (T(2) * q_w)
+                            neq_here_q = g_pre[i, j, q] - geq_q
+                            g_post[i, j, q] = geq_q + inv_two_q * neq_out +
+                                              (one(T) - inv_two_q) * neq_here_q
+                        end
+                    else
+                        g_post[i, j, q] = geq_q + (g_post[i, j, q_out] - geq_out)
+                    end
+                end
+            end
+
+            nonrest = zero(T)
+            for q in 2:9
+                nonrest += g_post[i, j, q]
+            end
+            g_post[i, j, 1] = φ - nonrest
+        end
+    end
+end
+
 @kernel function apply_cnebb_qaware_correction_2d_kernel!(g_post, @Const(g_pre),
                                                           @Const(is_solid),
                                                           @Const(q_wall),
@@ -1724,6 +1797,64 @@ end
                     g_post[i, j, q] = geq_q + inv_two_q * neq_out +
                                       (one(T) - inv_two_q) * neq_here_q
                 end
+            end
+        end
+    end
+end
+
+@kernel function apply_cnebb_field_qaware_dir_2d_kernel!(g_post, @Const(g_pre),
+                                                         @Const(is_solid),
+                                                         @Const(q_wall),
+                                                         use_q_wall, C_field,
+                                                         @Const(ux_bc),
+                                                         @Const(uy_bc),
+                                                         use_local_velocity,
+                                                         q, q_out, cxq, cyq,
+                                                         cxout, cyout, wq, wout,
+                                                         Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds if !is_solid[i, j]
+        T = eltype(g_post)
+        si = i - cxq
+        sj = j - cyq
+        src_solid = !(1 <= si <= Nx && 1 <= sj <= Ny) || is_solid[si, sj]
+        if src_solid
+            φ = C_field[i, j]
+            ub = use_local_velocity ? ux_bc[i, j] : zero(T)
+            vb = use_local_velocity ? uy_bc[i, j] : zero(T)
+            usq = ub * ub + vb * vb
+            cxq_t = T(cxq)
+            cyq_t = T(cyq)
+            cxout_t = T(cxout)
+            cyout_t = T(cyout)
+            geq_q = _feq_lit_2d(T(wq), cxq_t, cyq_t, φ, ub, vb, usq)
+            geq_out = _feq_lit_2d(T(wout), cxout_t, cyout_t, φ, ub, vb, usq)
+            q_w = use_q_wall ? q_wall[i, j, q_out] : zero(T)
+            if use_q_wall && q_w > zero(T) &&
+               abs(q_w - T(0.5)) > T(100) * eps(T)
+                neq_out = g_pre[i, j, q_out] - geq_out
+                if q_w <= T(0.5)
+                    bi = i - cxout
+                    bj = j - cyout
+                    geq_back_out = geq_out
+                    if 1 <= bi <= Nx && 1 <= bj <= Ny && !is_solid[bi, bj]
+                        us = use_local_velocity ? ux_bc[bi, bj] : zero(T)
+                        vs = use_local_velocity ? uy_bc[bi, bj] : zero(T)
+                        Cs = C_field[bi, bj]
+                        geq_back_out = _feq_lit_2d(T(wout), cxout_t, cyout_t,
+                                                   Cs, us, vs, us * us + vs * vs)
+                    end
+                    neq_back_out = g_post[i, j, q_out] - geq_back_out
+                    g_post[i, j, q] = geq_q + T(2) * q_w * neq_out +
+                                      (one(T) - T(2) * q_w) * neq_back_out
+                else
+                    inv_two_q = one(T) / (T(2) * q_w)
+                    neq_here_q = g_pre[i, j, q] - geq_q
+                    g_post[i, j, q] = geq_q + inv_two_q * neq_out +
+                                      (one(T) - inv_two_q) * neq_here_q
+                end
+            else
+                g_post[i, j, q] = geq_q + (g_post[i, j, q_out] - geq_out)
             end
         end
     end
@@ -2314,6 +2445,73 @@ function apply_cnebb_qaware_simple_conformation_2d!(g_post, g_pre, is_solid,
         dir_kernel!(g_post, g_pre, is_solid, q_wall, C_field, C_field, C_field,
                     false, q, q_out, _cx_q(q), _cy_q(q), _cx_q(q_out),
                     _cy_q(q_out), eltype(g_post)(_w_q(q)),
+                    eltype(g_post)(_w_q(q_out)), Nx, Ny; ndrange=(Nx, Ny))
+    end
+    rebalance_kernel! = rebalance_wall_rest_to_field_2d_kernel!(backend)
+    rebalance_kernel!(g_post, is_solid, C_field, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+function apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, C_field,
+                                            ux, uy)
+    backend = KernelAbstractions.get_backend(g_post)
+    Nx, Ny = size(C_field)
+    dir_kernel! = apply_cnebb_field_qaware_dir_2d_kernel!(backend)
+    for q in 2:9
+        q_out = _opp_q(q)
+        dir_kernel!(g_post, g_pre, is_solid, g_post, false, C_field, ux, uy,
+                    true, q, q_out, _cx_q(q), _cy_q(q), _cx_q(q_out),
+                    _cy_q(q_out), eltype(g_post)(_w_q(q)),
+                    eltype(g_post)(_w_q(q_out)), Nx, Ny; ndrange=(Nx, Ny))
+    end
+    rebalance_kernel! = rebalance_wall_rest_to_field_2d_kernel!(backend)
+    rebalance_kernel!(g_post, is_solid, C_field, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+function apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, C_field)
+    backend = KernelAbstractions.get_backend(g_post)
+    Nx, Ny = size(C_field)
+    dir_kernel! = apply_cnebb_field_qaware_dir_2d_kernel!(backend)
+    for q in 2:9
+        q_out = _opp_q(q)
+        dir_kernel!(g_post, g_pre, is_solid, g_post, false, C_field,
+                    C_field, C_field, false, q, q_out, _cx_q(q), _cy_q(q),
+                    _cx_q(q_out), _cy_q(q_out), eltype(g_post)(_w_q(q)),
+                    eltype(g_post)(_w_q(q_out)), Nx, Ny; ndrange=(Nx, Ny))
+    end
+    rebalance_kernel! = rebalance_wall_rest_to_field_2d_kernel!(backend)
+    rebalance_kernel!(g_post, is_solid, C_field, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+function apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, q_wall,
+                                            C_field, ux, uy)
+    backend = KernelAbstractions.get_backend(g_post)
+    Nx, Ny = size(C_field)
+    dir_kernel! = apply_cnebb_field_qaware_dir_2d_kernel!(backend)
+    for q in 2:9
+        q_out = _opp_q(q)
+        dir_kernel!(g_post, g_pre, is_solid, q_wall, true, C_field, ux, uy,
+                    true, q, q_out, _cx_q(q), _cy_q(q), _cx_q(q_out),
+                    _cy_q(q_out), eltype(g_post)(_w_q(q)),
+                    eltype(g_post)(_w_q(q_out)), Nx, Ny; ndrange=(Nx, Ny))
+    end
+    rebalance_kernel! = rebalance_wall_rest_to_field_2d_kernel!(backend)
+    rebalance_kernel!(g_post, is_solid, C_field, Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+function apply_cnebb_field_conformation_2d!(g_post, g_pre, is_solid, q_wall,
+                                            C_field)
+    backend = KernelAbstractions.get_backend(g_post)
+    Nx, Ny = size(C_field)
+    dir_kernel! = apply_cnebb_field_qaware_dir_2d_kernel!(backend)
+    for q in 2:9
+        q_out = _opp_q(q)
+        dir_kernel!(g_post, g_pre, is_solid, q_wall, true, C_field,
+                    C_field, C_field, false, q, q_out, _cx_q(q), _cy_q(q),
+                    _cx_q(q_out), _cy_q(q_out), eltype(g_post)(_w_q(q)),
                     eltype(g_post)(_w_q(q_out)), Nx, Ny; ndrange=(Nx, Ny))
     end
     rebalance_kernel! = rebalance_wall_rest_to_field_2d_kernel!(backend)
