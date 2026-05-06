@@ -130,11 +130,36 @@ function _plot_field!(fig, row, col, title, A; colormap=:viridis,
     if cr === nothing || !all(isfinite, cr)
         cr = (0.0, 1.0)
     end
-    Aplot = map(x -> isfinite(x) ? x : NaN, A)
-    kwargs = (; colorrange=cr)
+    Aplot = map(x -> isfinite(x) ? x : cr[1], A)
+    kwargs = (; colorrange=cr, colorscale=identity)
     hm = heatmap!(ax, 1:size(A, 1), 1:size(A, 2), Aplot;
                   colormap=colormap, nan_color=:black, kwargs...)
     Colorbar(fig[row, col + 1], hm)
+    return ax
+end
+
+function _lines_finite_segments!(ax, xs, ys; label=nothing, kwargs...)
+    first = nothing
+    current_label = label
+    n = length(xs)
+    @inbounds for k in 1:(n + 1)
+        finite = k <= n && isfinite(xs[k]) && isfinite(ys[k])
+        if finite && first === nothing
+            first = k
+        elseif (!finite || k == n + 1) && first !== nothing
+            last = k - 1
+            if last > first
+                if current_label === nothing
+                    lines!(ax, xs[first:last], ys[first:last]; kwargs...)
+                else
+                    lines!(ax, xs[first:last], ys[first:last];
+                           label=current_label, kwargs...)
+                    current_label = nothing
+                end
+            end
+            first = nothing
+        end
+    end
     return ax
 end
 
@@ -163,7 +188,7 @@ function _plot_case_fields(flow::Symbol, route_state, cart_state, outdir)
     _plot_field!(fig, 1, 2, "AMR-D |u|", route_state.fields.speed;
                  colormap=:viridis, colorrange=speed_range)
     _plot_field!(fig, 1, 4, "AMR-D rho", route_state.fields.rho;
-                 colormap=:balance, colorrange=rho_range)
+                 colormap=:viridis, colorrange=rho_range)
 
     axm2 = Axis(fig[2, 1], title="$title leaf Cartesian mesh",
                 aspect=DataAspect(), xlabel="x leaf", ylabel="y leaf")
@@ -174,7 +199,7 @@ function _plot_case_fields(flow::Symbol, route_state, cart_state, outdir)
     _plot_field!(fig, 2, 2, "Cartesian |u|", cart_state.fields.speed;
                  colormap=:viridis, colorrange=speed_range)
     _plot_field!(fig, 2, 4, "Cartesian rho", cart_state.fields.rho;
-                 colormap=:balance, colorrange=rho_range)
+                 colormap=:viridis, colorrange=rho_range)
 
     path = joinpath(outdir, "$(flow)_fields.png")
     save(path, fig)
@@ -186,40 +211,40 @@ function _plot_case_profiles(flow::Symbol, route_state, cart_state, outdir)
     nx, ny = size(route_state.fields.ux)
     j_mid = cld(ny, 2)
     i_probe = clamp(round(Int, 0.75 * nx), 1, nx)
-    x = collect(1:nx) ./ nx
-    y = collect(1:ny) ./ ny
+    x = (collect(1:nx) .- 0.5) ./ nx
+    y = (collect(1:ny) .- 0.5) ./ ny
 
     fig = Figure(size=(1350, 920), fontsize=16)
     ax1 = Axis(fig[1, 1], title="$title centerline ux",
                xlabel="x/Lx", ylabel="ux")
-    lines!(ax1, x, route_state.fields.ux[:, j_mid];
-           label="AMR-D", color=:orangered, linewidth=2.8)
-    lines!(ax1, x, cart_state.fields.ux[:, j_mid];
-           label="leaf Cartesian", color=:black, linewidth=2.4)
+    _lines_finite_segments!(ax1, x, route_state.fields.ux[:, j_mid];
+                            label="AMR-D", color=:orangered, linewidth=2.8)
+    _lines_finite_segments!(ax1, x, cart_state.fields.ux[:, j_mid];
+                            label="leaf Cartesian", color=:black, linewidth=2.4)
     axislegend(ax1, position=:rb)
 
     ax2 = Axis(fig[1, 2], title="$title centerline rho",
                xlabel="x/Lx", ylabel="rho")
-    lines!(ax2, x, route_state.fields.rho[:, j_mid];
-           label="AMR-D", color=:orangered, linewidth=2.8)
-    lines!(ax2, x, cart_state.fields.rho[:, j_mid];
-           label="leaf Cartesian", color=:black, linewidth=2.4)
+    _lines_finite_segments!(ax2, x, route_state.fields.rho[:, j_mid];
+                            label="AMR-D", color=:orangered, linewidth=2.8)
+    _lines_finite_segments!(ax2, x, cart_state.fields.rho[:, j_mid];
+                            label="leaf Cartesian", color=:black, linewidth=2.4)
     axislegend(ax2, position=:rb)
 
-    ax3 = Axis(fig[2, 1], title=@sprintf("%s ux at x/Lx=%.2f", title, i_probe / nx),
+    ax3 = Axis(fig[2, 1], title=@sprintf("%s ux at x/Lx=%.2f", title, x[i_probe]),
                xlabel="ux", ylabel="y/Ly")
-    lines!(ax3, route_state.fields.ux[i_probe, :], y;
-           label="AMR-D", color=:orangered, linewidth=2.8)
-    lines!(ax3, cart_state.fields.ux[i_probe, :], y;
-           label="leaf Cartesian", color=:black, linewidth=2.4)
+    _lines_finite_segments!(ax3, route_state.fields.ux[i_probe, :], y;
+                            label="AMR-D", color=:orangered, linewidth=2.8)
+    _lines_finite_segments!(ax3, cart_state.fields.ux[i_probe, :], y;
+                            label="leaf Cartesian", color=:black, linewidth=2.4)
     axislegend(ax3, position=:rb)
 
-    ax4 = Axis(fig[2, 2], title=@sprintf("%s rho at x/Lx=%.2f", title, i_probe / nx),
+    ax4 = Axis(fig[2, 2], title=@sprintf("%s rho at x/Lx=%.2f", title, x[i_probe]),
                xlabel="rho", ylabel="y/Ly")
-    lines!(ax4, route_state.fields.rho[i_probe, :], y;
-           label="AMR-D", color=:orangered, linewidth=2.8)
-    lines!(ax4, cart_state.fields.rho[i_probe, :], y;
-           label="leaf Cartesian", color=:black, linewidth=2.4)
+    _lines_finite_segments!(ax4, route_state.fields.rho[i_probe, :], y;
+                            label="AMR-D", color=:orangered, linewidth=2.8)
+    _lines_finite_segments!(ax4, cart_state.fields.rho[i_probe, :], y;
+                            label="leaf Cartesian", color=:black, linewidth=2.4)
     axislegend(ax4, position=:rb)
 
     Label(fig[3, 1:2],

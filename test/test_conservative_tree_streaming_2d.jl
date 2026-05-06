@@ -60,6 +60,46 @@ function _stream_composite_fluid_mass(coarse_F, patch, is_solid)
     return total
 end
 
+function _stream_y_mirror_mask_mismatch(is_solid)
+    ny = size(is_solid, 2)
+    mismatch = 0
+    @inbounds for j in axes(is_solid, 2), i in axes(is_solid, 1)
+        mismatch += is_solid[i, j] != is_solid[i, ny + 1 - j] ? 1 : 0
+    end
+    return mismatch
+end
+
+function _stream_y_mirror_cylinder_error(result; force_x=2e-5, volume=0.25)
+    leaf = zeros(Float64, 2 * size(result.coarse_F, 1),
+                 2 * size(result.coarse_F, 2), 9)
+    composite_to_leaf_F_2d!(leaf, result.coarse_F, result.patch)
+    ny = size(leaf, 2)
+    max_ux = 0.0
+    max_rho = 0.0
+    max_uy_antisym = 0.0
+    @inbounds for j in axes(leaf, 2), i in axes(leaf, 1)
+        jm = ny + 1 - j
+        result.is_solid_leaf[i, j] && continue
+        result.is_solid_leaf[i, jm] && continue
+
+        cell = @view leaf[i, j, :]
+        cell_mirror = @view leaf[i, jm, :]
+        rho = mass_F(cell) / volume
+        rho_mirror = mass_F(cell_mirror) / volume
+        mx, my = momentum_F(cell)
+        mx_mirror, my_mirror = momentum_F(cell_mirror)
+        ux = (mx / volume + force_x / 2) / rho
+        ux_mirror = (mx_mirror / volume + force_x / 2) / rho_mirror
+        uy = my / volume / rho
+        uy_mirror = my_mirror / volume / rho_mirror
+
+        max_ux = max(max_ux, abs(ux - ux_mirror))
+        max_rho = max(max_rho, abs(rho - rho_mirror))
+        max_uy_antisym = max(max_uy_antisym, abs(uy + uy_mirror))
+    end
+    return (; max_ux, max_rho, max_uy_antisym)
+end
+
 @testset "Conservative tree route streaming 2D" begin
     Nx, Ny = 9, 10
     patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
@@ -638,6 +678,12 @@ end
         @test abs(result.mass_drift) < 1e-8
         @test result.u_ref > 0
         @test sum(result.is_solid_leaf) > 0
+        @test _stream_y_mirror_mask_mismatch(result.is_solid_leaf) == 0
+        @test abs(result.Fy_drag) < 1e-12
+        symmetry = _stream_y_mirror_cylinder_error(result)
+        @test symmetry.max_ux < 1e-12
+        @test symmetry.max_rho < 1e-12
+        @test symmetry.max_uy_antisym < 1e-12
     end
 
     @testset "cartesian versus AMR benchmark rows are finite" begin

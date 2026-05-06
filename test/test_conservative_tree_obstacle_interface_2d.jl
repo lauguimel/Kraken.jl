@@ -415,8 +415,8 @@ end
         Nx, Ny = 24, 14
         patch_i_range = 8:17
         patch_j_range = 4:11
-        cx_leaf = (2 * Nx) / 2
-        cy_leaf = (2 * Ny) / 2
+        cx_leaf = (2 * Nx + 1) / 2
+        cy_leaf = (2 * Ny + 1) / 2
         is_solid = cylinder_solid_mask_leaf_2d(2 * Nx, 2 * Ny, cx_leaf, cy_leaf, 3.0)
         Fx = 2e-5
         omega = 1.0
@@ -438,8 +438,8 @@ end
     @testset "A.4: MEA drag is identical when given identical Fpre/Fpost" begin
         # Build a non-trivial leaf field with a cylinder obstacle.
         Nx, Ny = 24, 14
-        cx_leaf = (2 * Nx) / 2
-        cy_leaf = (2 * Ny) / 2
+        cx_leaf = (2 * Nx + 1) / 2
+        cy_leaf = (2 * Ny + 1) / 2
         is_solid = cylinder_solid_mask_leaf_2d(2 * Nx, 2 * Ny,
                                                cx_leaf, cy_leaf, 3.0)
         leaf = zeros(Float64, 2 * Nx, 2 * Ny, 9)

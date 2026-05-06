@@ -1710,8 +1710,8 @@ function run_conservative_tree_cylinder_obstacle_route_native_2d(;
         Ny::Int=14,
         patch_i_range::UnitRange{Int}=8:17,
         patch_j_range::UnitRange{Int}=4:11,
-        cx_leaf=(2 * Nx) / 2,
-        cy_leaf=(2 * Ny) / 2,
+        cx_leaf=(2 * Nx + 1) / 2,
+        cy_leaf=(2 * Ny + 1) / 2,
         radius_leaf=3.0,
         Fx=2e-5,
         omega=1.0,
@@ -2031,8 +2031,8 @@ function convergence_conservative_tree_obstacles_2d(;
                     :cylinder, scale, Nx, Ny, patch_strategy)
                 patch_i = patch_ranges.i_range
                 patch_j = patch_ranges.j_range
-                cx_leaf = 24 * scale
-                cy_leaf = 14 * scale
+                cx_leaf = (2 * Nx + 1) / 2
+                cy_leaf = (2 * Ny + 1) / 2
                 radius_leaf = 3 * scale
 
                 if include_coarse_cartesian
@@ -2044,8 +2044,8 @@ function convergence_conservative_tree_obstacles_2d(;
                             ; Nx=Nx_coarse, Ny=Ny_coarse,
                             patch_i_range=1:Nx_coarse,
                             patch_j_range=1:Ny_coarse,
-                            cx_leaf=cx_leaf / 2,
-                            cy_leaf=cy_leaf / 2,
+                            cx_leaf=(2 * Nx_coarse + 1) / 2,
+                            cy_leaf=(2 * Ny_coarse + 1) / 2,
                             radius_leaf=radius_leaf / 2,
                             steps=steps, avg_window=avg, T=T)
                     push!(rows, _conservative_tree_obstacle_convergence_row_2d(
