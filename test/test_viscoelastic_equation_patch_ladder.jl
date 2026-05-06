@@ -2363,6 +2363,36 @@ end
     @test result.source_scale_dynamics ≈ 1.0 atol=0.0 rtol=0.0
 end
 
+@testset "P18b5 cylinder drag_mode selects reported force reference" begin
+    common = (;
+        Nx=32,
+        Ny=16,
+        radius=3,
+        u_mean=0.005,
+        ν_s=0.08,
+        ν_p=0.02,
+        lambda=1.0,
+        polymer_bc=CNEBB(),
+        hermite_source_mode=:liu_direct,
+        conformation_initial_condition=:inlet_profile,
+        max_steps=1,
+        avg_window=1,
+        drag_stride=1,
+        backend=KernelAbstractions.CPU(),
+        FT=Float64,
+    )
+    post = run_conformation_cylinder_libb_2d(; common..., drag_mode=:post_source_mea)
+    split = run_conformation_cylinder_libb_2d(; common..., drag_mode=:explicit_split)
+
+    @test post.drag_mode === :post_source_mea
+    @test split.drag_mode === :explicit_split
+    @test post.Cd ≈ post.Cd_mea_post_source atol=P0_ATOL
+    @test split.Cd ≈ split.Cd_split_explicit atol=P0_ATOL
+    @test post.Cd_mea_post_source ≈ split.Cd_mea_post_source atol=P0_ATOL
+    @test post.Cd_split_explicit ≈ split.Cd_split_explicit atol=P0_ATOL
+    @test abs(post.Cd_mea_post_source - post.Cd_split_explicit) > 1e-3
+end
+
 function _straight_embedded_wall_macro_errors(bc; orientation=:horizontal,
                                               field=:tangent,
                                               velocity=(0.0, 0.0))
