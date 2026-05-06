@@ -311,8 +311,11 @@ using Kraken
                          route.q == 6 &&
                          route.kind == SPLIT_CORNER)
 
-        ledger = Kraken.conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
+        Kraken.conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
             bank, F, route; alpha=0.25)
+        parent_id = spec.cells[route.dst].parent
+        ledger = Kraken.conservative_tree_subcycle_spatial_ledger_2d(
+            bank, parent_id)
 
         expected = ledger.ratio * reconstructed_integrated_D2Q9_packet(
             @view(F[coarse_west, :]), 1.0, route.q, route.weight; alpha=0.25)

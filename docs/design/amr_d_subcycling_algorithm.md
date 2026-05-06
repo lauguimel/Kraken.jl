@@ -222,3 +222,28 @@ Hot-loop gate after warm-up on nested L4 x-band:
 transport-only stream: 0.0466 s -> 0.0404 s
 allocation: unchanged at about 45 wrapper objects / 0.002 MB
 ```
+
+Patch `2026-05-06-packed-ledgers`:
+
+- replaced per-parent `Dict{parent_id => ConservativeTreeSubcycleLedger2D}`
+  ledgers by packed per-level-pair arrays;
+- added a direct `parent_id -> slot` map for refined parents;
+- kept diagnostic helpers that return ledger snapshots for tests and debugging,
+  while the transport hot path writes the packed arrays directly;
+- preserved the recursive scheduler and packet semantics unchanged.
+
+Setup allocation gate after warm-up:
+
+```text
+x-band L4:   36746 objects,  43.31 MB ->  19714 objects,  42.01 MB
+y-band L4:   70465 objects,  81.85 MB ->  36889 objects,  79.96 MB
+patch10 L4:  74961 objects, 110.41 MB ->  39753 objects, 110.54 MB
+patch20 L4: 284368 objects, 374.13 MB -> 146028 objects, 369.29 MB
+```
+
+Runner timing gate:
+
+```text
+patch20 L4, 1 step: 1.17 s -> 1.06 s
+patch20 L4, 2 step: 1.62 s -> 1.39 s
+```

@@ -30,10 +30,17 @@ struct ConservativeTreeSubcycleLedgerBank2D{T}
     pair_ledgers::Vector{ConservativeTreeSubcycleLedger2D{T}}
 end
 
+struct ConservativeTreeSubcyclePackedLedgerPair2D{T}
+    parent_ids::Vector{Int}
+    coarse_to_fine::Array{T,5}
+    fine_to_coarse::Array{T,3}
+end
+
 struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     spec::ConservativeTreeSpec2D
     schedule::ConservativeTreeSubcycleSchedule2D
-    pair_parent_ledgers::Vector{Dict{Int,ConservativeTreeSubcycleLedger2D{T}}}
+    ledger_pairs::Vector{ConservativeTreeSubcyclePackedLedgerPair2D{T}}
+    parent_ledger_slot::Vector{Int}
     fine_to_coarse_route_packets::Vector{Dict{Tuple{Int,Int},Vector{T}}}
     refined_parent_ids_by_level::Vector{Vector{Int}}
     inactive_refined_ids_by_level::Vector{Vector{Int}}
@@ -162,29 +169,41 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
             create_conservative_tree_subcycle_schedule_2d(spec.max_level),
         T::Type{<:Real}=Float64)
     _check_conservative_tree_subcycle_spec_schedule_2d(spec, schedule)
-    pair_parent_ledgers = [
-        Dict{Int,ConservativeTreeSubcycleLedger2D{T}}()
-        for _ in 1:spec.max_level
-    ]
     fine_to_coarse_route_packets = [
         Dict{Tuple{Int,Int},Vector{T}}()
         for _ in 1:spec.max_level
     ]
     refined_parent_ids_by_level = [Int[] for _ in 1:spec.max_level]
     inactive_refined_ids_by_level = [Int[] for _ in 0:spec.max_level]
+    parent_ledger_slot = zeros(Int, length(spec.cells))
 
     @inbounds for (cell_id, cell) in pairs(spec.cells)
         children = spec.children[cell_id]
         children == (0, 0, 0, 0) && continue
         push!(inactive_refined_ids_by_level[cell.level + 1], cell_id)
         cell.level < spec.max_level || continue
-        pair_parent_ledgers[cell.level + 1][cell_id] =
-            create_conservative_tree_subcycle_ledger_2d(T=T, ratio=schedule.ratio)
         push!(refined_parent_ids_by_level[cell.level + 1], cell_id)
     end
+
+    ledger_pairs = Vector{ConservativeTreeSubcyclePackedLedgerPair2D{T}}(
+        undef, spec.max_level)
+    for parent_level in 0:(spec.max_level - 1)
+        parent_ids = refined_parent_ids_by_level[parent_level + 1]
+        nparents = length(parent_ids)
+        @inbounds for (slot, parent_id) in enumerate(parent_ids)
+            parent_ledger_slot[parent_id] = slot
+        end
+        ledger_pairs[parent_level + 1] =
+            ConservativeTreeSubcyclePackedLedgerPair2D{T}(
+                parent_ids,
+                zeros(T, 2, 2, 9, schedule.ratio, nparents),
+                zeros(T, 9, schedule.ratio, nparents))
+    end
+
     return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
-        spec, schedule, pair_parent_ledgers, fine_to_coarse_route_packets,
-        refined_parent_ids_by_level, inactive_refined_ids_by_level)
+        spec, schedule, ledger_pairs, parent_ledger_slot,
+        fine_to_coarse_route_packets, refined_parent_ids_by_level,
+        inactive_refined_ids_by_level)
 end
 
 function conservative_tree_subcycle_events_at_tick_2d(
@@ -255,7 +274,38 @@ function conservative_tree_subcycle_spatial_pair_ledgers_2d(
         parent_level::Integer)
     parent = _check_conservative_tree_pair_level_2d(
         bank.schedule, parent_level)
-    return bank.pair_parent_ledgers[parent + 1]
+    pair = bank.ledger_pairs[parent + 1]
+    ledgers = Vector{ConservativeTreeSubcycleLedger2D{eltype(pair.fine_to_coarse)}}(
+        undef, length(pair.parent_ids))
+    @inbounds for slot in eachindex(pair.parent_ids)
+        ledgers[slot] = ConservativeTreeSubcycleLedger2D(
+            bank.schedule.ratio,
+            copy(@view(pair.coarse_to_fine[:, :, :, :, slot])),
+            copy(@view(pair.fine_to_coarse[:, :, slot])))
+    end
+    return ledgers
+end
+
+function _conservative_tree_packed_ledger_pair_2d(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        parent_level::Integer)
+    parent = _check_conservative_tree_pair_level_2d(
+        bank.schedule, parent_level)
+    return bank.ledger_pairs[parent + 1]
+end
+
+function _conservative_tree_packed_ledger_slot_2d(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        parent_cell_id::Integer)
+    parent_id = Int(parent_cell_id)
+    1 <= parent_id <= length(bank.spec.cells) ||
+        throw(ArgumentError("parent_cell_id is outside the tree"))
+    parent = bank.spec.cells[parent_id]
+    _check_conservative_tree_pair_level_2d(bank.schedule, parent.level)
+    slot = bank.parent_ledger_slot[parent_id]
+    slot != 0 ||
+        throw(ArgumentError("parent_cell_id does not identify a refined parent"))
+    return slot
 end
 
 function conservative_tree_subcycle_spatial_ledger_2d(
@@ -265,19 +315,19 @@ function conservative_tree_subcycle_spatial_ledger_2d(
     1 <= parent_id <= length(bank.spec.cells) ||
         throw(ArgumentError("parent_cell_id is outside the tree"))
     parent = bank.spec.cells[parent_id]
-    _check_conservative_tree_pair_level_2d(bank.schedule, parent.level)
-    pair = bank.pair_parent_ledgers[parent.level + 1]
-    haskey(pair, parent_id) ||
-        throw(ArgumentError("parent_cell_id does not identify a refined parent"))
-    return pair[parent_id]
+    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
+    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
+    return ConservativeTreeSubcycleLedger2D(
+        bank.schedule.ratio,
+        copy(@view(pair.coarse_to_fine[:, :, :, :, slot])),
+        copy(@view(pair.fine_to_coarse[:, :, slot])))
 end
 
 function reset_conservative_tree_subcycle_spatial_bank_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D)
-    for pair in bank.pair_parent_ledgers
-        for ledger in values(pair)
-            reset_conservative_tree_subcycle_ledger_2d!(ledger)
-        end
+    for pair in bank.ledger_pairs
+        fill!(pair.coarse_to_fine, zero(eltype(pair.coarse_to_fine)))
+        fill!(pair.fine_to_coarse, zero(eltype(pair.fine_to_coarse)))
     end
     for packets in bank.fine_to_coarse_route_packets
         _zero_conservative_tree_route_packet_cache_2d!(packets)
@@ -288,13 +338,11 @@ end
 function reset_conservative_tree_subcycle_spatial_pair_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         parent_level::Integer)
-    pair = conservative_tree_subcycle_spatial_pair_ledgers_2d(
-        bank, parent_level)
-    for ledger in values(pair)
-        reset_conservative_tree_subcycle_ledger_2d!(ledger)
-    end
     parent = _check_conservative_tree_pair_level_2d(
         bank.schedule, parent_level)
+    pair = bank.ledger_pairs[parent + 1]
+    fill!(pair.coarse_to_fine, zero(eltype(pair.coarse_to_fine)))
+    fill!(pair.fine_to_coarse, zero(eltype(pair.fine_to_coarse)))
     _zero_conservative_tree_route_packet_cache_2d!(
         bank.fine_to_coarse_route_packets[parent + 1])
     return bank
@@ -445,7 +493,7 @@ function _check_subcycle_spatial_sync_down_event_2d(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D)
     parent = _check_subcycle_sync_down_event_2d(bank.schedule, event)
-    conservative_tree_subcycle_spatial_pair_ledgers_2d(bank, parent)
+    _conservative_tree_packed_ledger_pair_2d(bank, parent)
     return parent
 end
 
@@ -453,7 +501,7 @@ function _check_subcycle_spatial_sync_up_event_2d(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D)
     parent = _check_subcycle_sync_up_event_2d(bank.schedule, event)
-    conservative_tree_subcycle_spatial_pair_ledgers_2d(bank, parent)
+    _conservative_tree_packed_ledger_pair_2d(bank, parent)
     return parent
 end
 
@@ -462,7 +510,7 @@ function _check_subcycle_spatial_child_advance_event_2d(
         event::ConservativeTreeSubcycleEvent2D)
     parent, substep = _check_subcycle_child_advance_event_2d(
         bank.schedule, event)
-    conservative_tree_subcycle_spatial_pair_ledgers_2d(bank, parent)
+    _conservative_tree_packed_ledger_pair_2d(bank, parent)
     return parent, substep
 end
 
@@ -497,16 +545,18 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
     parent = spec.cells[parent_id]
     parent.level == src.level ||
         throw(ArgumentError("coarse-to-fine route destination parent level mismatch"))
-    ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
+    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
+    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
     ix, iy = _conservative_tree_child_index_in_parent_2d(parent, child)
     qi = _check_d2q9_q(route.q)
-    packet = ledger.ratio * _subcycle_route_packet_2d(
+    packet = bank.schedule.ratio * _subcycle_route_packet_2d(
         F, spec, route; alpha=alpha)
 
-    @inbounds for substep in 1:ledger.ratio
-        ledger.coarse_to_fine[ix, iy, qi, substep] += packet / ledger.ratio
+    @inbounds for substep in 1:bank.schedule.ratio
+        pair.coarse_to_fine[ix, iy, qi, substep, slot] +=
+            packet / bank.schedule.ratio
     end
-    return ledger
+    return bank
 end
 
 function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
@@ -527,18 +577,21 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
     parent = spec.cells[parent_id]
     route.dst == 0 || spec.cells[route.dst].level == parent.level ||
         throw(ArgumentError("fine-to-coarse route destination level mismatch"))
-    ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
-    step = _check_subcycle_step_2d(ledger, substep)
+    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
+    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
+    step = Int(substep)
+    1 <= step <= bank.schedule.ratio ||
+        throw(ArgumentError("substep must be inside 1:$(bank.schedule.ratio)"))
     qi = _check_d2q9_q(route.q)
     packet = _subcycle_route_packet_2d(
-        F, spec, route; alpha=alpha) / ledger.ratio
-    ledger.fine_to_coarse[qi, step] += packet
+        F, spec, route; alpha=alpha) / bank.schedule.ratio
+    pair.fine_to_coarse[qi, step, slot] += packet
     route.dst != 0 ||
         throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
     packets = _ensure_conservative_tree_route_packet_cache_2d!(
         bank, parent.level, route.dst, qi)
     packets[step] += packet
-    return ledger
+    return bank
 end
 
 function conservative_tree_subcycle_sync_down_routes_F_2d!(
@@ -662,8 +715,12 @@ function conservative_tree_subcycle_apply_coarse_to_fine_F_2d!(
         substep::Integer)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     parent_id = Int(parent_cell_id)
-    ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
-    step = _check_subcycle_step_2d(ledger, substep)
+    parent = bank.spec.cells[parent_id]
+    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
+    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
+    step = Int(substep)
+    1 <= step <= bank.schedule.ratio ||
+        throw(ArgumentError("substep must be inside 1:$(bank.schedule.ratio)"))
     children = bank.spec.children[parent_id]
     children == (0, 0, 0, 0) &&
         throw(ArgumentError("parent_cell_id does not identify a refined parent"))
@@ -672,7 +729,7 @@ function conservative_tree_subcycle_apply_coarse_to_fine_F_2d!(
         child_id = children[_conservative_tree_child_slot_2d(ix, iy)]
         child_id == 0 && continue
         for q in 1:9
-            F[child_id, q] += ledger.coarse_to_fine[ix, iy, q, step]
+            F[child_id, q] += pair.coarse_to_fine[ix, iy, q, step, slot]
         end
     end
     return F
@@ -714,13 +771,14 @@ function conservative_tree_subcycle_apply_fine_to_coarse_F_2d!(
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     parent_id = Int(parent_cell_id)
-    ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
     parent = bank.spec.cells[parent_id]
+    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
+    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
 
     @inbounds for q in 1:9
         packet = zero(eltype(F))
-        for substep in 1:ledger.ratio
-            packet += ledger.fine_to_coarse[q, substep]
+        for substep in 1:bank.schedule.ratio
+            packet += pair.fine_to_coarse[q, substep, slot]
         end
         iszero(packet) && continue
 
