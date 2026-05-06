@@ -2458,6 +2458,27 @@ end
     end
 end
 
+@testset "P18b2c2 Poiseuille high-Wi planar closures stay SPD" begin
+    for orientation in (:horizontal, :vertical), Wi in (1.0, 2.0, 3.0, 5.0, 10.0)
+        direct = _poiseuille_cde_patch_error(
+            collision=:trt, tau_plus=1.0, bc=ExtrapEqWallBC();
+            orientation, magic=1e-6, Wi, steps=200,
+        )
+        logc = _poiseuille_logconf_cde_patch_error(
+            ; orientation, Wi, steps=200, magic=1e-6,
+        )
+
+        @test direct.Cxy_l2 < 0.01
+        @test direct.N1_l2 < 0.025
+        @test direct.min_eig > 0.45
+        @test isfinite(direct.max_abs_C)
+        @test logc.Cxy_l2 < 0.10
+        @test logc.N1_l2 < 0.06
+        @test logc.min_eig > 0.45
+        @test isfinite(logc.max_abs_C)
+    end
+end
+
 @testset "P18b2d cartesian step log-conf smoke: square and BFS" begin
     u_ref = 0.005
     β = 0.59
