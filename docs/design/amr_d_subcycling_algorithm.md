@@ -163,3 +163,26 @@ Patch `2026-05-06-eq-neq-reconstruction`:
   stress, `alpha = 1` child-split roundtrip, and `Float32` compilation;
 - wired `alpha_c2f` and `alpha_f2c` knobs into subcycled interface packets,
   defaulting to `1` so existing transport remains unchanged.
+
+Patch `2026-05-06-hot-loop-preallocation`:
+
+- moved AMR-D runner schedule, route-ledger bank, state-buffer bank, and scratch
+  matrices out of the per-step call path;
+- cached active/all cell ids per level in `ConservativeTreeSubcycleBufferBank2D`
+  so level copies do not rebuild `Vector{Int}` lists in the hot loop;
+- replaced inactive-parent coalesce route-vector construction by direct scalar
+  route specs inside the loop;
+- preserved fine-to-coarse route packet vectors across resets and prefilled the
+  cache from the static route table;
+- kept `Dict`-based CPU ledgers as a reference implementation boundary, but
+  made the active hot loop use stable preallocated payload buffers. Production
+  GPU storage should lower the same contract to packed route arrays and device
+  buffers, not to dynamic maps.
+
+Allocation gate after warm-up on nested L4 x-band:
+
+```text
+before: +468315 objects and +27.33 MB for the first subcycled step
+after:      +12 objects and about +0.001 MB per additional runner step
+hot stream profile: no allocation site in src/refinement
+```

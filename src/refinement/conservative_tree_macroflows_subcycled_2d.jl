@@ -315,6 +315,14 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
     table = create_conservative_tree_route_table_2d(spec_run; periodic_x=true)
     F = allocate_conservative_tree_F_2d(spec_run; T=T)
     Ftmp = similar(F)
+    schedule = create_conservative_tree_subcycle_schedule_2d(spec_run.max_level)
+    route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+        spec_run; schedule=schedule, T=T)
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(route_bank, table)
+    state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
+        spec_run; schedule=schedule, T=T)
+    Fsource = similar(F)
+    Fscratch = similar(F)
     initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
     mass_initial = _active_mass_conservative_tree_F_2d(F, spec_run)
     guard = mass_guard_rtol === nothing ?
@@ -331,7 +339,9 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Ftmp, F, spec_run, table; boundary=:periodic_x_wall_y,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
-            pre_stream_level! = collide_level!)
+            pre_stream_level! = collide_level!,
+            schedule=schedule, route_bank=route_bank, state_bank=state_bank,
+            Fsource=Fsource, Fscratch=Fscratch)
         if enforce_mass
             raw_rel = _enforce_active_mass_conservation_2d!(
                 Ftmp, spec_run, mass_initial; rtol=guard)
@@ -378,6 +388,14 @@ function run_conservative_tree_couette_subcycled_2d(;
     table = create_conservative_tree_route_table_2d(spec_run; periodic_x=true)
     F = allocate_conservative_tree_F_2d(spec_run; T=T)
     Ftmp = similar(F)
+    schedule = create_conservative_tree_subcycle_schedule_2d(spec_run.max_level)
+    route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+        spec_run; schedule=schedule, T=T)
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(route_bank, table)
+    state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
+        spec_run; schedule=schedule, T=T)
+    Fsource = similar(F)
+    Fscratch = similar(F)
     initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
     mass_initial = _active_mass_conservative_tree_F_2d(F, spec_run)
     guard = mass_guard_rtol === nothing ?
@@ -395,7 +413,9 @@ function run_conservative_tree_couette_subcycled_2d(;
             Ftmp, F, spec_run, table; boundary=:periodic_x_moving_wall_y,
             u_south=zero(T), u_north=U, rho_wall=rho0,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
-            pre_stream_level! = collide_level!)
+            pre_stream_level! = collide_level!,
+            schedule=schedule, route_bank=route_bank, state_bank=state_bank,
+            Fsource=Fsource, Fscratch=Fscratch)
         if enforce_mass
             raw_rel = _enforce_active_mass_conservation_2d!(
                 Ftmp, spec_run, mass_initial; rtol=guard)

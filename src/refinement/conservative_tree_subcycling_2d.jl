@@ -35,6 +35,8 @@ struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     schedule::ConservativeTreeSubcycleSchedule2D
     pair_parent_ledgers::Vector{Dict{Int,ConservativeTreeSubcycleLedger2D{T}}}
     fine_to_coarse_route_packets::Vector{Dict{Tuple{Int,Int},Vector{T}}}
+    refined_parent_ids_by_level::Vector{Vector{Int}}
+    inactive_refined_ids_by_level::Vector{Vector{Int}}
 end
 
 function create_conservative_tree_subcycle_ledger_2d(;
@@ -168,16 +170,21 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
         Dict{Tuple{Int,Int},Vector{T}}()
         for _ in 1:spec.max_level
     ]
+    refined_parent_ids_by_level = [Int[] for _ in 1:spec.max_level]
+    inactive_refined_ids_by_level = [Int[] for _ in 0:spec.max_level]
 
     @inbounds for (cell_id, cell) in pairs(spec.cells)
-        cell.level < spec.max_level || continue
         children = spec.children[cell_id]
         children == (0, 0, 0, 0) && continue
+        push!(inactive_refined_ids_by_level[cell.level + 1], cell_id)
+        cell.level < spec.max_level || continue
         pair_parent_ledgers[cell.level + 1][cell_id] =
             create_conservative_tree_subcycle_ledger_2d(T=T, ratio=schedule.ratio)
+        push!(refined_parent_ids_by_level[cell.level + 1], cell_id)
     end
     return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
-        spec, schedule, pair_parent_ledgers, fine_to_coarse_route_packets)
+        spec, schedule, pair_parent_ledgers, fine_to_coarse_route_packets,
+        refined_parent_ids_by_level, inactive_refined_ids_by_level)
 end
 
 function conservative_tree_subcycle_events_at_tick_2d(
@@ -273,7 +280,7 @@ function reset_conservative_tree_subcycle_spatial_bank_2d!(
         end
     end
     for packets in bank.fine_to_coarse_route_packets
-        empty!(packets)
+        _zero_conservative_tree_route_packet_cache_2d!(packets)
     end
     return bank
 end
@@ -288,7 +295,61 @@ function reset_conservative_tree_subcycle_spatial_pair_2d!(
     end
     parent = _check_conservative_tree_pair_level_2d(
         bank.schedule, parent_level)
-    empty!(bank.fine_to_coarse_route_packets[parent + 1])
+    _zero_conservative_tree_route_packet_cache_2d!(
+        bank.fine_to_coarse_route_packets[parent + 1])
+    return bank
+end
+
+function _zero_conservative_tree_route_packet_cache_2d!(
+        packets::Dict{Tuple{Int,Int},Vector{T}}) where T
+    for values_by_substep in values(packets)
+        fill!(values_by_substep, zero(T))
+    end
+    return packets
+end
+
+function _ensure_conservative_tree_route_packet_cache_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D{T},
+        parent_level::Integer,
+        dst_id::Integer,
+        q::Integer) where T
+    parent = _check_conservative_tree_pair_level_2d(
+        bank.schedule, parent_level)
+    packets = bank.fine_to_coarse_route_packets[parent + 1]
+    key = (Int(dst_id), _check_d2q9_q(q))
+    return get!(packets, key) do
+        zeros(T, bank.schedule.ratio)
+    end
+end
+
+function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        table::ConservativeTreeRouteTable2D)
+    _check_conservative_tree_subcycle_route_table_2d(table)
+    @inbounds for route_id in table.interface_routes
+        route = table.routes[route_id]
+        route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER || continue
+        route.dst == 0 && continue
+        child = bank.spec.cells[route.src]
+        child.level > 0 || continue
+        parent = bank.spec.cells[child.parent]
+        _ensure_conservative_tree_route_packet_cache_2d!(
+            bank, parent.level, route.dst, route.q)
+    end
+    @inbounds for parent_level in 0:(bank.spec.max_level - 1)
+        child_level = parent_level + 1
+        for src_id in bank.inactive_refined_ids_by_level[child_level + 1]
+            src = bank.spec.cells[src_id]
+            src.active && continue
+            for q in 1:9
+                dst_id = _conservative_tree_inactive_parent_coalesce_dst_2d(
+                    bank.spec, src_id, q)
+                dst_id == 0 && continue
+                _ensure_conservative_tree_route_packet_cache_2d!(
+                    bank, parent_level, dst_id, q)
+            end
+        end
+    end
     return bank
 end
 
@@ -474,10 +535,8 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
     ledger.fine_to_coarse[qi, step] += packet
     route.dst != 0 ||
         throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
-    packets = get!(bank.fine_to_coarse_route_packets[parent.level + 1],
-                   (route.dst, qi)) do
-        zeros(eltype(ledger.fine_to_coarse), ledger.ratio)
-    end
+    packets = _ensure_conservative_tree_route_packet_cache_2d!(
+        bank, parent.level, route.dst, qi)
     packets[step] += packet
     return ledger
 end
@@ -525,35 +584,54 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
     return bank
 end
 
-function _conservative_tree_inactive_parent_coalesce_routes_2d(
+function _conservative_tree_inactive_parent_coalesce_route_spec_2d(
         spec::ConservativeTreeSpec2D,
         src_id::Int,
         q::Int)
     src = spec.cells[src_id]
-    src.level > 0 || return ConservativeTreeRoute2D[]
-    src.active && return ConservativeTreeRoute2D[]
-    spec.children[src_id] == (0, 0, 0, 0) && return ConservativeTreeRoute2D[]
+    src.level > 0 || return 0, DIRECT
+    src.active && return 0, DIRECT
+    spec.children[src_id] == (0, 0, 0, 0) && return 0, DIRECT
 
     i_dst = src.i + d2q9_cx(q)
     j_dst = src.j + d2q9_cy(q)
     nx_level = _conservative_tree_level_size_2d(spec.Nx, src.level)
     ny_level = _conservative_tree_level_size_2d(spec.Ny, src.level)
     1 <= i_dst <= nx_level && 1 <= j_dst <= ny_level ||
-        return ConservativeTreeRoute2D[]
+        return 0, DIRECT
 
     parent = spec.cells[src.parent]
     in_parent = (2 * parent.i - 1 <= i_dst <= 2 * parent.i) &&
                 (2 * parent.j - 1 <= j_dst <= 2 * parent.j)
-    in_parent && return ConservativeTreeRoute2D[]
+    in_parent && return 0, DIRECT
 
     dst_i = div(i_dst + 1, 2)
     dst_j = div(j_dst + 1, 2)
     dst_id = conservative_tree_cell_id_2d(
         spec, parent.level, dst_i, dst_j)
-    dst_id == 0 && return ConservativeTreeRoute2D[]
+    dst_id == 0 && return 0, DIRECT
     kind = (i_dst < 2 * parent.i - 1 || i_dst > 2 * parent.i) &&
            (j_dst < 2 * parent.j - 1 || j_dst > 2 * parent.j) ?
            COALESCE_CORNER : COALESCE_FACE
+    return dst_id, kind
+end
+
+function _conservative_tree_inactive_parent_coalesce_dst_2d(
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int)
+    dst_id, _ = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
+        spec, src_id, q)
+    return dst_id
+end
+
+function _conservative_tree_inactive_parent_coalesce_routes_2d(
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int)
+    dst_id, kind = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
+        spec, src_id, q)
+    dst_id == 0 && return ConservativeTreeRoute2D[]
     return [ConservativeTreeRoute2D(src_id, dst_id, q, 1.0, kind)]
 end
 
@@ -566,16 +644,15 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
         bank, event)
     child_level = parent_level + 1
 
-    @inbounds for (src_id, cell) in pairs(bank.spec.cells)
-        cell.level == child_level || continue
-        cell.active && continue
-        bank.spec.children[src_id] == (0, 0, 0, 0) && continue
+    @inbounds for src_id in bank.inactive_refined_ids_by_level[child_level + 1]
+        bank.spec.cells[src_id].active && continue
         for q in 1:9
-            for route in _conservative_tree_inactive_parent_coalesce_routes_2d(
-                    bank.spec, src_id, q)
-                conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
-                    bank, F, route, substep; alpha=alpha)
-            end
+            dst_id, kind = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
+                bank.spec, src_id, q)
+            dst_id == 0 && continue
+            route = ConservativeTreeRoute2D(src_id, dst_id, q, 1.0, kind)
+            conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
+                bank, F, route, substep; alpha=alpha)
         end
     end
     return bank
@@ -610,9 +687,9 @@ function conservative_tree_subcycle_apply_coarse_to_fine_pair_F_2d!(
         parent_level::Integer,
         substep::Integer)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
-    pair = conservative_tree_subcycle_spatial_pair_ledgers_2d(
-        bank, parent_level)
-    for parent_id in keys(pair)
+    parent = _check_conservative_tree_pair_level_2d(
+        bank.schedule, parent_level)
+    for parent_id in bank.refined_parent_ids_by_level[parent + 1]
         conservative_tree_subcycle_apply_coarse_to_fine_F_2d!(
             F, bank, parent_id, substep)
     end
@@ -686,9 +763,9 @@ function conservative_tree_subcycle_apply_fine_to_coarse_pair_F_2d!(
         u_north=0,
         rho_wall=1)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
-    pair = conservative_tree_subcycle_spatial_pair_ledgers_2d(
-        bank, parent_level)
-    for parent_id in keys(pair)
+    parent = _check_conservative_tree_pair_level_2d(
+        bank.schedule, parent_level)
+    for parent_id in bank.refined_parent_ids_by_level[parent + 1]
         conservative_tree_subcycle_apply_fine_to_coarse_F_2d!(
             F, bank, parent_id; boundary=boundary, u_south=u_south,
             u_north=u_north, rho_wall=rho_wall)
@@ -914,7 +991,12 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         rho_wall=1,
         alpha_c2f=1,
         alpha_f2c=1,
-        pre_stream_level! = nothing)
+        pre_stream_level! = nothing,
+        schedule = nothing,
+        route_bank = nothing,
+        state_bank = nothing,
+        Fsource = nothing,
+        Fscratch = nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     if spec.max_level == 0
@@ -923,72 +1005,93 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             u_north=u_north, rho_wall=rho_wall)
     end
 
-    schedule = create_conservative_tree_subcycle_schedule_2d(spec.max_level)
-    route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
-        spec; schedule=schedule, T=eltype(Fout))
-    state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
-        spec; schedule=schedule, T=eltype(Fout))
-    conservative_tree_subcycle_store_active_owned_2d!(state_bank, Fin)
+    schedule_run = schedule === nothing ?
+        create_conservative_tree_subcycle_schedule_2d(spec.max_level) :
+        schedule
+    _check_conservative_tree_subcycle_spec_schedule_2d(spec, schedule_run)
+    route_bank_run = route_bank === nothing ?
+        create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+            spec; schedule=schedule_run, T=eltype(Fout)) :
+        route_bank
+    state_bank_run = state_bank === nothing ?
+        create_conservative_tree_subcycle_buffer_bank_2d(
+            spec; schedule=schedule_run, T=eltype(Fout)) :
+        state_bank
+    route_bank_run.spec === spec ||
+        throw(ArgumentError("route_bank must belong to spec"))
+    route_bank_run.schedule === schedule_run ||
+        throw(ArgumentError("route_bank schedule must match schedule"))
+    state_bank_run.spec === spec ||
+        throw(ArgumentError("state_bank must belong to spec"))
+    state_bank_run.schedule === schedule_run ||
+        throw(ArgumentError("state_bank schedule must match schedule"))
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+        route_bank_run, table)
+    reset_conservative_tree_subcycle_spatial_bank_2d!(route_bank_run)
+    reset_conservative_tree_subcycle_buffer_bank_2d!(state_bank_run)
+    conservative_tree_subcycle_store_active_owned_2d!(state_bank_run, Fin)
 
-    Fsource = similar(Fout)
-    Fscratch = similar(Fout)
+    Fsource_run = Fsource === nothing ? similar(Fout) : Fsource
+    Fscratch_run = Fscratch === nothing ? similar(Fout) : Fscratch
+    _check_conservative_tree_F_2d(Fsource_run, spec)
+    _check_conservative_tree_F_2d(Fscratch_run, spec)
 
-    for event in schedule.events
+    for event in schedule_run.events
         if event.phase == :sync_down
             reset_conservative_tree_subcycle_spatial_pair_2d!(
-                route_bank, event.src_level)
-            parent_owned = state_bank.levels[event.src_level + 1].owned
+                route_bank_run, event.src_level)
+            parent_owned = state_bank_run.levels[event.src_level + 1].owned
             conservative_tree_subcycle_sync_down_routes_F_2d!(
-                route_bank, event, parent_owned, table; alpha=alpha_c2f)
+                route_bank_run, event, parent_owned, table; alpha=alpha_c2f)
         elseif event.phase == :advance
             level = event.src_level
-            buffers = state_bank.levels[level + 1]
-            fill!(Fsource, zero(eltype(Fsource)))
+            buffers = state_bank_run.levels[level + 1]
+            fill!(Fsource_run, zero(eltype(Fsource_run)))
             _copy_conservative_tree_level_rows_2d!(
-                Fsource, buffers.owned, spec, level)
+                Fsource_run, buffers.owned, spec, level)
             conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
-                Fsource, state_bank, level)
+                Fsource_run, state_bank_run, level)
             pre_stream_level! === nothing ||
-                pre_stream_level!(Fsource, spec, level, event)
+                pre_stream_level!(Fsource_run, spec, level, event)
 
             if level > 0
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
-                    route_bank, event, Fsource, table; alpha=alpha_f2c)
+                    route_bank_run, event, Fsource_run, table; alpha=alpha_f2c)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
-                    route_bank, event, Fsource; alpha=alpha_f2c)
+                    route_bank_run, event, Fsource_run; alpha=alpha_f2c)
             end
 
-            fill!(Fscratch, zero(eltype(Fscratch)))
+            fill!(Fscratch_run, zero(eltype(Fscratch_run)))
             _stream_conservative_tree_direct_level_routes_F_2d!(
-                Fscratch, Fsource, spec, table, level, policy;
+                Fscratch_run, Fsource_run, spec, table, level, policy;
                 u_south=u_south, u_north=u_north, rho_wall=rho_wall)
             if level > 0
                 fill!(buffers.ghost_from_coarse,
                       zero(eltype(buffers.ghost_from_coarse)))
                 conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
-                    buffers.ghost_from_coarse, route_bank, event)
+                    buffers.ghost_from_coarse, route_bank_run, event)
                 conservative_tree_subcycle_add_and_clear_ghost_to_F_level_2d!(
-                    Fscratch, state_bank, level)
+                    Fscratch_run, state_bank_run, level)
             end
             conservative_tree_subcycle_add_and_clear_reflux_to_F_level_2d!(
-                Fscratch, state_bank, level)
+                Fscratch_run, state_bank_run, level)
             _copy_conservative_tree_active_level_rows_2d!(
-                buffers.owned, Fscratch, spec, level)
+                buffers.owned, Fscratch_run, spec, level)
         elseif event.phase == :sync_up
             parent_level = _check_subcycle_spatial_sync_up_event_2d(
-                route_bank, event)
+                route_bank_run, event)
             conservative_tree_subcycle_restrict_level_2d!(
-                state_bank, parent_level)
-            parent_reflux = state_bank.levels[parent_level + 1].reflux_to_coarse
+                state_bank_run, parent_level)
+            parent_reflux = state_bank_run.levels[parent_level + 1].reflux_to_coarse
             conservative_tree_subcycle_apply_sync_up_F_2d!(
-                parent_reflux, route_bank, event; boundary=boundary,
+                parent_reflux, route_bank_run, event; boundary=boundary,
                 u_south=u_south, u_north=u_north, rho_wall=rho_wall)
         else
             throw(ArgumentError("unknown subcycle event phase $(event.phase)"))
         end
     end
 
-    conservative_tree_subcycle_collect_active_owned_F_2d!(Fout, state_bank)
+    conservative_tree_subcycle_collect_active_owned_F_2d!(Fout, state_bank_run)
     return Fout
 end
 

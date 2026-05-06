@@ -15,6 +15,8 @@ struct ConservativeTreeSubcycleBufferBank2D{T}
     spec::ConservativeTreeSpec2D
     schedule::ConservativeTreeSubcycleSchedule2D
     levels::Vector{ConservativeTreeSubcycleLevelBuffers2D{T}}
+    active_ids_by_level::Vector{Vector{Int}}
+    all_ids_by_level::Vector{Vector{Int}}
 end
 
 function _check_conservative_tree_subcycle_buffer_level_2d(
@@ -56,7 +58,10 @@ function create_conservative_tree_subcycle_buffer_bank_2d(
         create_conservative_tree_subcycle_level_buffers_2d(spec; T=T)
         for _ in 0:spec.max_level
     ]
-    return ConservativeTreeSubcycleBufferBank2D{T}(spec, schedule, levels)
+    active_ids_by_level, all_ids_by_level =
+        _conservative_tree_subcycle_level_id_cache_2d(spec)
+    return ConservativeTreeSubcycleBufferBank2D{T}(
+        spec, schedule, levels, active_ids_by_level, all_ids_by_level)
 end
 
 function reset_conservative_tree_subcycle_level_buffers_2d!(
@@ -92,6 +97,27 @@ function _conservative_tree_subcycle_level_row_ids_2d(
     return ids
 end
 
+function _conservative_tree_subcycle_level_id_cache_2d(
+        spec::ConservativeTreeSpec2D)
+    active_ids = [Int[] for _ in 0:spec.max_level]
+    all_ids = [Int[] for _ in 0:spec.max_level]
+    @inbounds for (cell_id, cell) in pairs(spec.cells)
+        level_index = cell.level + 1
+        push!(all_ids[level_index], cell_id)
+        cell.active && push!(active_ids[level_index], cell_id)
+    end
+    return active_ids, all_ids
+end
+
+function _conservative_tree_subcycle_level_row_ids_2d(
+        bank::ConservativeTreeSubcycleBufferBank2D,
+        level::Integer;
+        active_only::Bool=true)
+    l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
+    return active_only ? bank.active_ids_by_level[l + 1] :
+                         bank.all_ids_by_level[l + 1]
+end
+
 function conservative_tree_subcycle_store_owned_level_2d!(
         bank::ConservativeTreeSubcycleBufferBank2D,
         F::AbstractMatrix,
@@ -101,7 +127,7 @@ function conservative_tree_subcycle_store_owned_level_2d!(
     l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
     buffers = bank.levels[l + 1]
     @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
-            bank.spec, l; active_only=active_only)
+            bank, l; active_only=active_only)
         for q in 1:9
             buffers.owned[cell_id, q] = F[cell_id, q]
         end
@@ -129,7 +155,7 @@ function conservative_tree_subcycle_restore_owned_level_2d!(
     l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
     buffers = bank.levels[l + 1]
     @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
-            bank.spec, l; active_only=active_only)
+            bank, l; active_only=active_only)
         for q in 1:9
             F[cell_id, q] = buffers.owned[cell_id, q]
         end
@@ -144,7 +170,7 @@ function conservative_tree_subcycle_apply_reflux_to_owned_level_2d!(
     l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
     buffers = bank.levels[l + 1]
     @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
-            bank.spec, l; active_only=true)
+            bank, l; active_only=true)
         for q in 1:9
             buffers.owned[cell_id, q] += buffers.reflux_to_coarse[cell_id, q]
             if clear
@@ -164,7 +190,7 @@ function conservative_tree_subcycle_add_and_clear_reflux_to_F_level_2d!(
     l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
     buffers = bank.levels[l + 1]
     @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
-            bank.spec, l; active_only=true)
+            bank, l; active_only=true)
         for q in 1:9
             F[cell_id, q] += buffers.reflux_to_coarse[cell_id, q]
             buffers.reflux_to_coarse[cell_id, q] =
@@ -182,7 +208,7 @@ function conservative_tree_subcycle_add_and_clear_ghost_to_F_level_2d!(
     l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
     buffers = bank.levels[l + 1]
     @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
-            bank.spec, l; active_only=true)
+            bank, l; active_only=true)
         for q in 1:9
             F[cell_id, q] += buffers.ghost_from_coarse[cell_id, q]
             buffers.ghost_from_coarse[cell_id, q] =
