@@ -205,3 +205,20 @@ y-band L4:  1446738 objects, 146.15 MB ->  70450 objects,  81.47 MB
 patch10 L4: 1776339 objects, 191.45 MB ->  74946 objects, 114.13 MB
 patch20 L4: 6166912 objects, 636.38 MB -> 284353 objects, 370.14 MB
 ```
+
+Patch `2026-05-06-route-level-ranges`:
+
+- grouped route ids by level/type at route-table build time;
+- stored compact `UnitRange` windows into `direct_routes`, `boundary_routes`,
+  and `interface_routes` instead of duplicating route-id vectors;
+- changed the subcycled scheduler to iterate only the routes relevant to the
+  current level event;
+- kept the legacy flat route lists intact for tests, diagnostics, and existing
+  helpers.
+
+Hot-loop gate after warm-up on nested L4 x-band:
+
+```text
+transport-only stream: 0.0466 s -> 0.0404 s
+allocation: unchanged at about 45 wrapper objects / 0.002 MB
+```

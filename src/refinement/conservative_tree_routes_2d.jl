@@ -13,6 +13,10 @@ struct ConservativeTreeRouteTable2D
     direct_routes::Vector{Int}
     interface_routes::Vector{Int}
     boundary_routes::Vector{Int}
+    direct_route_ranges_by_level::Vector{UnitRange{Int}}
+    boundary_route_ranges_by_level::Vector{UnitRange{Int}}
+    split_route_ranges_by_parent_level::Vector{UnitRange{Int}}
+    coalesce_route_ranges_by_child_level::Vector{UnitRange{Int}}
 end
 
 function _active_leaf_covering_sample_2d(spec::ConservativeTreeSpec2D,
@@ -225,6 +229,78 @@ function _push_multilevel_link_routes_2d!(
     return nothing
 end
 
+function _empty_unit_range_2d(start::Int)
+    return start:(start - 1)
+end
+
+function _ranges_from_counts_2d(counts::Vector{Int}, first_index::Int)
+    ranges = Vector{UnitRange{Int}}(undef, length(counts))
+    cursor = first_index
+    @inbounds for idx in eachindex(counts)
+        n = counts[idx]
+        ranges[idx] = n == 0 ? _empty_unit_range_2d(cursor) :
+                      cursor:(cursor + n - 1)
+        cursor += n
+    end
+    return ranges
+end
+
+function _partition_route_ids_by_source_level_2d!(
+        route_ids::Vector{Int},
+        spec::ConservativeTreeSpec2D,
+        routes::Vector{ConservativeTreeRoute2D})
+    counts = zeros(Int, spec.max_level + 1)
+    @inbounds for route_id in route_ids
+        level = spec.cells[routes[route_id].src].level
+        counts[level + 1] += 1
+    end
+    sort!(route_ids; by=route_id -> spec.cells[routes[route_id].src].level)
+    ranges = _ranges_from_counts_2d(counts, 1)
+    return ranges
+end
+
+@inline function _interface_route_partition_key_2d(
+        spec::ConservativeTreeSpec2D,
+        routes::Vector{ConservativeTreeRoute2D},
+        route_id::Int)
+    route = routes[route_id]
+    src_level = spec.cells[route.src].level
+    if route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER
+        return src_level
+    end
+    return spec.max_level + 1 + src_level
+end
+
+function _partition_interface_route_ids_by_level_2d!(
+        interface_routes::Vector{Int},
+        spec::ConservativeTreeSpec2D,
+        routes::Vector{ConservativeTreeRoute2D})
+    split_counts = zeros(Int, spec.max_level)
+    coalesce_counts = zeros(Int, spec.max_level + 1)
+    @inbounds for route_id in interface_routes
+        route = routes[route_id]
+        src_level = spec.cells[route.src].level
+        if route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER
+            src_level < spec.max_level ||
+                throw(ArgumentError("split route source cannot be at max_level"))
+            split_counts[src_level + 1] += 1
+        elseif route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER
+            src_level > 0 ||
+                throw(ArgumentError("coalesce route source cannot be at level 0"))
+            coalesce_counts[src_level + 1] += 1
+        end
+    end
+
+    split_ranges = _ranges_from_counts_2d(split_counts, 1)
+    split_total = sum(split_counts)
+    coalesce_ranges = _ranges_from_counts_2d(coalesce_counts, split_total + 1)
+    sort!(interface_routes;
+          by=route_id -> _interface_route_partition_key_2d(
+              spec, routes, route_id))
+
+    return split_ranges, coalesce_ranges
+end
+
 """
     create_conservative_tree_route_table_2d(spec; periodic_x=false)
 
@@ -278,8 +354,17 @@ function create_conservative_tree_route_table_2d(spec::ConservativeTreeSpec2D;
         end
     end
 
+    direct_ranges = _partition_route_ids_by_source_level_2d!(
+        direct_routes, spec, routes)
+    boundary_ranges = _partition_route_ids_by_source_level_2d!(
+        boundary_routes, spec, routes)
+    split_ranges, coalesce_ranges =
+        _partition_interface_route_ids_by_level_2d!(
+            interface_routes, spec, routes)
+
     return ConservativeTreeRouteTable2D(
         links, routes, same_level_links, coarse_to_fine_links,
         fine_to_coarse_links, boundary_links, direct_routes, interface_routes,
-        boundary_routes)
+        boundary_routes, direct_ranges, boundary_ranges,
+        split_ranges, coalesce_ranges)
 end

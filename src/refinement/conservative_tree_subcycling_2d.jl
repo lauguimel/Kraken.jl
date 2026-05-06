@@ -551,11 +551,9 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
 
-    @inbounds for route_id in table.interface_routes
+    @inbounds for route_pos in table.split_route_ranges_by_parent_level[parent_level + 1]
+        route_id = table.interface_routes[route_pos]
         route = table.routes[route_id]
-        route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER || continue
-        bank.spec.cells[route.src].level == parent_level || continue
-        bank.spec.cells[route.dst].level == parent_level + 1 || continue
         conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
             bank, F, route; alpha=alpha)
     end
@@ -574,10 +572,9 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     child_level = parent_level + 1
 
-    @inbounds for route_id in table.interface_routes
+    @inbounds for route_pos in table.coalesce_route_ranges_by_child_level[child_level + 1]
+        route_id = table.interface_routes[route_pos]
         route = table.routes[route_id]
-        route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER || continue
-        bank.spec.cells[route.src].level == child_level || continue
         conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
             bank, F, route, substep; alpha=alpha)
     end
@@ -809,14 +806,14 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
         rho_wall=1)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
 
-    @inbounds for route_id in table.direct_routes
+    @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
+        route_id = table.direct_routes[route_pos]
         route = table.routes[route_id]
-        spec.cells[route.src].level == level || continue
         Fout[route.dst, route.q] += route.weight * Fin[route.src, route.q]
     end
-    @inbounds for route_id in table.boundary_routes
+    @inbounds for route_pos in table.boundary_route_ranges_by_level[level + 1]
+        route_id = table.boundary_routes[route_pos]
         route = table.routes[route_id]
-        spec.cells[route.src].level == level || continue
         if policy != :skip
             Fout[route.src, d2q9_opposite(route.q)] +=
                 _conservative_tree_boundary_reflection_packet_2d(
