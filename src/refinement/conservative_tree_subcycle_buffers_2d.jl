@@ -37,11 +37,16 @@ end
 
 function create_conservative_tree_subcycle_level_buffers_2d(
         spec::ConservativeTreeSpec2D;
-        T::Type{<:Real}=Float64)
+        T::Type{<:Real}=Float64,
+        owned=nothing,
+        ghost_from_coarse=nothing,
+        reflux_to_coarse=nothing)
     return ConservativeTreeSubcycleLevelBuffers2D{T}(
-        allocate_conservative_tree_F_2d(spec; T=T),
-        allocate_conservative_tree_F_2d(spec; T=T),
-        allocate_conservative_tree_F_2d(spec; T=T),
+        owned === nothing ? allocate_conservative_tree_F_2d(spec; T=T) : owned,
+        ghost_from_coarse === nothing ?
+            allocate_conservative_tree_F_2d(spec; T=T) : ghost_from_coarse,
+        reflux_to_coarse === nothing ?
+            allocate_conservative_tree_F_2d(spec; T=T) : reflux_to_coarse,
         allocate_conservative_tree_F_2d(spec; T=T))
 end
 
@@ -54,8 +59,13 @@ function create_conservative_tree_subcycle_buffer_bank_2d(
         throw(ArgumentError("subcycle buffer schedule max_level must match the tree spec"))
     schedule.ratio == 2 ||
         throw(ArgumentError("AMR-D subcycle buffers currently require ratio = 2"))
+    shared_owned = allocate_conservative_tree_F_2d(spec; T=T)
+    shared_ghost = allocate_conservative_tree_F_2d(spec; T=T)
+    shared_reflux = allocate_conservative_tree_F_2d(spec; T=T)
     levels = [
-        create_conservative_tree_subcycle_level_buffers_2d(spec; T=T)
+        create_conservative_tree_subcycle_level_buffers_2d(
+            spec; T=T, owned=shared_owned, ghost_from_coarse=shared_ghost,
+            reflux_to_coarse=shared_reflux)
         for _ in 0:spec.max_level
     ]
     active_ids_by_level, all_ids_by_level =
@@ -77,8 +87,13 @@ end
 
 function reset_conservative_tree_subcycle_buffer_bank_2d!(
         bank::ConservativeTreeSubcycleBufferBank2D)
-    for level in 0:bank.spec.max_level
-        reset_conservative_tree_subcycle_level_buffers_2d!(bank, level)
+    shared = bank.levels[1]
+    fill!(shared.owned, zero(eltype(shared.owned)))
+    fill!(shared.ghost_from_coarse, zero(eltype(shared.ghost_from_coarse)))
+    fill!(shared.reflux_to_coarse, zero(eltype(shared.reflux_to_coarse)))
+    for buffers in bank.levels
+        fill!(buffers.restrict_to_parent,
+              zero(eltype(buffers.restrict_to_parent)))
     end
     return bank
 end

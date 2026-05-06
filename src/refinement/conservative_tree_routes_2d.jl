@@ -94,6 +94,26 @@ function _sampled_route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
                                                  q::Int,
                                                  sample_level::Int;
                                                  periodic_x::Bool=false)
+    dsts = Int[]
+    weights = Float64[]
+    kinds = RouteKind[]
+    return _sampled_route_specs_for_active_cell_2d!(
+        dsts, weights, kinds, spec, src_id, q, sample_level;
+        periodic_x=periodic_x)
+end
+
+function _sampled_route_specs_for_active_cell_2d!(
+        dsts::Vector{Int},
+        weights::Vector{Float64},
+        kinds::Vector{RouteKind},
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int,
+        sample_level::Int;
+        periodic_x::Bool=false)
+    empty!(dsts)
+    empty!(weights)
+    empty!(kinds)
     src = spec.cells[src_id]
     scale = 1 << (sample_level - src.level)
     cx = d2q9_cx(q)
@@ -101,9 +121,6 @@ function _sampled_route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
     nx_sample = _conservative_tree_level_size_2d(spec.Nx, sample_level)
     weight = 1.0 / Float64(scale * scale)
 
-    dsts = Int[]
-    weights = Float64[]
-    kinds = RouteKind[]
     for sj in 1:scale, si in 1:scale
         sample_i = (src.i - 1) * scale + si + cx
         sample_j = (src.j - 1) * scale + sj + cy
@@ -150,6 +167,19 @@ function _route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
                                          periodic_x::Bool=false)
     return _sampled_route_specs_for_active_cell_2d(
         spec, src_id, q, spec.max_level; periodic_x=periodic_x)
+end
+
+function _route_specs_for_active_cell_2d!(
+        dsts::Vector{Int},
+        weights::Vector{Float64},
+        kinds::Vector{RouteKind},
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int;
+        periodic_x::Bool=false)
+    return _sampled_route_specs_for_active_cell_2d!(
+        dsts, weights, kinds, spec, src_id, q, spec.max_level;
+        periodic_x=periodic_x)
 end
 
 function _push_multilevel_link_routes_2d!(
@@ -223,11 +253,23 @@ function create_conservative_tree_route_table_2d(spec::ConservativeTreeSpec2D;
     direct_routes = Int[]
     interface_routes = Int[]
     boundary_routes = Int[]
+    link_hint = 9 * length(spec.active_cells)
+    sizehint!(links, link_hint)
+    sizehint!(same_level_links, link_hint)
+    sizehint!(direct_routes, link_hint)
+
+    dsts = Int[]
+    weights = Float64[]
+    kinds = RouteKind[]
+    sizehint!(dsts, 8)
+    sizehint!(weights, 8)
+    sizehint!(kinds, 8)
 
     for src_id in spec.active_cells
         for q in 1:9
-            dsts, weights, kinds = _route_specs_for_active_cell_2d(
-                spec, src_id, q; periodic_x=periodic_x)
+            _route_specs_for_active_cell_2d!(
+                dsts, weights, kinds, spec, src_id, q;
+                periodic_x=periodic_x)
             _push_multilevel_link_routes_2d!(
                 links, routes, same_level_links, coarse_to_fine_links,
                 fine_to_coarse_links, boundary_links, direct_routes,

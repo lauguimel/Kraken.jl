@@ -186,3 +186,22 @@ before: +468315 objects and +27.33 MB for the first subcycled step
 after:      +12 objects and about +0.001 MB per additional runner step
 hot stream profile: no allocation site in src/refinement
 ```
+
+Patch `2026-05-06-setup-footprint`:
+
+- shared `owned`, `ghost_from_coarse`, and `reflux_to_coarse` matrices across
+  levels because the global tree row ids are disjoint by level;
+- kept `restrict_to_parent` separate per level because recursive restriction
+  reads child-level restrictions while writing parent-level restrictions;
+- changed nested route-table construction to reuse `dsts`, `weights`, and
+  `kinds` scratch vectors instead of allocating them for every `(cell, q)`;
+- added route-table size hints for stable one-time construction.
+
+Setup allocation gate after warm-up:
+
+```text
+x-band L4:   741892 objects,  78.03 MB ->  36731 objects,  43.26 MB
+y-band L4:  1446738 objects, 146.15 MB ->  70450 objects,  81.47 MB
+patch10 L4: 1776339 objects, 191.45 MB ->  74946 objects, 114.13 MB
+patch20 L4: 6166912 objects, 636.38 MB -> 284353 objects, 370.14 MB
+```
