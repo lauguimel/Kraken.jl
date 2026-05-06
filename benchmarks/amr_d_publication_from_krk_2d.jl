@@ -59,6 +59,10 @@ function _coarsen_leaf_range(range::UnitRange{Int})
     return ((first(range) + 1) >>> 1):((last(range) + 1) >>> 1)
 end
 
+function _coarsen_leaf_center(center_leaf::Real)
+    return (Float64(center_leaf) - 0.5) / 2 + 0.5
+end
+
 function _mass_rel_drift(result)
     mass_initial = getproperty(result, :mass_initial)
     mass_drift = getproperty(result, :mass_drift)
@@ -184,8 +188,8 @@ function _run_cylinder_from_krk(setup, method::Symbol; T::Type{<:Real}=Float64)
             ; Nx=Nx, Ny=Ny,
             patch_i_range=1:Nx,
             patch_j_range=1:Ny,
-            cx_leaf=cx_leaf / 2,
-            cy_leaf=cy_leaf / 2,
+            cx_leaf=_coarsen_leaf_center(cx_leaf),
+            cy_leaf=_coarsen_leaf_center(cy_leaf),
             radius_leaf=radius_leaf / 2,
             Fx=Fx, omega=omega, rho=rho,
             steps=steps, avg_window=avg_window, T=T)

@@ -91,12 +91,12 @@ qsub hpc/amr_d_convergence_gallery_2d_aqua.pbs
 ## Nesting Probe
 
 `benchmarks/krk/amr_d_convergence_2d/cylinder_nested4_probe.krk` defines four
-nested cylinder refinement levels. The parser accepts the file, then the
-conservative-tree D helper rejects it before runtime because nested `parent`
-refinement is not implemented.
+nested cylinder refinement levels. The parser and static conservative-tree spec
+now accept the file, but the AMR-D runtime classifier still marks it as blocked
+because nested obstacle streaming/drag is not closed yet.
 
 This is the correct current behavior. The final four-level cylinder calculation
-needs a new multi-level D milestone:
+still needs the obstacle/runtime milestone:
 
 - nested ownership across levels;
 - 2:1 balance enforcement;
@@ -104,3 +104,13 @@ needs a new multi-level D milestone:
 - collision and streaming over all active leaves;
 - restriction/prolongation between adjacent levels only;
 - cylinder drag measured on the finest active leaves.
+
+The channel-only nested path is already executable through `.krk` smoke tests:
+
+```text
+benchmarks/krk/amr_d_convergence_2d/poiseuille_nested4_channel.krk
+benchmarks/krk/amr_d_convergence_2d/couette_nested4_channel.krk
+```
+
+Both use `ratio = 16`, which the KRK helper expands into four adjacent ratio-2
+levels.

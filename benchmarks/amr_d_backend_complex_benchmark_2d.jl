@@ -243,7 +243,7 @@ function _solid_mask_for_periodic_flow(flow::Symbol, nx::Int, ny::Int)
     if flow == :square
         return square_solid_mask_leaf_2d(nx, ny, 22:27, 12:17)
     elseif flow == :cylinder
-        return cylinder_solid_mask_leaf_2d(nx, ny, nx / 2, ny / 2, 3.0)
+        return cylinder_solid_mask_leaf_2d(nx, ny, (nx + 1) / 2, (ny + 1) / 2, 3.0)
     end
     throw(ArgumentError("backend periodic-solid benchmark supports square and cylinder only"))
 end

@@ -129,6 +129,7 @@ include("io/stl_reader.jl")
 include("io/voxelizer.jl")
 include("io/stl_libb.jl")
 include("io/kraken_parser.jl")
+include("refinement/conservative_tree_krk_validation_2d.jl")
 
 # --- Spatial boundary kernels ---
 include("kernels/boundary_spatial_2d.jl")
@@ -457,6 +458,12 @@ export conservative_tree_mass_roundoff_rtol_2d
 export run_cartesian_channel_mass_reference_2d
 export run_conservative_tree_poiseuille_subcycled_2d
 export run_conservative_tree_couette_subcycled_2d
+export ConservativeTreeAMRDKrkCase2D
+export conservative_tree_amr_d_boundary_policy_2d
+export conservative_tree_amr_d_geometry_2d
+export conservative_tree_amr_d_case_from_krk_2d
+export conservative_tree_amr_d_support_matrix_2d
+export run_conservative_tree_amr_d_case_from_krk_2d
 export RefinementPatch3D, RefinedDomain3D
 export create_patch_3d, create_refined_domain_3d, advance_refined_step_3d!
 export prolongate_f_rescaled_3d!, prolongate_f_rescaled_full_3d!

@@ -8,7 +8,7 @@ include(joinpath(dirname(@__DIR__), "benchmarks", "amr_d_convergence_gallery_2d.
         case_dir = joinpath(dirname(@__DIR__), "benchmarks", "krk",
                             "amr_d_convergence_2d")
         files = sort(filter(endswith(".krk"), readdir(case_dir; join=true)))
-        @test length(files) == 7
+        @test length(files) == 9
 
         for file in files
             setup = load_kraken(file)
@@ -22,8 +22,10 @@ include(joinpath(dirname(@__DIR__), "benchmarks", "amr_d_convergence_gallery_2d.
         nested = joinpath(case_dir, "cylinder_nested4_probe.krk")
         probe = probe_nested4_cylinder_2d(nested)
         @test probe.parsed_levels == 4
+        @test probe.max_level == 4
+        @test probe.spec_supported == true
         @test probe.supported == false
-        @test occursin("nested Refine parent blocks", probe.reason)
+        @test occursin("nested obstacle", probe.reason)
     end
 
     @testset "smoke rows remain finite" begin

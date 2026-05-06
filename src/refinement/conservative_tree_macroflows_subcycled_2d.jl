@@ -301,17 +301,21 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         alpha_f2c=1,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
+        spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
         T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
-    spec = create_conservative_tree_nested_channel_spec_2d(max_level)
-    table = create_conservative_tree_route_table_2d(spec; periodic_x=true)
-    F = allocate_conservative_tree_F_2d(spec; T=T)
+    spec_run = spec === nothing ?
+        create_conservative_tree_nested_channel_spec_2d(max_level) : spec
+    spec_run.max_level == Int(max_level) ||
+        throw(ArgumentError("max_level must match spec.max_level"))
+    table = create_conservative_tree_route_table_2d(spec_run; periodic_x=true)
+    F = allocate_conservative_tree_F_2d(spec_run; T=T)
     Ftmp = similar(F)
-    initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=rho0)
-    mass_initial = _active_mass_conservative_tree_F_2d(F, spec)
+    initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
+    mass_initial = _active_mass_conservative_tree_F_2d(F, spec_run)
     guard = mass_guard_rtol === nothing ?
-        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec.max_level) :
+        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec_run.max_level) :
         T(mass_guard_rtol)
     max_raw_relative_mass_drift = zero(T)
 
@@ -320,12 +324,12 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
             Flevel, local_spec, level, omega, Fx, Fy)
     for _ in 1:nsteps
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
-            Ftmp, F, spec, table; boundary=:periodic_x_wall_y,
+            Ftmp, F, spec_run, table; boundary=:periodic_x_wall_y,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
             pre_stream_level! = collide_level!)
         if enforce_mass
             raw_rel = _enforce_active_mass_conservation_2d!(
-                Ftmp, spec, mass_initial; rtol=guard)
+                Ftmp, spec_run, mass_initial; rtol=guard)
             max_raw_relative_mass_drift =
                 max(max_raw_relative_mass_drift, T(raw_rel))
         end
@@ -333,11 +337,11 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
     end
 
     profile = conservative_tree_leaf_mean_ux_profile_2d(
-        F, spec; force_x=Fx)
+        F, spec_run; force_x=Fx)
     analytic = poiseuille_analytic_profile_2d(length(profile), Fx, omega;
                                               rho=rho0)
     return _subcycled_macroflow_result_2d(
-        :poiseuille_subcycled, nsteps, spec, table, F, profile, analytic,
+        :poiseuille_subcycled, nsteps, spec_run, table, F, profile, analytic,
         mass_initial, max_raw_relative_mass_drift)
 end
 
@@ -358,17 +362,21 @@ function run_conservative_tree_couette_subcycled_2d(;
         alpha_f2c=1,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
+        spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
         T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
-    spec = create_conservative_tree_nested_channel_spec_2d(max_level)
-    table = create_conservative_tree_route_table_2d(spec; periodic_x=true)
-    F = allocate_conservative_tree_F_2d(spec; T=T)
+    spec_run = spec === nothing ?
+        create_conservative_tree_nested_channel_spec_2d(max_level) : spec
+    spec_run.max_level == Int(max_level) ||
+        throw(ArgumentError("max_level must match spec.max_level"))
+    table = create_conservative_tree_route_table_2d(spec_run; periodic_x=true)
+    F = allocate_conservative_tree_F_2d(spec_run; T=T)
     Ftmp = similar(F)
-    initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=rho0)
-    mass_initial = _active_mass_conservative_tree_F_2d(F, spec)
+    initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
+    mass_initial = _active_mass_conservative_tree_F_2d(F, spec_run)
     guard = mass_guard_rtol === nothing ?
-        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec.max_level) :
+        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec_run.max_level) :
         T(mass_guard_rtol)
     max_raw_relative_mass_drift = zero(T)
 
@@ -377,22 +385,22 @@ function run_conservative_tree_couette_subcycled_2d(;
             Flevel, local_spec, level, omega)
     for _ in 1:nsteps
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
-            Ftmp, F, spec, table; boundary=:periodic_x_moving_wall_y,
+            Ftmp, F, spec_run, table; boundary=:periodic_x_moving_wall_y,
             u_south=zero(T), u_north=U, rho_wall=rho0,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
             pre_stream_level! = collide_level!)
         if enforce_mass
             raw_rel = _enforce_active_mass_conservation_2d!(
-                Ftmp, spec, mass_initial; rtol=guard)
+                Ftmp, spec_run, mass_initial; rtol=guard)
             max_raw_relative_mass_drift =
                 max(max_raw_relative_mass_drift, T(raw_rel))
         end
         F, Ftmp = Ftmp, F
     end
 
-    profile = conservative_tree_leaf_mean_ux_profile_2d(F, spec)
+    profile = conservative_tree_leaf_mean_ux_profile_2d(F, spec_run)
     analytic = couette_analytic_profile_2d(length(profile), U)
     return _subcycled_macroflow_result_2d(
-        :couette_subcycled, nsteps, spec, table, F, profile, analytic,
+        :couette_subcycled, nsteps, spec_run, table, F, profile, analytic,
         mass_initial, max_raw_relative_mass_drift)
 end

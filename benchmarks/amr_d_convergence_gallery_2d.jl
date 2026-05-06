@@ -330,8 +330,8 @@ function _run_cylinder_case(scale::Int,
     Ny = 14 * scale
     patch_i = _scale_range(3:22, scale)
     patch_j = 1:Ny
-    cx_leaf = 24 * scale
-    cy_leaf = 14 * scale
+    cx_leaf = 24 * scale + 0.5
+    cy_leaf = 14 * scale + 0.5
     radius_leaf = 3 * scale
     avg = min(avg_window * scale, steps)
 
@@ -347,8 +347,10 @@ function _run_cylinder_case(scale::Int,
     coarse = nothing
     coarse_elapsed = @elapsed coarse = run_conservative_tree_cylinder_macroflow_2d(
         ; Nx=Nx_coarse, Ny=Ny_coarse, patch_i_range=1:Nx_coarse,
-        patch_j_range=1:Ny_coarse, cx_leaf=cx_leaf / 2,
-        cy_leaf=cy_leaf / 2, radius_leaf=radius_leaf / 2,
+        patch_j_range=1:Ny_coarse,
+        cx_leaf=(cx_leaf - 0.5) / 2 + 0.5,
+        cy_leaf=(cy_leaf - 0.5) / 2 + 0.5,
+        radius_leaf=radius_leaf / 2,
         steps=steps, avg_window=avg, T=T)
     push!(rows, _solid_row(:cylinder, :cartesian_coarse, scale,
                            Nx_coarse, Ny_coarse, 1:Nx_coarse, 1:Ny_coarse,
@@ -534,22 +536,27 @@ end
 function probe_nested4_cylinder_2d(krk_path::AbstractString)
     setup = load_kraken(krk_path)
     parsed_levels = length(getproperty(setup, :refinements))
-    supported = true
-    reason = "supported"
+    spec_supported = true
+    spec_reason = "static spec supported"
+    max_level = 0
     try
-        conservative_tree_patch_ranges_from_krk_refines_2d(
-            getproperty(setup, :domain), getproperty(setup, :refinements))
+        spec = create_conservative_tree_spec_from_krk_2d(setup)
+        max_level = spec.max_level
     catch err
-        supported = false
-        reason = sprint(showerror, err)
+        spec_supported = false
+        spec_reason = sprint(showerror, err)
     end
-    return (; parsed_levels, supported, reason)
+    case = conservative_tree_amr_d_case_from_krk_2d(setup)
+    supported = case.runtime_supported
+    reason = spec_supported ? case.reason : spec_reason
+    return (; parsed_levels, max_level, spec_supported, supported, reason)
 end
 
 function _write_nested_probe_csv(path::AbstractString, probe)
     open(path, "w") do io
-        println(io, "case,parsed_levels,supported,reason")
+        println(io, "case,parsed_levels,max_level,spec_supported,runtime_supported,reason")
         println(io, join(("cylinder_nested4", probe.parsed_levels,
+                          probe.max_level, probe.spec_supported,
                           probe.supported, repr(probe.reason)), ","))
     end
     return path
@@ -581,7 +588,9 @@ function plot_nested4_cylinder_probe(path_png::AbstractString,
     lines!(ax, 12 .+ 1.5 .* cos.(theta), 7 .+ 1.5 .* sin.(theta);
            color=:black, linewidth=3)
     status = probe.supported ? "runtime supported" :
-             "blocked before D runtime: nested Refine parent is rejected"
+             probe.spec_supported ?
+             "static spec supported; nested obstacle runtime blocked" :
+             "blocked before D runtime: invalid static spec"
     Label(fig[2, 1], status; tellwidth=false)
     save(path_png, fig)
     save(path_pdf, fig)
