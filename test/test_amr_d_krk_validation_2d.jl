@@ -88,6 +88,13 @@ using Kraken
     @test cases["couette_yband_nested4_debug.krk"].max_level == 4
     @test cases["couette_yband_nested4_debug.krk"].runtime_status ==
           :subcycled_nested_channel
+    couette_debug_spec = create_conservative_tree_spec_from_krk_2d(load_kraken(
+        joinpath(convergence_dir, "couette_yband_nested4_debug.krk")))
+    north_j = couette_debug_spec.Ny << couette_debug_spec.max_level
+    @test any(couette_debug_spec.cells[id].level ==
+              couette_debug_spec.max_level &&
+              couette_debug_spec.cells[id].j == north_j
+              for id in couette_debug_spec.active_cells)
 
     lift_probe = cases["cylinder_lift_nested4_probe.krk"]
     @test lift_probe.flow == :cylinder_lift

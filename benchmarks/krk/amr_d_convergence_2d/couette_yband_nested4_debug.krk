@@ -1,6 +1,7 @@
-# AMR D nested Couette quicklook: horizontal y-band refinement.
-# The moving wall speed and local step count are chosen to produce visible
-# velocity gradients in local debug plots.
+# AMR D nested Couette quicklook: north-wall y-band refinement.
+# Couette is wall-driven, so this validation band deliberately reaches the
+# moving wall. A center-only band leaves wall momentum injected on coarse cells
+# and is an interface-resolution diagnostic, not a Cartesian-comparison gate.
 
 Simulation amr_d_couette_yband_nested4_debug D2Q9
 
@@ -16,7 +17,7 @@ Boundary east periodic
 Boundary south wall
 Boundary north velocity(ux = 0.02, uy = 0)
 
-Refine yband { region = [0, 3, 16, 9], ratio = 16 }
+Refine yband { region = [0, 6, 16, 12], ratio = 16 }
 
 Run 200 steps
 Diagnostics every 50 [step, ux, uy, rho, mass]

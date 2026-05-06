@@ -149,7 +149,11 @@ until the corresponding AMR-D runtime gate is closed.
 
 The `*_nested4_debug.krk` files are local visual debug cases. They use stronger
 forcing or wall speed than the tiny scheduler canaries so `ux`, `rho`, field
-differences and profiles are visible in quicklook plots. The
+differences and profiles are visible in quicklook plots. Couette is wall-driven:
+`couette_yband_nested4_debug.krk` must refine the moving north wall. A
+center-only y-band is useful as an interface-resolution diagnostic, but it is
+not a Cartesian-comparison gate because wall momentum is then injected on coarse
+cells. The
 `cylinder_lift_nested4_probe.krk` case is an off-centre cylinder target: it must
 show the nested mesh and cylinder mask now, but runtime fields remain pending
 until nested open-channel obstacle routing is implemented.
