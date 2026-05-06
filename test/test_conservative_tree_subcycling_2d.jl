@@ -607,6 +607,30 @@ using Kraken
         @test band < 20 * small
     end
 
+    @testset "leaf-equivalent physics scales by AMR-D level" begin
+        spec = Kraken.create_conservative_tree_nested_channel_spec_2d(4)
+        omega_fine = 1.0
+        force_fine = 1e-7
+
+        @test Kraken.conservative_tree_leaf_equivalent_level_scale_2d(
+            spec, 4) == 1
+        @test Kraken.conservative_tree_leaf_equivalent_level_scale_2d(
+            spec, 0) == 16
+        @test Kraken.conservative_tree_leaf_equivalent_force_2d(
+            force_fine, spec, 0) == 16force_fine
+        @test Kraken.conservative_tree_leaf_equivalent_force_2d(
+            force_fine, spec, 4) == force_fine
+
+        tau_fine = inv(omega_fine)
+        tau_coarse = inv(Kraken.conservative_tree_leaf_equivalent_omega_2d(
+            omega_fine, spec, 0))
+        @test tau_coarse - 0.5 ≈ (tau_fine - 0.5) / 16
+        @test Kraken.conservative_tree_leaf_equivalent_omega_2d(
+            omega_fine, spec, 4) == omega_fine
+        @test_throws ArgumentError Kraken.conservative_tree_leaf_equivalent_omega_2d(
+            2.0, spec, 0)
+    end
+
     @testset "subcycled Couette macroflow runs from level 1 to 4" begin
         for max_level in 1:4
             result = run_conservative_tree_couette_subcycled_2d(

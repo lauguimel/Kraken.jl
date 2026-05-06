@@ -40,6 +40,36 @@ function _check_conservative_tree_channel_max_level_2d(max_level::Integer)
     return ml
 end
 
+@inline function conservative_tree_leaf_equivalent_level_scale_2d(
+        spec::ConservativeTreeSpec2D,
+        level::Integer)
+    l = Int(level)
+    0 <= l <= spec.max_level ||
+        throw(ArgumentError("level is outside the conservative-tree spec"))
+    return 1 << (spec.max_level - l)
+end
+
+function conservative_tree_leaf_equivalent_omega_2d(
+        omega,
+        spec::ConservativeTreeSpec2D,
+        level::Integer)
+    scale = conservative_tree_leaf_equivalent_level_scale_2d(spec, level)
+    T = typeof(float(omega))
+    tau_fine = inv(T(omega))
+    tau_fine > T(0.5) ||
+        throw(ArgumentError("leaf-equivalent omega requires tau_fine > 0.5"))
+    tau_level = T(0.5) + (tau_fine - T(0.5)) / T(scale)
+    return inv(tau_level)
+end
+
+@inline function conservative_tree_leaf_equivalent_force_2d(
+        force,
+        spec::ConservativeTreeSpec2D,
+        level::Integer)
+    scale = conservative_tree_leaf_equivalent_level_scale_2d(spec, level)
+    return force * scale
+end
+
 function _nested_channel_refine_blocks_2d(max_level::Integer)
     ml = _check_conservative_tree_channel_max_level_2d(max_level)
     blocks = ConservativeTreeRefineBlock2D[
@@ -166,7 +196,8 @@ end
 function conservative_tree_leaf_mean_ux_profile_2d(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D;
-        force_x=0)
+        force_x=0,
+        level_scaled_force::Bool=false)
     _check_conservative_tree_F_2d(F, spec)
     leaf_ny = _conservative_tree_level_size_2d(spec.Ny, spec.max_level)
     row_mass = zeros(eltype(F), leaf_ny)
@@ -184,7 +215,11 @@ function conservative_tree_leaf_mean_ux_profile_2d(
         end
         volume = eltype(F)(cell.metrics.volume)
         rho = mass / volume
-        ux = (mx / volume + force_x / 2) / rho
+        fx = level_scaled_force ?
+             conservative_tree_leaf_equivalent_force_2d(force_x, spec,
+                                                        cell.level) :
+             force_x
+        ux = (mx / volume + fx / 2) / rho
         row_packet = mass / scale
         for sj in 1:scale
             jf = (cell.j - 1) * scale + sj
@@ -334,7 +369,11 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
 
     collide_level! = (Flevel, local_spec, level, event) ->
         _collide_Guo_conservative_tree_active_level_F_2d!(
-            Flevel, local_spec, level, omega, Fx, Fy)
+            Flevel, local_spec, level,
+            conservative_tree_leaf_equivalent_omega_2d(
+                omega, local_spec, level),
+            conservative_tree_leaf_equivalent_force_2d(Fx, local_spec, level),
+            conservative_tree_leaf_equivalent_force_2d(Fy, local_spec, level))
     for _ in 1:nsteps
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Ftmp, F, spec_run, table; boundary=:periodic_x_wall_y,
@@ -352,7 +391,7 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
     end
 
     profile = conservative_tree_leaf_mean_ux_profile_2d(
-        F, spec_run; force_x=Fx)
+        F, spec_run; force_x=Fx, level_scaled_force=true)
     analytic = poiseuille_analytic_profile_2d(length(profile), Fx, omega;
                                               rho=rho0)
     return _subcycled_macroflow_result_2d(
@@ -407,7 +446,9 @@ function run_conservative_tree_couette_subcycled_2d(;
 
     collide_level! = (Flevel, local_spec, level, event) ->
         _collide_BGK_conservative_tree_active_level_F_2d!(
-            Flevel, local_spec, level, omega)
+            Flevel, local_spec, level,
+            conservative_tree_leaf_equivalent_omega_2d(
+                omega, local_spec, level))
     for _ in 1:nsteps
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Ftmp, F, spec_run, table; boundary=:periodic_x_moving_wall_y,

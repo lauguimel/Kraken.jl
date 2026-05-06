@@ -252,7 +252,8 @@ function _ql_state_from_composite_result(result; force_x=0.0, force_y=0.0)
             leaf_ny=size(leaf, 2))
 end
 
-function _ql_state_from_spec_result(result; force_x=0.0, force_y=0.0)
+function _ql_state_from_spec_result(result; force_x=0.0, force_y=0.0,
+                                    level_scaled_force::Bool=false)
     spec = getproperty(result, :spec)
     F = getproperty(result, :F)
     leaf_nx = spec.Nx << spec.max_level
@@ -277,8 +278,14 @@ function _ql_state_from_spec_result(result; force_x=0.0, force_y=0.0)
         end
         volume = eltype(F)(cell.metrics.volume)
         rho_c = mass / volume
-        ux_c = (mx / volume + force_x / 2) / rho_c
-        uy_c = (my / volume + force_y / 2) / rho_c
+        fx = level_scaled_force ?
+             Kraken.conservative_tree_leaf_equivalent_force_2d(
+                force_x, spec, cell.level) : force_x
+        fy = level_scaled_force ?
+             Kraken.conservative_tree_leaf_equivalent_force_2d(
+                force_y, spec, cell.level) : force_y
+        ux_c = (mx / volume + fx / 2) / rho_c
+        uy_c = (my / volume + fy / 2) / rho_c
         i0 = (cell.i - 1) * scale + 1
         i1 = cell.i * scale
         j0 = (cell.j - 1) * scale + 1
@@ -861,6 +868,7 @@ function _ql_run_cartesian_classic_channel(setup, case; steps, T)
     domain = getproperty(setup, :domain)
     ml = case.max_level
     scale = 1 << ml
+    reference_steps = Int(steps) * scale
     nx = Int(domain.Nx) * scale
     ny = Int(domain.Ny) * scale
     volume = one(T) / T(scale * scale)
@@ -873,7 +881,7 @@ function _ql_run_cartesian_classic_channel(setup, case; steps, T)
     force_x = zero(T)
     force_y = zero(T)
 
-    for _ in 1:steps
+    for _ in 1:reference_steps
         if case.flow == :poiseuille
             Fx = T(_ql_body_force(setup, :Fx, _ql_var(setup, :Fx, 1e-6)))
             force_x = Fx
@@ -906,8 +914,8 @@ function _ql_run_cartesian_classic_channel(setup, case; steps, T)
     mass_final = sum(F)
     return AMRDCartesianChannelQuicklook2D{T}(
         case.flow, F, profile, analytic, T(l2), T(linf), mass_initial,
-        mass_final, mass_final - mass_initial, Int(steps), volume, force_x,
-        force_y, ml)
+        mass_final, mass_final - mass_initial, reference_steps, volume,
+        force_x, force_y, ml)
 end
 
 function _ql_run_one_level_case(setup, case; steps, avg_window, method, T)
@@ -1171,7 +1179,11 @@ function run_amr_d_quicklook_from_krk_2d(paths;
                 _ql_state_from_cartesian_channel_result(result) :
                 hasproperty(result, :spec) ?
                 _ql_state_from_spec_result(result; force_x=force.force_x,
-                                           force_y=force.force_y) :
+                                           force_y=force.force_y,
+                                           level_scaled_force=
+                                               case.runtime_status ==
+                                               :subcycled_nested_channel &&
+                                               case.flow == :poiseuille) :
                 _ql_state_from_composite_result(result; force_x=force.force_x,
                                                 force_y=force.force_y)
             mesh_rows = result isa AMRDCartesianChannelQuicklook2D ?

@@ -125,8 +125,23 @@ For each case, the helper writes:
 
 For nested channel cases, the reference method is `cartesian_classic`: a dense
 D2Q9 Cartesian array at the finest leaf-equivalent resolution, without AMR tree,
-AMR route table or AMR projection. For one-level obstacle cases, the reference
-is the existing leaf-oracle route.
+AMR route table or AMR projection. Because an AMR-D nested channel step is one
+coarse step, the finest Cartesian reference is advanced by
+`steps * 2^max_level` fine ticks before profiles and fields are compared. For
+one-level obstacle cases, the reference is the existing leaf-oracle route.
+
+Nested channel macro-flow parameters are interpreted as finest leaf-equivalent
+parameters. During AMR-D subcycling the runner uses:
+
+```text
+tau_l - 0.5 = (tau_fine - 0.5) / 2^(max_level-l)
+F_l         = F_fine * 2^(max_level-l)
+```
+
+This keeps the coarse-level collision and body-force impulse on the same
+physical time/space scale as the finest Cartesian reference. Moving-wall
+velocity is not scaled because the current ratio-2 subcycling uses acoustic
+`dx/dt` scaling.
 
 Runtime-pending cases, such as the long-channel cylinder lift show-off, still
 emit `status.csv` and `mesh_static.csv/png`. They do not emit physical fields
