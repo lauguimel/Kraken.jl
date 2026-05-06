@@ -3,7 +3,8 @@
 # Uses `run_conformation_cylinder_libb_2d`:
 #   - Fused TRT + Bouzidi LI-BB V2 for the solvent flow (curved cylinder)
 #   - Modular BCSpec: ZouHeVelocity(Poiseuille) inlet + ZouHePressure outlet
-#   - Mei-consistent MEA drag on cut-link q_wall
+#   - Post-source MEA drag by default, matching the coupled Liu/Yu force path.
+#     Explicit split remains available through KRAKEN_DRAG_MODE for audits.
 #   - TRT conformation LBM + selectable polymer wall BC + Hermite stress source
 #
 # Liu setup (Table 3, CNEBB, Sc=10⁴):
@@ -22,10 +23,56 @@
 #   KRAKEN_LIU_VARIANTS=cnebb_wall_aware,extrap_eq_wallfit4 \
 #       julia --project=. hpc/liu_cylinder_benchmark.jl
 
-using Kraken, Printf, CUDA
+using Kraken, Printf, KernelAbstractions
 
-backend = CUDABackend()
-FT = Float64
+const _CUDA_MOD = try
+    @eval using CUDA
+    getfield(Main, :CUDA)
+catch
+    nothing
+end
+
+const _METAL_MOD = if Sys.isapple()
+    try
+        @eval using Metal
+        getfield(Main, :Metal)
+    catch
+        nothing
+    end
+else
+    nothing
+end
+
+function _select_backend()
+    requested = lowercase(get(ENV, "KRAKEN_BACKEND", "auto"))
+    if requested in ("auto", "cuda") && _CUDA_MOD !== nothing
+        try
+            if Base.invokelatest(getfield(_CUDA_MOD, :functional))
+                backend = Base.invokelatest(getfield(_CUDA_MOD, :CUDABackend))
+                device = Base.invokelatest(getfield(_CUDA_MOD, :device))
+                name = Base.invokelatest(getfield(_CUDA_MOD, :name), device)
+                return backend, Float64, "CUDA $name"
+            end
+        catch err
+            requested == "cuda" && rethrow(err)
+        end
+    end
+    if requested in ("auto", "metal") && _METAL_MOD !== nothing
+        try
+            if Base.invokelatest(getfield(_METAL_MOD, :functional))
+                backend = Base.invokelatest(getfield(_METAL_MOD, :MetalBackend))
+                return backend, Float32, "Metal"
+            end
+        catch err
+            requested == "metal" && rethrow(err)
+        end
+    end
+    requested in ("auto", "cpu") ||
+        error("unknown or unavailable KRAKEN_BACKEND=$(requested); expected auto, cuda, metal, or cpu")
+    return KernelAbstractions.CPU(), Float64, "CPU"
+end
+
+backend, FT, backend_label = _select_backend()
 
 function _env_items(raw::AbstractString)
     return (strip(x) for x in split(replace(raw, ';' => ','), ',')
@@ -40,6 +87,12 @@ function _parse_symbol_list(raw::AbstractString)
     return [Symbol(x) for x in _env_items(raw)]
 end
 
+function _polymer_model(name::Symbol, G, λ, ::Type{FT}) where {FT}
+    name === :direct && return OldroydB(G=FT(G), λ=FT(λ))
+    name === :logconf && return LogConfOldroydB(G=FT(G), λ=FT(λ))
+    error("unknown KRAKEN_MODELS entry $(name); expected direct or logconf")
+end
+
 function _liu_variant(name::Symbol)
     name === :cnebb_wall_aware &&
         return (; label="CNEBB/wall_aware", bc=CNEBB(), gradient=:wall_aware)
@@ -47,40 +100,81 @@ function _liu_variant(name::Symbol)
         return (; label="CNEBB/embedded_axis", bc=CNEBB(), gradient=:embedded_axis)
     name === :cnebb_wallfit4 &&
         return (; label="CNEBB/wallfit4", bc=CNEBB(), gradient=:wallfit4)
+    name === :cnebb_field_wall_aware &&
+        return (; label="CNEBBField/wall_aware", bc=CNEBBField(),
+                  gradient=:wall_aware)
+    name === :cnebb_field_eq_wall_aware &&
+        return (; label="CNEBBFieldEq/wall_aware", bc=CNEBBFieldEquilibrium(),
+                  gradient=:wall_aware)
+    name === :extrap_eq_wall_aware &&
+        return (; label="ExtrapEq/wall_aware", bc=ExtrapEqWallBC(),
+                  gradient=:wall_aware)
+    name === :log_field_wall_aware &&
+        return (; label="LogField/wall_aware", bc=LogFieldWallBC(),
+                  gradient=:wall_aware)
     name === :extrap_eq_embedded &&
         return (; label="ExtrapEq/embedded_axis", bc=ExtrapEqWallBC(),
                   gradient=:embedded_axis)
     name === :extrap_eq_wallfit4 &&
         return (; label="ExtrapEq/wallfit4", bc=ExtrapEqWallBC(),
                   gradient=:wallfit4)
-    error("unknown Liu benchmark variant $(name); expected cnebb_wall_aware, cnebb_embedded, cnebb_wallfit4, extrap_eq_embedded, or extrap_eq_wallfit4")
+    error("unknown Liu benchmark variant $(name); expected cnebb_wall_aware, cnebb_embedded, cnebb_wallfit4, cnebb_field_wall_aware, cnebb_field_eq_wall_aware, extrap_eq_wall_aware, log_field_wall_aware, extrap_eq_embedded, or extrap_eq_wallfit4")
 end
 
 println("="^70)
 println("Liu et al. 2025 cylinder benchmark — LI-BB V2 driver")
-println("Backend: $(typeof(backend)), GPU: $(CUDA.name(CUDA.device()))")
+println("Backend: $backend_label, FT=$FT")
 println("="^70)
 
 # Liu Table 3 reference values (CNEBB, Sc=10⁴)
 liu_ref = Dict(
     (20, 0.1) => 129.42, (20, 0.5) => 125.17, (20, 1.0) => 164.26,
     (30, 0.1) => 130.36, (30, 0.5) => 126.31, (30, 1.0) => 151.31,
+    (35, 0.1) => 130.77, (35, 0.5) => 127.72, (35, 1.0) => 149.04,
 )
 
 R_values = _parse_list(Int, get(ENV, "KRAKEN_R_LIST", "20,30"))
 Wi_values = _parse_list(Float64, get(ENV, "KRAKEN_WI_LIST", "0.001,0.1,0.5,1.0"))
 variants = [_liu_variant(name) for name in
             _parse_symbol_list(get(ENV, "KRAKEN_LIU_VARIANTS", "cnebb_wall_aware"))]
+models = _parse_symbol_list(get(ENV, "KRAKEN_MODELS",
+                                get(ENV, "KRAKEN_FORMULATIONS", "direct")))
 β = parse(Float64, get(ENV, "KRAKEN_BETA", "0.59"))
 u_mean = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.02"))
 steps_low_wi = parse(Int, get(ENV, "KRAKEN_STEPS_LOW_WI", "100000"))
 steps = parse(Int, get(ENV, "KRAKEN_STEPS", "200000"))
 avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR", "5"))
 run_newtonian = get(ENV, "KRAKEN_RUN_NEWTONIAN", "1") == "1"
+drag_mode = Symbol(get(ENV, "KRAKEN_DRAG_MODE", "post_source_mea"))
+hermite_source_mode =
+    Symbol(get(ENV, "KRAKEN_HERMITE_SOURCE_MODE", "liu_direct"))
+solvent_source_mode =
+    Symbol(get(ENV, "KRAKEN_SOLVENT_SOURCE_MODE", "post_collision"))
+source_stress_reconstruction =
+    Symbol(get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION", "raw"))
+source_stress_reconstruction_order =
+    parse(Int, get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER", "2"))
+source_scale_dynamics =
+    parse(Float64, get(ENV, "KRAKEN_SOURCE_SCALE_DYNAMICS", "1.0"))
+solvent_source_on_domain_walls =
+    get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_DOMAIN_WALLS", "0") == "1"
+conformation_magic =
+    parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "1e-6"))
+conformation_collision =
+    Symbol(get(ENV, "KRAKEN_CONFORMATION_COLLISION", "trt"))
+conformation_divergence_mode =
+    Symbol(get(ENV, "KRAKEN_CONFORMATION_DIVERGENCE_MODE", "trace_free"))
+conformation_initial_condition =
+    Symbol(get(ENV, "KRAKEN_CONFORMATION_INITIAL_CONDITION", "identity"))
+wall_geometry =
+    Symbol(get(ENV, "KRAKEN_WALL_GEOMETRY", "cutlink"))
+diagnostic_interval =
+    parse(Int, get(ENV, "KRAKEN_DIAGNOSTIC_INTERVAL", "0"))
 
 println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
 println("VARIANTS=$(join((v.label for v in variants), ","))")
-println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps run_newtonian=$run_newtonian")
+println("MODELS=$(join(models, ","))")
+println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
 
 for R in R_values
     # Liu uses Re = U_avg · R / ν → solve for ν_total given u_mean, R, Re
@@ -101,7 +195,7 @@ for R in R_values
         t0 = time()
         rn = run_cylinder_libb_2d(;
             Nx=Nx, Ny=Ny, radius=R, cx=cx, cy=cy,
-            u_in=1.5 * u_mean, ν=ν_total, inlet=:parabolic,
+            u_in=FT(1.5 * u_mean), ν=FT(ν_total), inlet=:parabolic,
             max_steps=max_steps_newt, avg_window=avg_window_newt,
             backend=backend, T=FT,
         )
@@ -109,31 +203,55 @@ for R in R_values
         @printf("%-22s %-6s %-10.3f %-10s %-8s %-14s (%.0fs, Cl=%.3g)\n",
                 "Newtonian", "-", rn.Cd, "-", "-", "-", dt, rn.Cl)
     end
-    @printf("%-22s %-6s %-10s %-10s %-8s %-14s\n",
-            "variant", "Wi", "Cd_sim", "Cd_Liu", "err%", "gradient")
-    println("-"^76)
+    @printf("%-22s %-9s %-6s %-10s %-10s %-10s %-10s %-8s %-9s %-14s\n",
+            "variant", "model", "Wi", "Cd_report", "Cd_post", "Cd_split",
+            "Cd_Liu", "err%", "bad_step", "gradient")
+    println("-"^104)
 
-    for variant in variants, Wi in Wi_values
+    for variant in variants, model_name in models, Wi in Wi_values
         # Liu: Wi = λ · U_c / R with U_c = U_avg = u_mean
         λ = Wi * R / u_mean
+        G = ν_p / λ
+        polymer_model = _polymer_model(model_name, G, λ, FT)
         max_steps = Wi < 0.01 ? steps_low_wi : steps
         avg_window = max_steps ÷ avg_divisor
 
         t0 = time()
         r = run_conformation_cylinder_libb_2d(;
                 Nx=Nx, Ny=Ny, radius=R, cx=cx, cy=cy,
-                u_mean=u_mean, ν_s=ν_s, ν_p=ν_p, lambda=λ, tau_plus=1.0,
-                inlet=:parabolic, ρ_out=1.0,
+                u_mean=FT(u_mean), ν_s=FT(ν_s),
+                polymer_model=polymer_model, tau_plus=one(FT),
+                inlet=:parabolic, ρ_out=one(FT),
                 max_steps=max_steps, avg_window=avg_window,
                 polymer_bc=variant.bc,
                 conformation_gradient_mode=variant.gradient,
+                conformation_magic=conformation_magic,
+                conformation_collision=conformation_collision,
+                conformation_divergence_mode=conformation_divergence_mode,
+                conformation_initial_condition=conformation_initial_condition,
+                wall_geometry=wall_geometry,
+                drag_mode=drag_mode,
+                hermite_source_mode=hermite_source_mode,
+                solvent_source_mode=solvent_source_mode,
+                source_stress_reconstruction=source_stress_reconstruction,
+                source_stress_reconstruction_order=source_stress_reconstruction_order,
+                source_scale_dynamics=source_scale_dynamics,
+                solvent_source_on_domain_walls=solvent_source_on_domain_walls,
+                diagnostic_interval=diagnostic_interval,
+                allow_diagnostic_polymer_bc=!(variant.bc isa CNEBB ||
+                                              variant.bc isa ExtrapEqWallBC),
+                allow_diagnostic_force_mode=drag_mode === :source_scaled_mea,
+                allow_diagnostic_conformation_collision=conformation_collision !== :trt,
+                allow_diagnostic_log_wall_bc=model_name === :logconf,
                 backend=backend, FT=FT)
         dt = time() - t0
 
         ref = get(liu_ref, (R, Wi), NaN)
         err = isnan(ref) ? NaN : (r.Cd - ref) / ref * 100
-        @printf("%-22s %-6.3f %-10.3f %-10.3f %-8.2f %-14s (%.0fs)\n",
-                variant.label, Wi, r.Cd, ref, err, string(variant.gradient), dt)
+        @printf("%-22s %-9s %-6.3f %-10.3f %-10.3f %-10.3f %-10.3f %-8.2f %-9d %-14s (%.0fs)\n",
+                variant.label, string(model_name), Wi, r.Cd,
+                r.Cd_mea_post_source, r.Cd_split_explicit, ref, err,
+                r.first_nonfinite_step, string(variant.gradient), dt)
     end
 end
 
