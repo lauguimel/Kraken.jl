@@ -247,3 +247,24 @@ Runner timing gate:
 patch20 L4, 1 step: 1.17 s -> 1.06 s
 patch20 L4, 2 step: 1.62 s -> 1.39 s
 ```
+
+Patch `2026-05-06-packed-route-packets`:
+
+- replaced `(dst_id, q) => Vector{substep packets}` route-packet maps by
+  packed `dst_ids`, `qs`, and contiguous packet payload vectors;
+- kept one CPU build/lookup map from `(dst_id, q)` to slot, but removed the
+  per-packet heap vectors;
+- made `sync_up` consume packet slots directly;
+- kept the public scheduler semantics unchanged.
+
+Setup object gate after warm-up:
+
+```text
+x-band L4:   19714 objects -> 555 objects
+y-band L4:   36889 objects -> 576 objects
+patch10 L4:  39753 objects -> 594 objects
+patch20 L4: 146028 objects -> 648 objects
+```
+
+The remaining setup memory is dominated by large contiguous arrays and route
+tables, not by millions of tiny CPU heap objects.

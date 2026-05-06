@@ -36,12 +36,19 @@ struct ConservativeTreeSubcyclePackedLedgerPair2D{T}
     fine_to_coarse::Array{T,3}
 end
 
+struct ConservativeTreeSubcycleRoutePacketCache2D{T}
+    key_to_slot::Dict{Tuple{Int,Int},Int}
+    dst_ids::Vector{Int}
+    qs::Vector{Int}
+    packets::Vector{T}
+end
+
 struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     spec::ConservativeTreeSpec2D
     schedule::ConservativeTreeSubcycleSchedule2D
     ledger_pairs::Vector{ConservativeTreeSubcyclePackedLedgerPair2D{T}}
     parent_ledger_slot::Vector{Int}
-    fine_to_coarse_route_packets::Vector{Dict{Tuple{Int,Int},Vector{T}}}
+    route_packet_caches::Vector{ConservativeTreeSubcycleRoutePacketCache2D{T}}
     refined_parent_ids_by_level::Vector{Vector{Int}}
     inactive_refined_ids_by_level::Vector{Vector{Int}}
 end
@@ -169,8 +176,9 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
             create_conservative_tree_subcycle_schedule_2d(spec.max_level),
         T::Type{<:Real}=Float64)
     _check_conservative_tree_subcycle_spec_schedule_2d(spec, schedule)
-    fine_to_coarse_route_packets = [
-        Dict{Tuple{Int,Int},Vector{T}}()
+    route_packet_caches = [
+        ConservativeTreeSubcycleRoutePacketCache2D{T}(
+            Dict{Tuple{Int,Int},Int}(), Int[], Int[], T[])
         for _ in 1:spec.max_level
     ]
     refined_parent_ids_by_level = [Int[] for _ in 1:spec.max_level]
@@ -202,7 +210,7 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
 
     return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
         spec, schedule, ledger_pairs, parent_ledger_slot,
-        fine_to_coarse_route_packets, refined_parent_ids_by_level,
+        route_packet_caches, refined_parent_ids_by_level,
         inactive_refined_ids_by_level)
 end
 
@@ -329,8 +337,8 @@ function reset_conservative_tree_subcycle_spatial_bank_2d!(
         fill!(pair.coarse_to_fine, zero(eltype(pair.coarse_to_fine)))
         fill!(pair.fine_to_coarse, zero(eltype(pair.fine_to_coarse)))
     end
-    for packets in bank.fine_to_coarse_route_packets
-        _zero_conservative_tree_route_packet_cache_2d!(packets)
+    for cache in bank.route_packet_caches
+        _zero_conservative_tree_route_packet_cache_2d!(cache)
     end
     return bank
 end
@@ -344,16 +352,14 @@ function reset_conservative_tree_subcycle_spatial_pair_2d!(
     fill!(pair.coarse_to_fine, zero(eltype(pair.coarse_to_fine)))
     fill!(pair.fine_to_coarse, zero(eltype(pair.fine_to_coarse)))
     _zero_conservative_tree_route_packet_cache_2d!(
-        bank.fine_to_coarse_route_packets[parent + 1])
+        bank.route_packet_caches[parent + 1])
     return bank
 end
 
 function _zero_conservative_tree_route_packet_cache_2d!(
-        packets::Dict{Tuple{Int,Int},Vector{T}}) where T
-    for values_by_substep in values(packets)
-        fill!(values_by_substep, zero(T))
-    end
-    return packets
+        cache::ConservativeTreeSubcycleRoutePacketCache2D)
+    fill!(cache.packets, zero(eltype(cache.packets)))
+    return cache
 end
 
 function _ensure_conservative_tree_route_packet_cache_2d!(
@@ -363,11 +369,21 @@ function _ensure_conservative_tree_route_packet_cache_2d!(
         q::Integer) where T
     parent = _check_conservative_tree_pair_level_2d(
         bank.schedule, parent_level)
-    packets = bank.fine_to_coarse_route_packets[parent + 1]
+    cache = bank.route_packet_caches[parent + 1]
     key = (Int(dst_id), _check_d2q9_q(q))
-    return get!(packets, key) do
-        zeros(T, bank.schedule.ratio)
+    slot = get(cache.key_to_slot, key, 0)
+    if slot == 0
+        push!(cache.dst_ids, key[1])
+        push!(cache.qs, key[2])
+        slot = length(cache.dst_ids)
+        cache.key_to_slot[key] = slot
+        old_len = length(cache.packets)
+        resize!(cache.packets, old_len + bank.schedule.ratio)
+        @inbounds for idx in (old_len + 1):length(cache.packets)
+            cache.packets[idx] = zero(T)
+        end
     end
+    return slot
 end
 
 function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
@@ -588,9 +604,10 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
     pair.fine_to_coarse[qi, step, slot] += packet
     route.dst != 0 ||
         throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
-    packets = _ensure_conservative_tree_route_packet_cache_2d!(
+    packet_slot = _ensure_conservative_tree_route_packet_cache_2d!(
         bank, parent.level, route.dst, qi)
-    packets[step] += packet
+    cache = bank.route_packet_caches[parent.level + 1]
+    cache.packets[(packet_slot - 1) * bank.schedule.ratio + step] += packet
     return bank
 end
 
@@ -837,12 +854,18 @@ function conservative_tree_subcycle_apply_sync_up_F_2d!(
         u_north=0,
         rho_wall=1)
     parent_level = _check_subcycle_spatial_sync_up_event_2d(bank, event)
-    packets = bank.fine_to_coarse_route_packets[parent_level + 1]
-    if !isempty(packets)
+    cache = bank.route_packet_caches[parent_level + 1]
+    if !isempty(cache.dst_ids)
         _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
-        for ((dst_id, q), substep_packets) in packets
-            packet = sum(substep_packets)
+        @inbounds for slot in eachindex(cache.dst_ids)
+            packet = zero(eltype(F))
+            offset = (slot - 1) * bank.schedule.ratio
+            for substep in 1:bank.schedule.ratio
+                packet += cache.packets[offset + substep]
+            end
             iszero(packet) && continue
+            dst_id = cache.dst_ids[slot]
+            q = cache.qs[slot]
             F[dst_id, q] += packet
         end
         return F
