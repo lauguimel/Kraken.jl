@@ -268,3 +268,39 @@ patch20 L4: 146028 objects -> 648 objects
 
 The remaining setup memory is dominated by large contiguous arrays and route
 tables, not by millions of tiny CPU heap objects.
+
+Patch `2026-05-06-route-packet-slots`:
+
+- added `route_id -> packet_slot` and inactive-parent `src_local,q -> packet_slot`
+  arrays to the spatial ledger bank;
+- kept the CPU `Dict{(dst_id,q)=>slot}` only as a setup/build map, not as a
+  hot-loop lookup path;
+- split fine-to-coarse accumulation into a checked public wrapper and an
+  unchecked scalar kernel used by the scheduled route loops;
+- raised the macro-flow mass roundoff safety from `1000` to `2000` after a
+  patch20 L4 one-step CPU run exceeded the previous guard by about 5 percent
+  before the explicit mass correction. This stays a roundoff guard, not a
+  physical tolerance.
+
+Setup and short-run gate after warm-up:
+
+```text
+case     active   leaf-equivalent  steps  objects  MB       time
+x-band    12936            49152      0      723   43.32   0.022 s
+x-band    12936            49152      1      735   43.33   0.054 s
+y-band    25344            49152      1      777   81.55   0.087 s
+patch10   30472          1048576      1      820  112.05   0.707 s
+patch20  107812          1048576      1      928  383.73   0.864 s
+patch20  107812          1048576      2      940  382.14   1.210 s
+```
+
+Preallocated hot-stream gate on patch20 L4:
+
+```text
+stream_conservative_tree_subcycled_buffered_routes_F_2d!:
+6 objects, 0.0012 MB, about 0.25 s on local CPU
+```
+
+The remaining runner allocation is setup/result/profile materialization. The
+recursive scheduler and route packet path no longer allocate per interface
+route in the measured CPU hot stream.

@@ -49,6 +49,8 @@ struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     ledger_pairs::Vector{ConservativeTreeSubcyclePackedLedgerPair2D{T}}
     parent_ledger_slot::Vector{Int}
     route_packet_caches::Vector{ConservativeTreeSubcycleRoutePacketCache2D{T}}
+    route_packet_slot_by_route::Vector{Int}
+    inactive_route_packet_slots_by_level::Vector{Matrix{Int}}
     refined_parent_ids_by_level::Vector{Vector{Int}}
     inactive_refined_ids_by_level::Vector{Vector{Int}}
 end
@@ -210,7 +212,8 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
 
     return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
         spec, schedule, ledger_pairs, parent_ledger_slot,
-        route_packet_caches, refined_parent_ids_by_level,
+        route_packet_caches, Int[], Matrix{Int}[],
+        refined_parent_ids_by_level,
         inactive_refined_ids_by_level)
 end
 
@@ -390,6 +393,24 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         table::ConservativeTreeRouteTable2D)
     _check_conservative_tree_subcycle_route_table_2d(table)
+    resize!(bank.route_packet_slot_by_route, length(table.routes))
+    fill!(bank.route_packet_slot_by_route, 0)
+    resize!(bank.inactive_route_packet_slots_by_level,
+            bank.spec.max_level + 1)
+    @inbounds for level in 0:bank.spec.max_level
+        ids = bank.inactive_refined_ids_by_level[level + 1]
+        slots = isassigned(bank.inactive_route_packet_slots_by_level,
+                           level + 1) ?
+                bank.inactive_route_packet_slots_by_level[level + 1] :
+                zeros(Int, 0, 9)
+        if size(slots, 1) != length(ids) || size(slots, 2) != 9
+            slots = zeros(Int, length(ids), 9)
+        else
+            fill!(slots, 0)
+        end
+        bank.inactive_route_packet_slots_by_level[level + 1] = slots
+    end
+
     @inbounds for route_id in table.interface_routes
         route = table.routes[route_id]
         route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER || continue
@@ -397,24 +418,91 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
         child = bank.spec.cells[route.src]
         child.level > 0 || continue
         parent = bank.spec.cells[child.parent]
-        _ensure_conservative_tree_route_packet_cache_2d!(
+        slot = _ensure_conservative_tree_route_packet_cache_2d!(
             bank, parent.level, route.dst, route.q)
+        bank.route_packet_slot_by_route[route_id] = slot
     end
     @inbounds for parent_level in 0:(bank.spec.max_level - 1)
         child_level = parent_level + 1
-        for src_id in bank.inactive_refined_ids_by_level[child_level + 1]
+        inactive_ids = bank.inactive_refined_ids_by_level[child_level + 1]
+        inactive_slots = bank.inactive_route_packet_slots_by_level[child_level + 1]
+        for (local_idx, src_id) in enumerate(inactive_ids)
             src = bank.spec.cells[src_id]
             src.active && continue
             for q in 1:9
-                dst_id = _conservative_tree_inactive_parent_coalesce_dst_2d(
+                dst_id, _ = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
                     bank.spec, src_id, q)
                 dst_id == 0 && continue
-                _ensure_conservative_tree_route_packet_cache_2d!(
+                inactive_slots[local_idx, q] =
+                    _ensure_conservative_tree_route_packet_cache_2d!(
                     bank, parent_level, dst_id, q)
             end
         end
     end
     return bank
+end
+
+function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        F::AbstractMatrix,
+        src_id::Integer,
+        dst_id::Integer,
+        q::Integer,
+        weight,
+        kind::RouteKind,
+        substep::Integer,
+        route_packet_slot::Integer=0;
+        alpha=1)
+    kind == COALESCE_FACE || kind == COALESCE_CORNER ||
+        throw(ArgumentError("route must be a fine-to-coarse coalesce route"))
+
+    spec = bank.spec
+    child_id = Int(src_id)
+    child = spec.cells[child_id]
+    child.level > 0 ||
+        throw(ArgumentError("fine-to-coarse route source must have a parent"))
+    parent_id = child.parent
+    parent = spec.cells[parent_id]
+    dst_cell_id = Int(dst_id)
+    dst_cell_id == 0 || spec.cells[dst_cell_id].level == parent.level ||
+        throw(ArgumentError("fine-to-coarse route destination level mismatch"))
+    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
+    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
+    step = Int(substep)
+    1 <= step <= bank.schedule.ratio ||
+        throw(ArgumentError("substep must be inside 1:$(bank.schedule.ratio)"))
+    qi = _check_d2q9_q(q)
+    packet = reconstructed_integrated_D2Q9_packet(
+        @view(F[child_id, :]), child.metrics.volume, qi, weight;
+        alpha=alpha) / bank.schedule.ratio
+    pair.fine_to_coarse[qi, step, slot] += packet
+    dst_cell_id != 0 ||
+        throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
+    packet_slot = Int(route_packet_slot)
+    if packet_slot == 0
+        packet_slot = _ensure_conservative_tree_route_packet_cache_2d!(
+            bank, parent.level, dst_cell_id, qi)
+    end
+    cache = bank.route_packet_caches[parent.level + 1]
+    cache.packets[(packet_slot - 1) * bank.schedule.ratio + step] += packet
+    return bank
+end
+
+function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        F::AbstractMatrix,
+        src_id::Integer,
+        dst_id::Integer,
+        q::Integer,
+        weight,
+        kind::RouteKind,
+        substep::Integer,
+        route_packet_slot::Integer=0;
+        alpha=1)
+    _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
+    return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
+        bank, F, src_id, dst_id, q, weight, kind, substep,
+        route_packet_slot; alpha=alpha)
 end
 
 @inline function _conservative_tree_child_slot_2d(ix::Int, iy::Int)
@@ -579,36 +667,12 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         F::AbstractMatrix,
         route::ConservativeTreeRoute2D,
-        substep::Integer;
+        substep::Integer,
+        route_packet_slot::Integer=0;
         alpha=1)
-    _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
-    route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER ||
-        throw(ArgumentError("route must be a fine-to-coarse coalesce route"))
-
-    spec = bank.spec
-    child = spec.cells[route.src]
-    child.level > 0 ||
-        throw(ArgumentError("fine-to-coarse route source must have a parent"))
-    parent_id = child.parent
-    parent = spec.cells[parent_id]
-    route.dst == 0 || spec.cells[route.dst].level == parent.level ||
-        throw(ArgumentError("fine-to-coarse route destination level mismatch"))
-    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
-    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
-    step = Int(substep)
-    1 <= step <= bank.schedule.ratio ||
-        throw(ArgumentError("substep must be inside 1:$(bank.schedule.ratio)"))
-    qi = _check_d2q9_q(route.q)
-    packet = _subcycle_route_packet_2d(
-        F, spec, route; alpha=alpha) / bank.schedule.ratio
-    pair.fine_to_coarse[qi, step, slot] += packet
-    route.dst != 0 ||
-        throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
-    packet_slot = _ensure_conservative_tree_route_packet_cache_2d!(
-        bank, parent.level, route.dst, qi)
-    cache = bank.route_packet_caches[parent.level + 1]
-    cache.packets[(packet_slot - 1) * bank.schedule.ratio + step] += packet
-    return bank
+    return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
+        bank, F, route.src, route.dst, route.q, route.weight, route.kind,
+        substep, route_packet_slot; alpha=alpha)
 end
 
 function conservative_tree_subcycle_sync_down_routes_F_2d!(
@@ -640,13 +704,18 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
+    if length(bank.route_packet_slot_by_route) < length(table.routes)
+        prepare_conservative_tree_subcycle_route_packet_cache_2d!(bank, table)
+    end
     child_level = parent_level + 1
 
     @inbounds for route_pos in table.coalesce_route_ranges_by_child_level[child_level + 1]
         route_id = table.interface_routes[route_pos]
         route = table.routes[route_id]
-        conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
-            bank, F, route, substep; alpha=alpha)
+        packet_slot = bank.route_packet_slot_by_route[route_id]
+        _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
+            bank, F, route.src, route.dst, route.q, route.weight, route.kind,
+            substep, packet_slot; alpha=alpha)
     end
     return bank
 end
@@ -710,16 +779,21 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
     child_level = parent_level + 1
+    _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
 
-    @inbounds for src_id in bank.inactive_refined_ids_by_level[child_level + 1]
+    inactive_ids = bank.inactive_refined_ids_by_level[child_level + 1]
+    inactive_slots = bank.inactive_route_packet_slots_by_level[child_level + 1]
+    @inbounds for (local_idx, src_id) in enumerate(inactive_ids)
         bank.spec.cells[src_id].active && continue
         for q in 1:9
+            packet_slot = inactive_slots[local_idx, q]
+            packet_slot == 0 && continue
             dst_id, kind = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
                 bank.spec, src_id, q)
             dst_id == 0 && continue
-            route = ConservativeTreeRoute2D(src_id, dst_id, q, 1.0, kind)
-            conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
-                bank, F, route, substep; alpha=alpha)
+            _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
+                bank, F, src_id, dst_id, q, 1.0, kind, substep,
+                packet_slot; alpha=alpha)
         end
     end
     return bank

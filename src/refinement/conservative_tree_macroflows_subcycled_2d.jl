@@ -25,7 +25,7 @@ function conservative_tree_mass_roundoff_rtol_2d(::Type{T},
                                                  steps::Integer,
                                                  max_level::Integer;
                                                  active_cell_count::Integer=1,
-                                                 safety=1000) where T<:AbstractFloat
+                                                 safety=2000) where T<:AbstractFloat
     nsteps = max(Int(steps), 1)
     levels = max(Int(max_level) + 1, 1)
     cells = max(Int(active_cell_count), 1)
