@@ -576,6 +576,10 @@ using Kraken
         for max_level in 1:4
             result = run_conservative_tree_poiseuille_subcycled_2d(
                 max_level=max_level, steps=8, Fx=1e-7)
+            cart = run_cartesian_channel_mass_reference_2d(
+                flow=:poiseuille, max_level=max_level, steps=8, Fx=1e-7)
+            guard = conservative_tree_mass_roundoff_rtol_2d(
+                Float64, result.steps, max_level)
             @test result.flow == :poiseuille_subcycled
             @test result.max_level == max_level
             @test result.steps == 8
@@ -583,22 +587,32 @@ using Kraken
             @test all(isfinite, result.analytic_profile)
             @test isfinite(result.l2_error)
             @test isfinite(result.linf_error)
-            @test abs(result.mass_drift) <= 1e-9
+            @test result.max_raw_relative_mass_drift <= guard
+            @test result.relative_mass_drift <=
+                  max(cart.relative_mass_drift, 10eps(Float64))
             @test maximum(result.ux_profile) > 0
             @test result.active_cell_count < result.leaf_equivalent_cell_count
         end
     end
 
-    @testset "subcycled Couette macroflow runs on four nested levels" begin
-        result = run_conservative_tree_couette_subcycled_2d(
-            max_level=4, steps=8, U=1e-4)
-        @test result.flow == :couette_subcycled
-        @test result.max_level == 4
-        @test all(isfinite, result.ux_profile)
-        @test isfinite(result.l2_error)
-        @test isfinite(result.linf_error)
-        @test abs(result.mass_drift) <= 1e-9
-        @test result.ux_profile[end] > result.ux_profile[1]
+    @testset "subcycled Couette macroflow runs from level 1 to 4" begin
+        for max_level in 1:4
+            result = run_conservative_tree_couette_subcycled_2d(
+                max_level=max_level, steps=8, U=1e-4)
+            cart = run_cartesian_channel_mass_reference_2d(
+                flow=:couette, max_level=max_level, steps=8, U=1e-4)
+            guard = conservative_tree_mass_roundoff_rtol_2d(
+                Float64, result.steps, max_level)
+            @test result.flow == :couette_subcycled
+            @test result.max_level == max_level
+            @test all(isfinite, result.ux_profile)
+            @test isfinite(result.l2_error)
+            @test isfinite(result.linf_error)
+            @test result.max_raw_relative_mass_drift <= guard
+            @test result.relative_mass_drift <=
+                  max(cart.relative_mass_drift, 10eps(Float64))
+            @test result.ux_profile[end] > result.ux_profile[1]
+        end
     end
 
     @testset "subcycled macroflow compiles with Float32 storage" begin
@@ -607,6 +621,8 @@ using Kraken
         @test eltype(result.F) == Float32
         @test eltype(result.ux_profile) == Float32
         @test all(isfinite, result.ux_profile)
+        @test result.max_raw_relative_mass_drift <=
+              conservative_tree_mass_roundoff_rtol_2d(Float32, 1, 1)
     end
 
     @testset "scheduled ledger binding rejects wrong events" begin

@@ -752,6 +752,8 @@ New API:
 - `create_conservative_tree_nested_channel_spec_2d(max_level)`;
 - `initialize_conservative_tree_equilibrium_F_2d!`;
 - `conservative_tree_leaf_mean_ux_profile_2d`;
+- `conservative_tree_mass_roundoff_rtol_2d`;
+- `run_cartesian_channel_mass_reference_2d`;
 - `run_conservative_tree_poiseuille_subcycled_2d(max_level=..., ...)`;
 - `run_conservative_tree_couette_subcycled_2d(max_level=..., ...)`.
 
@@ -760,17 +762,29 @@ canaries. A new `pre_stream_level!` hook applies BGK or Guo collision when each
 level receives its own `:advance` event, so L1, L2, L3, and L4 share one
 level-agnostic stepping path.
 
+Mass conservation contract:
+
+- closed channel macro-flows must not have a physical mass drift;
+- each AMR macro step first checks the raw active-mass residual against
+  `conservative_tree_mass_roundoff_rtol_2d`;
+- if the residual is roundoff-scale, it is closed on the rest population
+  `q=1`, which changes mass only and leaves momentum unchanged;
+- if the residual exceeds the guard, the runner throws instead of silently
+  masking a leak;
+- tests compare the final AMR relative drift against a Cartesian
+  leaf-equivalent channel mass reference.
+
 Smoke results for 32 coarse steps on the reference nested channel:
 
 ```text
-poiseuille L1 active=384/768   maxux=4.143945673549552e-6  mass_drift=-1.20e-10
-poiseuille L2 active=576/3072  maxux=4.679369540702683e-6  mass_drift=-3.42e-10
-poiseuille L3 active=768/12288 maxux=5.333825100188538e-6  mass_drift=-5.43e-10
-poiseuille L4 active=960/49152 maxux=6.169223581974620e-6  mass_drift=-5.68e-10
-couette    L1 active=384/768   top-bottom=8.372634228792708e-5 mass_drift=-3.73e-9
-couette    L2 active=576/3072  top-bottom=7.441268409308512e-5 mass_drift=-4.96e-10
-couette    L3 active=768/12288 top-bottom=6.105081179638384e-5 mass_drift=-3.53e-11
-couette    L4 active=960/49152 top-bottom=4.320759047797843e-5 mass_drift=-1.70e-11
+poiseuille L1 final_rel=0.0      raw_max=3.95e-14 cart_rel=5.92e-16
+poiseuille L2 final_rel=1.48e-16 raw_max=1.05e-13 cart_rel=1.78e-15
+poiseuille L3 final_rel=0.0      raw_max=1.49e-13 cart_rel=1.92e-15
+poiseuille L4 final_rel=0.0      raw_max=1.82e-13 cart_rel=2.07e-15
+couette    L1 final_rel=0.0      raw_max=1.30e-12 cart_rel=1.18e-15
+couette    L2 final_rel=0.0      raw_max=3.00e-13 cart_rel=2.96e-16
+couette    L3 final_rel=0.0      raw_max=2.38e-14 cart_rel=2.96e-16
+couette    L4 final_rel=0.0      raw_max=1.18e-14 cart_rel=0.0
 ```
 
 Validated locally:

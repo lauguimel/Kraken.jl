@@ -15,8 +15,19 @@ struct ConservativeTreeSpecMacroFlow2D{T}
     mass_initial::T
     mass_final::T
     mass_drift::T
+    relative_mass_drift::T
+    max_raw_relative_mass_drift::T
     active_cell_count::Int
     leaf_equivalent_cell_count::Int
+end
+
+function conservative_tree_mass_roundoff_rtol_2d(::Type{T},
+                                                 steps::Integer,
+                                                 max_level::Integer;
+                                                 safety=1000) where T<:AbstractFloat
+    nsteps = max(Int(steps), 1)
+    levels = max(Int(max_level) + 1, 1)
+    return T(safety) * eps(T) * T(nsteps) * T(levels)
 end
 
 function _check_conservative_tree_channel_max_level_2d(max_level::Integer)
@@ -79,6 +90,40 @@ function _active_mass_conservative_tree_F_2d(F::AbstractMatrix,
     return mass
 end
 
+@inline function _row_mass_conservative_tree_F_2d(F::AbstractMatrix,
+                                                  cell_id::Int)
+    mass = zero(eltype(F))
+    @inbounds for q in 1:9
+        mass += F[cell_id, q]
+    end
+    return mass
+end
+
+@inline function _restore_row_mass_conservative_tree_F_2d!(
+        F::AbstractMatrix,
+        cell_id::Int,
+        mass_before)
+    mass_after = _row_mass_conservative_tree_F_2d(F, cell_id)
+    @inbounds F[cell_id, 1] += mass_before - mass_after
+    return F
+end
+
+function _enforce_active_mass_conservation_2d!(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        target_mass;
+        rtol)
+    mass_now = _active_mass_conservative_tree_F_2d(F, spec)
+    drift = mass_now - target_mass
+    denom = max(abs(target_mass), eps(typeof(float(target_mass))))
+    rel = abs(drift) / denom
+    rel <= rtol ||
+        throw(ArgumentError("AMR-D mass residual $(rel) exceeds roundoff guard $(rtol)"))
+    first_cell = first(spec.active_cells)
+    @inbounds F[first_cell, 1] -= drift
+    return rel
+end
+
 function _collide_BGK_conservative_tree_active_level_F_2d!(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D,
@@ -88,8 +133,10 @@ function _collide_BGK_conservative_tree_active_level_F_2d!(
     @inbounds for cell_id in spec.active_cells
         cell = spec.cells[cell_id]
         cell.level == level || continue
+        mass_before = _row_mass_conservative_tree_F_2d(F, cell_id)
         collide_BGK_integrated_D2Q9!(@view(F[cell_id, :]),
                                      cell.metrics.volume, omega)
+        _restore_row_mass_conservative_tree_F_2d!(F, cell_id, mass_before)
     end
     return F
 end
@@ -105,8 +152,10 @@ function _collide_Guo_conservative_tree_active_level_F_2d!(
     @inbounds for cell_id in spec.active_cells
         cell = spec.cells[cell_id]
         cell.level == level || continue
+        mass_before = _row_mass_conservative_tree_F_2d(F, cell_id)
         collide_Guo_integrated_D2Q9!(@view(F[cell_id, :]),
                                      cell.metrics.volume, omega, Fx, Fy)
+        _restore_row_mass_conservative_tree_F_2d!(F, cell_id, mass_before)
     end
     return F
 end
@@ -155,19 +204,83 @@ function _subcycled_macroflow_result_2d(flow::Symbol,
                                         F::Matrix{T},
                                         profile::AbstractVector,
                                         analytic::AbstractVector,
-                                        mass_initial) where T
+                                        mass_initial,
+                                        max_raw_relative_mass_drift) where T
     profile_T = T.(profile)
     analytic_T = T.(analytic)
     l2, linf = _profile_errors(profile_T, analytic_T)
     mass_final = _active_mass_conservative_tree_F_2d(F, spec)
+    denom = max(abs(T(mass_initial)), eps(T))
+    relative_mass_drift = abs(mass_final - T(mass_initial)) / denom
     leaf_ny = length(profile_T)
     y = [T(j - 1) / T(leaf_ny - 1) for j in 1:leaf_ny]
     leaf_nx = _conservative_tree_level_size_2d(spec.Nx, spec.max_level)
     return ConservativeTreeSpecMacroFlow2D{T}(
         flow, spec.max_level, steps, spec, table, F, y, profile_T, analytic_T,
         T(l2), T(linf), T(mass_initial), mass_final,
-        mass_final - T(mass_initial),
+        mass_final - T(mass_initial), relative_mass_drift,
+        T(max_raw_relative_mass_drift),
         length(spec.active_cells), leaf_nx * leaf_ny)
+end
+
+function _initialize_cartesian_channel_equilibrium_F_2d!(
+        F::AbstractArray{T,3},
+        volume;
+        rho=1,
+        ux=0,
+        uy=0) where T
+    size(F, 3) == 9 ||
+        throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
+    @inbounds for j in axes(F, 2), i in axes(F, 1), q in 1:9
+        F[i, j, q] = T(volume) * equilibrium(
+            D2Q9(), T(rho), T(ux), T(uy), q)
+    end
+    return F
+end
+
+function run_cartesian_channel_mass_reference_2d(;
+        flow::Symbol,
+        max_level::Integer,
+        steps::Integer,
+        omega=1.2,
+        Fx=1e-6,
+        Fy=0,
+        U=1e-3,
+        rho0=1,
+        T::Type{<:AbstractFloat}=Float64)
+    ml = _check_conservative_tree_channel_max_level_2d(max_level)
+    nsteps = Int(steps)
+    nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
+    scale = 1 << ml
+    nx = 16 * scale
+    ny = 12 * scale
+    volume = one(T) / T(scale * scale)
+    F = zeros(T, nx, ny, 9)
+    Ftmp = similar(F)
+    _initialize_cartesian_channel_equilibrium_F_2d!(F, volume; rho=rho0)
+    mass_initial = sum(F)
+
+    for _ in 1:nsteps
+        if flow == :poiseuille || flow == :poiseuille_subcycled
+            collide_Guo_integrated_D2Q9!(F, volume, omega, Fx, Fy)
+            stream_periodic_x_wall_y_F_2d!(Ftmp, F)
+        elseif flow == :couette || flow == :couette_subcycled
+            collide_BGK_integrated_D2Q9!(F, volume, omega)
+            stream_periodic_x_moving_wall_y_F_2d!(
+                Ftmp, F; u_south=zero(T), u_north=U,
+                rho_wall=rho0, volume=volume)
+        else
+            throw(ArgumentError("flow must be :poiseuille or :couette"))
+        end
+        F, Ftmp = Ftmp, F
+    end
+
+    mass_final = sum(F)
+    drift = mass_final - mass_initial
+    rel = abs(drift) / max(abs(mass_initial), eps(T))
+    return (flow=flow, max_level=ml, steps=nsteps,
+            mass_initial=mass_initial, mass_final=mass_final,
+            mass_drift=drift, relative_mass_drift=rel)
 end
 
 """
@@ -186,7 +299,9 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         rho0=1,
         alpha_c2f=1,
         alpha_f2c=1,
-        T::Type{<:Real}=Float64)
+        enforce_mass::Bool=true,
+        mass_guard_rtol=nothing,
+        T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
     spec = create_conservative_tree_nested_channel_spec_2d(max_level)
@@ -195,6 +310,10 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
     Ftmp = similar(F)
     initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=rho0)
     mass_initial = _active_mass_conservative_tree_F_2d(F, spec)
+    guard = mass_guard_rtol === nothing ?
+        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec.max_level) :
+        T(mass_guard_rtol)
+    max_raw_relative_mass_drift = zero(T)
 
     collide_level! = (Flevel, local_spec, level, event) ->
         _collide_Guo_conservative_tree_active_level_F_2d!(
@@ -204,6 +323,12 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
             Ftmp, F, spec, table; boundary=:periodic_x_wall_y,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
             pre_stream_level! = collide_level!)
+        if enforce_mass
+            raw_rel = _enforce_active_mass_conservation_2d!(
+                Ftmp, spec, mass_initial; rtol=guard)
+            max_raw_relative_mass_drift =
+                max(max_raw_relative_mass_drift, T(raw_rel))
+        end
         F, Ftmp = Ftmp, F
     end
 
@@ -213,7 +338,7 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
                                               rho=rho0)
     return _subcycled_macroflow_result_2d(
         :poiseuille_subcycled, nsteps, spec, table, F, profile, analytic,
-        mass_initial)
+        mass_initial, max_raw_relative_mass_drift)
 end
 
 """
@@ -231,7 +356,9 @@ function run_conservative_tree_couette_subcycled_2d(;
         rho0=1,
         alpha_c2f=1,
         alpha_f2c=1,
-        T::Type{<:Real}=Float64)
+        enforce_mass::Bool=true,
+        mass_guard_rtol=nothing,
+        T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
     spec = create_conservative_tree_nested_channel_spec_2d(max_level)
@@ -240,6 +367,10 @@ function run_conservative_tree_couette_subcycled_2d(;
     Ftmp = similar(F)
     initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=rho0)
     mass_initial = _active_mass_conservative_tree_F_2d(F, spec)
+    guard = mass_guard_rtol === nothing ?
+        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec.max_level) :
+        T(mass_guard_rtol)
+    max_raw_relative_mass_drift = zero(T)
 
     collide_level! = (Flevel, local_spec, level, event) ->
         _collide_BGK_conservative_tree_active_level_F_2d!(
@@ -250,6 +381,12 @@ function run_conservative_tree_couette_subcycled_2d(;
             u_south=zero(T), u_north=U, rho_wall=rho0,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
             pre_stream_level! = collide_level!)
+        if enforce_mass
+            raw_rel = _enforce_active_mass_conservation_2d!(
+                Ftmp, spec, mass_initial; rtol=guard)
+            max_raw_relative_mass_drift =
+                max(max_raw_relative_mass_drift, T(raw_rel))
+        end
         F, Ftmp = Ftmp, F
     end
 
@@ -257,5 +394,5 @@ function run_conservative_tree_couette_subcycled_2d(;
     analytic = couette_analytic_profile_2d(length(profile), U)
     return _subcycled_macroflow_result_2d(
         :couette_subcycled, nsteps, spec, table, F, profile, analytic,
-        mass_initial)
+        mass_initial, max_raw_relative_mass_drift)
 end
