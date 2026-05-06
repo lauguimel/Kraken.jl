@@ -633,7 +633,10 @@ function conservative_tree_subcycle_apply_fine_to_coarse_F_2d!(
         F::AbstractMatrix,
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         parent_cell_id::Integer;
-        boundary::Symbol=:skip)
+        boundary::Symbol=:skip,
+        u_south=0,
+        u_north=0,
+        rho_wall=1)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     parent_id = Int(parent_cell_id)
@@ -651,8 +654,21 @@ function conservative_tree_subcycle_apply_fine_to_coarse_F_2d!(
             bank.spec, parent.level, parent.i + d2q9_cx(q),
             parent.j + d2q9_cy(q))
         if dst_id == 0
-            if policy == :bounceback
-                F[parent_id, d2q9_opposite(q)] += packet
+            if policy != :skip
+                reflected = packet
+                if policy == :periodic_x_moving_wall_y
+                    cy = d2q9_cy(q)
+                    cy != 0 ||
+                        throw(ArgumentError("periodic-x wall-y boundary policy received an x-boundary route; rebuild the route table with periodic_x=true"))
+                    wall_u = cy < 0 ? u_south : u_north
+                    reflected += _moving_wall_delta(parent.metrics.volume,
+                                                    rho_wall, wall_u,
+                                                    d2q9_opposite(q))
+                elseif policy == :periodic_x_wall_y
+                    d2q9_cy(q) != 0 ||
+                        throw(ArgumentError("periodic-x wall-y boundary policy received an x-boundary route; rebuild the route table with periodic_x=true"))
+                end
+                F[parent_id, d2q9_opposite(q)] += reflected
             end
         else
             F[dst_id, q] += packet
@@ -665,13 +681,17 @@ function conservative_tree_subcycle_apply_fine_to_coarse_pair_F_2d!(
         F::AbstractMatrix,
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         parent_level::Integer;
-        boundary::Symbol=:skip)
+        boundary::Symbol=:skip,
+        u_south=0,
+        u_north=0,
+        rho_wall=1)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     pair = conservative_tree_subcycle_spatial_pair_ledgers_2d(
         bank, parent_level)
     for parent_id in keys(pair)
         conservative_tree_subcycle_apply_fine_to_coarse_F_2d!(
-            F, bank, parent_id; boundary=boundary)
+            F, bank, parent_id; boundary=boundary, u_south=u_south,
+            u_north=u_north, rho_wall=rho_wall)
     end
     return F
 end
@@ -680,7 +700,10 @@ function conservative_tree_subcycle_apply_sync_up_F_2d!(
         F::AbstractMatrix,
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D;
-        boundary::Symbol=:skip)
+        boundary::Symbol=:skip,
+        u_south=0,
+        u_north=0,
+        rho_wall=1)
     parent_level = _check_subcycle_spatial_sync_up_event_2d(bank, event)
     packets = bank.fine_to_coarse_route_packets[parent_level + 1]
     if !isempty(packets)
@@ -693,7 +716,8 @@ function conservative_tree_subcycle_apply_sync_up_F_2d!(
         return F
     end
     return conservative_tree_subcycle_apply_fine_to_coarse_pair_F_2d!(
-        F, bank, parent_level; boundary=boundary)
+        F, bank, parent_level; boundary=boundary, u_south=u_south,
+        u_north=u_north, rho_wall=rho_wall)
 end
 
 function _stream_conservative_tree_direct_level_routes_F_2d!(
@@ -702,7 +726,10 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
         spec::ConservativeTreeSpec2D,
         table::ConservativeTreeRouteTable2D,
         level::Int,
-        policy::Symbol)
+        policy::Symbol;
+        u_south=0,
+        u_north=0,
+        rho_wall=1)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
 
     @inbounds for route_id in table.direct_routes
@@ -713,9 +740,11 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
     @inbounds for route_id in table.boundary_routes
         route = table.routes[route_id]
         spec.cells[route.src].level == level || continue
-        if policy == :bounceback
+        if policy != :skip
             Fout[route.src, d2q9_opposite(route.q)] +=
-                route.weight * Fin[route.src, route.q]
+                _conservative_tree_boundary_reflection_packet_2d(
+                    Fin, spec, route, policy; u_south=u_south,
+                    u_north=u_north, rho_wall=rho_wall)
         end
     end
     return Fout
@@ -790,13 +819,17 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
         spec::ConservativeTreeSpec2D,
         table::ConservativeTreeRouteTable2D;
         boundary::Symbol=:skip,
+        u_south=0,
+        u_north=0,
+        rho_wall=1,
         alpha_c2f=1,
         alpha_f2c=1)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     if spec.max_level == 0
         return stream_conservative_tree_routes_F_2d!(
-            Fout, Fin, spec, table; boundary=boundary)
+            Fout, Fin, spec, table; boundary=boundary, u_south=u_south,
+            u_north=u_north, rho_wall=rho_wall)
     end
 
     schedule = create_conservative_tree_subcycle_schedule_2d(spec.max_level)
@@ -825,7 +858,8 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
                     bank, event, Fstate; alpha=alpha_f2c)
             end
             _stream_conservative_tree_direct_level_routes_F_2d!(
-                Fscratch, Fstate, spec, table, level, policy)
+                Fscratch, Fstate, spec, table, level, policy;
+                u_south=u_south, u_north=u_north, rho_wall=rho_wall)
             if level > 0
                 conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
                     Fscratch, bank, event)
@@ -836,7 +870,8 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
                 Fstate, Fscratch, spec, level)
         elseif event.phase == :sync_up
             conservative_tree_subcycle_apply_sync_up_F_2d!(
-                Fpending, bank, event; boundary=boundary)
+                Fpending, bank, event; boundary=boundary, u_south=u_south,
+                u_north=u_north, rho_wall=rho_wall)
         else
             throw(ArgumentError("unknown subcycle event phase $(event.phase)"))
         end
@@ -863,6 +898,10 @@ closure is performed here.
 
 `alpha_c2f` and `alpha_f2c` are the Filippova-Hanel style non-equilibrium
 rescaling factors for coarse-to-fine and fine-to-coarse interface packets.
+`pre_stream_level!`, when provided, is called as
+`pre_stream_level!(Fsource, spec, level, event)` immediately before direct
+routes for that level are streamed. Macro-flow runners use it to apply local
+collision at each level's own subcycled advance.
 """
 function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         Fout::AbstractMatrix,
@@ -870,13 +909,18 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         spec::ConservativeTreeSpec2D,
         table::ConservativeTreeRouteTable2D;
         boundary::Symbol=:skip,
+        u_south=0,
+        u_north=0,
+        rho_wall=1,
         alpha_c2f=1,
-        alpha_f2c=1)
+        alpha_f2c=1,
+        pre_stream_level! = nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     if spec.max_level == 0
         return stream_conservative_tree_routes_F_2d!(
-            Fout, Fin, spec, table; boundary=boundary)
+            Fout, Fin, spec, table; boundary=boundary, u_south=u_south,
+            u_north=u_north, rho_wall=rho_wall)
     end
 
     schedule = create_conservative_tree_subcycle_schedule_2d(spec.max_level)
@@ -904,6 +948,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
                 Fsource, buffers.owned, spec, level)
             conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
                 Fsource, state_bank, level)
+            pre_stream_level! === nothing ||
+                pre_stream_level!(Fsource, spec, level, event)
 
             if level > 0
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
@@ -914,7 +960,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
 
             fill!(Fscratch, zero(eltype(Fscratch)))
             _stream_conservative_tree_direct_level_routes_F_2d!(
-                Fscratch, Fsource, spec, table, level, policy)
+                Fscratch, Fsource, spec, table, level, policy;
+                u_south=u_south, u_north=u_north, rho_wall=rho_wall)
             if level > 0
                 fill!(buffers.ghost_from_coarse,
                       zero(eltype(buffers.ghost_from_coarse)))
@@ -934,7 +981,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
                 state_bank, parent_level)
             parent_reflux = state_bank.levels[parent_level + 1].reflux_to_coarse
             conservative_tree_subcycle_apply_sync_up_F_2d!(
-                parent_reflux, route_bank, event; boundary=boundary)
+                parent_reflux, route_bank, event; boundary=boundary,
+                u_south=u_south, u_north=u_north, rho_wall=rho_wall)
         else
             throw(ArgumentError("unknown subcycle event phase $(event.phase)"))
         end

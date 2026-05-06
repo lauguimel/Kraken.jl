@@ -543,6 +543,72 @@ using Kraken
                            Fin[spec.active_cells, :])) <= 1e-14
     end
 
+    @testset "four-level buffered periodic-x wall-y transport preserves rest" begin
+        spec = create_conservative_tree_spec_2d(16, 12, [
+            ConservativeTreeRefineBlock2D("L1", 5:12, 3:10),
+            ConservativeTreeRefineBlock2D("L2", 13:20, 7:14; parent="L1"),
+            ConservativeTreeRefineBlock2D("L3", 29:36, 17:24; parent="L2"),
+            ConservativeTreeRefineBlock2D("L4", 61:68, 37:44; parent="L3"),
+        ])
+        table = create_conservative_tree_route_table_2d(spec; periodic_x=true)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:periodic_x_wall_y)
+
+        @test spec.max_level == 4
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
+    end
+
+    @testset "subcycled Poiseuille macroflow runs from level 1 to 4" begin
+        for max_level in 1:4
+            result = run_conservative_tree_poiseuille_subcycled_2d(
+                max_level=max_level, steps=8, Fx=1e-7)
+            @test result.flow == :poiseuille_subcycled
+            @test result.max_level == max_level
+            @test result.steps == 8
+            @test all(isfinite, result.ux_profile)
+            @test all(isfinite, result.analytic_profile)
+            @test isfinite(result.l2_error)
+            @test isfinite(result.linf_error)
+            @test abs(result.mass_drift) <= 1e-9
+            @test maximum(result.ux_profile) > 0
+            @test result.active_cell_count < result.leaf_equivalent_cell_count
+        end
+    end
+
+    @testset "subcycled Couette macroflow runs on four nested levels" begin
+        result = run_conservative_tree_couette_subcycled_2d(
+            max_level=4, steps=8, U=1e-4)
+        @test result.flow == :couette_subcycled
+        @test result.max_level == 4
+        @test all(isfinite, result.ux_profile)
+        @test isfinite(result.l2_error)
+        @test isfinite(result.linf_error)
+        @test abs(result.mass_drift) <= 1e-9
+        @test result.ux_profile[end] > result.ux_profile[1]
+    end
+
+    @testset "subcycled macroflow compiles with Float32 storage" begin
+        result = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=1, steps=1, Fx=Float32(1e-7), T=Float32)
+        @test eltype(result.F) == Float32
+        @test eltype(result.ux_profile) == Float32
+        @test all(isfinite, result.ux_profile)
+    end
+
     @testset "scheduled ledger binding rejects wrong events" begin
         schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(2)
         bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)

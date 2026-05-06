@@ -113,6 +113,7 @@ include("refinement/conservative_tree_streaming_3d.jl")
 include("refinement/conservative_tree_streaming_2d.jl")
 include("refinement/conservative_tree_adaptation_2d.jl")
 include("refinement/conservative_tree_subcycling_2d.jl")
+include("refinement/conservative_tree_macroflows_subcycled_2d.jl")
 include("refinement/conservative_tree_gpu_pack_2d.jl")
 include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
@@ -448,6 +449,12 @@ export run_conservative_tree_vfs_mask_adaptive_route_native_2d
 export run_conservative_tree_bfs_macroflow_2d
 export run_conservative_tree_cylinder_macroflow_2d
 export run_conservative_tree_cylinder_channel_macroflow_2d
+export ConservativeTreeSpecMacroFlow2D
+export create_conservative_tree_nested_channel_spec_2d
+export initialize_conservative_tree_equilibrium_F_2d!
+export conservative_tree_leaf_mean_ux_profile_2d
+export run_conservative_tree_poiseuille_subcycled_2d
+export run_conservative_tree_couette_subcycled_2d
 export RefinementPatch3D, RefinedDomain3D
 export create_patch_3d, create_refined_domain_3d, advance_refined_step_3d!
 export prolongate_f_rescaled_3d!, prolongate_f_rescaled_full_3d!

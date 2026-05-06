@@ -719,3 +719,70 @@ Next gate:
 - add a controlled shear/interface canary using non-unit `alpha`;
 - decide where `alpha_c2f/alpha_f2c` are computed from per-level `omega`
   before exposing the knobs in `.krk` AMR-D flows.
+
+## ML4l Periodic-X Wall-Y Channel Closure
+
+Added the first physical channel boundary closure on the recursive route table.
+
+New contracts:
+
+- `create_conservative_tree_route_table_2d(spec; periodic_x=true)` wraps only
+  x samples before active-leaf lookup;
+- y samples outside the domain remain explicit `ROUTE_BOUNDARY` packets;
+- subcycled transport accepts `boundary=:periodic_x_wall_y` for stationary
+  walls and `boundary=:periodic_x_moving_wall_y` for Couette-style moving
+  walls;
+- route tables built without `periodic_x=true` are rejected by the periodic
+  wall policy when an x-only boundary packet reaches the wall closure.
+
+Surgical validation:
+
+- direct route-table canary: west/east packets wrap in x, south/north packets
+  still hit `ROUTE_BOUNDARY`;
+- L4 buffered subcycled rest canary remains exact to roundoff with
+  periodic-x/wall-y closure.
+
+## ML4m Subcycled Macro-Flow Runners L1-L4
+
+Added a scheduler-native macro-flow path for nested AMR-D channel tests.
+
+New API:
+
+- `ConservativeTreeSpecMacroFlow2D`;
+- `create_conservative_tree_nested_channel_spec_2d(max_level)`;
+- `initialize_conservative_tree_equilibrium_F_2d!`;
+- `conservative_tree_leaf_mean_ux_profile_2d`;
+- `run_conservative_tree_poiseuille_subcycled_2d(max_level=..., ...)`;
+- `run_conservative_tree_couette_subcycled_2d(max_level=..., ...)`.
+
+The runner uses the same recursive buffered subcycling schedule as the rest
+canaries. A new `pre_stream_level!` hook applies BGK or Guo collision when each
+level receives its own `:advance` event, so L1, L2, L3, and L4 share one
+level-agnostic stepping path.
+
+Smoke results for 32 coarse steps on the reference nested channel:
+
+```text
+poiseuille L1 active=384/768   maxux=4.143945673549552e-6  mass_drift=-1.20e-10
+poiseuille L2 active=576/3072  maxux=4.679369540702683e-6  mass_drift=-3.42e-10
+poiseuille L3 active=768/12288 maxux=5.333825100188538e-6  mass_drift=-5.43e-10
+poiseuille L4 active=960/49152 maxux=6.169223581974620e-6  mass_drift=-5.68e-10
+couette    L1 active=384/768   top-bottom=8.372634228792708e-5 mass_drift=-3.73e-9
+couette    L2 active=576/3072  top-bottom=7.441268409308512e-5 mass_drift=-4.96e-10
+couette    L3 active=768/12288 top-bottom=6.105081179638384e-5 mass_drift=-3.53e-11
+couette    L4 active=960/49152 top-bottom=4.320759047797843e-5 mass_drift=-1.70e-11
+```
+
+Validated locally:
+
+```text
+julia --project=. -e 'using Test; include("test/test_conservative_tree_spec_2d.jl")'
+julia --project=. -e 'using Test; include("test/test_conservative_tree_subcycling_2d.jl")'
+```
+
+Status:
+
+- macro-flow capability exists for channel flows from L1 to L4;
+- this is still a capability gate, not yet a convergence gate;
+- next physical gate is a long-run Poiseuille/Couette convergence comparison
+  against Cartesian leaf-equivalent runs, then obstacle ramp-up.

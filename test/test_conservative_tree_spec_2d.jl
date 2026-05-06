@@ -351,6 +351,34 @@ using Random
         @test isapprox(west_routes[1].weight, 1.0; atol=1e-14, rtol=0)
     end
 
+    @testset "route table can wrap x while keeping y physical" begin
+        spec = create_conservative_tree_spec_2d(4, 4, ConservativeTreeRefineBlock2D[])
+        table = create_conservative_tree_route_table_2d(spec; periodic_x=true)
+
+        west_src = conservative_tree_cell_id_2d(spec, 0, 1, 2)
+        west_dst = conservative_tree_cell_id_2d(spec, 0, 4, 2)
+        west_routes = [route for route in table.routes
+                       if route.src == west_src && route.q == 4]
+        @test length(west_routes) == 1
+        @test west_routes[1].dst == west_dst
+        @test west_routes[1].kind == DIRECT
+
+        east_src = conservative_tree_cell_id_2d(spec, 0, 4, 2)
+        east_dst = conservative_tree_cell_id_2d(spec, 0, 1, 2)
+        east_routes = [route for route in table.routes
+                       if route.src == east_src && route.q == 2]
+        @test length(east_routes) == 1
+        @test east_routes[1].dst == east_dst
+        @test east_routes[1].kind == DIRECT
+
+        south_src = conservative_tree_cell_id_2d(spec, 0, 2, 1)
+        south_routes = [route for route in table.routes
+                        if route.src == south_src && route.q == 5]
+        @test length(south_routes) == 1
+        @test south_routes[1].dst == 0
+        @test south_routes[1].kind == ROUTE_BOUNDARY
+    end
+
     @testset "route table builds for the existing nested4 cylinder canary" begin
         setup = load_kraken("benchmarks/krk/amr_d_convergence_2d/cylinder_nested4_probe.krk")
         spec = create_conservative_tree_spec_from_krk_2d(setup)
