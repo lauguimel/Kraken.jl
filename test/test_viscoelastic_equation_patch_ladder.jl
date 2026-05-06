@@ -2253,6 +2253,46 @@ function _min_eig_field(Cxx, Cxy, Cyy, is_solid)
     return min_eig
 end
 
+function _square_logconf_force_coupling_probe(; source_scale=1.0, steps=200)
+    geom = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=3)
+    u_ref = 0.005
+    β = 0.59
+    Re = 1.0
+    Wi = 1.0
+    ν_total = u_ref * geom.H_ref / Re
+    λ = Wi * (geom.H_ref / 2) / u_ref
+    ν_s = β * ν_total
+    ν_p = (1 - β) * ν_total
+    model = LogConfOldroydB(G=ν_p / λ, λ=λ)
+    result = run_conformation_step_libb_2d(
+        ; geometry=geom, u_ref_mean=u_ref, ν_s,
+        polymer_model=model, polymer_bc=LogFieldWallBC(),
+        hermite_source_mode=:liu_direct,
+        conformation_magic=1e-6,
+        conformation_divergence_mode=:trace_free,
+        source_scale_dynamics=source_scale,
+        max_steps=steps, avg_window=10,
+        backend=KernelAbstractions.CPU(), FT=Float64,
+    )
+    fluid = .!result.is_solid
+    finite = all(isfinite, result.ux[fluid]) &&
+             all(isfinite, result.uy[fluid]) &&
+             all(isfinite, result.C_xx[fluid]) &&
+             all(isfinite, result.C_xy[fluid]) &&
+             all(isfinite, result.C_yy[fluid])
+    max_abs_C = maximum(maximum(abs, C[fluid])
+                        for C in (result.C_xx, result.C_xy, result.C_yy))
+    return (;
+        result,
+        finite,
+        max_abs_u=max(maximum(abs, result.ux[fluid]),
+                      maximum(abs, result.uy[fluid])),
+        max_abs_C,
+        min_eig=_min_eig_field(result.C_xx, result.C_xy, result.C_yy, result.is_solid),
+        source_scale=result.source_scale_dynamics,
+    )
+end
+
 function _poiseuille_prod_gradient_source_residual(; orientation=:horizontal,
                                                    mode::Symbol=:embedded_axis)
     Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
@@ -2511,6 +2551,30 @@ end
         @test logc.min_eig > 0.45
         @test isfinite(logc.max_abs_C)
     end
+end
+
+@testset "P18b2c3 square log-conf Wi=1 separates CDE from force coupling" begin
+    off = _square_logconf_force_coupling_probe(; source_scale=0.0, steps=200)
+    on = _square_logconf_force_coupling_probe(; source_scale=1.0, steps=200)
+    fluid = .!off.result.is_solid
+    flow_delta = max(
+        maximum(abs.(on.result.ux[fluid] .- off.result.ux[fluid])),
+        maximum(abs.(on.result.uy[fluid] .- off.result.uy[fluid])),
+    )
+    C_delta = maximum(abs.(on.result.C_xx[fluid] .- off.result.C_xx[fluid]))
+
+    @test off.source_scale ≈ 0.0 atol=0.0 rtol=0.0
+    @test on.source_scale ≈ 1.0 atol=0.0 rtol=0.0
+    @test off.finite
+    @test on.finite
+    @test off.min_eig > 0.35
+    @test on.min_eig > 0.35
+    @test off.max_abs_C < 3.0
+    @test on.max_abs_C < 3.0
+    @test flow_delta > 1e-5
+    @test flow_delta < 5e-4
+    @test C_delta > 1e-2
+    @test C_delta < 0.2
 end
 
 @testset "P18b2d cartesian step log-conf smoke: square and BFS" begin

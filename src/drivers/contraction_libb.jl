@@ -41,6 +41,7 @@
                                     hermite_source_mode=:liu_direct,
                                     conformation_magic=1e-6,
                                     conformation_divergence_mode=:trace_free,
+                                    source_scale_dynamics=1.0,
                                     max_steps=200_000, avg_window=20_000,
                                     backend=CPU(), FT=Float64)
 
@@ -67,6 +68,8 @@ Concrete cases are supplied as `StepChannelGeometry2D` specs, e.g.
 - `hermite_source_mode` : `:liu_direct` or `:ce_corrected`, matching the
   validated cylinder driver. This is intentionally exposed for wall/step
   isolation runs.
+- `source_scale_dynamics` : multiplier for the Hermite polymer source injected
+  into the hydrodynamic populations. Use `0.0` for CDE-only coupling canaries.
 - `conformation_magic` : TRT magic parameter Λₚ for conformation/log-conf.
 - `conformation_divergence_mode` : velocity-gradient trace handling for the
   conformation source. Defaults to `:trace_free`, matching the validated
@@ -86,6 +89,7 @@ function run_conformation_step_libb_2d(;
         hermite_source_mode::Symbol=:liu_direct,
         conformation_magic::Real=1e-6,
         conformation_divergence_mode::Symbol=:trace_free,
+        source_scale_dynamics::Union{Nothing,Real}=nothing,
         allow_diagnostic_polymer_bc::Bool=false,
         allow_diagnostic_conformation_collision::Bool=false,
         allow_diagnostic_log_wall_bc::Bool=false,
@@ -127,8 +131,10 @@ function run_conformation_step_libb_2d(;
     Wi      = λ_p * Float64(u_ref_mean) / (geom_h.H_ref / 2)
 
     s_plus_s = 1.0 / (3.0 * ν_s + 0.5)
+    source_scale_dynamics = isnothing(source_scale_dynamics) ?
+        1.0 : Float64(source_scale_dynamics)
 
-    @info "Conformation step-channel (LI-BB V2)" geometry=geom_h.name Nx Ny H_ref=geom_h.H_ref H_in=geom_h.H_in H_out=geom_h.H_out i_step j_low j_high Re Wi beta λ_p tau_plus hermite_source_mode conformation_magic conformation_divergence_mode polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model) u_ref_mean u_in_mean
+    @info "Conformation step-channel (LI-BB V2)" geometry=geom_h.name Nx Ny H_ref=geom_h.H_ref H_in=geom_h.H_in H_out=geom_h.H_out i_step j_low j_high Re Wi beta λ_p tau_plus hermite_source_mode conformation_magic conformation_divergence_mode source_scale_dynamics polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model) u_ref_mean u_in_mean
 
     # Geometry/spec: host object for initialization, device object for kernels.
     geom = transfer_step_geometry_2d(geom_h, backend)
@@ -211,7 +217,8 @@ function run_conformation_step_libb_2d(;
         # Inject Hermite polymer source on f_out
         apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
                                    tau_p_xx, tau_p_xy, tau_p_yy;
-                                   ce_correction = hermite_source_mode === :ce_corrected)
+                                   ce_correction = hermite_source_mode === :ce_corrected,
+                                   source_scale = FT(source_scale_dynamics))
 
         # --- Conformation / log-conformation LBM (TRT) + polymer wall BC ---
         stream_2d!(g_xx_buf, g_xx, Nx, Ny)
@@ -251,6 +258,17 @@ function run_conformation_step_libb_2d(;
             collide_conformation_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=3, divergence_mode=conformation_divergence_mode)
         end
 
+        reset_conformation_inlet_masked_2d!(g_xx, C_xx_inlet, u_profile, geom.west_conformation_mask, Ny)
+        reset_conformation_inlet_masked_2d!(g_xy, C_xy_inlet, u_profile, geom.west_conformation_mask, Ny)
+        reset_conformation_inlet_masked_2d!(g_yy, C_yy_inlet, u_profile, geom.west_conformation_mask, Ny)
+        reset_conformation_outlet_masked_2d!(g_xx, Nx, Ny, geom.east_conformation_mask)
+        reset_conformation_outlet_masked_2d!(g_xy, Nx, Ny, geom.east_conformation_mask)
+        reset_conformation_outlet_masked_2d!(g_yy, Nx, Ny, geom.east_conformation_mask)
+        compute_conformation_macro_2d!(Ψ_xx, g_xx)
+        compute_conformation_macro_2d!(Ψ_xy, g_xy)
+        compute_conformation_macro_2d!(Ψ_yy, g_yy)
+        use_logconf && psi_to_C_2d!(C_xx, C_xy, C_yy, Ψ_xx, Ψ_xy, Ψ_yy)
+
         update_polymer_stress!(tau_p_xx, tau_p_xy, tau_p_yy,
                                  C_xx, C_xy, C_yy, polymer_model)
 
@@ -271,6 +289,7 @@ function run_conformation_step_libb_2d(;
             geometry=geom_h.name,
             Nx=Nx, Ny=Ny, i_step=i_step, j_low=j_low, j_high=j_high,
             hermite_source_mode=hermite_source_mode,
+            source_scale_dynamics=source_scale_dynamics,
             conformation_magic=Float64(conformation_magic),
             conformation_divergence_mode=conformation_divergence_mode,
             Re=Re, Wi=Wi, beta=beta, u_ref=Float64(u_ref_mean),
