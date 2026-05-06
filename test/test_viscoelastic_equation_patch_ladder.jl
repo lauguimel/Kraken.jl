@@ -4045,6 +4045,21 @@ function _square_obstacle_face_qwall(geom)
     return q_wall
 end
 
+function _square_obstacle_solid_qwall(geom)
+    q_wall = zeros(Float64, geom.Nx, geom.Ny, 9)
+    for j in 1:geom.Ny, i in 1:geom.Nx, q in 2:9
+        qw = geom.q_wall[i, j, q]
+        qw > 0.0 || continue
+        ni = i + Int(D2Q9_CX[q])
+        nj = j + Int(D2Q9_CY[q])
+        if 1 <= ni <= geom.Nx && 1 <= nj <= geom.Ny &&
+           !geom.is_solid[i, j] && geom.is_solid[ni, nj]
+            q_wall[i, j, q] = qw
+        end
+    end
+    return q_wall
+end
+
 function _source_mea_increment_for_stress(tau_xx, tau_xy, tau_yy, q_wall, is_solid;
                                           s_plus=1.0)
     Nx, Ny = size(tau_xx)
@@ -4191,6 +4206,72 @@ end
     @test (after.Fx - before.Fx) ≈ (7 / 9) * explicit.Fx atol=P0_ATOL
     @test abs(explicit.Fy) < P0_ATOL
     @test abs(after.Fy - before.Fy) < P0_ATOL
+end
+
+@testset "P23d square source-MEA component matrix is not face traction" begin
+    geom = square_obstacle_channel_geometry_2d(; H=14, side=6, L_up=2, L_down=3)
+    Nx, Ny = geom.Nx, geom.Ny
+    cx = geom.i_step + (geom.H_ref - 1) / 2
+    cy = (Ny - 1) / 2
+    q_face = _square_obstacle_face_qwall(geom)
+    q_solid = _square_obstacle_solid_qwall(geom)
+    x = [(i - 1) - cx for i in 1:Nx, j in 1:Ny]
+    y = [(j - 1) - cy for i in 1:Nx, j in 1:Ny]
+    z = zeros(Float64, Nx, Ny)
+
+    face_area = Float64(geom.H_ref^2)
+    normal_face = (7 / 9) * face_area
+    cross_face = -(7 / 18) * face_area
+    normal_solid = (131 / 108) * face_area
+    shear_solid = (47 / 36) * face_area
+    cross_solid = (5 / 108) * face_area
+
+    cases = (
+        (txx=x, txy=z, tyy=z,
+         explicit=(Fx=face_area, Fy=0.0),
+         face=(Fx=normal_face, Fy=0.0),
+         solid=(Fx=normal_solid, Fy=0.0)),
+        (txx=y, txy=z, tyy=z,
+         explicit=(Fx=0.0, Fy=0.0),
+         face=(Fx=0.0, Fy=cross_face),
+         solid=(Fx=0.0, Fy=cross_solid)),
+        (txx=z, txy=x, tyy=z,
+         explicit=(Fx=0.0, Fy=face_area),
+         face=(Fx=0.0, Fy=0.0),
+         solid=(Fx=0.0, Fy=shear_solid)),
+        (txx=z, txy=y, tyy=z,
+         explicit=(Fx=face_area, Fy=0.0),
+         face=(Fx=0.0, Fy=0.0),
+         solid=(Fx=shear_solid, Fy=0.0)),
+        (txx=z, txy=z, tyy=x,
+         explicit=(Fx=0.0, Fy=0.0),
+         face=(Fx=cross_face, Fy=0.0),
+         solid=(Fx=cross_solid, Fy=0.0)),
+        (txx=z, txy=z, tyy=y,
+         explicit=(Fx=0.0, Fy=face_area),
+         face=(Fx=0.0, Fy=normal_face),
+         solid=(Fx=0.0, Fy=normal_solid)),
+    )
+
+    for case in cases
+        explicit = Kraken.compute_polymeric_drag_2d(
+            case.txx, case.txy, case.tyy, geom.is_solid, Nx, Ny;
+            extrapolate=true,
+        )
+        face = _source_mea_increment_for_stress(
+            case.txx, case.txy, case.tyy, q_face, geom.is_solid,
+        )
+        solid = _source_mea_increment_for_stress(
+            case.txx, case.txy, case.tyy, q_solid, geom.is_solid,
+        )
+
+        @test explicit.Fx ≈ case.explicit.Fx atol=P0_ATOL
+        @test explicit.Fy ≈ case.explicit.Fy atol=P0_ATOL
+        @test face.Fx ≈ case.face.Fx atol=P0_ATOL
+        @test face.Fy ≈ case.face.Fy atol=P0_ATOL
+        @test solid.Fx ≈ case.solid.Fx atol=P0_ATOL
+        @test solid.Fy ≈ case.solid.Fy atol=P0_ATOL
+    end
 end
 
 @testset "P23c curved Hermite source MEA is not surface traction" begin
