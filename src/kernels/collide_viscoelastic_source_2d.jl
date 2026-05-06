@@ -106,9 +106,12 @@ end
                                                    @Const(tau_p_xx),
                                                    @Const(tau_p_xy),
                                                    @Const(tau_p_yy),
-                                                   source_scale)
+                                                   source_scale,
+                                                   apply_y_domain_walls,
+                                                   Ny)
     i, j = @index(Global, NTuple)
-    @inbounds if !is_solid[i, j]
+    @inbounds if !is_solid[i, j] &&
+                 (apply_y_domain_walls || (j != 1 && j != Ny))
         T = eltype(f)
         txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
         pre = -s_plus * T(9.0/2.0) * source_scale
@@ -150,7 +153,8 @@ For BGK, pass `s_plus = ω`.
 function apply_hermite_source_2d!(f, is_solid, s_plus,
                                     tau_p_xx, tau_p_xy, tau_p_yy;
                                     ce_correction::Bool=true,
-                                    source_scale::Real=1)
+                                    source_scale::Real=1,
+                                    apply_y_domain_walls::Bool=true)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)
     T = eltype(f)
@@ -158,7 +162,7 @@ function apply_hermite_source_2d!(f, is_solid, s_plus,
         (ce_correction ? inv(one(T) - T(s_plus) / T(2)) : one(T))
     kernel! = apply_hermite_source_2d_kernel!(backend)
     kernel!(f, is_solid, T(s_plus), tau_p_xx, tau_p_xy, tau_p_yy,
-            source_scale_t;
+            source_scale_t, apply_y_domain_walls, Ny;
             ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)
 end

@@ -154,6 +154,28 @@ struct ZouHePressure{T<:Real} <: AbstractBC
 end
 
 """
+    MaskedZouHeVelocity(profile, mask)
+
+Zou-He velocity condition applied only where `mask[j] == true` on a 2D
+x-face. This is needed for step geometries with partial inlet faces.
+"""
+struct MaskedZouHeVelocity{A<:AbstractArray,M<:AbstractArray} <: AbstractBC
+    profile::A
+    mask::M
+end
+
+"""
+    MaskedZouHePressure(ρ_out, mask)
+
+Zou-He pressure condition applied only where `mask[j] == true` on a 2D
+x-face. This is needed for contractions/BFS with partial outlet faces.
+"""
+struct MaskedZouHePressure{T<:Real,M<:AbstractArray} <: AbstractBC
+    ρ_out::T
+    mask::M
+end
+
+"""
     BCSpec2D(; west, east, south, north)
 
 Per-face BC specification for a 2D rectangular domain. Defaults are
@@ -210,10 +232,55 @@ BCSpec3D(; west::AbstractBC=HalfwayBB(), east::AbstractBC=HalfwayBB(),
     end
 end
 
+@kernel function _bc_west_zh_velocity_masked_2d!(f_out, f_in, profile, mask, s_p, s_m)
+    jm1 = @index(Global); j = jm1 + 1
+    T = eltype(f_out)
+    @inbounds if mask[j]
+        fp1 = f_in[1, j,   1]
+        fp3 = f_in[1, j-1, 3]
+        fp4 = f_in[2, j,   4]
+        fp5 = f_in[1, j+1, 5]
+        fp7 = f_in[2, j-1, 7]
+        fp8 = f_in[2, j+1, 8]
+        u_in = profile[j]
+        ρ_w  = (fp1 + fp3 + fp5 + T(2)*(fp4 + fp7 + fp8)) / (one(T) - u_in)
+        fp2  = fp4 + T(2/3) * ρ_w * u_in
+        fp6  = fp8 - T(0.5)*(fp3 - fp5) + T(1/6) * ρ_w * u_in
+        fp9  = fp7 + T(0.5)*(fp3 - fp5) + T(1/6) * ρ_w * u_in
+        F1,F2,F3,F4,F5,F6,F7,F8,F9 = _trt_collide_local(
+            fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, s_p, s_m)
+        f_out[1, j, 1] = F1; f_out[1, j, 2] = F2; f_out[1, j, 3] = F3
+        f_out[1, j, 4] = F4; f_out[1, j, 5] = F5; f_out[1, j, 6] = F6
+        f_out[1, j, 7] = F7; f_out[1, j, 8] = F8; f_out[1, j, 9] = F9
+    end
+end
+
 @kernel function _bc_east_zh_pressure_2d!(f_out, f_in, Nx, ρ_out, s_p, s_m)
     jm1 = @index(Global); j = jm1 + 1
     T = eltype(f_out)
     @inbounds begin
+        fp1 = f_in[Nx,   j,   1]
+        fp2 = f_in[Nx-1, j,   2]
+        fp3 = f_in[Nx,   j-1, 3]
+        fp5 = f_in[Nx,   j+1, 5]
+        fp6 = f_in[Nx-1, j-1, 6]
+        fp9 = f_in[Nx-1, j+1, 9]
+        u_x = -one(T) + (fp1 + fp3 + fp5 + T(2)*(fp2 + fp6 + fp9)) / ρ_out
+        fp4 = fp2 - T(2/3) * ρ_out * u_x
+        fp7 = fp9 - T(0.5)*(fp3 - fp5) - T(1/6) * ρ_out * u_x
+        fp8 = fp6 + T(0.5)*(fp3 - fp5) - T(1/6) * ρ_out * u_x
+        F1,F2,F3,F4,F5,F6,F7,F8,F9 = _trt_collide_local(
+            fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, s_p, s_m)
+        f_out[Nx, j, 1] = F1; f_out[Nx, j, 2] = F2; f_out[Nx, j, 3] = F3
+        f_out[Nx, j, 4] = F4; f_out[Nx, j, 5] = F5; f_out[Nx, j, 6] = F6
+        f_out[Nx, j, 7] = F7; f_out[Nx, j, 8] = F8; f_out[Nx, j, 9] = F9
+    end
+end
+
+@kernel function _bc_east_zh_pressure_masked_2d!(f_out, f_in, Nx, ρ_out, mask, s_p, s_m)
+    jm1 = @index(Global); j = jm1 + 1
+    T = eltype(f_out)
+    @inbounds if mask[j]
         fp1 = f_in[Nx,   j,   1]
         fp2 = f_in[Nx-1, j,   2]
         fp3 = f_in[Nx,   j-1, 3]
@@ -240,6 +307,11 @@ end
     _bc_west_zh_velocity_2d!(backend)(f_out, f_in, bc.profile, s_p, s_m;
                                        ndrange=(Ny - 2,))
 end
+@inline function _apply_bc_2d_west!(backend, f_out, f_in, bc::MaskedZouHeVelocity,
+                                     s_p, s_m, Nx, Ny)
+    _bc_west_zh_velocity_masked_2d!(backend)(f_out, f_in, bc.profile, bc.mask,
+                                             s_p, s_m; ndrange=(Ny - 2,))
+end
 
 @inline function _apply_bc_2d_east!(backend, f_out, f_in, ::HalfwayBB,
                                      s_p, s_m, Nx, Ny) end
@@ -247,6 +319,11 @@ end
                                      s_p, s_m, Nx, Ny)
     _bc_east_zh_pressure_2d!(backend)(f_out, f_in, Nx, eltype(f_out)(bc.ρ_out),
                                         s_p, s_m; ndrange=(Ny - 2,))
+end
+@inline function _apply_bc_2d_east!(backend, f_out, f_in, bc::MaskedZouHePressure,
+                                     s_p, s_m, Nx, Ny)
+    _bc_east_zh_pressure_masked_2d!(backend)(f_out, f_in, Nx, eltype(f_out)(bc.ρ_out),
+                                             bc.mask, s_p, s_m; ndrange=(Ny - 2,))
 end
 
 # (South / North ZouHe variants can be added later — channel walls are
@@ -261,10 +338,10 @@ each active face, applies the Zou-He closure, and collides locally with
 TRT Λ=3/16 at the requested viscosity `ν`.
 """
 function apply_bc_rebuild_2d!(f_out, f_in, bcspec::BCSpec2D, ν::Real,
-                                Nx::Int, Ny::Int)
+                                Nx::Int, Ny::Int; Λ::Real=3/16)
     backend = KernelAbstractions.get_backend(f_out)
     T = eltype(f_out)
-    s_p_r, s_m_r = trt_rates(ν; Λ=3/16)
+    s_p_r, s_m_r = trt_rates(ν; Λ=Λ)
     s_p = T(s_p_r); s_m = T(s_m_r)
     _apply_bc_2d_west!(backend, f_out, f_in, bcspec.west, s_p, s_m, Nx, Ny)
     _apply_bc_2d_east!(backend, f_out, f_in, bcspec.east, s_p, s_m, Nx, Ny)
@@ -388,10 +465,10 @@ end
 on BC type; south/north/bottom/top are assumed `HalfwayBB`.
 """
 function apply_bc_rebuild_3d!(f_out, f_in, bcspec::BCSpec3D, ν::Real,
-                                Nx::Int, Ny::Int, Nz::Int)
+                                Nx::Int, Ny::Int, Nz::Int; Λ::Real=3/16)
     backend = KernelAbstractions.get_backend(f_out)
     T = eltype(f_out)
-    s_p_r, s_m_r = trt_rates(ν; Λ=3/16)
+    s_p_r, s_m_r = trt_rates(ν; Λ=Λ)
     s_p = T(s_p_r); s_m = T(s_m_r)
     _apply_bc_3d_west!(backend, f_out, f_in, bcspec.west, s_p, s_m, Nx, Ny, Nz)
     _apply_bc_3d_east!(backend, f_out, f_in, bcspec.east, s_p, s_m, Nx, Ny, Nz)

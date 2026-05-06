@@ -39,6 +39,13 @@ const _TRT_LIBB_V2_SPEC = LBMSpec(
     WriteMoments(),                      # pre-collision moments (correct after pre-phase)
 )
 
+const _TRT_LIBB_V2_HERMITE_SPEC = LBMSpec(
+    PullHalfwayBB(), SolidInert(),
+    ApplyLiBBPrePhase(),
+    Moments(), CollideTRTDirectHermite(),
+    WriteMoments(),
+)
+
 """
     fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
                              q_wall, uw_x, uw_y, Nx, Ny, ν; Λ=3/16)
@@ -56,5 +63,32 @@ function fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
     kernel!(f_out, ρ, ux, uy, f_in, is_solid,
             q_wall, uw_link_x, uw_link_y,
             Nx, Ny, ET(s_plus), ET(s_minus);
+            ndrange=(Nx, Ny))
+end
+
+"""
+    fused_trt_libb_v2_hermite_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                     q_wall, uw_x, uw_y,
+                                     tau_p_xx, tau_p_xy, tau_p_yy,
+                                     Nx, Ny, ν; Λ=3/16, source_scale=1)
+
+Experimental LI-BB V2 step with the polymer Hermite stress source fused into
+the TRT collision. `source_scale=1` gives the local Liu/Yu in-collision
+amplitude; `source_scale=1/(1-s_plus/2)` gives the standalone CE-corrected
+amplitude used by the post-collision source.
+"""
+function fused_trt_libb_v2_hermite_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                           q_wall, uw_link_x, uw_link_y,
+                                           tau_p_xx, tau_p_xy, tau_p_yy,
+                                           Nx, Ny, ν; Λ::Real=3/16,
+                                           source_scale::Real=1)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    kernel! = build_lbm_kernel(backend, _TRT_LIBB_V2_HERMITE_SPEC)
+    kernel!(f_out, ρ, ux, uy, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y,
+            tau_p_xx, tau_p_xy, tau_p_yy,
+            Nx, Ny, ET(s_plus), ET(s_minus), ET(source_scale);
             ndrange=(Nx, Ny))
 end

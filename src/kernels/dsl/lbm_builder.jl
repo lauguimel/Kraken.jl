@@ -94,7 +94,7 @@ function build_lbm_kernel(backend, ::LBMSpec{S, Bricks}) where {S, Bricks}
         end
     end
     Core.eval(@__MODULE__, src)
-    ctor = getfield(@__MODULE__, kname)
+    ctor = Base.invokelatest(getfield, @__MODULE__, kname)
     # World-age: `ctor` and its produced kernel were just `eval`d. On
     # CPU, calling the kernel from user code (later world) works. On
     # GPU backends (CUDA/Metal), `KernelAbstractions` JITs an extra

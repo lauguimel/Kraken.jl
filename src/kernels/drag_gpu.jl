@@ -192,6 +192,10 @@ each thread writes its own slot. The caller sums on host with
 function compute_drag_libb_mei_2d_gpu!(Fx_link, Fy_link, links::CutLinkList,
                                          f, uw_x, uw_y,
                                          Nx::Integer, Ny::Integer)
+    # Skip kernel launch for empty link lists. KernelAbstractions/CUDA cannot
+    # launch ndrange=(0,), which can happen in multi-block or diagnostic cases
+    # where a block has no cylinder cut links.
+    links.Nlinks == 0 && return nothing
     backend = KernelAbstractions.get_backend(f)
     _drag_mei_2d_list_kernel!(backend)(Fx_link, Fy_link,
                                          links.list_i, links.list_j,

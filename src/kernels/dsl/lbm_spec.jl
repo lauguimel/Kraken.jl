@@ -91,10 +91,11 @@ const CANONICAL_ARG_ORDER = [
     :f_out, :ρ_out, :ux_out, :uy_out, :uz_out,
     # input arrays (@Const-able)
     :f_in, :is_solid, :q_wall, :uw_link_x, :uw_link_y, :uw_link_z,
+    :tau_p_xx, :tau_p_xy, :tau_p_yy,
     # integer scalars
     :Nx, :Ny, :Nz,
     # float scalars
-    :ω, :s_plus, :s_minus,
+    :ω, :s_plus, :s_minus, :source_scale,
 ]
 
 function _canonical_sort(args::AbstractVector{Symbol})

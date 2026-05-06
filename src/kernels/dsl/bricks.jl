@@ -25,14 +25,16 @@ required_args(::PullHalfwayBB) = (:f_in, :Nx, :Ny)
 phase(::PullHalfwayBB) = :pre_solid
 emit_code(::PullHalfwayBB) = quote
     fp1 = f_in[i, j, 1]
-    fp2 = ifelse(i > 1,             f_in[i - 1, j,     2], f_in[i, j, 4])
-    fp3 = ifelse(j > 1,             f_in[i,     j - 1, 3], f_in[i, j, 5])
-    fp4 = ifelse(i < Nx,            f_in[i + 1, j,     4], f_in[i, j, 2])
-    fp5 = ifelse(j < Ny,            f_in[i,     j + 1, 5], f_in[i, j, 3])
-    fp6 = ifelse(i > 1  && j > 1,   f_in[i - 1, j - 1, 6], f_in[i, j, 8])
-    fp7 = ifelse(i < Nx && j > 1,   f_in[i + 1, j - 1, 7], f_in[i, j, 9])
-    fp8 = ifelse(i < Nx && j < Ny,  f_in[i + 1, j + 1, 8], f_in[i, j, 6])
-    fp9 = ifelse(i > 1  && j < Ny,  f_in[i - 1, j + 1, 9], f_in[i, j, 7])
+    # `ifelse` evaluates both branches. Clamp indices so the discarded branch
+    # cannot perform an out-of-bounds read under `@inbounds`.
+    fp2 = ifelse(i > 1,             f_in[max(i - 1, 1),  j,              2], f_in[i, j, 4])
+    fp3 = ifelse(j > 1,             f_in[i,              max(j - 1, 1),  3], f_in[i, j, 5])
+    fp4 = ifelse(i < Nx,            f_in[min(i + 1, Nx), j,              4], f_in[i, j, 2])
+    fp5 = ifelse(j < Ny,            f_in[i,              min(j + 1, Ny), 5], f_in[i, j, 3])
+    fp6 = ifelse(i > 1  && j > 1,   f_in[max(i - 1, 1),  max(j - 1, 1),  6], f_in[i, j, 8])
+    fp7 = ifelse(i < Nx && j > 1,   f_in[min(i + 1, Nx), max(j - 1, 1),  7], f_in[i, j, 9])
+    fp8 = ifelse(i < Nx && j < Ny,  f_in[min(i + 1, Nx), min(j + 1, Ny), 8], f_in[i, j, 6])
+    fp9 = ifelse(i > 1  && j < Ny,  f_in[max(i - 1, 1),  min(j + 1, Ny), 9], f_in[i, j, 7])
 end
 
 # ------------------------------------------------------------------
@@ -138,6 +140,48 @@ emit_code(::CollideTRTDirect) = quote
     f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6)
     f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9)
     f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7)
+end
+
+"TRT collision with Liu/Yu Hermite stress source written directly to f_out."
+struct CollideTRTDirectHermite <: LBMBrick end
+required_args(::CollideTRTDirectHermite) =
+    (:f_out, :s_plus, :s_minus, :tau_p_xx, :tau_p_xy, :tau_p_yy, :source_scale)
+emit_code(::CollideTRTDirectHermite) = quote
+    feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
+    feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
+    feq3 = feq_2d(Val(3), ρ, ux, uy, usq)
+    feq4 = feq_2d(Val(4), ρ, ux, uy, usq)
+    feq5 = feq_2d(Val(5), ρ, ux, uy, usq)
+    feq6 = feq_2d(Val(6), ρ, ux, uy, usq)
+    feq7 = feq_2d(Val(7), ρ, ux, uy, usq)
+    feq8 = feq_2d(Val(8), ρ, ux, uy, usq)
+    feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
+    a = (s_plus + s_minus) * T(0.5)
+    b = (s_plus - s_minus) * T(0.5)
+
+    txx = tau_p_xx[i, j]
+    txy = tau_p_xy[i, j]
+    tyy = tau_p_yy[i, j]
+    pre = -s_plus * T(9.0 / 2.0) * source_scale
+    cs2 = T(1 / 3)
+    wr = T(4 / 9)
+    wa = T(1 / 9)
+    we = T(1 / 36)
+    T1 = pre * wr * (-cs2 * (txx + tyy))
+    T2 = pre * wa * ((one(T) - cs2) * txx - cs2 * tyy)
+    T3 = pre * wa * (-cs2 * txx + (one(T) - cs2) * tyy)
+    T6 = pre * we * ((one(T) - cs2) * txx + (one(T) - cs2) * tyy + T(2) * txy)
+    T7 = pre * we * ((one(T) - cs2) * txx + (one(T) - cs2) * tyy - T(2) * txy)
+
+    f_out[i, j, 1] = fp1 - s_plus * (fp1 - feq1) + T1
+    f_out[i, j, 2] = fp2 - a * (fp2 - feq2) - b * (fp4 - feq4) + T2
+    f_out[i, j, 4] = fp4 - a * (fp4 - feq4) - b * (fp2 - feq2) + T2
+    f_out[i, j, 3] = fp3 - a * (fp3 - feq3) - b * (fp5 - feq5) + T3
+    f_out[i, j, 5] = fp5 - a * (fp5 - feq5) - b * (fp3 - feq3) + T3
+    f_out[i, j, 6] = fp6 - a * (fp6 - feq6) - b * (fp8 - feq8) + T6
+    f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6) + T6
+    f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9) + T7
+    f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7) + T7
 end
 
 # ------------------------------------------------------------------

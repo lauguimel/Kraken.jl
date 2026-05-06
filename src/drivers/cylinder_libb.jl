@@ -45,6 +45,37 @@ end
 const _D2Q9_OPP = (1, 4, 5, 2, 3, 8, 9, 6, 7)
 
 """
+    compute_drag_libb_postpair_2d(f_post, q_wall, Nx, Ny) -> (Fx, Fy)
+
+Diagnostic momentum exchange for a post-LI-BB population array. For each
+cut link q it sums the outgoing post-collision population `f_q` and the
+already-overwritten reflected population `f_qbar` stored in `f_post`.
+
+This is the direct pair form of the stationary-wall exchange,
+`F_link = c_q · (f_q + f_qbar_reflected)`. It is useful for checking that
+`compute_drag_libb_mei_2d` is not reconstructing a Bouzidi reflection twice
+when called on a post-boundary `f_out` array. It is diagnostic only; for
+quantitative interpolated LI-BB cylinder drag, keep `compute_drag_libb_mei_2d`.
+"""
+function compute_drag_libb_postpair_2d(f_post, q_wall, Nx::Int, Ny::Int)
+    f = Array(f_post)
+    qw = Array(q_wall)
+    cxv = (0, 1, 0, -1,  0, 1, -1, -1,  1)
+    cyv = (0, 0, 1,  0, -1, 1,  1, -1, -1)
+    Fx = 0.0; Fy = 0.0
+    @inbounds for j in 1:Ny, i in 1:Nx
+        for q in 2:9
+            qw[i, j, q] > 0 || continue
+            qbar = _D2Q9_OPP[q]
+            F_link = Float64(f[i, j, q]) + Float64(f[i, j, qbar])
+            Fx += Float64(cxv[q]) * F_link
+            Fy += Float64(cyv[q]) * F_link
+        end
+    end
+    return (Fx = Fx, Fy = Fy)
+end
+
+"""
     compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y, Nx, Ny)
         -> (Fx, Fy)
 
@@ -54,16 +85,15 @@ each cut link q on a fluid cell, the force per link per step is
 
     F_link = c_q · (f_q_pre + f_q̄_bouzidi)
 
-where `f_q_pre = f_pre[i,j,q]` (pop q pre-step at the fluid cell,
-i.e. post-coll from the previous step) and `f_q̄_bouzidi` is the
-arriving pop computed via the same `_libb_branch` used in the
-kernel's ApplyLiBBPrePhase brick (lag-1 Bouzidi estimate). Reduces to
-`2·c_q·f_q` at q_w = 0.5 stationary, matching the halfway formula.
+where `f_q_pre = f_pre[i,j,q]` and `f_q̄_bouzidi` is the arriving
+population computed via the same `_libb_branch` used in the LI-BB kernel.
+Reduces to `2·c_q·f_q` at q_w = 0.5 stationary, matching the halfway
+formula.
 
-`f_pre` must be the `f_in` array at step N (= `f_out` from step N-1
-BEFORE the boundary patches of step N are applied; in the driver we
-pass the full `f_in` each sampling step). `uw_link_x/y` are the per-
-link wall-velocity arrays (zero for a stationary cylinder).
+Current V2 cylinder drivers pass the post-boundary `f_out` array to this
+routine; this reconstruction path is the empirically validated force path for
+the Newtonian LI-BB benchmark. `uw_link_x/y` are the per-link wall-velocity
+arrays (zero for a stationary cylinder).
 """
 function compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y,
                                     Nx::Int, Ny::Int)
@@ -76,6 +106,25 @@ function compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y,
                                                       uw_link_y, Nx, Ny)
     end
 end
+
+"""
+    compute_drag_libb_liu_eq63_2d(f_post, q_wall, uw_link_x, uw_link_y, Nx, Ny)
+        -> (Fx, Fy)
+
+Explicit diagnostic for Liu/Yu Eq. 63:
+
+    F_x = Σ_{x_f∈Γ_b} Σ_{i∈I_w} e_{ix}
+          (f_i†(x_f,t) + f_ī(x_f,t+Δt))
+
+in lattice units. For Kraken's interpolated LI-BB storage, `f_ī(x_f,t+Δt)`
+is reconstructed with the same Bouzidi branch used by the boundary update,
+so this is numerically identical to `compute_drag_libb_mei_2d` when called on
+the post-collision `f_out` array. The separate name exists to make Liu Eq. 63
+selection explicit in validation matrices.
+"""
+compute_drag_libb_liu_eq63_2d(f_post, q_wall, uw_link_x, uw_link_y,
+                              Nx::Int, Ny::Int) =
+    compute_drag_libb_mei_2d(f_post, q_wall, uw_link_x, uw_link_y, Nx, Ny)
 
 function _compute_drag_libb_mei_2d_host(f_pre, q_wall, uw_link_x, uw_link_y,
                                           Nx::Int, Ny::Int)
@@ -149,16 +198,17 @@ BCSpec2D(west=ZouHeVelocity(u_profile), east=ZouHePressure(ρ_out)),
 ν, Nx, Ny)` in new code — it decouples BC choice from the driver.
 """
 function rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out::Real,
-                                        ν::Real, Nx::Int, Ny::Int)
+                                        ν::Real, Nx::Int, Ny::Int; Λ::Real=3/16)
     bc = BCSpec2D(; west = ZouHeVelocity(u_profile),
                     east = ZouHePressure(eltype(f_out)(ρ_out)))
-    apply_bc_rebuild_2d!(f_out, f_in, bc, ν, Nx, Ny)
+    apply_bc_rebuild_2d!(f_out, f_in, bc, ν, Nx, Ny; Λ=Λ)
 end
 
 """
     run_cylinder_libb_2d(; Nx=300, Ny=80, cx=Nx÷4, cy=Ny÷2, radius=10,
                           u_in=0.04, ν=0.04, max_steps=50000,
-                          avg_window=5000, inlet=:parabolic, ρ_out=1.0)
+                          avg_window=5000, drag_stride=1,
+                          inlet=:parabolic, ρ_out=1.0)
 
 2D cylinder with LI-BB V2 boundary condition. Parabolic / uniform
 Zou-He velocity inlet, Zou-He pressure outlet; both reconstructed from
@@ -170,12 +220,18 @@ Arguments:
 - `u_in`: centerline u_max for `:parabolic` inlet; uniform u for `:uniform`.
 - `inlet`: `:parabolic` (Schäfer-Turek 2D convention) or `:uniform`.
 - `ρ_out`: outlet density for the Zou-He pressure BC (default 1).
+- `drag_stride`: sample drag every N steps during `avg_window` (default 1).
+- `momentum_exchange_mode`: `:mei_reconstruct` for the validated LI-BB MEA,
+  `:liu_eq63` for the explicit Liu/Yu Eq. 63 diagnostic,
+  `:simple_halfway` for the old `2c_q f_q` diagnostic, or `:postpair` for
+  diagnostics only.
 
 Returns a NamedTuple with:
 - `ρ`, `ux`, `uy`, `is_solid`, `q_wall`, `u_ref`, `D`, `Fx`, `Fy`
 - `Cd = 2·Fx / (u_ref² · D)` with `u_ref = u_mean = 2/3 · u_max`
   (parabolic) or `u_ref = u_in` (uniform).
 - `Cl` analogously.
+- `n_drag_samples`: number of drag samples averaged.
 
 Reference for Schäfer-Turek 2D-1 (Re=20, blockage ≈ 25%): Cd ≈ 5.58.
 """
@@ -186,12 +242,18 @@ function run_cylinder_libb_2d(; Nx::Int=300, Ny::Int=80,
                                 u_in::Real=0.04, ν::Real=0.04,
                                 max_steps::Int=50_000,
                                 avg_window::Int=5_000,
+                                drag_stride::Int=1,
+                                momentum_exchange_mode::Symbol=:mei_reconstruct,
                                 inlet::Symbol=:parabolic,
                                 ρ_out::Real=1.0,
+                                solvent_magic::Real=3/16,
                                 backend=KernelAbstractions.CPU(),
                                 T::Type{<:AbstractFloat}=Float64)
+    drag_stride > 0 || error("drag_stride must be positive")
+    momentum_exchange_mode in (:mei_reconstruct, :liu_eq63, :simple_halfway, :postpair) ||
+        error("unknown momentum_exchange_mode $(momentum_exchange_mode); expected :mei_reconstruct, :liu_eq63, :simple_halfway, or :postpair")
     cx = isnothing(cx) ? Nx ÷ 4 : Float64(cx)
-    cy = isnothing(cy) ? Ny ÷ 2 : Float64(cy)
+    cy = isnothing(cy) ? (Ny - 1) / 2 : Float64(cy)
 
     q_wall_h, is_solid_h = precompute_q_wall_cylinder(Nx, Ny, cx, cy, radius; FT=T)
 
@@ -232,12 +294,22 @@ function run_cylinder_libb_2d(; Nx::Int=300, Ny::Int=80,
 
     for step in 1:max_steps
         fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
-                                 q_wall, uw_x, uw_y, Nx, Ny, T(ν))
+                                 q_wall, uw_x, uw_y, Nx, Ny, T(ν);
+                                 Λ=solvent_magic)
         # Pre-collision Zou-He rebuild at i=1 and i=Nx (j=2..Ny-1)
-        rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out, ν, Nx, Ny)
+        rebuild_inlet_outlet_libb_2d!(f_out, f_in, u_profile, ρ_out, ν, Nx, Ny;
+                                      Λ=solvent_magic)
 
-        if step > max_steps - avg_window
-            drag = compute_drag_libb_mei_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny)
+        if step > max_steps - avg_window &&
+           ((step - (max_steps - avg_window) - 1) % drag_stride == 0 ||
+            step == max_steps)
+            drag = momentum_exchange_mode === :postpair ?
+                compute_drag_libb_postpair_2d(f_out, q_wall, Nx, Ny) :
+                (momentum_exchange_mode === :simple_halfway ?
+                 compute_drag_libb_2d(f_out, q_wall, Nx, Ny) :
+                 (momentum_exchange_mode === :liu_eq63 ?
+                  compute_drag_libb_liu_eq63_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny) :
+                  compute_drag_libb_mei_2d(f_out, q_wall, uw_x, uw_y, Nx, Ny)))
             Fx_sum += drag.Fx; Fy_sum += drag.Fy
             n_avg  += 1
         end
@@ -249,11 +321,15 @@ function run_cylinder_libb_2d(; Nx::Int=300, Ny::Int=80,
     Fx_avg = Fx_sum / n_avg
     Fy_avg = Fy_sum / n_avg
     D      = 2 * Float64(radius)
+    Re_R   = u_ref * Float64(radius) / Float64(ν)
+    Re_D   = u_ref * D / Float64(ν)
     Cd     = 2.0 * Fx_avg / (u_ref^2 * D)
     Cl     = 2.0 * Fy_avg / (u_ref^2 * D)
 
     return (; ρ = Array(ρ), ux = Array(ux), uy = Array(uy),
              Cd, Cl, Fx = Fx_avg, Fy = Fy_avg,
              q_wall = Array(q_wall), is_solid = Array(is_solid),
-             u_ref, D, inlet)
+             u_ref, D, Re_R, Re_D, inlet, momentum_exchange_mode,
+             solvent_magic = Float64(solvent_magic),
+             n_drag_samples = n_avg)
 end

@@ -42,8 +42,9 @@ using KernelAbstractions
             feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
 
             txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
-            # Hermite stress source for BGK + Guo collision, corrected
-            # for the CE (1-ω/2) factor — see collide_viscoelastic_source_2d.jl.
+            # Hermite stress source fused into the BGK + Guo collision.
+            # Unlike `apply_hermite_source_2d!`, this in-collision form
+            # does not use an explicit (1-ω/2) denominator.
             pre = -ω * T(9.0/2.0)
             cs2 = T(1/3)
             wr = T(4/9); wa = T(1/9); we = T(1/36)
