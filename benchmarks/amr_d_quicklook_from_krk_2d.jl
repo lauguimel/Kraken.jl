@@ -212,9 +212,9 @@ end
 
 function _ql_leaf_fields(F, is_solid; volume=0.25, force_x=0.0, force_y=0.0)
     ux = fill(NaN, size(F, 1), size(F, 2))
-    uy = similar(ux)
-    rho = similar(ux)
-    speed = similar(ux)
+    uy = fill(NaN, size(F, 1), size(F, 2))
+    rho = fill(NaN, size(F, 1), size(F, 2))
+    speed = fill(NaN, size(F, 1), size(F, 2))
     @inbounds for j in axes(F, 2), i in axes(F, 1)
         is_solid[i, j] && continue
         cell = @view F[i, j, :]
@@ -259,9 +259,9 @@ function _ql_state_from_spec_result(result; force_x=0.0, force_y=0.0,
     leaf_nx = spec.Nx << spec.max_level
     leaf_ny = spec.Ny << spec.max_level
     ux = fill(NaN, leaf_nx, leaf_ny)
-    uy = similar(ux)
-    rho = similar(ux)
-    speed = similar(ux)
+    uy = fill(NaN, leaf_nx, leaf_ny)
+    rho = fill(NaN, leaf_nx, leaf_ny)
+    speed = fill(NaN, leaf_nx, leaf_ny)
     level = fill(-1, leaf_nx, leaf_ny)
 
     @inbounds for cell_id in spec.active_cells
@@ -602,11 +602,12 @@ end
 function _ql_lines_finite!(ax, xs, ys; label=nothing, kwargs...)
     first_i = nothing
     label_pending = label
-    for k in 1:(length(xs) + 1)
-        finite = k <= length(xs) && isfinite(xs[k]) && isfinite(ys[k])
+    n = min(length(xs), length(ys))
+    for k in 1:(n + 1)
+        finite = k <= n && isfinite(xs[k]) && isfinite(ys[k])
         if finite && first_i === nothing
             first_i = k
-        elseif (!finite || k == length(xs) + 1) && first_i !== nothing
+        elseif (!finite || k == n + 1) && first_i !== nothing
             last_i = k - 1
             if last_i >= first_i
                 if label_pending === nothing
@@ -621,6 +622,14 @@ function _ql_lines_finite!(ax, xs, ys; label=nothing, kwargs...)
         end
     end
     return ax
+end
+
+function _ql_has_finite_pairs(xs, ys)
+    n = min(length(xs), length(ys))
+    for k in 1:n
+        isfinite(xs[k]) && isfinite(ys[k]) && return true
+    end
+    return false
 end
 
 function _ql_plot_profiles(path, result, state; title)
@@ -641,7 +650,9 @@ function _ql_plot_profiles(path, result, state; title)
                       color=:orangered, linewidth=2.8)
     _ql_lines_finite!(ax1, analytic, y_mean; label="analytic",
                       color=:black, linestyle=:dash, linewidth=2.2)
-    axislegend(ax1, position=:rb)
+    (_ql_has_finite_pairs(profile, y_mean) ||
+     _ql_has_finite_pairs(analytic, y_mean)) &&
+        axislegend(ax1, position=:rb)
 
     ax2 = Axis(fig[1, 2]; title="$title centerline ux",
                xlabel="x/Lx", ylabel="ux")
@@ -728,7 +739,10 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
                       color=:dodgerblue4, linewidth=2.5)
     _ql_lines_finite!(ax1, analytic, y_amr; label="analytic",
                       color=:black, linestyle=:dash, linewidth=2.2)
-    axislegend(ax1, position=:rb)
+    (_ql_has_finite_pairs(amr_profile, y_amr) ||
+     _ql_has_finite_pairs(ref_profile, y_ref) ||
+     _ql_has_finite_pairs(analytic, y_amr)) &&
+        axislegend(ax1, position=:rb)
 
     ax2 = Axis(fig[1, 2]; title="$title centerline ux",
                xlabel="x/Lx", ylabel="ux")
@@ -737,7 +751,9 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax2, x, reference_state.fields.ux[1:nx, j_mid];
                       label="classic Cartesian", color=:dodgerblue4,
                       linewidth=2.3)
-    axislegend(ax2, position=:rb)
+    (_ql_has_finite_pairs(x, amr_state.fields.ux[1:nx, j_mid]) ||
+     _ql_has_finite_pairs(x, reference_state.fields.ux[1:nx, j_mid])) &&
+        axislegend(ax2, position=:rb)
 
     ax3 = Axis(fig[2, 1]; title="$title vertical ux probe",
                xlabel="ux", ylabel="y/Ly")
@@ -746,7 +762,9 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax3, reference_state.fields.ux[i_probe, 1:ny], y;
                       label="classic Cartesian", color=:dodgerblue4,
                       linewidth=2.3)
-    axislegend(ax3, position=:rb)
+    (_ql_has_finite_pairs(amr_state.fields.ux[i_probe, 1:ny], y) ||
+     _ql_has_finite_pairs(reference_state.fields.ux[i_probe, 1:ny], y)) &&
+        axislegend(ax3, position=:rb)
 
     ax4 = Axis(fig[2, 2]; title="$title centerline rho",
                xlabel="x/Lx", ylabel="rho")
@@ -755,7 +773,9 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax4, x, reference_state.fields.rho[1:nx, j_mid];
                       label="classic Cartesian", color=:dodgerblue4,
                       linewidth=2.3)
-    axislegend(ax4, position=:rb)
+    (_ql_has_finite_pairs(x, amr_state.fields.rho[1:nx, j_mid]) ||
+     _ql_has_finite_pairs(x, reference_state.fields.rho[1:nx, j_mid])) &&
+        axislegend(ax4, position=:rb)
     save(path, fig)
     return path
 end
@@ -831,7 +851,10 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
                       color=:orangered, linewidth=2.8)
     _ql_lines_finite!(ax31, analytic, y_analytic; label="analytic",
                       color=:black, linestyle=:dash, linewidth=2.2)
-    axislegend(ax31, position=:rb)
+    (_ql_has_finite_pairs(ref_profile, y_ref) ||
+     _ql_has_finite_pairs(amr_profile, y_amr) ||
+     _ql_has_finite_pairs(analytic, y_analytic)) &&
+        axislegend(ax31, position=:rb)
 
     nx = min(amr_state.leaf_nx, reference_state.leaf_nx)
     ny = min(amr_state.leaf_ny, reference_state.leaf_ny)
@@ -847,7 +870,11 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
                       linewidth=2.6)
     _ql_lines_finite!(ax32, analytic, y_analytic; label="analytic",
                       color=:black, linestyle=:dash, linewidth=2.0)
-    axislegend(ax32, position=:rb)
+    (_ql_has_finite_pairs(reference_state.fields.ux[i_probe, 1:ny],
+                          y_probe) ||
+     _ql_has_finite_pairs(amr_state.fields.ux[i_probe, 1:ny], y_probe) ||
+     _ql_has_finite_pairs(analytic, y_analytic)) &&
+        axislegend(ax32, position=:rb)
 
     err_range = _ql_finite_colorrange(vcat(amr_residual, ref_residual);
                                       symmetric=true)
@@ -858,7 +885,9 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     _ql_lines_finite!(ax33, amr_residual, y_amr; label="AMR-D",
                       color=:orangered, linewidth=2.6)
     xlims!(ax33, err_range...)
-    axislegend(ax33, position=:rb)
+    (_ql_has_finite_pairs(ref_residual, y_ref) ||
+     _ql_has_finite_pairs(amr_residual, y_amr)) &&
+        axislegend(ax33, position=:rb)
 
     save(path, fig)
     return path
