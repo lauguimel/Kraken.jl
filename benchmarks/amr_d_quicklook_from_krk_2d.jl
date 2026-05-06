@@ -457,15 +457,20 @@ function _ql_finite_colorrange(A; symmetric=false)
     end
     lo = minimum(vals)
     hi = maximum(vals)
-    lo == hi && return _ql_safe_colorrange(lo, hi)
+    abs(hi - lo) <= max(abs(lo), abs(hi), 1.0) * 1e-5 &&
+        return _ql_safe_colorrange(lo, hi)
     return (lo, hi)
 end
 
 function _ql_safe_colorrange(lo::Real, hi::Real)
     lo_f = Float64(lo)
     hi_f = Float64(hi)
-    if lo_f == hi_f
-        pad = max(abs(lo_f), 1.0) * 1e-6
+    if abs(hi_f - lo_f) <= max(abs(lo_f), abs(hi_f), 1.0) * 1e-5
+        center = 0.5 * (lo_f + hi_f)
+        pad = max(abs(center), 1.0) * 1e-4
+        return (center - pad, center + pad)
+    elseif lo_f == hi_f
+        pad = max(abs(lo_f), 1.0) * 1e-4
         return (lo_f - pad, hi_f + pad)
     end
     return (lo_f, hi_f)
