@@ -49,8 +49,15 @@ using Kraken
     nested_cylinder = cases["cylinder_nested4_probe.krk"]
     @test nested_cylinder.spec_supported
     @test nested_cylinder.max_level == 4
-    @test nested_cylinder.runtime_supported == false
-    @test nested_cylinder.runtime_status == :nested_obstacle_runtime_pending
+    @test nested_cylinder.runtime_supported
+    @test nested_cylinder.runtime_status == :subcycled_nested_solid
+    result_ny = run_conservative_tree_amr_d_case_from_krk_2d(
+        joinpath(convergence_dir, "cylinder_nested4_probe.krk");
+        steps_override=2)
+    @test result_ny.flow == :cylinder_obstacle_subcycled
+    @test result_ny.max_level == 4
+    @test result_ny.steps == 2
+    @test isfinite(result_ny.relative_mass_drift)
 
     nested_poiseuille = cases["poiseuille_nested4_channel.krk"]
     @test nested_poiseuille.max_level == 4
@@ -102,6 +109,7 @@ using Kraken
     @test support[:periodic_x_moving_wall_y].nested
     @test support[:open_x_wall_y].single_patch
     @test support[:open_x_wall_y].nested == false
+    @test support[:halfway_bounceback_solid_mask].nested
     @test support[:ibb].wall_model == :unsupported
     @test support[:libb].wall_model == :unsupported
 end

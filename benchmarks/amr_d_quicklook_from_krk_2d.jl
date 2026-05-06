@@ -297,7 +297,18 @@ function _ql_state_from_spec_result(result; force_x=0.0, force_y=0.0,
         level[i0:i1, j0:j1] .= cell.level
     end
 
-    return (; fields=(; rho, ux, uy, speed), is_solid=falses(leaf_nx, leaf_ny),
+    is_solid = hasproperty(result, :is_solid_leaf) ?
+        getproperty(result, :is_solid_leaf) : falses(leaf_nx, leaf_ny)
+    @inbounds for j in 1:leaf_ny, i in 1:leaf_nx
+        if is_solid[i, j]
+            rho[i, j] = NaN
+            ux[i, j] = NaN
+            uy[i, j] = NaN
+            speed[i, j] = NaN
+        end
+    end
+
+    return (; fields=(; rho, ux, uy, speed), is_solid,
             level, patch=nothing, leaf_nx, leaf_ny)
 end
 
@@ -1193,10 +1204,12 @@ function run_amr_d_quicklook_from_krk_2d(paths;
                                                            steps=steps, T=T)
                 force = (force_x=getproperty(result, :force_x),
                          force_y=getproperty(result, :force_y))
-            elseif case.runtime_status == :subcycled_nested_channel
+            elseif case.runtime_status in (:subcycled_nested_channel,
+                                           :subcycled_nested_solid)
                 result = run_conservative_tree_amr_d_case_from_krk_2d(
                     setup; steps_override=steps, T=T)
-                force = (force_x=_ql_body_force(setup, :Fx, 0.0), force_y=0.0)
+                force = (force_x=_ql_body_force(setup, :Fx, 0.0),
+                         force_y=_ql_body_force(setup, :Fy, 0.0))
             else
                 result, force = _ql_run_one_level_case(
                     setup, case; steps=steps, avg_window=avg,
@@ -1210,9 +1223,10 @@ function run_amr_d_quicklook_from_krk_2d(paths;
                 _ql_state_from_spec_result(result; force_x=force.force_x,
                                            force_y=force.force_y,
                                            level_scaled_force=
-                                               case.runtime_status ==
-                                               :subcycled_nested_channel &&
-                                               case.flow == :poiseuille) :
+                                               case.runtime_status in
+                                               (:subcycled_nested_channel,
+                                                :subcycled_nested_solid) &&
+                                               case.flow != :couette) :
                 _ql_state_from_composite_result(result; force_x=force.force_x,
                                                 force_y=force.force_y)
             mesh_rows = result isa AMRDCartesianChannelQuicklook2D ?

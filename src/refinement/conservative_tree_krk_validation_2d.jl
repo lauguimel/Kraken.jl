@@ -127,6 +127,11 @@ function _amr_d_runtime_status_2d(flow::Symbol,
             1 <= max_level <= 4
         return true, :subcycled_nested_channel,
                "nested AMR-D channel scheduler is available for levels 1:4"
+    elseif flow in (:square, :cylinder) &&
+            boundary_policy == :periodic_x_wall_y &&
+            1 <= max_level <= 4
+        return true, :subcycled_nested_solid,
+               "nested AMR-D solid-mask scheduler is available when the solid is fully refined"
     elseif geometry != :channel
         return false, :nested_obstacle_runtime_pending,
                "nested obstacle AMR-D runtime is not closed yet"
@@ -180,9 +185,9 @@ function conservative_tree_amr_d_support_matrix_2d()
          wall_model=:none, note="channel Couette"),
         (feature=:open_x_wall_y, single_patch=true, nested=false,
          wall_model=:none, note="BFS/open-channel nesting still pending"),
-        (feature=:halfway_bounceback_solid_mask, single_patch=true, nested=false,
+        (feature=:halfway_bounceback_solid_mask, single_patch=true, nested=true,
          wall_model=:halfway_bounceback_mask,
-         note="square/cylinder/BFS solid mask in AMR-D"),
+         note="periodic square/cylinder nesting requires solid fully resolved away from interfaces"),
         (feature=:ibb, single_patch=false, nested=false, wall_model=:unsupported,
          note="IBB is available in other Kraken paths, not AMR-D route-native D"),
         (feature=:libb, single_patch=false, nested=false, wall_model=:unsupported,
@@ -312,6 +317,36 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
                 avg_window=round(Int, _amr_d_var_2d(
                     setup, :avg_window, max(1, div(steps, 4)))),
                 T=T)
+        end
+    elseif case.runtime_status == :subcycled_nested_solid
+        leaf_nx = Int(getproperty(getproperty(setup, :domain), :Nx)) <<
+            case.max_level
+        leaf_ny = Int(getproperty(getproperty(setup, :domain), :Ny)) <<
+            case.max_level
+        Fx = _amr_d_body_force_2d(setup, :Fx, 2e-5)
+        if case.flow == :square
+            Fy = _amr_d_body_force_2d(setup, :Fy, 0.0)
+            is_solid = square_solid_mask_leaf_2d(
+                leaf_nx, leaf_ny,
+                round(Int, _amr_d_var_2d(setup, :obstacle_i0, 22)):
+                round(Int, _amr_d_var_2d(setup, :obstacle_i1, 27)),
+                round(Int, _amr_d_var_2d(setup, :obstacle_j0, 12)):
+                round(Int, _amr_d_var_2d(setup, :obstacle_j1, 17)))
+            return run_conservative_tree_solid_obstacle_subcycled_2d(
+                flow=:square_obstacle_subcycled, max_level=case.max_level,
+                spec=spec, is_solid_leaf=is_solid, steps=steps,
+                omega=omega, Fx=Fx, Fy=Fy, rho0=rho0, T=T)
+        elseif case.flow == :cylinder
+            is_solid = cylinder_solid_mask_leaf_2d(
+                leaf_nx, leaf_ny,
+                _amr_d_var_2d(setup, :cx_leaf, (leaf_nx + 1) / 2),
+                _amr_d_var_2d(setup, :cy_leaf, (leaf_ny + 1) / 2),
+                _amr_d_var_2d(setup, :radius_leaf, 3.0))
+            return run_conservative_tree_solid_obstacle_subcycled_2d(
+                flow=:cylinder_obstacle_subcycled,
+                max_level=case.max_level, spec=spec,
+                is_solid_leaf=is_solid, steps=steps, omega=omega,
+                Fx=Fx, Fy=0.0, rho0=rho0, T=T)
         end
     elseif case.flow == :poiseuille
         Fx = _amr_d_body_force_2d(setup, :Fx, 1e-6)

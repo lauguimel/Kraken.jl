@@ -535,6 +535,79 @@ function _check_conservative_tree_subcycle_route_table_2d(
     return table
 end
 
+function _check_conservative_tree_leaf_solid_mask_2d(
+        spec::ConservativeTreeSpec2D,
+        is_solid::AbstractArray{Bool,2})
+    leaf_nx = _conservative_tree_level_size_2d(spec.Nx, spec.max_level)
+    leaf_ny = _conservative_tree_level_size_2d(spec.Ny, spec.max_level)
+    size(is_solid) == (leaf_nx, leaf_ny) ||
+        throw(ArgumentError("is_solid must match the finest leaf-equivalent grid"))
+    return is_solid
+end
+
+@inline function _conservative_tree_cell_leaf_bounds_2d(
+        spec::ConservativeTreeSpec2D,
+        cell::ConservativeTreeCell2D)
+    scale = 1 << (spec.max_level - cell.level)
+    i0 = (cell.i - 1) * scale + 1
+    i1 = cell.i * scale
+    j0 = (cell.j - 1) * scale + 1
+    j1 = cell.j * scale
+    return i0, i1, j0, j1
+end
+
+function _conservative_tree_cell_solid_status_2d(
+        spec::ConservativeTreeSpec2D,
+        cell::ConservativeTreeCell2D,
+        is_solid::AbstractArray{Bool,2})
+    i0, i1, j0, j1 = _conservative_tree_cell_leaf_bounds_2d(spec, cell)
+    any_solid = false
+    all_solid = true
+    @inbounds for j in j0:j1, i in i0:i1
+        solid = is_solid[i, j]
+        any_solid |= solid
+        all_solid &= solid
+    end
+    all_solid && return :solid
+    any_solid && return :partial
+    return :fluid
+end
+
+function _conservative_tree_cell_is_solid_2d(
+        spec::ConservativeTreeSpec2D,
+        cell::ConservativeTreeCell2D,
+        is_solid::Union{Nothing,AbstractArray{Bool,2}})
+    is_solid === nothing && return false
+    status = _conservative_tree_cell_solid_status_2d(spec, cell, is_solid)
+    status == :partial &&
+        throw(ArgumentError("active AMR-D solid cells must be fully resolved by refinement"))
+    return status == :solid
+end
+
+function validate_conservative_tree_solid_mask_resolved_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D,
+        is_solid::AbstractArray{Bool,2})
+    _check_conservative_tree_leaf_solid_mask_2d(spec, is_solid)
+    @inbounds for cell_id in spec.active_cells
+        status = _conservative_tree_cell_solid_status_2d(
+            spec, spec.cells[cell_id], is_solid)
+        status == :partial &&
+            throw(ArgumentError("AMR-D solid mask cuts active cell $cell_id; refine the solid band"))
+    end
+    @inbounds for route_id in table.interface_routes
+        route = table.routes[route_id]
+        for cell_id in (route.src, route.dst)
+            cell_id == 0 && continue
+            status = _conservative_tree_cell_solid_status_2d(
+                spec, spec.cells[cell_id], is_solid)
+            status == :fluid && continue
+            throw(ArgumentError("AMR-D solid mask touches an interface route; keep refinement interfaces away from solids"))
+        end
+    end
+    return is_solid
+end
+
 function conservative_tree_subcycle_local_substep_2d(
         schedule::ConservativeTreeSubcycleSchedule2D,
         parent_level::Integer,
@@ -958,17 +1031,29 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
         policy::Symbol;
         u_south=0,
         u_north=0,
-        rho_wall=1)
+        rho_wall=1,
+        is_solid=nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
 
     @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
         route_id = table.direct_routes[route_pos]
         route = table.routes[route_id]
-        Fout[route.dst, route.q] += route.weight * Fin[route.src, route.q]
+        src_cell = spec.cells[route.src]
+        _conservative_tree_cell_is_solid_2d(spec, src_cell, is_solid) &&
+            continue
+        if _conservative_tree_cell_is_solid_2d(
+                spec, spec.cells[route.dst], is_solid)
+            Fout[route.src, d2q9_opposite(route.q)] +=
+                route.weight * Fin[route.src, route.q]
+        else
+            Fout[route.dst, route.q] += route.weight * Fin[route.src, route.q]
+        end
     end
     @inbounds for route_pos in table.boundary_route_ranges_by_level[level + 1]
         route_id = table.boundary_routes[route_pos]
         route = table.routes[route_id]
+        _conservative_tree_cell_is_solid_2d(
+            spec, spec.cells[route.src], is_solid) && continue
         if policy != :skip
             Fout[route.src, d2q9_opposite(route.q)] +=
                 _conservative_tree_boundary_reflection_packet_2d(
@@ -1052,9 +1137,13 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
         u_north=0,
         rho_wall=1,
         alpha_c2f=1,
-        alpha_f2c=1)
+        alpha_f2c=1,
+        is_solid=nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
+    is_solid === nothing ||
+        validate_conservative_tree_solid_mask_resolved_2d(
+            spec, table, is_solid)
     if spec.max_level == 0
         return stream_conservative_tree_routes_F_2d!(
             Fout, Fin, spec, table; boundary=boundary, u_south=u_south,
@@ -1088,7 +1177,8 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
             end
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch, Fstate, spec, table, level, policy;
-                u_south=u_south, u_north=u_north, rho_wall=rho_wall)
+                u_south=u_south, u_north=u_north, rho_wall=rho_wall,
+                is_solid=is_solid)
             if level > 0
                 conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
                     Fscratch, bank, event)
@@ -1148,9 +1238,13 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         route_bank = nothing,
         state_bank = nothing,
         Fsource = nothing,
-        Fscratch = nothing)
+        Fscratch = nothing,
+        is_solid=nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
+    is_solid === nothing ||
+        validate_conservative_tree_solid_mask_resolved_2d(
+            spec, table, is_solid)
     if spec.max_level == 0
         return stream_conservative_tree_routes_F_2d!(
             Fout, Fin, spec, table; boundary=boundary, u_south=u_south,
@@ -1216,7 +1310,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             fill!(Fscratch_run, zero(eltype(Fscratch_run)))
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch_run, Fsource_run, spec, table, level, policy;
-                u_south=u_south, u_north=u_north, rho_wall=rho_wall)
+                u_south=u_south, u_north=u_north, rho_wall=rho_wall,
+                is_solid=is_solid)
             if level > 0
                 fill!(buffers.ghost_from_coarse,
                       zero(eltype(buffers.ghost_from_coarse)))
