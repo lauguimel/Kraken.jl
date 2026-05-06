@@ -514,6 +514,35 @@ using Kraken
                            Fin[spec.active_cells, :])) <= 1e-14
     end
 
+    @testset "four-level buffered subcycled transport preserves rest state" begin
+        spec = create_conservative_tree_spec_2d(16, 12, [
+            ConservativeTreeRefineBlock2D("L1", 5:12, 3:10),
+            ConservativeTreeRefineBlock2D("L2", 13:20, 7:14; parent="L1"),
+            ConservativeTreeRefineBlock2D("L3", 29:36, 17:24; parent="L2"),
+            ConservativeTreeRefineBlock2D("L4", 61:68, 37:44; parent="L3"),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:bounceback)
+
+        @test spec.max_level == 4
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
+    end
+
     @testset "scheduled ledger binding rejects wrong events" begin
         schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(2)
         bank = Kraken.create_conservative_tree_subcycle_ledger_bank_2d(schedule)

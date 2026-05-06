@@ -712,7 +712,7 @@ Surgical validation:
 - `alpha < 1` changes only the non-equilibrium component;
 - sparse zero source rows produce zero packets, preserving existing ledger
   tests;
-- subcycling defaults still pass one-level and nested rest gates.
+- subcycling defaults still pass one-level, nested L2, and nested L4 rest gates.
 
 Next gate:
 
