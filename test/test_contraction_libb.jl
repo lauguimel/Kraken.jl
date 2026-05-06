@@ -3,6 +3,69 @@ using Kraken
 
 @testset "Contraction LI-BB driver (4:1 planar viscoelastic)" begin
 
+    @testset "StepChannelGeometry2D specs" begin
+        geom = contraction_step_geometry_2d(; H_out=8, β_c=4, L_up=4, L_down=4)
+
+        @test geom.name === :contraction
+        @test geom.Nx == 64
+        @test geom.Ny == 32
+        @test geom.i_step == 33
+        @test geom.inlet_open == 1:32
+        @test geom.outlet_open == 13:20
+        @test count(geom.west_hydro_mask) == geom.Ny - 2
+        @test count(geom.east_hydro_mask) == geom.H_out - 2
+        @test count(geom.west_conformation_mask) == geom.Ny
+        @test count(geom.east_conformation_mask) == geom.H_out
+        @test all(geom.is_solid[geom.i_step:end, 1:12])
+        @test all(geom.is_solid[geom.i_step:end, 21:32])
+        @test !any(geom.is_solid[geom.i_step:end, geom.outlet_open])
+
+        bfs = backward_facing_step_geometry_2d(; H_in=8, expansion_ratio=2,
+                                               L_up=3, L_down=5)
+        @test bfs.name === :backward_facing_step
+        @test bfs.Nx == 64
+        @test bfs.Ny == 16
+        @test bfs.inlet_open == 9:16
+        @test bfs.outlet_open == 1:16
+        @test count(bfs.west_hydro_mask) == 6
+        @test count(bfs.east_hydro_mask) == 14
+        @test all(bfs.is_solid[1:bfs.i_step-1, 1:8])
+        @test !any(bfs.is_solid[bfs.i_step:end, :])
+
+        sq = square_obstacle_channel_geometry_2d(; H=16, side=4,
+                                                 L_up=3, L_down=5)
+        @test sq.name === :square_obstacle
+        @test sq.Nx == 36
+        @test sq.Ny == 16
+        @test sq.inlet_open == 1:16
+        @test sq.outlet_open == 1:16
+        @test sq.H_ref == 4
+        @test count(sq.west_hydro_mask) == 14
+        @test count(sq.east_hydro_mask) == 14
+        @test all(sq.is_solid[sq.i_step:sq.i_step+3, 7:10])
+        @test !any(sq.is_solid[1:sq.i_step-1, :])
+        @test !any(sq.is_solid[sq.i_step+4:end, :])
+        @test sq.q_wall[sq.i_step-1, 7, 2] ≈ 0.5
+        @test sq.q_wall[sq.i_step, 6, 3] ≈ 0.5
+        for j in 1:sq.Ny, i in 1:sq.Nx
+            sq.is_solid[i, j] && continue
+            for q in 2:9
+                cx = Int(Kraken.velocities_x(D2Q9())[q])
+                cy = Int(Kraken.velocities_y(D2Q9())[q])
+                ni = i + cx
+                nj = j + cy
+                expected_wall =
+                    (1 <= ni <= sq.Nx && 1 <= nj <= sq.Ny && sq.is_solid[ni, nj]) ||
+                    (1 <= ni <= sq.Nx && !(1 <= nj <= sq.Ny) && cy != 0)
+                if expected_wall
+                    @test sq.q_wall[i, j, q] ≈ 0.5
+                else
+                    @test sq.q_wall[i, j, q] == 0.0
+                end
+            end
+        end
+    end
+
     # ----------------------------------------------------------------
     # 1. Geometry helper: q_wall + is_solid
     # ----------------------------------------------------------------
@@ -52,6 +115,8 @@ using Kraken
         @test all(isfinite, r.tau_p_xx)
         @test all(isfinite, r.C_xx)
         @test r.beta ≈ 0.354 / (0.354 + 0.246) atol=1e-12
+        @test count(r.east_hydro_mask) == r.H_out - 2
+        @test count(r.east_conformation_mask) == r.H_out
 
         # Mass conservation: mean upstream u ≈ u_out_mean / β_c
         u_in_mean_target = 0.02 / 4
@@ -62,6 +127,80 @@ using Kraken
         @test maximum(abs.(r.ux[r.is_solid])) < 1e-6
     end
 
+    @testset "generic step driver smoke test (BFS spec)" begin
+        geometry = backward_facing_step_geometry_2d(; H_in=8, expansion_ratio=2,
+                                                    L_up=3, L_down=5)
+        r = run_conformation_step_libb_2d(;
+                geometry,
+                u_ref_mean=0.01, ν_s=0.354, ν_p=0.246, lambda=5.0,
+                polymer_bc=CNEBB(),
+                hermite_source_mode=:liu_direct,
+                max_steps=80, avg_window=20)
+
+        @test r.geometry === :backward_facing_step
+        @test all(isfinite, r.ux)
+        @test all(isfinite, r.C_xx)
+        @test count(r.west_hydro_mask) == 6
+        @test count(r.east_hydro_mask) == 14
+        @test maximum(abs.(r.ux[r.is_solid])) < 1e-6
+    end
+
+    @testset "generic step driver rejects NoPolymerWallBC on wall geometry" begin
+        geometry = backward_facing_step_geometry_2d(; H_in=8, expansion_ratio=2,
+                                                    L_up=3, L_down=5)
+        @test_throws ErrorException run_conformation_step_libb_2d(;
+            geometry,
+            u_ref_mean=0.01, ν_s=0.354, ν_p=0.246, lambda=5.0,
+            polymer_bc=NoPolymerWallBC(),
+            max_steps=1, avg_window=1)
+    end
+
+    @testset "generic step driver rejects diagnostic wall BC by default" begin
+        geometry = contraction_step_geometry_2d(; H_out=8, β_c=4,
+                                                L_up=4, L_down=8)
+        @test_throws ErrorException run_conformation_step_libb_2d(;
+            geometry,
+            u_ref_mean=0.01, ν_s=0.354, ν_p=0.246, lambda=5.0,
+            polymer_bc=CNEBBEqGradient(),
+            max_steps=1, avg_window=1)
+    end
+
+    @testset "generic step driver smoke test (square obstacle spec)" begin
+        geometry = square_obstacle_channel_geometry_2d(; H=16, side=4,
+                                                       L_up=3, L_down=5)
+        r = run_conformation_step_libb_2d(;
+                geometry,
+                u_ref_mean=0.01, ν_s=0.354, ν_p=0.246, lambda=5.0,
+                polymer_bc=CNEBB(),
+                hermite_source_mode=:liu_direct,
+                max_steps=80, avg_window=20)
+
+        @test r.geometry === :square_obstacle
+        @test all(isfinite, r.ux)
+        @test all(isfinite, r.C_xx)
+        @test count(r.west_hydro_mask) == 14
+        @test count(r.east_hydro_mask) == 14
+        @test count(r.is_solid) == 16
+        @test maximum(abs.(r.ux[r.is_solid])) < 1e-6
+
+        function y_symmetry_error(field, is_solid; parity)
+            Nx, Ny = size(field)
+            err = 0.0
+            for j in 1:Ny, i in 1:Nx
+                jp = Ny + 1 - j
+                (is_solid[i, j] || is_solid[i, jp]) && continue
+                err = max(err, abs(field[i, j] - parity * field[i, jp]))
+            end
+            return err
+        end
+
+        @test y_symmetry_error(r.ux, r.is_solid; parity=1) < 1e-12
+        @test y_symmetry_error(r.uy, r.is_solid; parity=-1) < 1e-12
+        @test y_symmetry_error(r.C_xx, r.is_solid; parity=1) < 1e-12
+        @test y_symmetry_error(r.C_xy, r.is_solid; parity=-1) < 1e-12
+        @test y_symmetry_error(r.C_yy, r.is_solid; parity=1) < 1e-12
+    end
+
     # ----------------------------------------------------------------
     # 3. Driver smoke test with log-conformation polymer model
     # ----------------------------------------------------------------
@@ -70,12 +209,40 @@ using Kraken
                 H_out=8, β_c=4, L_up=4, L_down=8,
                 u_out_mean=0.02, ν_s=0.354,
                 polymer_model=LogConfOldroydB(G=0.246/5.0, λ=5.0),
+                hermite_source_mode=:liu_direct,
+                conformation_magic=0.01,
+                allow_diagnostic_log_wall_bc=true,
                 max_steps=400, avg_window=100)
 
         @test all(isfinite, r.ux)
         @test all(isfinite, r.tau_p_xx)
         @test all(isfinite, r.C_xx)
         @test r.Wi ≈ 5.0 * 0.02 / (8/2) atol=1e-12
+        @test r.hermite_source_mode === :liu_direct
+        @test r.conformation_magic ≈ 0.01
+        @test maximum(r.C_xx .+ r.C_yy) < 3.0
+    end
+
+    @testset "driver rejects unknown Hermite source mode" begin
+        @test_throws ErrorException run_conformation_contraction_libb_2d(;
+            H_out=8, β_c=4, L_up=4, L_down=8,
+            u_out_mean=0.02, ν_s=0.354, ν_p=0.246, lambda=5.0,
+            hermite_source_mode=:not_a_source, max_steps=1, avg_window=1)
+    end
+
+    @testset "driver rejects unsupported CDE tau_plus by default" begin
+        @test_throws ErrorException run_conformation_contraction_libb_2d(;
+            H_out=8, β_c=4, L_up=4, L_down=8,
+            u_out_mean=0.02, ν_s=0.354, ν_p=0.246, lambda=5.0,
+            tau_plus=0.50001, max_steps=1, avg_window=1)
+    end
+
+    @testset "driver rejects log-conformation wall BC by default" begin
+        @test_throws ErrorException run_conformation_contraction_libb_2d(;
+            H_out=8, β_c=4, L_up=4, L_down=8,
+            u_out_mean=0.02, ν_s=0.354,
+            polymer_model=LogConfOldroydB(G=0.246/5.0, λ=5.0),
+            max_steps=1, avg_window=1)
     end
 
     # ----------------------------------------------------------------
@@ -96,5 +263,25 @@ using Kraken
                   i_step=r.i_step, j_low=r.j_low, j_high=r.j_high)
         @test length(N1) == r.Nx - r.i_step + 1
         @test all(isfinite, N1)
+    end
+
+    @testset "vortex length ignores zero corner sample" begin
+        ux = ones(Float64, 8, 8)
+        uy = zeros(Float64, 8, 8)
+        is_solid = falses(8, 8)
+
+        ux[5, 3] = 0.0
+        ux[4, 3] = -1.0
+        ux[3, 3] = -1.0
+        ux[2, 3] = 1.0
+
+        X_R, j_probe = vortex_length_contraction_2d(ux, uy, is_solid;
+            i_step=6, j_low=4, j_high=5, side=:south)
+        @test X_R == 3.0
+        @test j_probe == 3
+
+        X_R_no_vortex, _ = vortex_length_contraction_2d(ux, uy, is_solid;
+            i_step=6, j_low=4, j_high=5, side=:north)
+        @test X_R_no_vortex == 0.0
     end
 end
