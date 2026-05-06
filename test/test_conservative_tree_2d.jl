@@ -456,6 +456,25 @@ end
         @test isapprox(Fdst, Fsrc ./ 4; atol=1f-6, rtol=0)
     end
 
+    @testset "eq/neq route packet scales only non-equilibrium part" begin
+        Fsrc = zeros(Float64, 9)
+        _fill_equilibrium_with_pxy!(Fsrc, 1.0, 1.0, 0.03, 0.0, 2e-4)
+        q = 6
+        weight = 0.25
+        rho, ux, uy = macrostate_integrated_D2Q9(Fsrc, 1.0)
+        feq = equilibrium(D2Q9(), rho, ux, uy, q)
+
+        raw = reconstructed_integrated_D2Q9_packet(
+            Fsrc, 1.0, q, weight; alpha=1.0)
+        relaxed = reconstructed_integrated_D2Q9_packet(
+            Fsrc, 1.0, q, weight; alpha=0.25)
+
+        @test isapprox(raw, weight * Fsrc[q]; atol=1e-14, rtol=0)
+        @test isapprox(relaxed,
+                       weight * (feq + 0.25 * (Fsrc[q] - feq));
+                       atol=1e-14, rtol=0)
+    end
+
     @testset "parent-child mapping" begin
         @test conservative_tree_parent_index(1, 1) == (1, 1, 1, 1)
         @test conservative_tree_parent_index(2, 1) == (1, 1, 2, 1)

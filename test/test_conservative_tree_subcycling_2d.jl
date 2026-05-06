@@ -289,6 +289,39 @@ using Kraken
         @test isapprox(Fout[coarse_west, 4], 2.0; atol=1e-14, rtol=0)
     end
 
+    @testset "spatial route ledgers apply eq/neq alpha to interface packets" begin
+        spec = create_conservative_tree_spec_2d(6, 5, [
+            ConservativeTreeRefineBlock2D("fine", 3:4, 2:3),
+        ])
+        table = create_conservative_tree_route_table_2d(spec)
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(spec.max_level)
+        bank = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+            spec; schedule=schedule)
+        F = allocate_conservative_tree_F_2d(spec)
+        coarse_west = conservative_tree_cell_id_2d(spec, 0, 2, 2)
+        fill_equilibrium_integrated_D2Q9!(
+            @view(F[coarse_west, :]), 1.0, 1.0, 0.03, 0.0)
+        delta = 2e-4 / 4
+        F[coarse_west, 6] += delta
+        F[coarse_west, 7] -= delta
+        F[coarse_west, 8] += delta
+        F[coarse_west, 9] -= delta
+        route = first(route for route in table.routes
+                      if route.src == coarse_west &&
+                         route.q == 6 &&
+                         route.kind == SPLIT_CORNER)
+
+        ledger = Kraken.conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
+            bank, F, route; alpha=0.25)
+
+        expected = ledger.ratio * reconstructed_integrated_D2Q9_packet(
+            @view(F[coarse_west, :]), 1.0, route.q, route.weight; alpha=0.25)
+        raw = ledger.ratio * route.weight * F[coarse_west, route.q]
+        @test isapprox(sum(ledger.coarse_to_fine[:, :, route.q, :]),
+                       expected; atol=1e-14, rtol=0)
+        @test abs(expected - raw) > 1e-6
+    end
+
     @testset "spatial route ledgers recurse over all adjacent pairs" begin
         spec = create_conservative_tree_spec_2d(8, 6, [
             ConservativeTreeRefineBlock2D("outer", 3:6, 2:5),

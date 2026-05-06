@@ -661,6 +661,8 @@ New API:
 
 - `macrostate_integrated_D2Q9(Fcell, volume)`;
 - `reconstruct_integrated_D2Q9_eq_neq!(Fdst, dst_volume, Fsrc, src_volume;
+  alpha=1)`;
+- `reconstructed_integrated_D2Q9_packet(Fsrc, src_volume, q, weight;
   alpha=1)`.
 
 Contract:
@@ -683,6 +685,37 @@ Validated:
 
 Not wired yet:
 
-- `sync_down` still injects route packets directly;
-- the next patch must use this primitive at the interface and add uniform
-  velocity/shear canaries before macro-flow ramps.
+- macro-flow interface closures still need uniform velocity/shear canaries
+  before Couette/Poiseuille ramps.
+
+## ML4k Interface Packet Alpha Knobs
+
+Wired the reconstruction primitive into the subcycling route ledgers.
+
+New runtime knobs:
+
+- `alpha_c2f` for coarse-to-fine interface packets;
+- `alpha_f2c` for fine-to-coarse interface packets.
+
+Both default to `1`, so the previous packet transport remains bitwise
+equivalent for the current tests. With non-unit values, only the
+non-equilibrium part of an interface packet is rescaled:
+
+```text
+packet_q = weight * Vsrc *
+           (feq_q(rho, u) + alpha * (Fsrc_q/Vsrc - feq_q(rho, u)))
+```
+
+Surgical validation:
+
+- packet helper returns raw `weight * Fsrc_q` at `alpha = 1`;
+- `alpha < 1` changes only the non-equilibrium component;
+- sparse zero source rows produce zero packets, preserving existing ledger
+  tests;
+- subcycling defaults still pass one-level and nested rest gates.
+
+Next gate:
+
+- add a controlled shear/interface canary using non-unit `alpha`;
+- decide where `alpha_c2f/alpha_f2c` are computed from per-level `omega`
+  before exposing the knobs in `.krk` AMR-D flows.

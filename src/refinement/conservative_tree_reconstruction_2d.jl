@@ -51,3 +51,26 @@ function reconstruct_integrated_D2Q9_eq_neq!(
     end
     return Fdst
 end
+
+function reconstructed_integrated_D2Q9_packet(
+        Fsrc::AbstractVector,
+        src_volume,
+        q::Integer,
+        weight;
+        alpha=1)
+    _check_d2q9_vector(Fsrc, "Fsrc")
+    qi = _check_d2q9_q(Int(q))
+    T = typeof(zero(eltype(Fsrc)) + src_volume + weight + alpha)
+    src_vol = T(src_volume)
+    src_vol > zero(T) || throw(ArgumentError("src_volume must be positive"))
+    mass = zero(T)
+    @inbounds for qq in 1:9
+        mass += T(Fsrc[qq])
+    end
+    iszero(mass) && return zero(T)
+
+    rho, ux, uy = macrostate_integrated_D2Q9(Fsrc, src_vol)
+    feq = equilibrium(D2Q9(), T(rho), T(ux), T(uy), qi)
+    fsrc = T(Fsrc[qi]) / src_vol
+    return T(weight) * src_vol * (feq + T(alpha) * (fsrc - feq))
+end

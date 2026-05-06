@@ -158,6 +158,8 @@ Patch `2026-05-06-eq-neq-reconstruction`:
 
 - added `macrostate_integrated_D2Q9`;
 - added `reconstruct_integrated_D2Q9_eq_neq!`;
+- added `reconstructed_integrated_D2Q9_packet`;
 - validated mass/momentum preservation, `alpha` scaling of non-equilibrium
   stress, `alpha = 1` child-split roundtrip, and `Float32` compilation;
-- intentionally did not wire it into the scheduler yet.
+- wired `alpha_c2f` and `alpha_f2c` knobs into subcycled interface packets,
+  defaulting to `1` so existing transport remains unchanged.

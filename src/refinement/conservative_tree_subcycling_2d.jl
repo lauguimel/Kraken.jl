@@ -405,15 +405,22 @@ function _check_subcycle_spatial_child_advance_event_2d(
     return parent, substep
 end
 
-@inline function _subcycle_route_packet_2d(F::AbstractMatrix,
-                                           route::ConservativeTreeRoute2D)
-    return route.weight * F[route.src, route.q]
+@inline function _subcycle_route_packet_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        route::ConservativeTreeRoute2D;
+        alpha=1)
+    src = spec.cells[route.src]
+    return reconstructed_integrated_D2Q9_packet(
+        @view(F[route.src, :]), src.metrics.volume, route.q, route.weight;
+        alpha=alpha)
 end
 
 function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         F::AbstractMatrix,
-        route::ConservativeTreeRoute2D)
+        route::ConservativeTreeRoute2D;
+        alpha=1)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER ||
         throw(ArgumentError("route must be a coarse-to-fine split route"))
@@ -432,7 +439,8 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
     ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
     ix, iy = _conservative_tree_child_index_in_parent_2d(parent, child)
     qi = _check_d2q9_q(route.q)
-    packet = ledger.ratio * _subcycle_route_packet_2d(F, route)
+    packet = ledger.ratio * _subcycle_route_packet_2d(
+        F, spec, route; alpha=alpha)
 
     @inbounds for substep in 1:ledger.ratio
         ledger.coarse_to_fine[ix, iy, qi, substep] += packet / ledger.ratio
@@ -444,7 +452,8 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         F::AbstractMatrix,
         route::ConservativeTreeRoute2D,
-        substep::Integer)
+        substep::Integer;
+        alpha=1)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER ||
         throw(ArgumentError("route must be a fine-to-coarse coalesce route"))
@@ -460,7 +469,8 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
     ledger = conservative_tree_subcycle_spatial_ledger_2d(bank, parent_id)
     step = _check_subcycle_step_2d(ledger, substep)
     qi = _check_d2q9_q(route.q)
-    packet = _subcycle_route_packet_2d(F, route) / ledger.ratio
+    packet = _subcycle_route_packet_2d(
+        F, spec, route; alpha=alpha) / ledger.ratio
     ledger.fine_to_coarse[qi, step] += packet
     route.dst != 0 ||
         throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
@@ -476,7 +486,8 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D,
         F::AbstractMatrix,
-        table::ConservativeTreeRouteTable2D)
+        table::ConservativeTreeRouteTable2D;
+        alpha=1)
     parent_level = _check_subcycle_spatial_sync_down_event_2d(bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
@@ -487,7 +498,7 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
         bank.spec.cells[route.src].level == parent_level || continue
         bank.spec.cells[route.dst].level == parent_level + 1 || continue
         conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
-            bank, F, route)
+            bank, F, route; alpha=alpha)
     end
     return bank
 end
@@ -496,7 +507,8 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D,
         F::AbstractMatrix,
-        table::ConservativeTreeRouteTable2D)
+        table::ConservativeTreeRouteTable2D;
+        alpha=1)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
@@ -508,7 +520,7 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER || continue
         bank.spec.cells[route.src].level == child_level || continue
         conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
-            bank, F, route, substep)
+            bank, F, route, substep; alpha=alpha)
     end
     return bank
 end
@@ -548,7 +560,8 @@ end
 function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D,
-        F::AbstractMatrix)
+        F::AbstractMatrix;
+        alpha=1)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
     child_level = parent_level + 1
@@ -561,7 +574,7 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
             for route in _conservative_tree_inactive_parent_coalesce_routes_2d(
                     bank.spec, src_id, q)
                 conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
-                    bank, F, route, substep)
+                    bank, F, route, substep; alpha=alpha)
             end
         end
     end
@@ -753,8 +766,10 @@ function _copy_conservative_tree_active_level_rows_2d!(
 end
 
 """
-    stream_conservative_tree_subcycled_routes_F_2d!(Fout, Fin, spec, table;
-                                                    boundary=:skip)
+stream_conservative_tree_subcycled_routes_F_2d!(Fout, Fin, spec, table;
+                                                    boundary=:skip,
+                                                    alpha_c2f=1,
+                                                    alpha_f2c=1)
 
 CPU reference transport for the recursive AMR-D subcycle schedule. Same-level
 routes are advanced only when their level receives an `:advance` event.
@@ -765,13 +780,18 @@ on `:sync_up`.
 
 This is still a transport skeleton: no collision, forcing, or physical open
 boundary closure is performed here.
+
+`alpha_c2f` and `alpha_f2c` rescale the non-equilibrium part of interface
+packets. The default `1` preserves the original packet transport exactly.
 """
 function stream_conservative_tree_subcycled_routes_F_2d!(
         Fout::AbstractMatrix,
         Fin::AbstractMatrix,
         spec::ConservativeTreeSpec2D,
         table::ConservativeTreeRouteTable2D;
-        boundary::Symbol=:skip)
+        boundary::Symbol=:skip,
+        alpha_c2f=1,
+        alpha_f2c=1)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     if spec.max_level == 0
@@ -792,7 +812,7 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
             reset_conservative_tree_subcycle_spatial_pair_2d!(
                 bank, event.src_level)
             conservative_tree_subcycle_sync_down_routes_F_2d!(
-                bank, event, Fstate, table)
+                bank, event, Fstate, table; alpha=alpha_c2f)
         elseif event.phase == :advance
             fill!(Fscratch, zero(eltype(Fscratch)))
             level = event.src_level
@@ -800,9 +820,9 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
                 _add_and_clear_conservative_tree_level_rows_2d!(
                     Fstate, Fpending, spec, level)
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
-                    bank, event, Fstate, table)
+                    bank, event, Fstate, table; alpha=alpha_f2c)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
-                    bank, event, Fstate)
+                    bank, event, Fstate; alpha=alpha_f2c)
             end
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch, Fstate, spec, table, level, policy)
@@ -827,8 +847,10 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
 end
 
 """
-    stream_conservative_tree_subcycled_buffered_routes_F_2d!(Fout, Fin, spec, table;
-                                                             boundary=:skip)
+stream_conservative_tree_subcycled_buffered_routes_F_2d!(Fout, Fin, spec, table;
+                                                             boundary=:skip,
+                                                             alpha_c2f=1,
+                                                             alpha_f2c=1)
 
 CPU reference transport that drives the recursive AMR-D schedule through the
 explicit subcycle buffer contract. Unlike the legacy skeleton, it keeps
@@ -838,13 +860,18 @@ fine-to-parent restriction (`restrict_to_parent`) in distinct buffers.
 
 This remains transport-only: no collision, forcing, or physical open-boundary
 closure is performed here.
+
+`alpha_c2f` and `alpha_f2c` are the Filippova-Hanel style non-equilibrium
+rescaling factors for coarse-to-fine and fine-to-coarse interface packets.
 """
 function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         Fout::AbstractMatrix,
         Fin::AbstractMatrix,
         spec::ConservativeTreeSpec2D,
         table::ConservativeTreeRouteTable2D;
-        boundary::Symbol=:skip)
+        boundary::Symbol=:skip,
+        alpha_c2f=1,
+        alpha_f2c=1)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     if spec.max_level == 0
@@ -868,7 +895,7 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
                 route_bank, event.src_level)
             parent_owned = state_bank.levels[event.src_level + 1].owned
             conservative_tree_subcycle_sync_down_routes_F_2d!(
-                route_bank, event, parent_owned, table)
+                route_bank, event, parent_owned, table; alpha=alpha_c2f)
         elseif event.phase == :advance
             level = event.src_level
             buffers = state_bank.levels[level + 1]
@@ -880,9 +907,9 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
 
             if level > 0
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
-                    route_bank, event, Fsource, table)
+                    route_bank, event, Fsource, table; alpha=alpha_f2c)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
-                    route_bank, event, Fsource)
+                    route_bank, event, Fsource; alpha=alpha_f2c)
             end
 
             fill!(Fscratch, zero(eltype(Fscratch)))
