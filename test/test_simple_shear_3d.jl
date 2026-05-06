@@ -140,7 +140,7 @@ using Kraken, KernelAbstractions
     tyy_num = Array(tau_p_yy)[ic, jc, kc]
     N1_num  = txx_num - tyy_num
 
-    @info "3D simple shear @ centre" Wi_eff Cxx_num Cxx_an Cxy_num Cxy_an Cxz_num Cyy_num Cyz_num Czz_num txy_num τ_xy_an N1_num N1_an
+    @info "3D simple shear @ centre" Wi_eff Cxx_num C_xx_an Cxy_num C_xy_an Cxz_num Cyy_num Cyz_num Czz_num txy_num τ_xy_an N1_num N1_an
 
     @testset "C_xy ≈ λγ̇ (off-diag in shear plane)" begin
         @test isapprox(Cxy_num, C_xy_an; rtol=0.05)

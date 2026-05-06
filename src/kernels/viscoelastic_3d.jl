@@ -3,7 +3,7 @@ using KernelAbstractions
 # --- 3D Hermite stress source (D3Q19) for viscoelastic post-collision ---
 #
 # 3D port of `apply_hermite_source_2d!` (Liu et al. 2025, Eq. 25 with the
-# (1 − s_plus/2) division for standard BGK/TRT consistency).
+# post-collision CE half-step correction).
 #
 # T_q = -s_plus · (9/2) / (1 − s_plus/2) · w_q ·
 #         [(c_qx² − cs²)·τxx + (c_qy² − cs²)·τyy + (c_qz² − cs²)·τzz +

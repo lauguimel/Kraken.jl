@@ -42,27 +42,28 @@ using KernelAbstractions
                                   duxdx::T, duxdy::T, duxdz::T,
                                   duydx::T, duydy::T, duydz::T,
                                   duzdx::T, duzdy::T, duzdz::T) where {T}
+    divu = duxdx + duydy + duzdz
     if component == 1        # xx
         return -inv_λ * (cxx - one(T)) +
-               T(2) * (cxx * duxdx + cxy * duxdy + cxz * duxdz)
+               T(2) * (cxx * duxdx + cxy * duxdy + cxz * duxdz) + cxx * divu
     elseif component == 2    # xy
         return -inv_λ * cxy +
                (cxx * duydx + cyy * duxdy +
-                cxy * (duxdx + duydy) + cxz * duydz + cyz * duxdz)
+                cxy * (duxdx + duydy) + cxz * duydz + cyz * duxdz) + cxy * divu
     elseif component == 3    # xz
         return -inv_λ * cxz +
                (cxx * duzdx + czz * duxdz +
-                cxz * (duxdx + duzdz) + cxy * duzdy + cyz * duxdy)
+                cxz * (duxdx + duzdz) + cxy * duzdy + cyz * duxdy) + cxz * divu
     elseif component == 4    # yy
         return -inv_λ * (cyy - one(T)) +
-               T(2) * (cxy * duydx + cyy * duydy + cyz * duydz)
+               T(2) * (cxy * duydx + cyy * duydy + cyz * duydz) + cyy * divu
     elseif component == 5    # yz
         return -inv_λ * cyz +
                (cyy * duzdy + czz * duydz +
-                cyz * (duydy + duzdz) + cxy * duzdx + cxz * duydx)
+                cyz * (duydy + duzdz) + cxy * duzdx + cxz * duydx) + cyz * divu
     else                     # zz (component == 6)
         return -inv_λ * (czz - one(T)) +
-               T(2) * (cxz * duzdx + cyz * duzdy + czz * duzdz)
+               T(2) * (cxz * duzdx + cyz * duzdy + czz * duzdz) + czz * divu
     end
 end
 
@@ -292,11 +293,12 @@ end
     @inbounds if !is_solid[i, j, k]
         T = eltype(g_post)
 
-        # Detect any solid neighbour
+        # Detect any solid or out-of-domain neighbour. Domain boundaries are
+        # physical walls for the conformation populations as well.
         any_solid = false
         for q in 2:19
             ni = i + _cx_q3(q); nj = j + _cy_q3(q); nk = k + _cz_q3(q)
-            if 1 ≤ ni ≤ Nx && 1 ≤ nj ≤ Ny && 1 ≤ nk ≤ Nz && is_solid[ni, nj, nk]
+            if !(1 ≤ ni ≤ Nx && 1 ≤ nj ≤ Ny && 1 ≤ nk ≤ Nz) || is_solid[ni, nj, nk]
                 any_solid = true
             end
         end
@@ -335,6 +337,12 @@ end
                     g_post[i,j,k,q] = ge_q[q] + (g_post[i,j,k,oq] - ge_q[oq])
                 end
             end
+
+            nonrest = zero(T)
+            for q in 2:19
+                nonrest += g_post[i,j,k,q]
+            end
+            g_post[i,j,k,1] = φ - nonrest
 
             C_field[i,j,k] = φ
         end
