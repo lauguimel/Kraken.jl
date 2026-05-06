@@ -26,6 +26,23 @@ struct AMRDQuicklookArtifact2D
     profiles_png::String
 end
 
+struct AMRDCartesianChannelQuicklook2D{T}
+    flow::Symbol
+    F::Array{T,3}
+    ux_profile::Vector{T}
+    analytic_ux_profile::Vector{T}
+    l2_error::T
+    linf_error::T
+    mass_initial::T
+    mass_final::T
+    mass_drift::T
+    steps::Int
+    volume::T
+    force_x::T
+    force_y::T
+    max_level::Int
+end
+
 function _ql_sanitize_name(name::AbstractString)
     cleaned = replace(String(name), r"[^A-Za-z0-9_.-]+" => "_")
     return isempty(cleaned) ? "case" : cleaned
@@ -116,6 +133,69 @@ function _ql_mass_rel_drift(result)
                                  eps(typeof(float(mass_initial))))
 end
 
+function _ql_profile_interp(profile::AbstractVector, y::Real)
+    n = length(profile)
+    n == 0 && return NaN
+    n == 1 && return Float64(only(profile))
+    pos = clamp(y, 0.0, 1.0) * (n - 1) + 1
+    lo = floor(Int, pos)
+    hi = ceil(Int, pos)
+    lo == hi && return Float64(profile[lo])
+    t = pos - lo
+    return (1 - t) * Float64(profile[lo]) + t * Float64(profile[hi])
+end
+
+function _ql_profile_errors(profile::AbstractVector, reference::AbstractVector)
+    n = length(profile)
+    n == 0 && return (NaN, NaN)
+    sq = 0.0
+    linf = 0.0
+    count = 0
+    for k in 1:n
+        value = Float64(profile[k])
+        isfinite(value) || continue
+        y = n == 1 ? 0.0 : (k - 1) / (n - 1)
+        ref = _ql_profile_interp(reference, y)
+        isfinite(ref) || continue
+        err = value - ref
+        sq += err * err
+        linf = max(linf, abs(err))
+        count += 1
+    end
+    count == 0 && return (NaN, NaN)
+    return sqrt(sq / count), linf
+end
+
+function _ql_field_errors(A, B)
+    size(A) == size(B) || return (NaN, NaN)
+    sq = 0.0
+    linf = 0.0
+    count = 0
+    @inbounds for idx in eachindex(A, B)
+        a = Float64(A[idx])
+        b = Float64(B[idx])
+        isfinite(a) && isfinite(b) || continue
+        err = a - b
+        sq += err * err
+        linf = max(linf, abs(err))
+        count += 1
+    end
+    count == 0 && return (NaN, NaN)
+    return sqrt(sq / count), linf
+end
+
+function _ql_finite_mean(A)
+    total = 0.0
+    count = 0
+    for value in A
+        v = Float64(value)
+        isfinite(v) || continue
+        total += v
+        count += 1
+    end
+    return count == 0 ? NaN : total / count
+end
+
 function _ql_leaf_fields(F, is_solid; volume=0.25, force_x=0.0, force_y=0.0)
     ux = fill(NaN, size(F, 1), size(F, 2))
     uy = similar(ux)
@@ -200,6 +280,18 @@ function _ql_state_from_spec_result(result; force_x=0.0, force_y=0.0)
             level, patch=nothing, leaf_nx, leaf_ny)
 end
 
+function _ql_state_from_cartesian_channel_result(result)
+    F = getproperty(result, :F)
+    is_solid = falses(size(F, 1), size(F, 2))
+    fields = _ql_leaf_fields(
+        F, is_solid; volume=getproperty(result, :volume),
+        force_x=getproperty(result, :force_x),
+        force_y=getproperty(result, :force_y))
+    level = fill(getproperty(result, :max_level), size(F, 1), size(F, 2))
+    return (; fields, is_solid, level, patch=nothing, leaf_nx=size(F, 1),
+            leaf_ny=size(F, 2))
+end
+
 function _ql_static_solid_mask(setup, case, leaf_nx::Int, leaf_ny::Int)
     case.geometry == :cylinder || return falses(leaf_nx, leaf_ny)
     vars = getproperty(setup, :user_vars)
@@ -240,6 +332,15 @@ function _ql_mesh_cells_from_spec(spec)
                      leaf_j_min=(cell.j - 1) * scale + 1,
                      leaf_j_max=cell.j * scale,
                      active=true))
+    end
+    return rows
+end
+
+function _ql_mesh_cells_uniform(leaf_nx::Int, leaf_ny::Int, level::Int)
+    rows = NamedTuple[]
+    for j in 1:leaf_ny, i in 1:leaf_nx
+        push!(rows, (; level, i, j, leaf_i_min=i, leaf_i_max=i,
+                     leaf_j_min=j, leaf_j_max=j, active=true))
     end
     return rows
 end
@@ -356,8 +457,18 @@ function _ql_finite_colorrange(A; symmetric=false)
     end
     lo = minimum(vals)
     hi = maximum(vals)
-    lo == hi && (hi = lo + max(abs(lo), 1.0) * 1e-12)
+    lo == hi && return _ql_safe_colorrange(lo, hi)
     return (lo, hi)
+end
+
+function _ql_safe_colorrange(lo::Real, hi::Real)
+    lo_f = Float64(lo)
+    hi_f = Float64(hi)
+    if lo_f == hi_f
+        pad = max(abs(lo_f), 1.0) * 1e-6
+        return (lo_f - pad, hi_f + pad)
+    end
+    return (lo_f, hi_f)
 end
 
 function _ql_rect!(ax, i0, i1, j0, j1; color, linewidth)
@@ -382,14 +493,31 @@ function _ql_overlay_solid!(ax, is_solid)
     return ax
 end
 
+function _ql_mesh_level_grid(rows, leaf_nx::Int, leaf_ny::Int)
+    grid = fill(-1, leaf_nx, leaf_ny)
+    for r in rows
+        grid[r.leaf_i_min:r.leaf_i_max, r.leaf_j_min:r.leaf_j_max] .= r.level
+    end
+    return grid
+end
+
 function _ql_plot_mesh(path, rows; title, leaf_nx, leaf_ny, is_solid=falses(0, 0))
     fig = Figure(size=(1100, 760), fontsize=16)
     ax = Axis(fig[1, 1]; title=title, xlabel="x leaf", ylabel="y leaf",
               aspect=DataAspect())
-    for r in rows
-        _ql_rect!(ax, r.leaf_i_min, r.leaf_i_max, r.leaf_j_min, r.leaf_j_max;
-                  color=(_ql_level_color(r.level), 0.68),
-                  linewidth=r.level == 0 ? 0.45 : 0.65)
+    if length(rows) > 8000
+        levels = _ql_mesh_level_grid(rows, leaf_nx, leaf_ny)
+        hm = heatmap!(ax, 1:leaf_nx, 1:leaf_ny, Float64.(levels);
+                      colormap=:viridis,
+                      colorrange=_ql_safe_colorrange(
+                          minimum(levels), maximum(levels)))
+        Colorbar(fig[1, 2], hm; label="level")
+    else
+        for r in rows
+            _ql_rect!(ax, r.leaf_i_min, r.leaf_i_max, r.leaf_j_min, r.leaf_j_max;
+                      color=(_ql_level_color(r.level), 0.68),
+                      linewidth=r.level == 0 ? 0.45 : 0.65)
+        end
     end
     _ql_overlay_solid!(ax, is_solid)
     xlims!(ax, 0.5, leaf_nx + 0.5)
@@ -426,7 +554,8 @@ function _ql_plot_fields(path, state; title)
     _ql_overlay_solid!(ax3, state.is_solid)
     ax4 = _ql_heatmap!(fig, 2, 3, "$title level", Float64.(state.level);
                        colormap=:viridis,
-                       colorrange=(minimum(state.level), maximum(state.level)))
+                       colorrange=_ql_safe_colorrange(
+                           minimum(state.level), maximum(state.level)))
     _ql_overlay_solid!(ax4, state.is_solid)
     save(path, fig)
     return path
@@ -492,6 +621,155 @@ function _ql_plot_profiles(path, result, state; title)
                       color=:dodgerblue4, linewidth=2.5)
     save(path, fig)
     return path
+end
+
+function _ql_array_diff(A, B)
+    size(A) == size(B) || return fill(NaN, size(A))
+    C = fill(NaN, size(A))
+    @inbounds for idx in eachindex(A, B)
+        a = A[idx]
+        b = B[idx]
+        C[idx] = isfinite(a) && isfinite(b) ? a - b : NaN
+    end
+    return C
+end
+
+function _ql_plot_compare_fields(path, amr_state, reference_state; title)
+    speed_range = _ql_finite_colorrange(vcat(vec(amr_state.fields.speed),
+                                             vec(reference_state.fields.speed)))
+    rho_range = _ql_finite_colorrange(vcat(vec(amr_state.fields.rho),
+                                           vec(reference_state.fields.rho)))
+    ux_diff = _ql_array_diff(amr_state.fields.ux, reference_state.fields.ux)
+    rho_diff = _ql_array_diff(amr_state.fields.rho, reference_state.fields.rho)
+    ux_diff_range = _ql_finite_colorrange(ux_diff; symmetric=true)
+    rho_diff_range = _ql_finite_colorrange(rho_diff; symmetric=true)
+
+    fig = Figure(size=(1900, 980), fontsize=16)
+    ax1 = _ql_heatmap!(fig, 1, 1, "$title AMR-D |u|",
+                       amr_state.fields.speed; colorrange=speed_range)
+    _ql_overlay_solid!(ax1, amr_state.is_solid)
+    ax2 = _ql_heatmap!(fig, 1, 3, "$title reference |u|",
+                       reference_state.fields.speed; colorrange=speed_range)
+    _ql_overlay_solid!(ax2, reference_state.is_solid)
+    _ql_heatmap!(fig, 1, 5, "$title ux diff AMR-D - reference",
+                 ux_diff; colormap=:balance, colorrange=ux_diff_range)
+
+    ax3 = _ql_heatmap!(fig, 2, 1, "$title AMR-D rho",
+                       amr_state.fields.rho; colorrange=rho_range)
+    _ql_overlay_solid!(ax3, amr_state.is_solid)
+    ax4 = _ql_heatmap!(fig, 2, 3, "$title reference rho",
+                       reference_state.fields.rho; colorrange=rho_range)
+    _ql_overlay_solid!(ax4, reference_state.is_solid)
+    _ql_heatmap!(fig, 2, 5, "$title rho diff AMR-D - reference",
+                 rho_diff; colormap=:balance, colorrange=rho_diff_range)
+    save(path, fig)
+    return path
+end
+
+function _ql_plot_compare_profiles(path, amr_result, amr_state,
+                                   reference_result, reference_state; title)
+    amr_profile, analytic = _ql_profile_vectors(amr_result, amr_state)
+    ref_profile, _ = _ql_profile_vectors(reference_result, reference_state)
+    nx = min(amr_state.leaf_nx, reference_state.leaf_nx)
+    ny = min(amr_state.leaf_ny, reference_state.leaf_ny)
+    j_mid = cld(ny, 2)
+    i_probe = clamp(round(Int, 0.75 * nx), 1, nx)
+    x = (collect(1:nx) .- 0.5) ./ nx
+    y = (collect(1:ny) .- 0.5) ./ ny
+    y_amr = length(amr_profile) == 1 ? [0.0] :
+        [(j - 1) / (length(amr_profile) - 1) for j in eachindex(amr_profile)]
+    y_ref = length(ref_profile) == 1 ? [0.0] :
+        [(j - 1) / (length(ref_profile) - 1) for j in eachindex(ref_profile)]
+
+    fig = Figure(size=(1500, 980), fontsize=16)
+    ax1 = Axis(fig[1, 1]; title="$title mean ux",
+               xlabel="ux", ylabel="y/Ly")
+    _ql_lines_finite!(ax1, amr_profile, y_amr; label="AMR-D",
+                      color=:orangered, linewidth=2.8)
+    _ql_lines_finite!(ax1, ref_profile, y_ref; label="leaf Cartesian",
+                      color=:dodgerblue4, linewidth=2.5)
+    _ql_lines_finite!(ax1, analytic, y_amr; label="analytic",
+                      color=:black, linestyle=:dash, linewidth=2.2)
+    axislegend(ax1, position=:rb)
+
+    ax2 = Axis(fig[1, 2]; title="$title centerline ux",
+               xlabel="x/Lx", ylabel="ux")
+    _ql_lines_finite!(ax2, x, amr_state.fields.ux[1:nx, j_mid];
+                      label="AMR-D", color=:orangered, linewidth=2.5)
+    _ql_lines_finite!(ax2, x, reference_state.fields.ux[1:nx, j_mid];
+                      label="leaf Cartesian", color=:dodgerblue4, linewidth=2.3)
+    axislegend(ax2, position=:rb)
+
+    ax3 = Axis(fig[2, 1]; title="$title vertical ux probe",
+               xlabel="ux", ylabel="y/Ly")
+    _ql_lines_finite!(ax3, amr_state.fields.ux[i_probe, 1:ny], y;
+                      label="AMR-D", color=:orangered, linewidth=2.5)
+    _ql_lines_finite!(ax3, reference_state.fields.ux[i_probe, 1:ny], y;
+                      label="leaf Cartesian", color=:dodgerblue4, linewidth=2.3)
+    axislegend(ax3, position=:rb)
+
+    ax4 = Axis(fig[2, 2]; title="$title centerline rho",
+               xlabel="x/Lx", ylabel="rho")
+    _ql_lines_finite!(ax4, x, amr_state.fields.rho[1:nx, j_mid];
+                      label="AMR-D", color=:orangered, linewidth=2.5)
+    _ql_lines_finite!(ax4, x, reference_state.fields.rho[1:nx, j_mid];
+                      label="leaf Cartesian", color=:dodgerblue4, linewidth=2.3)
+    axislegend(ax4, position=:rb)
+    save(path, fig)
+    return path
+end
+
+function _ql_run_cartesian_leaf_channel(setup, case; steps, T)
+    domain = getproperty(setup, :domain)
+    ml = case.max_level
+    scale = 1 << ml
+    nx = Int(domain.Nx) * scale
+    ny = Int(domain.Ny) * scale
+    volume = one(T) / T(scale * scale)
+    rho0 = T(_ql_var(setup, :rho0, 1.0))
+    omega = T(_ql_var(setup, :omega, 1.0))
+    F = zeros(T, nx, ny, 9)
+    Ftmp = similar(F)
+    fill_equilibrium_integrated_D2Q9!(F, volume, rho0, zero(T), zero(T))
+    mass_initial = sum(F)
+    force_x = zero(T)
+    force_y = zero(T)
+
+    for _ in 1:steps
+        if case.flow == :poiseuille
+            Fx = T(_ql_body_force(setup, :Fx, _ql_var(setup, :Fx, 1e-6)))
+            force_x = Fx
+            collide_Guo_integrated_D2Q9!(F, volume, omega, Fx, zero(T))
+            stream_periodic_x_wall_y_F_2d!(Ftmp, F)
+        elseif case.flow == :couette
+            U = T(_ql_boundary_value(
+                setup, :north, :velocity, :ux, _ql_var(setup, :U, 1e-3)))
+            collide_BGK_integrated_D2Q9!(F, volume, omega)
+            stream_periodic_x_moving_wall_y_F_2d!(
+                Ftmp, F; u_south=zero(T), u_north=U,
+                rho_wall=rho0, volume=volume)
+        else
+            throw(ArgumentError("cartesian leaf reference supports nested channels only"))
+        end
+        F, Ftmp = Ftmp, F
+    end
+
+    fields = _ql_leaf_fields(F, falses(nx, ny); volume=volume,
+                             force_x=force_x, force_y=force_y)
+    state = (; fields, is_solid=falses(nx, ny), level=fill(ml, nx, ny),
+             patch=nothing, leaf_nx=nx, leaf_ny=ny)
+    profile = T.(_ql_mean_ux_by_y(state))
+    analytic = case.flow == :poiseuille ?
+        T.(poiseuille_analytic_profile_2d(ny, force_x, omega; rho=rho0)) :
+        T.(couette_analytic_profile_2d(
+            ny, _ql_boundary_value(setup, :north, :velocity, :ux,
+                                   _ql_var(setup, :U, 1e-3))))
+    l2, linf = _ql_profile_errors(profile, analytic)
+    mass_final = sum(F)
+    return AMRDCartesianChannelQuicklook2D{T}(
+        case.flow, F, profile, analytic, T(l2), T(linf), mass_initial,
+        mass_final, mass_final - mass_initial, Int(steps), volume, force_x,
+        force_y, ml)
 end
 
 function _ql_run_one_level_case(setup, case; steps, avg_window, method, T)
@@ -570,12 +848,83 @@ end
 
 function _ql_write_summary_csv(path, artifacts)
     open(path, "w") do io
-        println(io, "case,flow,method,status,outdir,status_csv,mesh_csv,mesh_png,fields_csv,fields_png,profiles_csv,profiles_png")
+        println(io, "case,flow,method,status,outdir,status_csv,mesh_csv,mesh_png,fields_csv,fields_png,profiles_csv,profiles_png,values_csv,fields_compare_png,profiles_compare_png")
         for a in artifacts
+            values_csv = joinpath(a.outdir, "values.csv")
+            fields_compare_png = joinpath(a.outdir, "fields_compare.png")
+            profiles_compare_png = joinpath(a.outdir, "profiles_compare.png")
             println(io, join((a.case_name, a.flow, a.method, a.status, a.outdir,
                               a.status_csv, a.mesh_csv, a.mesh_png,
                               a.fields_csv, a.fields_png,
-                              a.profiles_csv, a.profiles_png), ","))
+                              a.profiles_csv, a.profiles_png,
+                              isfile(values_csv) ? values_csv : "",
+                              isfile(fields_compare_png) ? fields_compare_png : "",
+                              isfile(profiles_compare_png) ? profiles_compare_png : ""), ","))
+        end
+    end
+    return path
+end
+
+function _ql_method_values(record, reference)
+    profile, analytic = _ql_profile_vectors(record.result, record.state)
+    l2_analytic, linf_analytic = _ql_profile_errors(profile, analytic)
+    if reference === nothing
+        l2_ref = NaN
+        linf_ref = NaN
+        ux_l2_ref = NaN
+        ux_linf_ref = NaN
+        rho_l2_ref = NaN
+        rho_linf_ref = NaN
+    else
+        ref_profile, _ = _ql_profile_vectors(reference.result, reference.state)
+        l2_ref, linf_ref = _ql_profile_errors(profile, ref_profile)
+        ux_l2_ref, ux_linf_ref = _ql_field_errors(
+            record.state.fields.ux, reference.state.fields.ux)
+        rho_l2_ref, rho_linf_ref = _ql_field_errors(
+            record.state.fields.rho, reference.state.fields.rho)
+    end
+    return (;
+        method=record.method,
+        steps=getproperty(record.result, :steps),
+        mass_rel_drift=_ql_mass_rel_drift(record.result),
+        ux_mean=_ql_finite_mean(record.state.fields.ux),
+        uy_mean=_ql_finite_mean(record.state.fields.uy),
+        rho_mean=_ql_finite_mean(record.state.fields.rho),
+        l2_profile_vs_analytic=l2_analytic,
+        linf_profile_vs_analytic=linf_analytic,
+        l2_profile_vs_reference=l2_ref,
+        linf_profile_vs_reference=linf_ref,
+        l2_ux_field_vs_reference=ux_l2_ref,
+        linf_ux_field_vs_reference=ux_linf_ref,
+        l2_rho_field_vs_reference=rho_l2_ref,
+        linf_rho_field_vs_reference=rho_linf_ref)
+end
+
+function _ql_write_values_csv(path, records)
+    reference = nothing
+    for record in records
+        if record.method in (:leaf_cartesian, :leaf_oracle)
+            reference = record
+            break
+        end
+    end
+    open(path, "w") do io
+        println(io, "method,steps,mass_rel_drift,ux_mean,uy_mean,rho_mean,l2_profile_vs_analytic,linf_profile_vs_analytic,l2_profile_vs_reference,linf_profile_vs_reference,l2_ux_field_vs_reference,linf_ux_field_vs_reference,l2_rho_field_vs_reference,linf_rho_field_vs_reference")
+        for record in records
+            values = _ql_method_values(
+                record, record.method in (:leaf_cartesian, :leaf_oracle) ?
+                nothing : reference)
+            @printf(io, "%s,%d,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e\n",
+                    String(values.method), values.steps, values.mass_rel_drift,
+                    values.ux_mean, values.uy_mean, values.rho_mean,
+                    values.l2_profile_vs_analytic,
+                    values.linf_profile_vs_analytic,
+                    values.l2_profile_vs_reference,
+                    values.linf_profile_vs_reference,
+                    values.l2_ux_field_vs_reference,
+                    values.linf_ux_field_vs_reference,
+                    values.l2_rho_field_vs_reference,
+                    values.linf_rho_field_vs_reference)
         end
     end
     return path
@@ -637,13 +986,21 @@ function run_amr_d_quicklook_from_krk_2d(paths;
 
         steps = _ql_steps(setup; steps_override=steps_override)
         avg = _ql_avg_window(setup, steps; avg_window_override=avg_window_override)
-        methods = case.max_level <= 1 && include_reference ?
+        methods = case.runtime_status == :subcycled_nested_channel && include_reference ?
+            (:amr_d, :leaf_cartesian) :
+            case.max_level <= 1 && include_reference ?
             (:amr_d, :leaf_oracle) : (:amr_d,)
+        records = NamedTuple[]
 
         for method in methods
             result = nothing
             force = (force_x=0.0, force_y=0.0)
-            if case.runtime_status == :subcycled_nested_channel
+            if method == :leaf_cartesian
+                result = _ql_run_cartesian_leaf_channel(setup, case;
+                                                        steps=steps, T=T)
+                force = (force_x=getproperty(result, :force_x),
+                         force_y=getproperty(result, :force_y))
+            elseif case.runtime_status == :subcycled_nested_channel
                 result = run_conservative_tree_amr_d_case_from_krk_2d(
                     setup; steps_override=steps, T=T)
                 force = (force_x=_ql_body_force(setup, :Fx, 0.0), force_y=0.0)
@@ -654,12 +1011,17 @@ function run_amr_d_quicklook_from_krk_2d(paths;
                     T=T)
             end
 
-            state = hasproperty(result, :spec) ?
+            state = result isa AMRDCartesianChannelQuicklook2D ?
+                _ql_state_from_cartesian_channel_result(result) :
+                hasproperty(result, :spec) ?
                 _ql_state_from_spec_result(result; force_x=force.force_x,
                                            force_y=force.force_y) :
                 _ql_state_from_composite_result(result; force_x=force.force_x,
                                                 force_y=force.force_y)
-            mesh_rows = state.patch === nothing ?
+            mesh_rows = result isa AMRDCartesianChannelQuicklook2D ?
+                _ql_mesh_cells_uniform(state.leaf_nx, state.leaf_ny,
+                                       getproperty(result, :max_level)) :
+                state.patch === nothing ?
                 _ql_mesh_cells_from_spec(getproperty(result, :spec)) :
                 _ql_mesh_cells_from_patch(
                     div(state.leaf_nx, 2), div(state.leaf_ny, 2), state.patch)
@@ -684,9 +1046,28 @@ function run_amr_d_quicklook_from_krk_2d(paths;
                 _ql_plot_profiles(profiles_png, result, state;
                                   title="$(case.name) $(prefix)")
             end
+            push!(records, (; method, result, state))
             push!(artifacts, _ql_artifact(
                 setup, case, method, case_dir, status_csv, mesh_csv_m,
                 mesh_png_m, fields_csv, fields_png, profiles_csv, profiles_png))
+        end
+
+        if !isempty(records)
+            _ql_write_values_csv(joinpath(case_dir, "values.csv"), records)
+            amr_record = findfirst(record -> record.method == :amr_d, records)
+            ref_record = findfirst(record -> record.method in
+                                  (:leaf_cartesian, :leaf_oracle), records)
+            if make_plots && amr_record !== nothing && ref_record !== nothing
+                amr = records[amr_record]
+                ref = records[ref_record]
+                _ql_plot_compare_fields(
+                    joinpath(case_dir, "fields_compare.png"),
+                    amr.state, ref.state; title=case.name)
+                _ql_plot_compare_profiles(
+                    joinpath(case_dir, "profiles_compare.png"),
+                    amr.result, amr.state, ref.result, ref.state;
+                    title=case.name)
+            end
         end
     end
 

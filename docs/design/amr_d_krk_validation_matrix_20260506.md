@@ -113,7 +113,15 @@ For each case, the helper writes:
 - `mesh_amr_d.csv/png`: actual runtime mesh when the case is executable;
 - `fields_amr_d.csv/png`: `rho`, `ux`, `uy`, `|u|`, level and solid mask;
 - `profiles_amr_d.csv/png`: mean profile, centerline and vertical probe;
+- `fields_compare.png`: AMR-D vs reference fields and field differences;
+- `profiles_compare.png`: AMR-D vs reference profiles, plus analytic profile
+  when available;
+- `values.csv`: mass drift, mean values, profile errors and field errors;
 - `summary.csv`: all generated artifact paths.
+
+For nested channel cases, the reference is a leaf-equivalent Cartesian run at
+the finest nested resolution. For one-level obstacle cases, the reference is the
+existing leaf-oracle route.
 
 Runtime-pending cases, such as the long-channel cylinder lift show-off, still
 emit `status.csv` and `mesh_static.csv/png`. They do not emit physical fields

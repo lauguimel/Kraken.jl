@@ -28,6 +28,24 @@ include(joinpath(dirname(@__DIR__), "benchmarks",
     mktempdir() do dir
         artifacts = run_amr_d_quicklook_from_krk_2d(
             joinpath(dirname(@__DIR__), "benchmarks", "krk",
+                     "amr_d_convergence_2d",
+                     "poiseuille_nested4_channel.krk");
+            outdir=dir, steps_override=1, include_reference=true,
+            make_plots=false)
+
+        @test length(artifacts) == 2
+        @test Set(a.method for a in artifacts) == Set([:amr_d, :leaf_cartesian])
+        case_dir = first(artifacts).outdir
+        values_csv = joinpath(case_dir, "values.csv")
+        @test isfile(values_csv)
+        values_text = read(values_csv, String)
+        @test occursin("linf_profile_vs_reference", values_text)
+        @test occursin("leaf_cartesian", values_text)
+    end
+
+    mktempdir() do dir
+        artifacts = run_amr_d_quicklook_from_krk_2d(
+            joinpath(dirname(@__DIR__), "benchmarks", "krk",
                      "amr_d_showoff_2d",
                      "cylinder_lift_re100_long_channel.krk");
             outdir=dir, steps_override=1, include_reference=false,
