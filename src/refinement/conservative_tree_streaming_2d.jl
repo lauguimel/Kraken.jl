@@ -123,6 +123,125 @@ end
     return nothing
 end
 
+@inline function _coarse_child_limited_linear_Fq_2d(
+        coarse_F::AbstractArray{<:Any,3},
+        patch::ConservativeTreePatch2D,
+        I::Int,
+        J::Int,
+        q::Int,
+        ix::Int,
+        iy::Int)
+    center = _composite_parent_Fq(coarse_F, patch, I, J, q)
+    sx = _limited_parent_slope_x(coarse_F, patch, I, J, q)
+    sy = _limited_parent_slope_y(coarse_F, patch, I, J, q)
+
+    max_delta = (abs(sx) + abs(sy)) / 16
+    base = center / 4
+    if max_delta > zero(max_delta) && base < max_delta
+        theta = base / max_delta
+        sx *= theta
+        sy *= theta
+    end
+
+    xsign = ix == 1 ? -1 : 1
+    ysign = iy == 1 ? -1 : 1
+    return base + xsign * sx / 16 + ysign * sy / 16
+end
+
+function _scatter_limited_linear_coarse_route_packet_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        cell_id_by_coord,
+        src_cell::ConservativeTreeCell2D,
+        route::ConservativeTreeRoute2D,
+        nx::Int,
+        ny::Int)
+    q = route.q
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+    split_kind = (src_cell.i < first(patch_in.parent_i_range) ||
+                  src_cell.i > last(patch_in.parent_i_range)) &&
+                 (src_cell.j < first(patch_in.parent_j_range) ||
+                  src_cell.j > last(patch_in.parent_j_range)) ? SPLIT_CORNER : SPLIT_FACE
+    handled = false
+
+    @inbounds for iy in 1:2, ix in 1:2
+        i_dst = _fine_global_i(src_cell.i, ix) + cx
+        j_dst = _fine_global_j(src_cell.j, iy) + cy
+        _inside_leaf_domain(i_dst, j_dst, nx, ny) || continue
+
+        if _inside_fine_patch(i_dst, j_dst, patch_in)
+            dst = cell_id_by_coord[_tree_topology_key(1, i_dst, j_dst)]
+            kind = split_kind
+        else
+            I_dst, J_dst = _coarse_parent_from_fine(i_dst, j_dst)
+            dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
+            kind = DIRECT
+        end
+        dst == route.dst && kind == route.kind || continue
+
+        dst_cell = topology.cells[dst]
+        value = _coarse_child_limited_linear_Fq_2d(
+            coarse_in, patch_in, src_cell.i, src_cell.j, q, ix, iy)
+        _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, q, value)
+        handled = true
+    end
+    return handled
+end
+
+function _scatter_limited_linear_coarse_solid_route_packet_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        cell_id_by_coord,
+        src_cell::ConservativeTreeCell2D,
+        route::ConservativeTreeRoute2D,
+        nx::Int,
+        ny::Int,
+        is_solid::AbstractArray{Bool,2})
+    q = route.q
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+    split_kind = (src_cell.i < first(patch_in.parent_i_range) ||
+                  src_cell.i > last(patch_in.parent_i_range)) &&
+                 (src_cell.j < first(patch_in.parent_j_range) ||
+                  src_cell.j > last(patch_in.parent_j_range)) ? SPLIT_CORNER : SPLIT_FACE
+    handled = false
+
+    @inbounds for iy in 1:2, ix in 1:2
+        i_dst = _fine_global_i(src_cell.i, ix) + cx
+        j_dst = _fine_global_j(src_cell.j, iy) + cy
+        _inside_leaf_domain(i_dst, j_dst, nx, ny) || continue
+
+        if _inside_fine_patch(i_dst, j_dst, patch_in)
+            dst = cell_id_by_coord[_tree_topology_key(1, i_dst, j_dst)]
+            kind = split_kind
+        else
+            I_dst, J_dst = _coarse_parent_from_fine(i_dst, j_dst)
+            dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
+            kind = DIRECT
+        end
+        dst == route.dst && kind == route.kind || continue
+
+        dst_cell = topology.cells[dst]
+        value = _coarse_child_limited_linear_Fq_2d(
+            coarse_in, patch_in, src_cell.i, src_cell.j, q, ix, iy)
+        if _cell_is_solid_2d(dst_cell, is_solid)
+            _add_cell_Fq_2d!(coarse_out, patch_out, src_cell,
+                             d2q9_opposite(q), value)
+        else
+            _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, q, value)
+        end
+        handled = true
+    end
+    return handled
+end
+
 @inline function _scatter_solid_route_packet_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -149,6 +268,107 @@ end
     return i < 1 ? nx : (i > nx ? 1 : i)
 end
 
+function _stream_periodic_x_leaf_equivalent_boundary_samples_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        cell_id_by_coord,
+        src_cell::ConservativeTreeCell2D,
+        q::Int,
+        nx::Int,
+        ny::Int;
+        coarse_prolongation::Symbol=:flat)
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+    cx == 0 && return false
+
+    handled = false
+    @inbounds for iy in 1:2, ix in 1:2
+        i_raw = _fine_global_i(src_cell.i, ix) + cx
+        j_dst = _fine_global_j(src_cell.j, iy) + cy
+        (i_raw < 1 || i_raw > 2 * nx) || continue
+        1 <= j_dst <= 2 * ny || continue
+
+        i_dst = _periodic_x_wrapped(i_raw, 2 * nx)
+        if _inside_fine_patch(i_dst, j_dst, patch_in)
+            dst = cell_id_by_coord[_tree_topology_key(1, i_dst, j_dst)]
+        else
+            I_dst, J_dst = _coarse_parent_from_fine(i_dst, j_dst)
+            dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
+        end
+        dst_cell = topology.cells[dst]
+        if coarse_prolongation == :limited_linear
+            value = _coarse_child_limited_linear_Fq_2d(
+                coarse_in, patch_in, src_cell.i, src_cell.j, q, ix, iy)
+            _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, q, value)
+        else
+            _scatter_route_packet_2d!(coarse_out, patch_out,
+                                       coarse_in, patch_in,
+                                       src_cell, dst_cell, q, 0.25)
+        end
+        handled = true
+    end
+    return handled
+end
+
+function _stream_periodic_x_wall_y_leaf_equivalent_boundary_samples_2d!(
+        coarse_out::AbstractArray{<:Any,3},
+        patch_out::ConservativeTreePatch2D,
+        coarse_in::AbstractArray{<:Any,3},
+        patch_in::ConservativeTreePatch2D,
+        topology::ConservativeTreeTopology2D,
+        cell_id_by_coord,
+        src_cell::ConservativeTreeCell2D,
+        q::Int,
+        nx::Int,
+        ny::Int,
+        u_south,
+        u_north,
+        rho_wall,
+        volume_coarse;
+        coarse_prolongation::Symbol=:flat)
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+    q_dst = d2q9_opposite(q)
+    handled = false
+
+    @inbounds for iy in 1:2, ix in 1:2
+        i_leaf = _fine_global_i(src_cell.i, ix) + cx
+        j_leaf = _fine_global_j(src_cell.j, iy) + cy
+        _inside_leaf_domain(i_leaf, j_leaf, nx, ny) && continue
+
+        value = if coarse_prolongation == :limited_linear
+            _coarse_child_limited_linear_Fq_2d(
+                coarse_in, patch_in, src_cell.i, src_cell.j, q, ix, iy)
+        else
+            0.25 * _cell_Fq_2d(coarse_in, patch_in, src_cell, q)
+        end
+
+        if j_leaf < 1 || j_leaf > 2 * ny
+            wall_u = j_leaf < 1 ? u_south : u_north
+            correction = _moving_wall_delta(
+                volume_coarse / 4, rho_wall, wall_u, q_dst)
+            _add_cell_Fq_2d!(coarse_out, patch_out, src_cell, q_dst,
+                             value + correction)
+            handled = true
+        elseif i_leaf < 1 || i_leaf > 2 * nx
+            i_dst = _periodic_x_wrapped(i_leaf, 2 * nx)
+            if _inside_fine_patch(i_dst, j_leaf, patch_in)
+                dst = cell_id_by_coord[_tree_topology_key(1, i_dst, j_leaf)]
+            else
+                I_dst, J_dst = _coarse_parent_from_fine(i_dst, j_leaf)
+                dst = cell_id_by_coord[_tree_topology_key(0, I_dst, J_dst)]
+            end
+            dst_cell = topology.cells[dst]
+            _add_cell_Fq_2d!(coarse_out, patch_out, dst_cell, q, value)
+            handled = true
+        end
+    end
+    return handled
+end
+
 function _stream_periodic_x_boundary_route_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -158,7 +378,8 @@ function _stream_periodic_x_boundary_route_2d!(
         cell_id_by_coord,
         route::ConservativeTreeRoute2D,
         nx::Int,
-        ny::Int)
+        ny::Int;
+        coarse_prolongation::Symbol=:flat)
     src_cell = topology.cells[route.src]
     q = route.q
     cx = d2q9_cx(q)
@@ -172,6 +393,12 @@ function _stream_periodic_x_boundary_route_2d!(
         1 <= j_dst <= ny || return false
 
         i_dst = _periodic_x_wrapped(i_raw, nx)
+        if route.weight < 1.0
+            return _stream_periodic_x_leaf_equivalent_boundary_samples_2d!(
+                coarse_out, patch_out, coarse_in, patch_in,
+                topology, cell_id_by_coord, src_cell, q, nx, ny;
+                coarse_prolongation=coarse_prolongation)
+        end
         if _inside_range(i_dst, j_dst, patch_in.parent_i_range, patch_in.parent_j_range)
             specs = _coarse_to_fine_route_specs(cell_id_by_coord,
                                                 src_cell.i, src_cell.j, q,
@@ -230,7 +457,8 @@ function _stream_wall_y_boundary_route_2d!(
         u_north,
         rho_wall,
         volume_coarse,
-        volume_fine)
+        volume_fine;
+        coarse_prolongation::Symbol=:flat)
     src_cell = topology.cells[route.src]
     q = route.q
     cy = d2q9_cy(q)
@@ -241,6 +469,26 @@ function _stream_wall_y_boundary_route_2d!(
         j_raw = src_cell.j + cy
         (j_raw < 1 || j_raw > ny) || return false
         wall_u = j_raw < 1 ? u_south : u_north
+        if route.weight < 1.0
+            q_dst = d2q9_opposite(q)
+            handled = false
+            @inbounds for iy in 1:2, ix in 1:2
+                j_leaf = _fine_global_j(src_cell.j, iy) + cy
+                (j_leaf < 1 || j_leaf > 2 * ny) || continue
+                value = if coarse_prolongation == :limited_linear
+                    _coarse_child_limited_linear_Fq_2d(
+                        coarse_in, patch_in, src_cell.i, src_cell.j, q, ix, iy)
+                else
+                    0.25 * _cell_Fq_2d(coarse_in, patch_in, src_cell, q)
+                end
+                correction = _moving_wall_delta(
+                    volume_coarse / 4, rho_wall, wall_u, q_dst)
+                _add_cell_Fq_2d!(coarse_out, patch_out, src_cell, q_dst,
+                                 value + correction)
+                handled = true
+            end
+            return handled
+        end
     else
         j_raw = src_cell.j + cy
         (j_raw < 1 || j_raw > 2 * ny) || return false
@@ -269,10 +517,13 @@ function _stream_composite_routes_F_2d!(
         rho_wall=1,
         volume_coarse=1,
         volume_fine=0.25,
-        is_solid=nothing)
+        is_solid=nothing,
+        coarse_prolongation::Symbol=:flat)
     _check_composite_pair_layout(coarse_out, patch_out, coarse_in, patch_in)
     _check_route_stream_topology_layout(topology, coarse_in, patch_in)
     _check_route_stream_topology_layout(topology, coarse_out, patch_out)
+    coarse_prolongation in (:flat, :limited_linear) ||
+        throw(ArgumentError("coarse_prolongation must be :flat or :limited_linear"))
     if is_solid !== nothing
         _check_route_solid_mask_layout(topology, coarse_in, patch_in, is_solid)
     end
@@ -285,9 +536,7 @@ function _stream_composite_routes_F_2d!(
 
     nx = size(coarse_in, 1)
     ny = size(coarse_in, 2)
-    cell_id_by_coord = boundary_policy in (
-        :periodic_x, :periodic_x_wall_y, :periodic_x_moving_wall_y) ?
-        _cell_id_by_coord_2d(topology) : nothing
+    cell_id_by_coord = _cell_id_by_coord_2d(topology)
 
     @inbounds for route in topology.routes
         if route.kind == ROUTE_BOUNDARY
@@ -298,30 +547,57 @@ function _stream_composite_routes_F_2d!(
                 :periodic_x, :periodic_x_wall_y, :periodic_x_moving_wall_y,
                 :open_x_wall_y) ||
                 throw(ArgumentError("unsupported route boundary policy: $boundary_policy"))
+            if src_cell.level == 0 && route.weight < 1.0 &&
+                    boundary_policy in (:periodic_x_wall_y,
+                                        :periodic_x_moving_wall_y)
+                _stream_periodic_x_wall_y_leaf_equivalent_boundary_samples_2d!(
+                    coarse_out, patch_out, coarse_in, patch_in,
+                    topology, cell_id_by_coord, src_cell, route.q, nx, ny,
+                    u_south, u_north, rho_wall, volume_coarse;
+                    coarse_prolongation=coarse_prolongation)
+                continue
+            end
             handled = false
             if boundary_policy in (
                     :periodic_x_wall_y, :periodic_x_moving_wall_y, :open_x_wall_y)
                 handled = _stream_wall_y_boundary_route_2d!(
                     coarse_out, patch_out, coarse_in, patch_in,
                     topology, route, ny, u_south, u_north, rho_wall,
-                    volume_coarse, volume_fine)
+                    volume_coarse, volume_fine;
+                    coarse_prolongation=coarse_prolongation)
             end
             boundary_policy == :open_x_wall_y && continue
             handled || _stream_periodic_x_boundary_route_2d!(
                 coarse_out, patch_out, coarse_in, patch_in,
-                topology, cell_id_by_coord, route, nx, ny)
+                topology, cell_id_by_coord, route, nx, ny;
+                coarse_prolongation=coarse_prolongation)
             continue
         end
 
         src_cell = topology.cells[route.src]
         dst_cell = topology.cells[route.dst]
         if is_solid === nothing
-            _scatter_route_packet_2d!(coarse_out, patch_out, coarse_in, patch_in,
-                                      src_cell, dst_cell, route.q, route.weight)
+            if coarse_prolongation == :limited_linear &&
+                    src_cell.level == 0 && route.weight < 1.0
+                _scatter_limited_linear_coarse_route_packet_2d!(
+                    coarse_out, patch_out, coarse_in, patch_in,
+                    topology, cell_id_by_coord, src_cell, route, nx, ny)
+            else
+                _scatter_route_packet_2d!(coarse_out, patch_out, coarse_in, patch_in,
+                                          src_cell, dst_cell, route.q, route.weight)
+            end
         else
-            _scatter_solid_route_packet_2d!(
-                coarse_out, patch_out, coarse_in, patch_in,
-                src_cell, dst_cell, route.q, route.weight, is_solid)
+            if coarse_prolongation == :limited_linear &&
+                    src_cell.level == 0 && route.weight < 1.0
+                _scatter_limited_linear_coarse_solid_route_packet_2d!(
+                    coarse_out, patch_out, coarse_in, patch_in,
+                    topology, cell_id_by_coord, src_cell, route, nx, ny,
+                    is_solid)
+            else
+                _scatter_solid_route_packet_2d!(
+                    coarse_out, patch_out, coarse_in, patch_in,
+                    src_cell, dst_cell, route.q, route.weight, is_solid)
+            end
         end
     end
     coalesce_patch_to_shadow_F_2d!(patch_out)
@@ -347,10 +623,12 @@ function stream_composite_routes_interior_F_2d!(
         coarse_in::AbstractArray{<:Any,3},
         patch_in::ConservativeTreePatch2D,
         topology::ConservativeTreeTopology2D;
-        clear::Bool=true)
+        clear::Bool=true,
+        coarse_prolongation::Symbol=:flat)
     return _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
-                                          topology, :skip, clear)
+                                          topology, :skip, clear;
+                                          coarse_prolongation=coarse_prolongation)
 end
 
 """
@@ -371,10 +649,12 @@ function stream_composite_routes_periodic_x_F_2d!(
         coarse_in::AbstractArray{<:Any,3},
         patch_in::ConservativeTreePatch2D,
         topology::ConservativeTreeTopology2D;
-        clear::Bool=true)
+        clear::Bool=true,
+        coarse_prolongation::Symbol=:flat)
     return _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
-                                          topology, :periodic_x, clear)
+                                          topology, :periodic_x, clear;
+                                          coarse_prolongation=coarse_prolongation)
 end
 
 """
@@ -394,10 +674,12 @@ function stream_composite_routes_periodic_x_wall_y_F_2d!(
         coarse_in::AbstractArray{<:Any,3},
         patch_in::ConservativeTreePatch2D,
         topology::ConservativeTreeTopology2D;
-        clear::Bool=true)
+        clear::Bool=true,
+        coarse_prolongation::Symbol=:flat)
     return _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
-                                          topology, :periodic_x_wall_y, clear)
+                                          topology, :periodic_x_wall_y, clear;
+                                          coarse_prolongation=coarse_prolongation)
 end
 
 """
@@ -420,7 +702,8 @@ function stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
         rho_wall=1,
         volume_coarse=1,
         volume_fine=0.25,
-        clear::Bool=true)
+        clear::Bool=true,
+        coarse_prolongation::Symbol=:flat)
     return _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
                                           topology, :periodic_x_moving_wall_y,
@@ -429,7 +712,8 @@ function stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
                                           u_north=u_north,
                                           rho_wall=rho_wall,
                                           volume_coarse=volume_coarse,
-                                          volume_fine=volume_fine)
+                                          volume_fine=volume_fine,
+                                          coarse_prolongation=coarse_prolongation)
 end
 
 function stream_composite_routes_zou_he_x_wall_y_F_2d!(
@@ -443,13 +727,15 @@ function stream_composite_routes_zou_he_x_wall_y_F_2d!(
         rho_wall=1,
         volume_coarse=1,
         volume_fine=0.25,
-        clear::Bool=true)
+        clear::Bool=true,
+        coarse_prolongation::Symbol=:flat)
     _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                    coarse_in, patch_in,
                                    topology, :open_x_wall_y, clear;
                                    rho_wall=rho_wall,
                                    volume_coarse=volume_coarse,
-                                   volume_fine=volume_fine)
+                                   volume_fine=volume_fine,
+                                   coarse_prolongation=coarse_prolongation)
     apply_composite_zou_he_west_F_2d!(
         coarse_out, patch_out, u_in, volume_coarse, volume_fine)
     apply_composite_zou_he_pressure_east_F_2d!(
@@ -469,14 +755,16 @@ function stream_composite_routes_zou_he_x_wall_y_solid_F_2d!(
         rho_wall=1,
         volume_coarse=1,
         volume_fine=0.25,
-        clear::Bool=true)
+        clear::Bool=true,
+        coarse_prolongation::Symbol=:flat)
     _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                    coarse_in, patch_in,
                                    topology, :open_x_wall_y, clear;
                                    rho_wall=rho_wall,
                                    volume_coarse=volume_coarse,
                                    volume_fine=volume_fine,
-                                   is_solid=is_solid)
+                                   is_solid=is_solid,
+                                   coarse_prolongation=coarse_prolongation)
     apply_composite_zou_he_west_F_2d!(
         coarse_out, patch_out, is_solid, u_in, volume_coarse, volume_fine)
     apply_composite_zou_he_pressure_east_F_2d!(
@@ -492,11 +780,13 @@ function stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
         patch_in::ConservativeTreePatch2D,
         topology::ConservativeTreeTopology2D,
         is_solid::AbstractArray{Bool,2};
-        clear::Bool=true)
+        clear::Bool=true,
+        coarse_prolongation::Symbol=:flat)
     return _stream_composite_routes_F_2d!(coarse_out, patch_out,
                                           coarse_in, patch_in,
                                           topology, :periodic_x_wall_y, clear;
-                                          is_solid=is_solid)
+                                          is_solid=is_solid,
+                                          coarse_prolongation=coarse_prolongation)
 end
 
 function collide_Guo_composite_solid_F_2d!(
@@ -882,6 +1172,7 @@ function run_conservative_tree_couette_route_native_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=3000,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     U = T(U)
     omega = T(omega)
@@ -893,7 +1184,8 @@ function run_conservative_tree_couette_route_native_2d(;
     coarse_next = similar(coarse)
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
 
     fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
     fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
@@ -905,7 +1197,8 @@ function run_conservative_tree_couette_route_native_2d(;
         stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
             coarse_next, patch_next, coarse, patch, topology;
             u_north=U, rho_wall=rho,
-            volume_coarse=volume_coarse, volume_fine=volume_fine)
+            volume_coarse=volume_coarse, volume_fine=volume_fine,
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
     end
@@ -929,6 +1222,7 @@ function run_conservative_tree_poiseuille_route_native_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=3000,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     Fx = T(Fx)
     omega = T(omega)
@@ -940,7 +1234,8 @@ function run_conservative_tree_poiseuille_route_native_2d(;
     coarse_next = similar(coarse)
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
 
     fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
     fill_equilibrium_integrated_D2Q9!(patch.fine_F, volume_fine, rho, zero(T), zero(T))
@@ -950,7 +1245,8 @@ function run_conservative_tree_poiseuille_route_native_2d(;
         collide_Guo_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
                                     omega, omega, Fx, zero(T))
         stream_composite_routes_periodic_x_wall_y_F_2d!(
-            coarse_next, patch_next, coarse, patch, topology)
+            coarse_next, patch_next, coarse, patch, topology;
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
     end
@@ -1135,7 +1431,8 @@ function run_conservative_tree_bfs_route_native_2d(;
         stream_composite_routes_zou_he_x_wall_y_solid_F_2d!(
             coarse_next, patch_next, coarse, patch, topology, is_solid;
             u_in=u_in, rho_out=rho_out,
-            volume_coarse=volume_coarse, volume_fine=volume_fine)
+            volume_coarse=volume_coarse, volume_fine=volume_fine,
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
     end
@@ -1157,6 +1454,7 @@ function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=320,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     steps > 0 || throw(ArgumentError("steps must be positive"))
     regrid_every > 0 || throw(ArgumentError("regrid_every must be positive"))
@@ -1171,7 +1469,8 @@ function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
     first_ranges = patch_schedule[1]
     patch = create_conservative_tree_patch_2d(first_ranges[1], first_ranges[2]; T=T)
     patch_next = create_conservative_tree_patch_2d(first_ranges[1], first_ranges[2]; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
     coarse = zeros(T, Nx, Ny, 9)
     coarse_next = similar(coarse)
     fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
@@ -1187,7 +1486,8 @@ function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
         collide_Guo_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
                                     omega, omega, Fx, zero(T))
         stream_composite_routes_periodic_x_wall_y_F_2d!(
-            coarse_next, patch_next, coarse, patch, topology)
+            coarse_next, patch_next, coarse, patch, topology;
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
 
@@ -1202,7 +1502,8 @@ function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
             patch = new_patch
             patch_next = create_conservative_tree_patch_2d(ranges[1], ranges[2]; T=T)
             coarse_next = similar(coarse)
-            topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+            topology = create_conservative_tree_topology_2d(
+                Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
             push!(patch_history, (patch.parent_i_range, patch.parent_j_range))
         end
     end
@@ -1224,7 +1525,7 @@ function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
         patch_i_range::UnitRange{Int}=7:12,
         patch_j_range::UnitRange{Int}=5:10,
         regrid_every::Int=80,
-        gradient_threshold=1.5e-2,
+        gradient_threshold=5e-4,
         pad_leaf::Int=1,
         pad_parent::Int=1,
         shrink_margin::Int=1,
@@ -1232,6 +1533,7 @@ function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
         omega=1.0,
         rho=1.0,
         steps::Int=320,
+        coarse_route_mode::Symbol=:leaf_equivalent,
         T::Type{<:Real}=Float64)
     steps > 0 || throw(ArgumentError("steps must be positive"))
     regrid_every > 0 || throw(ArgumentError("regrid_every must be positive"))
@@ -1245,7 +1547,8 @@ function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
 
     patch = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
     patch_next = create_conservative_tree_patch_2d(patch_i_range, patch_j_range; T=T)
-    topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+    topology = create_conservative_tree_topology_2d(
+        Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
     coarse = zeros(T, Nx, Ny, 9)
     coarse_next = similar(coarse)
     fill_equilibrium_integrated_D2Q9!(coarse, volume_coarse, rho, zero(T), zero(T))
@@ -1261,7 +1564,8 @@ function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
         collide_Guo_composite_F_2d!(coarse, patch, volume_coarse, volume_fine,
                                     omega, omega, Fx, zero(T))
         stream_composite_routes_periodic_x_wall_y_F_2d!(
-            coarse_next, patch_next, coarse, patch, topology)
+            coarse_next, patch_next, coarse, patch, topology;
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
 
@@ -1282,7 +1586,8 @@ function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
                 patch_next = create_conservative_tree_patch_2d(
                     ranges.i_range, ranges.j_range; T=T)
                 coarse_next = similar(coarse)
-                topology = create_conservative_tree_topology_2d(Nx, Ny, patch)
+                topology = create_conservative_tree_topology_2d(
+                    Nx, Ny, patch; coarse_route_mode=coarse_route_mode)
                 regrid_count += 1
                 push!(patch_history, (patch.parent_i_range, patch.parent_j_range))
             end
@@ -1384,7 +1689,8 @@ function run_conservative_tree_square_obstacle_route_native_2d(;
             coarse, patch, topology, is_solid,
             volume_coarse, volume_fine, omega, omega, Fx, Fy)
         stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
-            coarse_next, patch_next, coarse, patch, topology, is_solid)
+            coarse_next, patch_next, coarse, patch, topology, is_solid;
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
     end
@@ -1452,7 +1758,8 @@ function run_conservative_tree_cylinder_obstacle_route_native_2d(;
             coarse, patch, topology, is_solid,
             volume_coarse, volume_fine, omega, omega, Fx, zero(T))
         stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
-            coarse_next, patch_next, coarse, patch, topology, is_solid)
+            coarse_next, patch_next, coarse, patch, topology, is_solid;
+            coarse_prolongation=:limited_linear)
 
         if step > steps - avg_window_i
             composite_to_leaf_F_2d!(leaf, coarse, patch)
@@ -1810,7 +2117,8 @@ function run_conservative_tree_vfs_route_native_2d(;
             coarse, patch, topology, is_solid,
             volume_coarse, volume_fine, omega, omega, Fx, Fy)
         stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
-            coarse_next, patch_next, coarse, patch, topology, is_solid)
+            coarse_next, patch_next, coarse, patch, topology, is_solid;
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
     end
@@ -1875,7 +2183,8 @@ function run_conservative_tree_vfs_mask_adaptive_route_native_2d(;
             coarse, patch, topology, is_solid,
             volume_coarse, volume_fine, omega, omega, Fx, Fy)
         stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
-            coarse_next, patch_next, coarse, patch, topology, is_solid)
+            coarse_next, patch_next, coarse, patch, topology, is_solid;
+            coarse_prolongation=:limited_linear)
         coarse, coarse_next = coarse_next, coarse
         patch, patch_next = patch_next, patch
 

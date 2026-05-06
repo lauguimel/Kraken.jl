@@ -560,6 +560,28 @@ end
         @test report.poiseuille.linf_delta < 2e-2
     end
 
+    @testset "route native Poiseuille X/Y bands preserve rest state and analytic profile" begin
+        rest = run_conservative_tree_poiseuille_route_native_2d(
+            ; Nx=24, Ny=16, patch_i_range=1:24, patch_j_range=7:10,
+            Fx=0.0, steps=100)
+        @test abs(rest.mass_drift) < 1e-11
+        @test maximum(abs.(rest.ux_profile)) < 1e-14
+
+        xband = run_conservative_tree_poiseuille_route_native_2d(
+            ; Nx=24, Ny=16, patch_i_range=11:14, patch_j_range=1:16,
+            steps=1000)
+        yband = run_conservative_tree_poiseuille_route_native_2d(
+            ; Nx=24, Ny=16, patch_i_range=1:24, patch_j_range=7:10,
+            steps=1000)
+
+        @test abs(xband.mass_drift) / xband.mass_initial < 1e-12
+        @test abs(yband.mass_drift) / yband.mass_initial < 1e-12
+        @test xband.l2_error < 5.5e-3
+        @test yband.l2_error < 5.5e-3
+        @test xband.linf_error < 8.5e-3
+        @test yband.linf_error < 8.5e-3
+    end
+
     @testset "solid route bounces fine packets at obstacle links" begin
         nx, ny = 8, 8
         patch_in = create_conservative_tree_patch_2d(3:5, 4:6)
@@ -962,10 +984,9 @@ end
         @test result.flow == :poiseuille_gradient_adaptive_route_native
         @test result.steps == 320
         @test result.regrid_every == 80
-        @test result.regrid_count == 2
+        @test result.regrid_count == 1
         @test result.patch_history[1] == (7:12, 5:10)
-        @test result.patch_history[2] == (3:16, 2:13)
-        @test result.patch_history[3] == (1:18, 1:14)
+        @test result.patch_history[2] == (1:18, 1:14)
         @test abs(result.mass_drift) < 1e-9
         @test result.ux_mean > 0
     end

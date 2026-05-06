@@ -101,11 +101,10 @@ function _draw_uniform_mesh!(ax, nx::Int, ny::Int)
 end
 
 function _solid_overlay!(ax, is_solid)
-    mask = fill(NaN, size(is_solid))
-    mask[is_solid] .= 1.0
+    mask = Float64.(is_solid)
     heatmap!(ax, 1:size(mask, 1), 1:size(mask, 2), mask;
-             colormap=[RGBAf(0.82, 0.05, 0.02, 0.68)],
-             colorrange=(0.0, 1.0), nan_color=RGBAf(0, 0, 0, 0))
+             colormap=[RGBAf(0, 0, 0, 0), RGBAf(0.82, 0.05, 0.02, 0.68)],
+             colorrange=(0.0, 1.0))
     return ax
 end
 
@@ -131,8 +130,9 @@ function _plot_field!(fig, row, col, title, A; colormap=:viridis,
     if cr === nothing || !all(isfinite, cr)
         cr = (0.0, 1.0)
     end
+    Aplot = map(x -> isfinite(x) ? x : NaN, A)
     kwargs = (; colorrange=cr)
-    hm = heatmap!(ax, 1:size(A, 1), 1:size(A, 2), A;
+    hm = heatmap!(ax, 1:size(A, 1), 1:size(A, 2), Aplot;
                   colormap=colormap, nan_color=:black, kwargs...)
     Colorbar(fig[row, col + 1], hm)
     return ax
