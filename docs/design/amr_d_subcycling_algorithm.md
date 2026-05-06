@@ -153,3 +153,11 @@ Patch `2026-05-06-global-finest-routes`:
 - validated that closed nested rest is now locally exact for the static route
   scatter and for the buffered recursive subcycling path;
 - left the legacy shared-`Fstate` subcycling path as a broken canary.
+
+Patch `2026-05-06-eq-neq-reconstruction`:
+
+- added `macrostate_integrated_D2Q9`;
+- added `reconstruct_integrated_D2Q9_eq_neq!`;
+- validated mass/momentum preservation, `alpha` scaling of non-equilibrium
+  stress, `alpha = 1` child-split roundtrip, and `Float32` compilation;
+- intentionally did not wire it into the scheduler yet.

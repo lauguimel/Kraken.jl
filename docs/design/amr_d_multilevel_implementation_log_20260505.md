@@ -651,3 +651,38 @@ Next gate:
 - first surgical tests: rest, uniform velocity, and shear crossing a nested
   interface;
 - only then resume Couette/Poiseuille and obstacle macro-flow ramps.
+
+## ML4j Integrated Eq/Neq Reconstruction Primitive
+
+Added the scalar reconstruction primitive required before any physical
+coarse/fine interface closure is attempted.
+
+New API:
+
+- `macrostate_integrated_D2Q9(Fcell, volume)`;
+- `reconstruct_integrated_D2Q9_eq_neq!(Fdst, dst_volume, Fsrc, src_volume;
+  alpha=1)`.
+
+Contract:
+
+- rows store integrated populations `F_q = f_q * cell_volume`;
+- the source macrostate is recovered from integrated moments;
+- destination populations are reconstructed as
+  `Fdst_q = Vdst * (feq_q(rho, u) + alpha * (Fsrc_q/Vsrc - feq_q))`;
+- mass and momentum are preserved for any `alpha` because the non-equilibrium
+  part has zero zeroth and first moments;
+- `alpha = 1` makes a parent-to-four-children split coalesce exactly back to
+  the parent row.
+
+Validated:
+
+- mass and momentum preservation;
+- non-equilibrium shear stress scales with `alpha`;
+- `alpha = 1` child split roundtrips through coalescence;
+- `Float32` smoke test compiles and preserves equilibrium.
+
+Not wired yet:
+
+- `sync_down` still injects route packets directly;
+- the next patch must use this primitive at the interface and add uniform
+  velocity/shear canaries before macro-flow ramps.

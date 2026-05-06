@@ -410,6 +410,52 @@ end
         @test maximum(abs.(after_pxy .- before_pxy)) > 1.9e-4
     end
 
+    @testset "eq/neq reconstruction preserves integrated macro moments" begin
+        Fsrc = zeros(Float64, 9)
+        _fill_equilibrium_with_pxy!(Fsrc, 1.0, 1.02, 0.04, -0.015, 2e-4)
+        Fdst = zeros(Float64, 9)
+
+        reconstruct_integrated_D2Q9_eq_neq!(
+            Fdst, 0.25, Fsrc, 1.0; alpha=0.5)
+
+        rho, ux, uy = macrostate_integrated_D2Q9(Fsrc, 1.0)
+        @test isapprox(mass_F(Fdst), 0.25 * rho; atol=1e-14, rtol=0)
+        @test isapprox(momentum_F(Fdst)[1], 0.25 * rho * ux; atol=1e-14, rtol=0)
+        @test isapprox(momentum_F(Fdst)[2], 0.25 * rho * uy; atol=1e-14, rtol=0)
+        @test isapprox(_noneq_second_moments_F(Fdst; volume=0.25)[2],
+                       0.5 * 0.25 * _noneq_second_moments_F(Fsrc; volume=1.0)[2];
+                       atol=1e-14, rtol=0)
+    end
+
+    @testset "eq/neq reconstruction roundtrips alpha-one child split" begin
+        Fp = zeros(Float64, 9)
+        _fill_equilibrium_with_pxy!(Fp, 1.0, 0.98, -0.02, 0.01, -1.5e-4)
+        Fc = zeros(Float64, 2, 2, 9)
+        for iy in 1:2, ix in 1:2
+            reconstruct_integrated_D2Q9_eq_neq!(
+                @view(Fc[ix, iy, :]), 0.25, Fp, 1.0; alpha=1.0)
+        end
+
+        Fback = zeros(Float64, 9)
+        coalesce_F_2d!(Fback, Fc)
+
+        @test isapprox(Fback, Fp; atol=1e-14, rtol=0)
+        @test isapprox(collect(moments_F(Fback)), collect(moments_F(Fp));
+                       atol=1e-14, rtol=0)
+    end
+
+    @testset "eq/neq reconstruction compiles for Float32" begin
+        Fsrc = zeros(Float32, 9)
+        fill_equilibrium_integrated_D2Q9!(Fsrc, 1.0f0, 1.0f0, 0.02f0, 0.0f0)
+        Fdst = zeros(Float32, 9)
+
+        reconstruct_integrated_D2Q9_eq_neq!(
+            Fdst, 0.25f0, Fsrc, 1.0f0; alpha=1.0f0)
+
+        @test eltype(Fdst) == Float32
+        @test isapprox(Fdst, Fsrc ./ 4; atol=1f-6, rtol=0)
+    end
+
     @testset "parent-child mapping" begin
         @test conservative_tree_parent_index(1, 1) == (1, 1, 1, 1)
         @test conservative_tree_parent_index(2, 1) == (1, 1, 2, 1)

@@ -100,6 +100,7 @@ include("multiblock/multiblock.jl")
 # --- Grid refinement ---
 include("refinement/refinement.jl")
 include("refinement/conservative_tree_2d.jl")
+include("refinement/conservative_tree_reconstruction_2d.jl")
 include("refinement/conservative_tree_multipatch_2d.jl")
 include("refinement/conservative_tree_3d.jl")
 include("refinement/conservative_tree_topology_2d.jl")
@@ -300,6 +301,8 @@ export d2q9_opposite
 export coalesce_F_2d!, explode_uniform_F_2d!
 export mass_F, momentum_F, moments_F
 export fill_equilibrium_integrated_D2Q9!
+export macrostate_integrated_D2Q9
+export reconstruct_integrated_D2Q9_eq_neq!
 export d3q19_cx, d3q19_cy, d3q19_cz, d3q19_opposite
 export coalesce_F_3d!, explode_uniform_F_3d!
 export mass_F_3d, momentum_F_3d, moments_F_3d
