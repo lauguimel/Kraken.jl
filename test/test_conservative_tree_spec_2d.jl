@@ -417,7 +417,7 @@ using Random
         @test maximum(abs.(Fout - Fin)) <= 1e-14
     end
 
-    @testset "bounceback route streaming preserves closed nested mass" begin
+    @testset "bounceback route streaming preserves closed nested rest state" begin
         spec = create_conservative_tree_spec_2d(16, 12, [
             ConservativeTreeRefineBlock2D("L1", 5:12, 3:10),
             ConservativeTreeRefineBlock2D("L2", 13:20, 7:14; parent="L1"),
@@ -442,7 +442,7 @@ using Random
         @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
                        sum(active_population_sums_F_2d(Fin, spec));
                        atol=1e-12, rtol=0)
-        @test_broken maximum(abs.(Fout - Fin)) <= 1e-14
+        @test maximum(abs.(Fout - Fin)) <= 1e-14
     end
 
     @testset "route streaming rejects bad matrices and boundary policies" begin

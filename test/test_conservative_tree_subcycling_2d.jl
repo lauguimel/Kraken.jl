@@ -455,7 +455,7 @@ using Kraken
         @test_broken diag.max_active_abs <= 1e-14
     end
 
-    @testset "nested buffered subcycled transport rest state is the buffer wiring gate" begin
+    @testset "nested buffered subcycled transport preserves rest state" begin
         spec = create_conservative_tree_spec_2d(8, 6, [
             ConservativeTreeRefineBlock2D("outer", 3:6, 2:5),
             ConservativeTreeRefineBlock2D("inner", 7:8, 5:6; parent="outer"),
@@ -474,11 +474,11 @@ using Kraken
         Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Fout, Fin, spec, table; boundary=:bounceback)
 
-        @test_broken isapprox(sum(active_population_sums_F_2d(Fout, spec)),
-                              sum(active_population_sums_F_2d(Fin, spec));
-                              atol=1e-12, rtol=0)
-        @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
-                                  Fin[spec.active_cells, :])) <= 1e-14
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
     end
 
     @testset "scheduled ledger binding rejects wrong events" begin
