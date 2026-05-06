@@ -88,3 +88,39 @@ The test verifies:
 - nested cylinder is static-spec green but runtime red;
 - show-off lift case is parse/spec green but runtime red;
 - IBB/LIBB are explicitly unsupported in AMR-D D.
+
+## Quicklook Output From KRK
+
+The quicklook helper turns one or several `.krk` files into data and figures:
+
+```bash
+julia --project=. benchmarks/amr_d_quicklook_from_krk_2d.jl
+```
+
+Useful overrides:
+
+```bash
+KRK_AMR_D_QUICKLOOK_CASES=poiseuille_nested4_channel.krk,cylinder_scale1.krk \
+KRK_AMR_D_QUICKLOOK_STEPS_OVERRIDE=20 \
+KRK_AMR_D_QUICKLOOK_OUTDIR=benchmarks/results/quicklook/manual_check \
+julia --project=. benchmarks/amr_d_quicklook_from_krk_2d.jl
+```
+
+For each case, the helper writes:
+
+- `status.csv`: parsed flow, BC policy, wall model, max level, runtime support;
+- `mesh_static.csv/png`: static tree mesh directly from the `.krk`;
+- `mesh_amr_d.csv/png`: actual runtime mesh when the case is executable;
+- `fields_amr_d.csv/png`: `rho`, `ux`, `uy`, `|u|`, level and solid mask;
+- `profiles_amr_d.csv/png`: mean profile, centerline and vertical probe;
+- `summary.csv`: all generated artifact paths.
+
+Runtime-pending cases, such as the long-channel cylinder lift show-off, still
+emit `status.csv` and `mesh_static.csv/png`. They do not emit physical fields
+until the corresponding AMR-D runtime gate is closed.
+
+Focused smoke:
+
+```bash
+julia --project=. -e 'using Test; include("test/test_amr_d_quicklook_krk_2d.jl")'
+```
