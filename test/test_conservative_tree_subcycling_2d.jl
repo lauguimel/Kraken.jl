@@ -595,6 +595,15 @@ using Kraken
         end
     end
 
+    @testset "mass roundoff guard scales with active leaf count" begin
+        small = conservative_tree_mass_roundoff_rtol_2d(
+            Float64, 1, 4; active_cell_count=1)
+        band = conservative_tree_mass_roundoff_rtol_2d(
+            Float64, 1, 4; active_cell_count=20_000)
+        @test band > small
+        @test band < 20 * small
+    end
+
     @testset "subcycled Couette macroflow runs from level 1 to 4" begin
         for max_level in 1:4
             result = run_conservative_tree_couette_subcycled_2d(

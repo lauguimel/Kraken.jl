@@ -57,6 +57,22 @@ using Kraken
     @test result_c.steps == 2
     @test isfinite(result_c.relative_mass_drift)
 
+    @test cases["poiseuille_xband_nested4_debug.krk"].max_level == 4
+    @test cases["poiseuille_xband_nested4_debug.krk"].runtime_status ==
+          :subcycled_nested_channel
+    @test cases["poiseuille_yband_nested4_debug.krk"].max_level == 4
+    @test cases["poiseuille_yband_nested4_debug.krk"].runtime_status ==
+          :subcycled_nested_channel
+    @test cases["couette_yband_nested4_debug.krk"].max_level == 4
+    @test cases["couette_yband_nested4_debug.krk"].runtime_status ==
+          :subcycled_nested_channel
+
+    lift_probe = cases["cylinder_lift_nested4_probe.krk"]
+    @test lift_probe.flow == :cylinder_lift
+    @test lift_probe.max_level == 4
+    @test lift_probe.runtime_supported == false
+    @test lift_probe.runtime_status == :nested_obstacle_runtime_pending
+
     showoff = conservative_tree_amr_d_case_from_krk_2d(
         joinpath(showoff_dir, "cylinder_lift_re100_long_channel.krk"))
     @test showoff.flow == :cylinder_lift

@@ -196,6 +196,20 @@ function _ql_finite_mean(A)
     return count == 0 ? NaN : total / count
 end
 
+function _ql_finite_minmax(A)
+    vmin = Inf
+    vmax = -Inf
+    count = 0
+    for value in A
+        v = Float64(value)
+        isfinite(v) || continue
+        vmin = min(vmin, v)
+        vmax = max(vmax, v)
+        count += 1
+    end
+    return count == 0 ? (NaN, NaN) : (vmin, vmax)
+end
+
 function _ql_leaf_fields(F, is_solid; volume=0.25, force_x=0.0, force_y=0.0)
     ux = fill(NaN, size(F, 1), size(F, 2))
     uy = similar(ux)
@@ -295,8 +309,20 @@ end
 function _ql_static_solid_mask(setup, case, leaf_nx::Int, leaf_ny::Int)
     case.geometry == :cylinder || return falses(leaf_nx, leaf_ny)
     vars = getproperty(setup, :user_vars)
-    haskey(vars, :cx_leaf) && haskey(vars, :cy_leaf) &&
-        haskey(vars, :radius_leaf) || return falses(leaf_nx, leaf_ny)
+    if !(haskey(vars, :cx_leaf) && haskey(vars, :cy_leaf) &&
+            haskey(vars, :radius_leaf))
+        if haskey(vars, :cx) && haskey(vars, :cy) && haskey(vars, :R)
+            domain = getproperty(setup, :domain)
+            rx = Float64(vars[:R]) * leaf_nx / Float64(domain.Lx)
+            ry = Float64(vars[:R]) * leaf_ny / Float64(domain.Ly)
+            vars = merge(vars, Dict(
+                :cx_leaf => Float64(vars[:cx]) * leaf_nx / Float64(domain.Lx) + 0.5,
+                :cy_leaf => Float64(vars[:cy]) * leaf_ny / Float64(domain.Ly) + 0.5,
+                :radius_leaf => 0.5 * (rx + ry)))
+        else
+            return falses(leaf_nx, leaf_ny)
+        end
+    end
     return cylinder_solid_mask_leaf_2d(
         leaf_nx, leaf_ny, vars[:cx_leaf], vars[:cy_leaf], vars[:radius_leaf])
 end
@@ -691,7 +717,7 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
                xlabel="ux", ylabel="y/Ly")
     _ql_lines_finite!(ax1, amr_profile, y_amr; label="AMR-D",
                       color=:orangered, linewidth=2.8)
-    _ql_lines_finite!(ax1, ref_profile, y_ref; label="leaf Cartesian",
+    _ql_lines_finite!(ax1, ref_profile, y_ref; label="classic Cartesian",
                       color=:dodgerblue4, linewidth=2.5)
     _ql_lines_finite!(ax1, analytic, y_amr; label="analytic",
                       color=:black, linestyle=:dash, linewidth=2.2)
@@ -702,7 +728,8 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax2, x, amr_state.fields.ux[1:nx, j_mid];
                       label="AMR-D", color=:orangered, linewidth=2.5)
     _ql_lines_finite!(ax2, x, reference_state.fields.ux[1:nx, j_mid];
-                      label="leaf Cartesian", color=:dodgerblue4, linewidth=2.3)
+                      label="classic Cartesian", color=:dodgerblue4,
+                      linewidth=2.3)
     axislegend(ax2, position=:rb)
 
     ax3 = Axis(fig[2, 1]; title="$title vertical ux probe",
@@ -710,7 +737,8 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax3, amr_state.fields.ux[i_probe, 1:ny], y;
                       label="AMR-D", color=:orangered, linewidth=2.5)
     _ql_lines_finite!(ax3, reference_state.fields.ux[i_probe, 1:ny], y;
-                      label="leaf Cartesian", color=:dodgerblue4, linewidth=2.3)
+                      label="classic Cartesian", color=:dodgerblue4,
+                      linewidth=2.3)
     axislegend(ax3, position=:rb)
 
     ax4 = Axis(fig[2, 2]; title="$title centerline rho",
@@ -718,13 +746,14 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax4, x, amr_state.fields.rho[1:nx, j_mid];
                       label="AMR-D", color=:orangered, linewidth=2.5)
     _ql_lines_finite!(ax4, x, reference_state.fields.rho[1:nx, j_mid];
-                      label="leaf Cartesian", color=:dodgerblue4, linewidth=2.3)
+                      label="classic Cartesian", color=:dodgerblue4,
+                      linewidth=2.3)
     axislegend(ax4, position=:rb)
     save(path, fig)
     return path
 end
 
-function _ql_run_cartesian_leaf_channel(setup, case; steps, T)
+function _ql_run_cartesian_classic_channel(setup, case; steps, T)
     domain = getproperty(setup, :domain)
     ml = case.max_level
     scale = 1 << ml
@@ -754,7 +783,7 @@ function _ql_run_cartesian_leaf_channel(setup, case; steps, T)
                 Ftmp, F; u_south=zero(T), u_north=U,
                 rho_wall=rho0, volume=volume)
         else
-            throw(ArgumentError("cartesian leaf reference supports nested channels only"))
+            throw(ArgumentError("classic Cartesian reference supports nested channels only"))
         end
         F, Ftmp = Ftmp, F
     end
@@ -873,6 +902,10 @@ end
 function _ql_method_values(record, reference)
     profile, analytic = _ql_profile_vectors(record.result, record.state)
     l2_analytic, linf_analytic = _ql_profile_errors(profile, analytic)
+    ux_min, ux_max = _ql_finite_minmax(record.state.fields.ux)
+    uy_min, uy_max = _ql_finite_minmax(record.state.fields.uy)
+    rho_min, rho_max = _ql_finite_minmax(record.state.fields.rho)
+    _, speed_max = _ql_finite_minmax(record.state.fields.speed)
     if reference === nothing
         l2_ref = NaN
         linf_ref = NaN
@@ -892,9 +925,18 @@ function _ql_method_values(record, reference)
         method=record.method,
         steps=getproperty(record.result, :steps),
         mass_rel_drift=_ql_mass_rel_drift(record.result),
+        max_raw_mass_rel_drift=hasproperty(record.result, :max_raw_relative_mass_drift) ?
+            getproperty(record.result, :max_raw_relative_mass_drift) : NaN,
         ux_mean=_ql_finite_mean(record.state.fields.ux),
         uy_mean=_ql_finite_mean(record.state.fields.uy),
         rho_mean=_ql_finite_mean(record.state.fields.rho),
+        ux_min=ux_min,
+        ux_max=ux_max,
+        uy_min=uy_min,
+        uy_max=uy_max,
+        rho_min=rho_min,
+        rho_max=rho_max,
+        speed_max=speed_max,
         l2_profile_vs_analytic=l2_analytic,
         linf_profile_vs_analytic=linf_analytic,
         l2_profile_vs_reference=l2_ref,
@@ -908,20 +950,23 @@ end
 function _ql_write_values_csv(path, records)
     reference = nothing
     for record in records
-        if record.method in (:leaf_cartesian, :leaf_oracle)
+        if record.method in (:cartesian_classic, :leaf_oracle)
             reference = record
             break
         end
     end
     open(path, "w") do io
-        println(io, "method,steps,mass_rel_drift,ux_mean,uy_mean,rho_mean,l2_profile_vs_analytic,linf_profile_vs_analytic,l2_profile_vs_reference,linf_profile_vs_reference,l2_ux_field_vs_reference,linf_ux_field_vs_reference,l2_rho_field_vs_reference,linf_rho_field_vs_reference")
+        println(io, "method,steps,mass_rel_drift,max_raw_mass_rel_drift,ux_mean,uy_mean,rho_mean,ux_min,ux_max,uy_min,uy_max,rho_min,rho_max,speed_max,l2_profile_vs_analytic,linf_profile_vs_analytic,l2_profile_vs_reference,linf_profile_vs_reference,l2_ux_field_vs_reference,linf_ux_field_vs_reference,l2_rho_field_vs_reference,linf_rho_field_vs_reference")
         for record in records
             values = _ql_method_values(
-                record, record.method in (:leaf_cartesian, :leaf_oracle) ?
+                record, record.method in (:cartesian_classic, :leaf_oracle) ?
                 nothing : reference)
-            @printf(io, "%s,%d,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e\n",
+            @printf(io, "%s,%d,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e,%.16e\n",
                     String(values.method), values.steps, values.mass_rel_drift,
+                    values.max_raw_mass_rel_drift,
                     values.ux_mean, values.uy_mean, values.rho_mean,
+                    values.ux_min, values.ux_max, values.uy_min, values.uy_max,
+                    values.rho_min, values.rho_max, values.speed_max,
                     values.l2_profile_vs_analytic,
                     values.linf_profile_vs_analytic,
                     values.l2_profile_vs_reference,
@@ -992,7 +1037,7 @@ function run_amr_d_quicklook_from_krk_2d(paths;
         steps = _ql_steps(setup; steps_override=steps_override)
         avg = _ql_avg_window(setup, steps; avg_window_override=avg_window_override)
         methods = case.runtime_status == :subcycled_nested_channel && include_reference ?
-            (:amr_d, :leaf_cartesian) :
+            (:amr_d, :cartesian_classic) :
             case.max_level <= 1 && include_reference ?
             (:amr_d, :leaf_oracle) : (:amr_d,)
         records = NamedTuple[]
@@ -1000,9 +1045,9 @@ function run_amr_d_quicklook_from_krk_2d(paths;
         for method in methods
             result = nothing
             force = (force_x=0.0, force_y=0.0)
-            if method == :leaf_cartesian
-                result = _ql_run_cartesian_leaf_channel(setup, case;
-                                                        steps=steps, T=T)
+            if method == :cartesian_classic
+                result = _ql_run_cartesian_classic_channel(setup, case;
+                                                           steps=steps, T=T)
                 force = (force_x=getproperty(result, :force_x),
                          force_y=getproperty(result, :force_y))
             elseif case.runtime_status == :subcycled_nested_channel
@@ -1061,7 +1106,7 @@ function run_amr_d_quicklook_from_krk_2d(paths;
             _ql_write_values_csv(joinpath(case_dir, "values.csv"), records)
             amr_record = findfirst(record -> record.method == :amr_d, records)
             ref_record = findfirst(record -> record.method in
-                                  (:leaf_cartesian, :leaf_oracle), records)
+                                  (:cartesian_classic, :leaf_oracle), records)
             if make_plots && amr_record !== nothing && ref_record !== nothing
                 amr = records[amr_record]
                 ref = records[ref_record]

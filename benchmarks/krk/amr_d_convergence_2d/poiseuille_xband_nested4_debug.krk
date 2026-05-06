@@ -1,0 +1,23 @@
+# AMR D nested Poiseuille quicklook: vertical x-band refinement.
+# This is a visual/debug case, not a convergence gate. The forcing and step
+# count is deliberately larger than the tiny canary so velocity fields are
+# visible in local quicklook plots without relaxing the mass guard.
+
+Simulation amr_d_poiseuille_xband_nested4_debug D2Q9
+
+Define Fx = 1e-7
+Define omega = 1.0
+Define rho0 = 1.0
+
+Domain L = 16 x 12  N = 16 x 12
+Physics nu = 0.16666666666666666 Fx = 1e-7
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north wall
+
+Refine xband { region = [6, 0, 10, 12], ratio = 16 }
+
+Run 200 steps
+Diagnostics every 50 [step, ux, uy, rho, mass]

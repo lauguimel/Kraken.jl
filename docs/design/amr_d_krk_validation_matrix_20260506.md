@@ -116,16 +116,25 @@ For each case, the helper writes:
 - `fields_compare.png`: AMR-D vs reference fields and field differences;
 - `profiles_compare.png`: AMR-D vs reference profiles, plus analytic profile
   when available;
-- `values.csv`: mass drift, mean values, profile errors and field errors;
+- `values.csv`: final mass drift, max raw mass residual before correction,
+  mean/min/max values, profile errors and field errors;
 - `summary.csv`: all generated artifact paths.
 
-For nested channel cases, the reference is a leaf-equivalent Cartesian run at
-the finest nested resolution. For one-level obstacle cases, the reference is the
-existing leaf-oracle route.
+For nested channel cases, the reference method is `cartesian_classic`: a dense
+D2Q9 Cartesian array at the finest leaf-equivalent resolution, without AMR tree,
+AMR route table or AMR projection. For one-level obstacle cases, the reference
+is the existing leaf-oracle route.
 
 Runtime-pending cases, such as the long-channel cylinder lift show-off, still
 emit `status.csv` and `mesh_static.csv/png`. They do not emit physical fields
 until the corresponding AMR-D runtime gate is closed.
+
+The `*_nested4_debug.krk` files are local visual debug cases. They use stronger
+forcing or wall speed than the tiny scheduler canaries so `ux`, `rho`, field
+differences and profiles are visible in quicklook plots. The
+`cylinder_lift_nested4_probe.krk` case is an off-centre cylinder target: it must
+show the nested mesh and cylinder mask now, but runtime fields remain pending
+until nested open-channel obstacle routing is implemented.
 
 Focused smoke:
 

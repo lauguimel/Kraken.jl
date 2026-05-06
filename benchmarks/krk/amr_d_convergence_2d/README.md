@@ -39,3 +39,10 @@ julia --project=. benchmarks/amr_d_convergence_gallery_2d.jl
 The nested cylinder file is a probe, not a validated production input. It
 parses four nested `Refine` levels, then the conservative-tree D helper must
 reject it until multi-level route ownership and routing are implemented.
+
+Files ending in `nested4_debug.krk` are quicklook/debug inputs, not publication
+convergence gates. They use stronger local forcing or wall speed so field and
+profile plots are readable after a short local run. The
+`cylinder_lift_nested4_probe.krk` input is an off-centre cylinder target for
+future lift/CD validation; today it is expected to produce static mesh and
+solid-mask plots only.

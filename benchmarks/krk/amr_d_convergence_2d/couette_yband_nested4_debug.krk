@@ -1,0 +1,22 @@
+# AMR D nested Couette quicklook: horizontal y-band refinement.
+# The moving wall speed and local step count are chosen to produce visible
+# velocity gradients in local debug plots.
+
+Simulation amr_d_couette_yband_nested4_debug D2Q9
+
+Define U = 0.02
+Define omega = 1.0
+Define rho0 = 1.0
+
+Domain L = 16 x 12  N = 16 x 12
+Physics nu = 0.16666666666666666
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north velocity(ux = 0.02, uy = 0)
+
+Refine yband { region = [0, 3, 16, 9], ratio = 16 }
+
+Run 200 steps
+Diagnostics every 50 [step, ux, uy, rho, mass]

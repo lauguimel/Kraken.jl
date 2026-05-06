@@ -11,6 +11,9 @@ Define rho0 = 1.0
 Define cx = 12.0
 Define cy = 7.0
 Define R = 1.5
+Define cx_leaf = 192.5
+Define cy_leaf = 112.5
+Define radius_leaf = 24
 
 Domain L = 24 x 14  N = 24 x 14
 Physics nu = 0.16666666666666666 Fx = 2e-5

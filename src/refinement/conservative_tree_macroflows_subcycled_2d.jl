@@ -24,10 +24,13 @@ end
 function conservative_tree_mass_roundoff_rtol_2d(::Type{T},
                                                  steps::Integer,
                                                  max_level::Integer;
+                                                 active_cell_count::Integer=1,
                                                  safety=1000) where T<:AbstractFloat
     nsteps = max(Int(steps), 1)
     levels = max(Int(max_level) + 1, 1)
-    return T(safety) * eps(T) * T(nsteps) * T(levels)
+    cells = max(Int(active_cell_count), 1)
+    cell_factor = max(one(T), T(log2(cells + 1)))
+    return T(safety) * eps(T) * T(nsteps) * T(levels) * cell_factor
 end
 
 function _check_conservative_tree_channel_max_level_2d(max_level::Integer)
@@ -315,7 +318,9 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
     initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
     mass_initial = _active_mass_conservative_tree_F_2d(F, spec_run)
     guard = mass_guard_rtol === nothing ?
-        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec_run.max_level) :
+        conservative_tree_mass_roundoff_rtol_2d(
+            T, nsteps, spec_run.max_level;
+            active_cell_count=length(spec_run.active_cells)) :
         T(mass_guard_rtol)
     max_raw_relative_mass_drift = zero(T)
 
@@ -376,7 +381,9 @@ function run_conservative_tree_couette_subcycled_2d(;
     initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
     mass_initial = _active_mass_conservative_tree_F_2d(F, spec_run)
     guard = mass_guard_rtol === nothing ?
-        conservative_tree_mass_roundoff_rtol_2d(T, nsteps, spec_run.max_level) :
+        conservative_tree_mass_roundoff_rtol_2d(
+            T, nsteps, spec_run.max_level;
+            active_cell_count=length(spec_run.active_cells)) :
         T(mass_guard_rtol)
     max_raw_relative_mass_drift = zero(T)
 
