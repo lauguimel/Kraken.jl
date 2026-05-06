@@ -76,10 +76,11 @@ u_mean = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.02"))
 steps_low_wi = parse(Int, get(ENV, "KRAKEN_STEPS_LOW_WI", "100000"))
 steps = parse(Int, get(ENV, "KRAKEN_STEPS", "200000"))
 avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR", "5"))
+run_newtonian = get(ENV, "KRAKEN_RUN_NEWTONIAN", "1") == "1"
 
 println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
 println("VARIANTS=$(join((v.label for v in variants), ","))")
-println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps")
+println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps run_newtonian=$run_newtonian")
 
 for R in R_values
     # Liu uses Re = U_avg · R / ν → solve for ν_total given u_mean, R, Re
@@ -91,9 +92,23 @@ for R in R_values
     Nx = 30 * R
     Ny = 4 * R
     cx = 15 * R
-    cy = 2 * R
+    cy = (Ny - 1) / 2
 
-    println("\n>>> R = $R  (Nx=$Nx, Ny=$Ny, ν_s=$ν_s, ν_p=$ν_p)")
+    println("\n>>> R = $R  (Nx=$Nx, Ny=$Ny, cx=$cx, cy=$cy, ν_s=$ν_s, ν_p=$ν_p)")
+    if run_newtonian
+        max_steps_newt = steps_low_wi
+        avg_window_newt = max_steps_newt ÷ avg_divisor
+        t0 = time()
+        rn = run_cylinder_libb_2d(;
+            Nx=Nx, Ny=Ny, radius=R, cx=cx, cy=cy,
+            u_in=1.5 * u_mean, ν=ν_total, inlet=:parabolic,
+            max_steps=max_steps_newt, avg_window=avg_window_newt,
+            backend=backend, T=FT,
+        )
+        dt = time() - t0
+        @printf("%-22s %-6s %-10.3f %-10s %-8s %-14s (%.0fs, Cl=%.3g)\n",
+                "Newtonian", "-", rn.Cd, "-", "-", "-", dt, rn.Cl)
+    end
     @printf("%-22s %-6s %-10s %-10s %-8s %-14s\n",
             "variant", "Wi", "Cd_sim", "Cd_Liu", "err%", "gradient")
     println("-"^76)
