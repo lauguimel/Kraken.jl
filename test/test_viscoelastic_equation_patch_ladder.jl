@@ -36,6 +36,24 @@ function _log_spd_2x2(cxx, cxy, cyy)
     )
 end
 
+function _exp_spd_2x2(ψxx, ψxy, ψyy)
+    trace_ψ = ψxx + ψyy
+    diff_ψ = ψxx - ψyy
+    disc = sqrt(diff_ψ^2 + 4ψxy^2)
+    λ1 = 0.5 * (trace_ψ + disc)
+    λ2 = 0.5 * (trace_ψ - disc)
+    θ = 0.5 * atan(2ψxy, diff_ψ)
+    c = cos(θ)
+    s = sin(θ)
+    e1 = exp(λ1)
+    e2 = exp(λ2)
+    return (
+        c^2 * e1 + s^2 * e2,
+        c * s * (e1 - e2),
+        s^2 * e1 + c^2 * e2,
+    )
+end
+
 function _stationary_direct_conformation_incompressible(dudx, dudy, dvdx, dvdy, λ)
     @assert abs(dudx + dvdy) < 1e-14
     system = [
@@ -331,6 +349,39 @@ end
     end
 end
 
+@testset "P0 log-conformation source: Frechet-equivalent to direct C source" begin
+    ε = 1e-7
+    cases = (
+        (; c=(1.3, 0.2, 0.9), grad=(0.012, 0.035, -0.018, -0.012), λ=3.0),
+        (; c=(3.0, 1.0, 1.2), grad=(0.0, 0.002, 0.0, 0.0), λ=500.0),
+        (; c=(6.0, -1.6, 1.0), grad=(0.0, -0.0015, 0.0004, 0.0), λ=800.0),
+        (; c=(2.5, 0.0, 0.45), grad=(0.0005, 0.0, 0.0, -0.0005), λ=900.0),
+    )
+    for case in cases
+        cxx, cxy, cyy = case.c
+        dudx, dudy, dvdx, dvdy = case.grad
+        @test _min_eig_spd_2x2(cxx, cxy, cyy) > 0.0
+
+        ψxx, ψxy, ψyy = _log_spd_2x2(cxx, cxy, cyy)
+        sc = _direct_source_tuple(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, case.λ)
+        sψ = _logconf_source_tuple(ψxx, ψxy, ψyy, dudx, dudy, dvdx, dvdy, case.λ)
+        cxx_plus, cxy_plus, cyy_plus = _exp_spd_2x2(
+            ψxx + ε * sψ[1],
+            ψxy + ε * sψ[2],
+            ψyy + ε * sψ[3],
+        )
+        cxx_minus, cxy_minus, cyy_minus = _exp_spd_2x2(
+            ψxx - ε * sψ[1],
+            ψxy - ε * sψ[2],
+            ψyy - ε * sψ[3],
+        )
+
+        @test (cxx_plus - cxx_minus) / (2ε) ≈ sc[1] rtol=2e-7 atol=2e-8
+        @test (cxy_plus - cxy_minus) / (2ε) ≈ sc[2] rtol=2e-7 atol=2e-8
+        @test (cyy_plus - cyy_minus) / (2ε) ≈ sc[3] rtol=2e-7 atol=2e-8
+    end
+end
+
 const D2Q9_CX = (0.0, 1.0, 0.0, -1.0, 0.0, 1.0, -1.0, -1.0, 1.0)
 const D2Q9_CY = (0.0, 0.0, 1.0, 0.0, -1.0, 1.0, 1.0, -1.0, -1.0)
 const D2Q9_W = (4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36)
@@ -352,6 +403,82 @@ function _hermite_delta_moments(txx, txy, tyy, s_plus; ce_correction=false)
     m_xy = sum(D2Q9_CX[q] * D2Q9_CY[q] * f[1, 1, q] for q in 1:9)
     m_yy = sum(D2Q9_CY[q]^2 * f[1, 1, q] for q in 1:9)
     return mass, mom_x, mom_y, m_xx, m_xy, m_yy
+end
+
+function _hermite_source_delta_field(; apply_y_domain_walls=true)
+    Nx, Ny = 4, 5
+    f = zeros(Float64, Nx, Ny, 9)
+    is_solid = falses(Nx, Ny)
+    τxx = [0.01 * (2i + j) for i in 1:Nx, j in 1:Ny]
+    τxy = [0.02 * (i - j) for i in 1:Nx, j in 1:Ny]
+    τyy = [-0.015 * (i + 2j) for i in 1:Nx, j in 1:Ny]
+    apply_hermite_source_2d!(
+        f, is_solid, 0.8, τxx, τxy, τyy;
+        ce_correction=false,
+        apply_y_domain_walls,
+    )
+    return f
+end
+
+function _periodic_shear_decay_ratio(ν; νp=0.0, steps=200,
+                                     ce_correction=false, source_scale=0.0)
+    Nx, Ny = 4, 64
+    k = 2π / Ny
+    amp0 = 1e-5
+    f = zeros(Float64, Nx, Ny, 9)
+    buf = similar(f)
+    is_solid = falses(Nx, Ny)
+    τxx = zeros(Float64, Nx, Ny)
+    τxy = zeros(Float64, Nx, Ny)
+    τyy = zeros(Float64, Nx, Ny)
+    s_plus = 1.0 / (3ν + 0.5)
+
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        f[i, j, q] = equilibrium(D2Q9(), 1.0, amp0 * sin(k * (j - 1)), 0.0, q)
+    end
+
+    for _ in 1:steps
+        pull = similar(f)
+        for j in 1:Ny, i in 1:Nx, q in 1:9
+            ii = mod1(i - Int(D2Q9_CX[q]), Nx)
+            jj = mod1(j - Int(D2Q9_CY[q]), Ny)
+            pull[i, j, q] = f[ii, jj, q]
+        end
+
+        ux = zeros(Float64, Nx, Ny)
+        for j in 1:Ny, i in 1:Nx
+            ρ = sum(pull[i, j, q] for q in 1:9)
+            u = sum(D2Q9_CX[q] * pull[i, j, q] for q in 1:9) / ρ
+            v = sum(D2Q9_CY[q] * pull[i, j, q] for q in 1:9) / ρ
+            ux[i, j] = u
+            for q in 1:9
+                buf[i, j, q] = pull[i, j, q] -
+                    s_plus * (pull[i, j, q] - equilibrium(D2Q9(), ρ, u, v, q))
+            end
+        end
+
+        if source_scale != 0.0
+            amp = 2.0 * sum(ux[i, j] * sin(k * (j - 1))
+                            for j in 1:Ny, i in 1:Nx) / (Nx * Ny)
+            for j in 1:Ny, i in 1:Nx
+                τxy[i, j] = νp * k * amp * cos(k * (j - 1))
+            end
+            apply_hermite_source_2d!(
+                buf, is_solid, s_plus, τxx, τxy, τyy;
+                ce_correction, source_scale,
+            )
+        end
+
+        f, buf = buf, f
+    end
+
+    amp = 0.0
+    for j in 1:Ny, i in 1:Nx
+        ρ = sum(f[i, j, q] for q in 1:9)
+        u = sum(D2Q9_CX[q] * f[i, j, q] for q in 1:9) / ρ
+        amp += u * sin(k * (j - 1))
+    end
+    return 2.0 * amp / (Nx * Ny * amp0)
 end
 
 @testset "P1 Hermite polymer source moments: τxx orientation" begin
@@ -405,6 +532,28 @@ end
     @test m_xx ≈ -s_plus * scale * txx atol=P0_ATOL
     @test m_xy ≈ -s_plus * scale * txy atol=P0_ATOL
     @test m_yy ≈ -s_plus * scale * tyy atol=P0_ATOL
+end
+
+@testset "P1c Hermite polymer source can skip y-domain walls" begin
+    full = _hermite_source_delta_field(; apply_y_domain_walls=true)
+    skipped = _hermite_source_delta_field(; apply_y_domain_walls=false)
+    Nx, Ny, _ = size(full)
+    @test maximum(abs, skipped[:, 1, :]) < P0_ATOL
+    @test maximum(abs, skipped[:, Ny, :]) < P0_ATOL
+    @test maximum(abs, skipped[:, 2:Ny-1, :] .- full[:, 2:Ny-1, :]) < P0_ATOL
+end
+
+@testset "P1b bulk Hermite source recovers Newtonian shear viscosity" begin
+    νs = 0.09
+    νp = 0.01
+    reference = _periodic_shear_decay_ratio(νs + νp)
+    direct = _periodic_shear_decay_ratio(νs; νp, ce_correction=false, source_scale=1.0)
+    over_scaled = _periodic_shear_decay_ratio(νs; νp, ce_correction=false, source_scale=3.0)
+    ce_scaled = _periodic_shear_decay_ratio(νs; νp, ce_correction=true, source_scale=1.0)
+
+    @test abs(direct - reference) < 3e-5
+    @test abs(over_scaled - reference) > 1e-2
+    @test abs(ce_scaled - reference) > 1e-2
 end
 
 @testset "P2 D2Q9 streaming: single interior link orientations" begin
@@ -830,6 +979,25 @@ end
         else
             @test abs(nonlinear_gap) > 1e-4
         end
+    end
+end
+
+@testset "P8c LogFieldWallBC is field-pinned in log space" begin
+    for q_out in 2:9,
+        qw in (0.3, 0.7),
+        orientation in (:uniform, :tangent, :normal, :mixed),
+        velocity in ((0.0, 0.0), (0.03, -0.02))
+
+        macro_error, sum_error = _single_cut_link_macro_error_bc(
+            q_out, LogFieldWallBC(); q_wall_value=qw, orientation, velocity,
+        )
+        @test abs(macro_error) < P0_ATOL
+        @test abs(sum_error) < P0_ATOL
+    end
+    for q_out in 2:9, qw in (0.3, 0.7)
+        gap = _logspace_wall_bc_gap(q_out, LogFieldWallBC();
+                                    q_wall_value=qw)
+        @test abs(gap) < P0_ATOL
     end
 end
 
@@ -1664,11 +1832,10 @@ function _poiseuille_cde_patch_error(; collision=:trt, phi_mode=:pre_opp,
                                      bc=nothing,
                                      tau_plus=1.0, steps=200,
                                      orientation=:horizontal,
-                                     magic=2.5e-7)
+                                     magic=2.5e-7,
+                                     Wi=0.1, u_mean=0.005)
     Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
     R = 4.0
-    u_mean = 0.005
-    Wi = 0.1
     λ = Wi * R / u_mean
     ux, uy, Cxx, Cxy, Cyy, ref_Cxy, ref_N1 =
         _poiseuille_patch_profiles(Nx, Ny, u_mean, λ; orientation)
@@ -1741,11 +1908,130 @@ function _poiseuille_cde_patch_error(; collision=:trt, phi_mode=:pre_opp,
                                                  vec(mean(Cxy, dims=2))
     N1_profile = orientation === :horizontal ? vec(mean(Cxx .- Cyy, dims=1)) :
                                                 vec(mean(Cxx .- Cyy, dims=2))
+    min_eig = minimum(
+        _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j])
+        for j in 1:Ny for i in 1:Nx
+    )
     return (
         Cxy_l2 = _rel_l2_profile(Cxy_profile, ref_Cxy),
         N1_l2 = _rel_l2_profile(N1_profile, ref_N1),
         min_Cyy = minimum(Cyy),
+        min_eig = min_eig,
+        max_abs_C = maximum(maximum(abs, C) for C in (Cxx, Cxy, Cyy)),
     )
+end
+
+function _collide_logconf_cde_state!(gxx, gxy, gyy, Ψxx, Ψxy, Ψyy,
+                                     ux, uy, is_solid, λ;
+                                     tau_plus=1.0, magic=1e-6,
+                                     divergence_mode::Symbol=:trace_free)
+    collide_logconf_2d!(gxx, Ψxx, ux, uy, Ψxx, Ψxy, Ψyy,
+                        is_solid, tau_plus, λ;
+                        magic, component=1, divergence_mode)
+    collide_logconf_2d!(gxy, Ψxy, ux, uy, Ψxx, Ψxy, Ψyy,
+                        is_solid, tau_plus, λ;
+                        magic, component=2, divergence_mode)
+    collide_logconf_2d!(gyy, Ψyy, ux, uy, Ψxx, Ψxy, Ψyy,
+                        is_solid, tau_plus, λ;
+                        magic, component=3, divergence_mode)
+    compute_conformation_macro_2d!(Ψxx, gxx)
+    compute_conformation_macro_2d!(Ψxy, gxy)
+    compute_conformation_macro_2d!(Ψyy, gyy)
+    return nothing
+end
+
+function _poiseuille_logconf_cde_patch_error(; steps=200,
+                                             orientation=:horizontal,
+                                             tau_plus=1.0,
+                                             magic=1e-6,
+                                             Wi=0.1,
+                                             u_mean=0.005)
+    Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
+    R = 4.0
+    λ = Wi * R / u_mean
+    ux, uy, Cxx_ref, Cxy_ref, Cyy_ref, ref_Cxy, ref_N1 =
+        _poiseuille_patch_profiles(Nx, Ny, u_mean, λ; orientation)
+    is_solid = falses(Nx, Ny)
+    q_wall = zeros(Float64, Nx, Ny, 9)
+
+    Ψxx = similar(Cxx_ref)
+    Ψxy = similar(Cxy_ref)
+    Ψyy = similar(Cyy_ref)
+    C_to_psi_2d!(Ψxx, Ψxy, Ψyy, Cxx_ref, Cxy_ref, Cyy_ref)
+    g_xx = zeros(Float64, Nx, Ny, 9)
+    g_xy = zeros(Float64, Nx, Ny, 9)
+    g_yy = zeros(Float64, Nx, Ny, 9)
+    init_conformation_field_2d!(g_xx, Ψxx, ux, uy)
+    init_conformation_field_2d!(g_xy, Ψxy, ux, uy)
+    init_conformation_field_2d!(g_yy, Ψyy, ux, uy)
+    g_xx_buf = similar(g_xx)
+    g_xy_buf = similar(g_xy)
+    g_yy_buf = similar(g_yy)
+
+    for _ in 1:steps
+        if orientation === :horizontal
+            stream_periodic_x_wall_y_2d!(g_xx_buf, g_xx, Nx, Ny)
+            stream_periodic_x_wall_y_2d!(g_xy_buf, g_xy, Nx, Ny)
+            stream_periodic_x_wall_y_2d!(g_yy_buf, g_yy, Nx, Ny)
+        else
+            _stream_periodic_y_wall_x_2d!(g_xx_buf, g_xx, Nx, Ny)
+            _stream_periodic_y_wall_x_2d!(g_xy_buf, g_xy, Nx, Ny)
+            _stream_periodic_y_wall_x_2d!(g_yy_buf, g_yy, Nx, Ny)
+        end
+
+        apply_polymer_wall_bc!(
+            g_xx_buf, g_xx, is_solid, q_wall, Ψxx, ux, uy, LogFieldWallBC(),
+        )
+        apply_polymer_wall_bc!(
+            g_xy_buf, g_xy, is_solid, q_wall, Ψxy, ux, uy, LogFieldWallBC(),
+        )
+        apply_polymer_wall_bc!(
+            g_yy_buf, g_yy, is_solid, q_wall, Ψyy, ux, uy, LogFieldWallBC(),
+        )
+
+        g_xx, g_xx_buf = g_xx_buf, g_xx
+        g_xy, g_xy_buf = g_xy_buf, g_xy
+        g_yy, g_yy_buf = g_yy_buf, g_yy
+
+        compute_conformation_macro_2d!(Ψxx, g_xx)
+        compute_conformation_macro_2d!(Ψxy, g_xy)
+        compute_conformation_macro_2d!(Ψyy, g_yy)
+        _collide_logconf_cde_state!(
+            g_xx, g_xy, g_yy, Ψxx, Ψxy, Ψyy,
+            ux, uy, is_solid, λ; tau_plus, magic,
+        )
+    end
+
+    Cxx = similar(Cxx_ref)
+    Cxy = similar(Cxy_ref)
+    Cyy = similar(Cyy_ref)
+    psi_to_C_2d!(Cxx, Cxy, Cyy, Ψxx, Ψxy, Ψyy)
+    Cxy_profile = orientation === :horizontal ? vec(mean(Cxy, dims=1)) :
+                                                 vec(mean(Cxy, dims=2))
+    N1_profile = orientation === :horizontal ? vec(mean(Cxx .- Cyy, dims=1)) :
+                                                vec(mean(Cxx .- Cyy, dims=2))
+    min_eig = minimum(
+        _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j])
+        for j in 1:Ny for i in 1:Nx
+    )
+    return (
+        Cxy_l2 = _rel_l2_profile(Cxy_profile, ref_Cxy),
+        N1_l2 = _rel_l2_profile(N1_profile, ref_N1),
+        min_eig = min_eig,
+        max_abs_C = maximum(maximum(abs, C) for C in (Cxx, Cxy, Cyy)),
+    )
+end
+
+function _min_eig_field(Cxx, Cxy, Cyy, is_solid)
+    min_eig = Inf
+    for j in axes(Cxx, 2), i in axes(Cxx, 1)
+        is_solid[i, j] && continue
+        min_eig = min(
+            min_eig,
+            _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j]),
+        )
+    end
+    return min_eig
 end
 
 function _poiseuille_prod_gradient_source_residual(; orientation=:horizontal,
@@ -1922,6 +2208,158 @@ end
         @test result.N1_l2 < 0.20
         @test result.min_Cyy > 0.0
     end
+end
+
+@testset "P18b2b Poiseuille CDE analytic patch: direct/log planar Wi ladder" begin
+    for orientation in (:horizontal, :vertical), Wi in (0.1, 0.5, 1.0)
+        @testset "$(orientation) Wi=$(Wi)" begin
+            logc = _poiseuille_logconf_cde_patch_error(
+                ; orientation, Wi, steps=200,
+            )
+
+            if Wi < 1.0
+                direct = _poiseuille_cde_patch_error(
+                    collision=:trt, tau_plus=1.0, bc=CNEBB();
+                    orientation, magic=1e-6, Wi, steps=200,
+                )
+                @test direct.Cxy_l2 < 0.12
+                @test direct.N1_l2 < 0.25
+                @test direct.min_eig > 0.0
+            end
+            @test logc.Cxy_l2 < 0.12
+            @test logc.N1_l2 < 0.25
+            @test logc.min_eig > 0.0
+            @test isfinite(logc.max_abs_C)
+        end
+    end
+end
+
+@testset "P18b2c Poiseuille direct-C SPD ceiling is planar, not cylindrical" begin
+    for orientation in (:horizontal, :vertical)
+        direct = _poiseuille_cde_patch_error(
+            collision=:trt, tau_plus=1.0, bc=CNEBB();
+            orientation, magic=1e-6, Wi=1.0, steps=200,
+        )
+        @test direct.Cxy_l2 < 0.12
+        @test direct.N1_l2 < 0.25
+        @test_broken direct.min_eig > 0.0
+        @test direct.min_eig < 0.0
+    end
+end
+
+@testset "P18b2d cartesian step log-conf smoke: square and BFS" begin
+    u_ref = 0.005
+    β = 0.59
+    Re = 1.0
+    Wi = 1.0
+    cases = (
+        square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=3),
+        backward_facing_step_geometry_2d(; H_in=8, expansion_ratio=2,
+                                         L_up=3, L_down=5),
+    )
+    for geom in cases
+        ν_total = u_ref * geom.H_ref / Re
+        λ = Wi * (geom.H_ref / 2) / u_ref
+        ν_s = β * ν_total
+        ν_p = (1 - β) * ν_total
+        model = LogConfOldroydB(G=ν_p / λ, λ=λ)
+        result = run_conformation_step_libb_2d(
+            ; geometry=geom, u_ref_mean=u_ref, ν_s,
+            polymer_model=model, polymer_bc=LogFieldWallBC(),
+            hermite_source_mode=:ce_corrected,
+            conformation_magic=1e-6,
+            conformation_divergence_mode=:trace_free,
+            max_steps=40, avg_window=10,
+            backend=KernelAbstractions.CPU(), FT=Float64,
+        )
+        fluid = .!result.is_solid
+        @test result.Wi ≈ Wi atol=1e-12
+        @test all(isfinite, result.ux[fluid])
+        @test all(isfinite, result.C_xx[fluid])
+        @test all(isfinite, result.C_xy[fluid])
+        @test all(isfinite, result.C_yy[fluid])
+        @test _min_eig_field(
+            result.C_xx, result.C_xy, result.C_yy, result.is_solid,
+        ) > 0.0
+    end
+end
+
+@testset "P18b2e cartesian step low-Wi uses lambda-stable scaling" begin
+    u_ref = 0.0005
+    β = 0.59
+    Re = 0.1
+    Wi = 0.001
+    cases = (
+        square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=3),
+        backward_facing_step_geometry_2d(; H_in=8, expansion_ratio=2,
+                                         L_up=3, L_down=5),
+    )
+    for geom in cases, formulation in (:direct, :log)
+        ν_total = u_ref * geom.H_ref / Re
+        λ = Wi * (geom.H_ref / 2) / u_ref
+        ν_s = β * ν_total
+        ν_p = (1 - β) * ν_total
+        model = formulation === :direct ?
+            OldroydB(G=ν_p / λ, λ=λ) :
+            LogConfOldroydB(G=ν_p / λ, λ=λ)
+        bc = formulation === :direct ? CNEBB() : LogFieldWallBC()
+        result = run_conformation_step_libb_2d(
+            ; geometry=geom, u_ref_mean=u_ref, ν_s,
+            polymer_model=model, polymer_bc=bc,
+            hermite_source_mode=:ce_corrected,
+            conformation_magic=1e-6,
+            conformation_divergence_mode=:trace_free,
+            max_steps=40, avg_window=10,
+            backend=KernelAbstractions.CPU(), FT=Float64,
+        )
+        fluid = .!result.is_solid
+        @test result.Wi ≈ Wi atol=1e-12
+        @test λ >= 4.0
+        @test all(isfinite, result.ux[fluid])
+        @test all(isfinite, result.C_xx[fluid])
+        @test all(isfinite, result.C_xy[fluid])
+        @test all(isfinite, result.C_yy[fluid])
+        @test _min_eig_field(
+            result.C_xx, result.C_xy, result.C_yy, result.is_solid,
+        ) > 0.0
+    end
+end
+
+@testset "P18b3 cartesian step driver defaults use validated CDE knobs" begin
+    geom = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=2)
+    result = run_conformation_step_libb_2d(;
+        geometry=geom,
+        u_ref_mean=0.005,
+        ν_s=0.059,
+        ν_p=0.041,
+        lambda=1.0,
+        polymer_bc=CNEBB(),
+        max_steps=1,
+        avg_window=1,
+    )
+    @test result.conformation_magic ≈ 1e-6 atol=0.0 rtol=0.0
+    @test haskey(pairs(result), :conformation_divergence_mode)
+    @test result.conformation_divergence_mode === :trace_free
+end
+
+@testset "P18b4 cylinder source scale does not double-apply CE correction" begin
+    result = run_conformation_cylinder_libb_2d(;
+        Nx=32,
+        Ny=16,
+        radius=3,
+        u_mean=0.005,
+        ν_s=0.08,
+        ν_p=0.02,
+        lambda=1.0,
+        polymer_bc=CNEBB(),
+        hermite_source_mode=:ce_corrected,
+        max_steps=1,
+        avg_window=1,
+        drag_stride=1,
+        backend=KernelAbstractions.CPU(),
+        FT=Float64,
+    )
+    @test result.source_scale_dynamics ≈ 1.0 atol=0.0 rtol=0.0
 end
 
 function _straight_embedded_wall_macro_errors(bc; orientation=:horizontal,
@@ -3593,6 +4031,35 @@ function _curved_expected_mea_increment_from_source(
     return (; Fx, Fy)
 end
 
+function _square_obstacle_face_qwall(geom)
+    q_wall = zeros(Float64, geom.Nx, geom.Ny, 9)
+    for j in 1:geom.Ny, i in 1:geom.Nx, q in 2:5
+        ni = i + Int(D2Q9_CX[q])
+        nj = j + Int(D2Q9_CY[q])
+        if 1 <= ni <= geom.Nx && 1 <= nj <= geom.Ny &&
+           !geom.is_solid[i, j] && geom.is_solid[ni, nj]
+            q_wall[i, j, q] = 0.5
+        end
+    end
+    return q_wall
+end
+
+function _source_mea_increment_for_stress(tau_xx, tau_xy, tau_yy, q_wall, is_solid;
+                                          s_plus=1.0)
+    Nx, Ny = size(tau_xx)
+    f = zeros(Float64, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        f[i, j, q] = equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+    end
+    uwx = zeros(Float64, Nx, Ny, 9)
+    uwy = zeros(Float64, Nx, Ny, 9)
+    before = compute_drag_libb_mei_2d(f, q_wall, uwx, uwy, Nx, Ny)
+    apply_hermite_source_2d!(f, is_solid, s_plus, tau_xx, tau_xy, tau_yy;
+                             ce_correction=false)
+    after = compute_drag_libb_mei_2d(f, q_wall, uwx, uwy, Nx, Ny)
+    return (Fx=after.Fx - before.Fx, Fy=after.Fy - before.Fy)
+end
+
 @testset "P19 curved cut-link affine velocity gradients are exact" begin
     p = _curved_affine_oldroydb_patch()
     n_cut = 0
@@ -3694,6 +4161,61 @@ end
     )
     @test isapprox(after.Fx - before.Fx, expected.Fx; rtol=1e-12, atol=1e-14)
     @test isapprox(after.Fy - before.Fy, expected.Fy; rtol=1e-12, atol=1e-14)
+end
+
+@testset "P23b square Hermite source MEA is not face traction" begin
+    geom = square_obstacle_channel_geometry_2d(; H=14, side=6, L_up=2, L_down=3)
+    Nx, Ny = geom.Nx, geom.Ny
+    cx = geom.i_step + (geom.H_ref - 1) / 2
+    q_face = _square_obstacle_face_qwall(geom)
+    tau_xx = [(i - 1) - cx for i in 1:Nx, j in 1:Ny]
+    tau_xy = zeros(Float64, Nx, Ny)
+    tau_yy = zeros(Float64, Nx, Ny)
+    explicit = Kraken.compute_polymeric_drag_2d(
+        tau_xx, tau_xy, tau_yy, geom.is_solid, Nx, Ny; extrapolate=true,
+    )
+
+    f = zeros(Float64, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        f[i, j, q] = equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+    end
+    uwx = zeros(Float64, Nx, Ny, 9)
+    uwy = zeros(Float64, Nx, Ny, 9)
+    before = compute_drag_libb_mei_2d(f, q_face, uwx, uwy, Nx, Ny)
+    apply_hermite_source_2d!(f, geom.is_solid, 1.0, tau_xx, tau_xy, tau_yy;
+                             ce_correction=false)
+    after = compute_drag_libb_mei_2d(f, q_face, uwx, uwy, Nx, Ny)
+
+    @test explicit.Fx ≈ geom.H_ref^2 atol=P0_ATOL
+    @test (after.Fx - before.Fx) ≈ (7 / 9) * explicit.Fx atol=P0_ATOL
+    @test abs(explicit.Fy) < P0_ATOL
+    @test abs(after.Fy - before.Fy) < P0_ATOL
+end
+
+@testset "P23c curved Hermite source MEA is not surface traction" begin
+    ratios = Float64[]
+    for (Nx, Ny, R, cx0, cy0) in (
+            (36, 30, 5.0, 17.31, 14.62),
+            (48, 40, 8.0, 23.37, 19.79),
+            (72, 60, 12.0, 35.41, 29.73))
+        q_wall, is_solid = precompute_q_wall_cylinder(Nx, Ny, cx0, cy0, R)
+        tau_xx = [(i - 1) - cx0 for i in 1:Nx, j in 1:Ny]
+        tau_xy = zeros(Float64, Nx, Ny)
+        tau_yy = zeros(Float64, Nx, Ny)
+        explicit = Kraken.compute_polymeric_drag_2d(
+            tau_xx, tau_xy, tau_yy, q_wall, Nx, Ny;
+            cx=cx0, cy=cy0, radius=R, extrapolate=true, reconstruction_order=2,
+        )
+        source_mea = _source_mea_increment_for_stress(
+            tau_xx, tau_xy, tau_yy, q_wall, is_solid,
+        )
+        push!(ratios, source_mea.Fx / explicit.Fx)
+
+        @test explicit.Fx ≈ π * R^2 rtol=2e-4
+        @test abs(explicit.Fy) < P0_ATOL
+        @test source_mea.Fx / explicit.Fx > 1.05
+    end
+    @test maximum(ratios) - minimum(ratios) > 0.05
 end
 
 @testset "P24 curved CDE-generated tau creates spurious source force unless BC is fixed" begin
