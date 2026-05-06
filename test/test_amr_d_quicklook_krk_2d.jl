@@ -45,6 +45,38 @@ include(joinpath(dirname(@__DIR__), "benchmarks",
     end
 
     mktempdir() do dir
+        nx, ny = 5, 4
+        y = collect(range(0.0, 1.0; length=ny))
+        analytic = [0.01 * yy * (1 - yy) for yy in y]
+        ux_cart = [analytic[j] for i in 1:nx, j in 1:ny]
+        ux_amr = [analytic[j] * (i <= 3 ? 1.0 : 1.05)
+                  for i in 1:nx, j in 1:ny]
+        cart_state = (;
+            fields=(; rho=ones(nx, ny), ux=ux_cart, uy=zeros(nx, ny),
+                    speed=abs.(ux_cart)),
+            is_solid=falses(nx, ny),
+            level=fill(2, nx, ny),
+            patch=nothing,
+            leaf_nx=nx,
+            leaf_ny=ny)
+        amr_state = (;
+            fields=(; rho=ones(nx, ny) .+ 1e-6 .* ux_amr, ux=ux_amr,
+                    uy=zeros(nx, ny), speed=abs.(ux_amr)),
+            is_solid=falses(nx, ny),
+            level=[i <= 3 ? 1 : 2 for i in 1:nx, j in 1:ny],
+            patch=nothing,
+            leaf_nx=nx,
+            leaf_ny=ny)
+        cart_result = (ux_profile=analytic, analytic_ux_profile=analytic)
+        amr_result = (ux_profile=vec(sum(ux_amr; dims=1) ./ nx),
+                      analytic_ux_profile=analytic)
+        path = joinpath(dir, "debug_dashboard.png")
+        _ql_plot_debug_dashboard(path, amr_result, amr_state,
+                                 cart_result, cart_state; title="unit")
+        @test isfile(path)
+    end
+
+    mktempdir() do dir
         artifacts = run_amr_d_quicklook_from_krk_2d(
             joinpath(dirname(@__DIR__), "benchmarks", "krk",
                      "amr_d_convergence_2d",

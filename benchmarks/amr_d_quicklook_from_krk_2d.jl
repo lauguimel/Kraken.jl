@@ -753,6 +753,110 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     return path
 end
 
+function _ql_profile_axis(n::Int)
+    return n == 1 ? [0.0] : [(j - 1) / (n - 1) for j in 1:n]
+end
+
+function _ql_profile_residual(profile::AbstractVector,
+                              analytic::AbstractVector)
+    residual = fill(NaN, length(profile))
+    n = length(profile)
+    for k in eachindex(profile)
+        y = n == 1 ? 0.0 : (k - 1) / (n - 1)
+        ref = _ql_profile_interp(analytic, y)
+        value = Float64(profile[k])
+        residual[k] = isfinite(value) && isfinite(ref) ? value - ref : NaN
+    end
+    return residual
+end
+
+function _ql_plot_debug_dashboard(path, amr_result, amr_state,
+                                  reference_result, reference_state; title)
+    ux_range = _ql_finite_colorrange(vcat(vec(amr_state.fields.ux),
+                                          vec(reference_state.fields.ux));
+                                     symmetric=true)
+    rho_range = _ql_finite_colorrange(vcat(vec(amr_state.fields.rho),
+                                           vec(reference_state.fields.rho)))
+    level_min = min(minimum(amr_state.level), minimum(reference_state.level))
+    level_max = max(maximum(amr_state.level), maximum(reference_state.level))
+    level_range = _ql_safe_colorrange(level_min, level_max)
+
+    fig = Figure(size=(1900, 1650), fontsize=15)
+    ax11 = _ql_heatmap!(fig, 1, 1, "$title cartesian mesh",
+                        Float64.(reference_state.level);
+                        colormap=:viridis, colorrange=level_range)
+    _ql_overlay_solid!(ax11, reference_state.is_solid)
+    ax12 = _ql_heatmap!(fig, 1, 3, "$title cartesian ux",
+                        reference_state.fields.ux;
+                        colormap=:balance, colorrange=ux_range)
+    _ql_overlay_solid!(ax12, reference_state.is_solid)
+    ax13 = _ql_heatmap!(fig, 1, 5, "$title cartesian rho",
+                        reference_state.fields.rho;
+                        colormap=:viridis, colorrange=rho_range)
+    _ql_overlay_solid!(ax13, reference_state.is_solid)
+
+    ax21 = _ql_heatmap!(fig, 2, 1, "$title AMR-D mesh",
+                        Float64.(amr_state.level);
+                        colormap=:viridis, colorrange=level_range)
+    _ql_overlay_solid!(ax21, amr_state.is_solid)
+    ax22 = _ql_heatmap!(fig, 2, 3, "$title AMR-D ux",
+                        amr_state.fields.ux;
+                        colormap=:balance, colorrange=ux_range)
+    _ql_overlay_solid!(ax22, amr_state.is_solid)
+    ax23 = _ql_heatmap!(fig, 2, 5, "$title AMR-D rho",
+                        amr_state.fields.rho;
+                        colormap=:viridis, colorrange=rho_range)
+    _ql_overlay_solid!(ax23, amr_state.is_solid)
+
+    amr_profile, analytic = _ql_profile_vectors(amr_result, amr_state)
+    ref_profile, _ = _ql_profile_vectors(reference_result, reference_state)
+    y_amr = _ql_profile_axis(length(amr_profile))
+    y_ref = _ql_profile_axis(length(ref_profile))
+    y_analytic = _ql_profile_axis(length(analytic))
+    amr_residual = _ql_profile_residual(amr_profile, analytic)
+    ref_residual = _ql_profile_residual(ref_profile, analytic)
+
+    ax31 = Axis(fig[3, 1:2]; title="$title mean ux(y) vs analytic",
+                xlabel="ux", ylabel="y/Ly")
+    _ql_lines_finite!(ax31, ref_profile, y_ref; label="classic Cartesian",
+                      color=:dodgerblue4, linewidth=2.5)
+    _ql_lines_finite!(ax31, amr_profile, y_amr; label="AMR-D",
+                      color=:orangered, linewidth=2.8)
+    _ql_lines_finite!(ax31, analytic, y_analytic; label="analytic",
+                      color=:black, linestyle=:dash, linewidth=2.2)
+    axislegend(ax31, position=:rb)
+
+    nx = min(amr_state.leaf_nx, reference_state.leaf_nx)
+    ny = min(amr_state.leaf_ny, reference_state.leaf_ny)
+    i_probe = clamp(round(Int, 0.75 * nx), 1, nx)
+    y_probe = (collect(1:ny) .- 0.5) ./ ny
+    ax32 = Axis(fig[3, 3:4]; title="$title vertical ux probe vs analytic",
+                xlabel="ux", ylabel="y/Ly")
+    _ql_lines_finite!(ax32, reference_state.fields.ux[i_probe, 1:ny],
+                      y_probe; label="classic Cartesian",
+                      color=:dodgerblue4, linewidth=2.4)
+    _ql_lines_finite!(ax32, amr_state.fields.ux[i_probe, 1:ny],
+                      y_probe; label="AMR-D", color=:orangered,
+                      linewidth=2.6)
+    _ql_lines_finite!(ax32, analytic, y_analytic; label="analytic",
+                      color=:black, linestyle=:dash, linewidth=2.0)
+    axislegend(ax32, position=:rb)
+
+    err_range = _ql_finite_colorrange(vcat(amr_residual, ref_residual);
+                                      symmetric=true)
+    ax33 = Axis(fig[3, 5:6]; title="$title mean profile error",
+                xlabel="ux - analytic", ylabel="y/Ly")
+    _ql_lines_finite!(ax33, ref_residual, y_ref; label="classic Cartesian",
+                      color=:dodgerblue4, linewidth=2.4)
+    _ql_lines_finite!(ax33, amr_residual, y_amr; label="AMR-D",
+                      color=:orangered, linewidth=2.6)
+    xlims!(ax33, err_range...)
+    axislegend(ax33, position=:rb)
+
+    save(path, fig)
+    return path
+end
+
 function _ql_run_cartesian_classic_channel(setup, case; steps, T)
     domain = getproperty(setup, :domain)
     ml = case.max_level
@@ -882,18 +986,20 @@ end
 
 function _ql_write_summary_csv(path, artifacts)
     open(path, "w") do io
-        println(io, "case,flow,method,status,outdir,status_csv,mesh_csv,mesh_png,fields_csv,fields_png,profiles_csv,profiles_png,values_csv,fields_compare_png,profiles_compare_png")
+        println(io, "case,flow,method,status,outdir,status_csv,mesh_csv,mesh_png,fields_csv,fields_png,profiles_csv,profiles_png,values_csv,fields_compare_png,profiles_compare_png,debug_dashboard_png")
         for a in artifacts
             values_csv = joinpath(a.outdir, "values.csv")
             fields_compare_png = joinpath(a.outdir, "fields_compare.png")
             profiles_compare_png = joinpath(a.outdir, "profiles_compare.png")
+            debug_dashboard_png = joinpath(a.outdir, "debug_dashboard.png")
             println(io, join((a.case_name, a.flow, a.method, a.status, a.outdir,
                               a.status_csv, a.mesh_csv, a.mesh_png,
                               a.fields_csv, a.fields_png,
                               a.profiles_csv, a.profiles_png,
                               isfile(values_csv) ? values_csv : "",
                               isfile(fields_compare_png) ? fields_compare_png : "",
-                              isfile(profiles_compare_png) ? profiles_compare_png : ""), ","))
+                              isfile(profiles_compare_png) ? profiles_compare_png : "",
+                              isfile(debug_dashboard_png) ? debug_dashboard_png : ""), ","))
         end
     end
     return path
@@ -1115,6 +1221,10 @@ function run_amr_d_quicklook_from_krk_2d(paths;
                     amr.state, ref.state; title=case.name)
                 _ql_plot_compare_profiles(
                     joinpath(case_dir, "profiles_compare.png"),
+                    amr.result, amr.state, ref.result, ref.state;
+                    title=case.name)
+                _ql_plot_debug_dashboard(
+                    joinpath(case_dir, "debug_dashboard.png"),
                     amr.result, amr.state, ref.result, ref.state;
                     title=case.name)
             end

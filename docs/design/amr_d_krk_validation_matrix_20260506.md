@@ -116,6 +116,9 @@ For each case, the helper writes:
 - `fields_compare.png`: AMR-D vs reference fields and field differences;
 - `profiles_compare.png`: AMR-D vs reference profiles, plus analytic profile
   when available;
+- `debug_dashboard.png`: one-page debug board with classic Cartesian mesh/ux/rho
+  on top, AMR-D mesh/ux/rho in the middle, and profiles versus analytic on the
+  bottom;
 - `values.csv`: final mass drift, max raw mass residual before correction,
   mean/min/max values, profile errors and field errors;
 - `summary.csv`: all generated artifact paths.
