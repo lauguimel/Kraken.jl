@@ -239,6 +239,7 @@ end
 
 function run_conservative_tree_amr_d_case_from_krk_2d(source;
         steps_override=nothing,
+        mass_guard_rtol=nothing,
         T::Type{<:AbstractFloat}=Float64)
     setup = _amr_d_setup_from_source_2d(source)
     case = conservative_tree_amr_d_case_from_krk_2d(setup)
@@ -252,6 +253,9 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
     spec = create_conservative_tree_spec_from_krk_2d(setup)
     omega = _amr_d_var_2d(setup, :omega, 1.2)
     rho0 = _amr_d_var_2d(setup, :rho0, 1.0)
+    krk_mass_guard_rtol = _amr_d_var_2d(setup, :mass_guard_rtol, nothing)
+    resolved_mass_guard_rtol = mass_guard_rtol === nothing ?
+        krk_mass_guard_rtol : mass_guard_rtol
 
     if case.runtime_status == :route_native_one_level_channel
         domain = getproperty(setup, :domain)
@@ -335,7 +339,8 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
             return run_conservative_tree_solid_obstacle_subcycled_2d(
                 flow=:square_obstacle_subcycled, max_level=case.max_level,
                 spec=spec, is_solid_leaf=is_solid, steps=steps,
-                omega=omega, Fx=Fx, Fy=Fy, rho0=rho0, T=T)
+                omega=omega, Fx=Fx, Fy=Fy, rho0=rho0,
+                mass_guard_rtol=resolved_mass_guard_rtol, T=T)
         elseif case.flow == :cylinder
             is_solid = cylinder_solid_mask_leaf_2d(
                 leaf_nx, leaf_ny,
@@ -346,20 +351,23 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
                 flow=:cylinder_obstacle_subcycled,
                 max_level=case.max_level, spec=spec,
                 is_solid_leaf=is_solid, steps=steps, omega=omega,
-                Fx=Fx, Fy=0.0, rho0=rho0, T=T)
+                Fx=Fx, Fy=0.0, rho0=rho0,
+                mass_guard_rtol=resolved_mass_guard_rtol, T=T)
         end
     elseif case.flow == :poiseuille
         Fx = _amr_d_body_force_2d(setup, :Fx, 1e-6)
         Fy = _amr_d_body_force_2d(setup, :Fy, 0.0)
         return run_conservative_tree_poiseuille_subcycled_2d(
             max_level=case.max_level, spec=spec, steps=steps, omega=omega,
-            Fx=Fx, Fy=Fy, rho0=rho0, T=T)
+            Fx=Fx, Fy=Fy, rho0=rho0,
+            mass_guard_rtol=resolved_mass_guard_rtol, T=T)
     elseif case.flow == :couette
         U = _amr_d_boundary_value_2d(
             setup, :north, :velocity, :ux, _amr_d_var_2d(setup, :U, 1e-3))
         return run_conservative_tree_couette_subcycled_2d(
             max_level=case.max_level, spec=spec, steps=steps, omega=omega,
-            U=U, rho0=rho0, T=T)
+            U=U, rho0=rho0, mass_guard_rtol=resolved_mass_guard_rtol,
+            T=T)
     end
 
     throw(ArgumentError("AMR-D .krk runtime helper currently dispatches " *

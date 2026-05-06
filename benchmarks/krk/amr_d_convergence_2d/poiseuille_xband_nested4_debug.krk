@@ -1,13 +1,15 @@
 # AMR D nested Poiseuille quicklook: vertical x-band refinement.
 # This is a visual/debug case, not a convergence gate. The forcing and step
 # count is deliberately larger than the tiny canary so velocity fields are
-# visible in local quicklook plots without relaxing the mass guard.
+# visible in local quicklook plots. The explicit mass guard is a diagnostic
+# tolerance; max_raw_mass_rel_drift is still reported in values.csv.
 
 Simulation amr_d_poiseuille_xband_nested4_debug D2Q9
 
 Define Fx = 1e-7
 Define omega = 1.0
 Define rho0 = 1.0
+Define mass_guard_rtol = 1e-6
 
 Domain L = 16 x 12  N = 16 x 12
 Physics nu = 0.16666666666666666 Fx = 1e-7

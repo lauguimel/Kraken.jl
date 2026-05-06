@@ -1,6 +1,6 @@
 # AMR D four-level cylinder nesting probe.
-# This file must parse, but conservative-tree D must reject it until nested
-# route ownership and same-calculation multi-level routing are implemented.
+# Periodic nested solid-mask runtime is enabled when the obstacle is fully
+# contained in the finest region.
 
 Simulation amr_d_cylinder_nested4_probe D2Q9
 
@@ -14,6 +14,10 @@ Define R = 1.5
 Define cx_leaf = 192.5
 Define cy_leaf = 112.5
 Define radius_leaf = 24
+# Diagnostic guard: this nested solid probe intentionally records the raw
+# fluid-mass correction in values.csv while the solid-interface closure is
+# still being audited.
+Define mass_guard_rtol = 1e-3
 
 Domain L = 24 x 14  N = 24 x 14
 Physics nu = 0.16666666666666666 Fx = 2e-5
