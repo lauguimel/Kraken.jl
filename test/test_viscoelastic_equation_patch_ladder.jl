@@ -2266,7 +2266,7 @@ end
         result = run_conformation_step_libb_2d(
             ; geometry=geom, u_ref_mean=u_ref, ν_s,
             polymer_model=model, polymer_bc=LogFieldWallBC(),
-            hermite_source_mode=:ce_corrected,
+            hermite_source_mode=:liu_direct,
             conformation_magic=1e-6,
             conformation_divergence_mode=:trace_free,
             max_steps=40, avg_window=10,
@@ -2306,7 +2306,7 @@ end
         result = run_conformation_step_libb_2d(
             ; geometry=geom, u_ref_mean=u_ref, ν_s,
             polymer_model=model, polymer_bc=bc,
-            hermite_source_mode=:ce_corrected,
+            hermite_source_mode=:liu_direct,
             conformation_magic=1e-6,
             conformation_divergence_mode=:trace_free,
             max_steps=40, avg_window=10,
@@ -2340,6 +2340,7 @@ end
     @test result.conformation_magic ≈ 1e-6 atol=0.0 rtol=0.0
     @test haskey(pairs(result), :conformation_divergence_mode)
     @test result.conformation_divergence_mode === :trace_free
+    @test result.hermite_source_mode === :liu_direct
 end
 
 @testset "P18b4 cylinder source scale does not double-apply CE correction" begin
