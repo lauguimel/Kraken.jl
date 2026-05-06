@@ -1623,6 +1623,40 @@ end
     @test clean < P0_ATOL
 end
 
+@testset "P15c2 driver refreshes inlet macros after post-collision reset" begin
+    Ny = 16
+    u_mean = 0.005
+    λ = 12.0
+    u_max = 1.5 * u_mean
+    Cxx_ref = zeros(Float64, Ny)
+    Cxy_ref = zeros(Float64, Ny)
+    Cyy_ref = ones(Float64, Ny)
+    for j in 1:Ny
+        y = j - 0.5
+        dudy = u_max * 4.0 * (Ny - 2.0 * y) / (Ny * Ny)
+        Cxy_ref[j] = λ * dudy
+        Cxx_ref[j] = 1.0 + 2.0 * (λ * dudy)^2
+    end
+
+    for model in (OldroydB(G=0.01, λ=λ), LogConfOldroydB(G=0.01, λ=λ))
+        result = run_conformation_cylinder_libb_2d(
+            ; Nx=32, Ny, radius=3, cx=16, cy=(Ny - 1) / 2,
+            u_mean, ν_s=0.04, polymer_model=model,
+            max_steps=1, avg_window=1,
+            polymer_bc=uses_log_conformation(model) ? LogFieldWallBC() : CNEBB(),
+            hermite_source_mode=:liu_direct,
+            conformation_magic=1e-6,
+            conformation_divergence_mode=:trace_free,
+            conformation_initial_condition=:identity,
+            source_scale_dynamics=0.0,
+            backend=KernelAbstractions.CPU(), FT=Float64,
+        )
+        @test maximum(abs, result.C_xx[1, :] .- Cxx_ref) < 1e-12
+        @test maximum(abs, result.C_xy[1, :] .- Cxy_ref) < 1e-12
+        @test maximum(abs, result.C_yy[1, :] .- Cyy_ref) < 1e-12
+    end
+end
+
 function _bulk_affine_shear_patch(; orientation=:x_shear_y)
     Nx = Ny = 48
     γ = 0.01

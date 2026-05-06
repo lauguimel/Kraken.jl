@@ -1033,6 +1033,14 @@ function run_conformation_cylinder_libb_2d(;
         reset_conformation_outlet_2d!(g_xy, Nx, Ny)
         reset_conformation_outlet_2d!(g_yy, Nx, Ny)
 
+        # The reset above fixes the populations used by the next transport
+        # step. Refresh the macro fields before computing τ_p, otherwise the
+        # hydrodynamic source sees the pre-reset inlet/outlet collision state.
+        compute_conformation_macro_2d!(Ψ_xx, g_xx)
+        compute_conformation_macro_2d!(Ψ_xy, g_xy)
+        compute_conformation_macro_2d!(Ψ_yy, g_yy)
+        use_logconf && psi_to_C_2d!(C_xx, C_xy, C_yy, Ψ_xx, Ψ_xy, Ψ_yy)
+
         update_polymer_stress!(tau_p_xx, tau_p_xy, tau_p_yy,
                                  C_xx, C_xy, C_yy, polymer_model)
 
