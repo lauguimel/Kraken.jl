@@ -40,18 +40,93 @@ using Kraken, KernelAbstractions
         # (with Loewner derivative) against the validated direct-C source.
         common = (; Nx=240, Ny=60, radius=8, u_mean=0.02, ν_s=0.06,
                     inlet=:parabolic, ρ_out=1.0, tau_plus=1.0,
-                    max_steps=3000, avg_window=500,
+                    max_steps=6000, avg_window=1000,
                     backend=KernelAbstractions.CPU(), FT=Float64)
 
         m_direct  = OldroydB(G=0.04/5.0, λ=5.0)
         m_logconf = LogConfOldroydB(G=0.04/5.0, λ=5.0)
 
         r1 = run_conformation_cylinder_libb_2d(; common..., polymer_model=m_direct)
-        r2 = run_conformation_cylinder_libb_2d(; common..., polymer_model=m_logconf)
+        r2 = run_conformation_cylinder_libb_2d(; common...,
+            polymer_model=m_logconf, polymer_bc=LogFieldWallBC())
 
         rel_diff = abs(r1.Cd - r2.Cd) / r1.Cd
         @info "log-conformation low-Wi" Cd_direct=round(r1.Cd, digits=4) Cd_logconf=round(r2.Cd, digits=4) rel_diff
-        @test rel_diff < 0.01   # < 1 % at Wi ≈ 0.012
+        # This compares different wall closures: direct-C uses strict CNEBB,
+        # logconf uses the field-pinned log-space closure. Keep it as a
+        # coarse end-to-end smoke test, not a wall-BC equivalence proof.
+        @test rel_diff < 0.02   # < 2 % at Wi ≈ 0.012
         @test isfinite(r2.Cd) && r2.Cd > 0
+        @test r1.drag_mode === :post_source_mea
+        @test r1.hermite_source_mode === :liu_direct
+        @test r1.solvent_source_mode === :post_collision
+        @test r1.conformation_magic == 1e-6
+        @test r1.momentum_exchange_mode === :mei_reconstruct
+        @test r1.Cd == r1.Cd_mea_post_source
+        @test r1.Cd_split_explicit ≈ r1.Cd_s + r1.Cd_p
+    end
+
+    @testset "source-scaled force mode requires explicit diagnostic opt-in" begin
+        model = OldroydB(G=0.04/5.0, λ=5.0)
+        @test_throws ErrorException run_conformation_cylinder_libb_2d(;
+            Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+            polymer_model=model, max_steps=1, avg_window=1,
+            drag_mode=:source_scaled_mea)
+    end
+
+    @testset "diagnostic polymer wall BC requires explicit opt-in" begin
+        model = OldroydB(G=0.04/5.0, λ=5.0)
+        @test_throws ErrorException run_conformation_cylinder_libb_2d(;
+            Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+            polymer_model=model, polymer_bc=CNEBBEqGradient(),
+            max_steps=1, avg_window=1)
+    end
+
+    @testset "unsupported conformation collision windows require diagnostic opt-in" begin
+        model = OldroydB(G=0.04/5.0, λ=5.0)
+        @test_throws ErrorException run_conformation_cylinder_libb_2d(;
+            Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+            polymer_model=model, tau_plus=0.50001,
+            conformation_collision=:trt, max_steps=1, avg_window=1)
+        @test_throws ErrorException run_conformation_cylinder_libb_2d(;
+            Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+            polymer_model=model, tau_plus=1.0,
+            conformation_collision=:regularized, max_steps=1, avg_window=1)
+    end
+
+    @testset "LogFieldWallBC is the validated log-conformation wall closure" begin
+        model = LogConfOldroydB(G=0.04/5.0, λ=5.0)
+        @test_throws ErrorException run_conformation_cylinder_libb_2d(;
+            Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+            polymer_model=model, max_steps=1, avg_window=1)
+        result = run_conformation_cylinder_libb_2d(;
+            Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+            polymer_model=model, polymer_bc=LogFieldWallBC(),
+            max_steps=1, avg_window=1)
+        @test result.first_nonfinite_step == 0
+        @test isfinite(result.Cd)
+    end
+
+    @testset "LogFieldWallBC is rejected for direct-C validation" begin
+        model = OldroydB(G=0.04/5.0, λ=5.0)
+        @test_throws ErrorException run_conformation_cylinder_libb_2d(;
+            Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+            polymer_model=model, polymer_bc=LogFieldWallBC(),
+            max_steps=1, avg_window=1)
+    end
+
+    @testset "log-conformation accepts production gradient stencils" begin
+        model = LogConfOldroydB(G=0.04/5.0, λ=5.0)
+        for mode in (:embedded_axis, :wallfit4)
+            result = run_conformation_cylinder_libb_2d(;
+                Nx=24, Ny=12, radius=2, u_mean=0.01, ν_s=0.06,
+                polymer_model=model, polymer_bc=LogFieldWallBC(),
+                conformation_gradient_mode=mode,
+                conformation_gradient_max_terms=mode === :embedded_axis ? 4 : 64,
+                max_steps=1, avg_window=1)
+            @test result.conformation_gradient_mode === mode
+            @test result.first_nonfinite_step == 0
+            @test isfinite(result.Cd)
+        end
     end
 end
