@@ -1816,6 +1816,93 @@ function _rel_l2_profile(profile, ref)
     return sqrt(sum(abs2, profile .- ref) / den)
 end
 
+function _min_eig_arrays(Cxx, Cxy, Cyy)
+    Nx, Ny = size(Cxx)
+    return minimum(
+        _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j])
+        for j in 1:Ny for i in 1:Nx
+    )
+end
+
+function _poiseuille_direct_source_residual(; orientation=:horizontal,
+                                            Wi=1.0, u_mean=0.005)
+    Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
+    R = 4.0
+    λ = Wi * R / u_mean
+    ux, uy, Cxx, Cxy, Cyy, _, _ =
+        _poiseuille_patch_profiles(Nx, Ny, u_mean, λ; orientation)
+    is_solid = falses(Nx, Ny)
+    max_source = 0.0
+    for j in 1:Ny, i in 1:Nx
+        dudx = Kraken._wall_aware_dx_2d(ux, is_solid, i, j, Nx, Float64)
+        dvdx = Kraken._wall_aware_dx_2d(uy, is_solid, i, j, Nx, Float64)
+        dudy = Kraken._wall_aware_dy_2d(ux, is_solid, i, j, Ny, Float64)
+        dvdy = Kraken._wall_aware_dy_2d(uy, is_solid, i, j, Ny, Float64)
+        source = _direct_source_tuple(
+            Cxx[i, j], Cxy[i, j], Cyy[i, j],
+            dudx, dudy, dvdx, dvdy, λ,
+        )
+        max_source = max(max_source, maximum(abs, source))
+    end
+    return (; max_source, min_ref_eig=_min_eig_arrays(Cxx, Cxy, Cyy))
+end
+
+function _poiseuille_direct_collision_only_error(; collision=:trt,
+                                                 orientation=:horizontal,
+                                                 tau_plus=1.0,
+                                                 magic=1e-6,
+                                                 Wi=1.0,
+                                                 steps=200,
+                                                 u_mean=0.005)
+    Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
+    R = 4.0
+    λ = Wi * R / u_mean
+    ux, uy, Cxx, Cxy, Cyy, ref_Cxy, ref_N1 =
+        _poiseuille_patch_profiles(Nx, Ny, u_mean, λ; orientation)
+    is_solid = falses(Nx, Ny)
+    ρ = ones(Float64, Nx, Ny)
+
+    g_xx = zeros(Float64, Nx, Ny, 9)
+    g_xy = zeros(Float64, Nx, Ny, 9)
+    g_yy = zeros(Float64, Nx, Ny, 9)
+    init_conformation_field_2d!(g_xx, Cxx, ux, uy)
+    init_conformation_field_2d!(g_xy, Cxy, ux, uy)
+    init_conformation_field_2d!(g_yy, Cyy, ux, uy)
+    Fe_xx = zeros(Float64, Nx, Ny, 9)
+    Fe_xy = zeros(Float64, Nx, Ny, 9)
+    Fe_yy = zeros(Float64, Nx, Ny, 9)
+    min_eig = _min_eig_arrays(Cxx, Cxy, Cyy)
+
+    for _ in 1:steps
+        compute_conformation_macro_2d!(Cxx, g_xx)
+        compute_conformation_macro_2d!(Cxy, g_xy)
+        compute_conformation_macro_2d!(Cyy, g_yy)
+        min_eig = min(min_eig, _min_eig_arrays(Cxx, Cxy, Cyy))
+        for (g, Fe, C_field, component) in
+            ((g_xx, Fe_xx, Cxx, 1), (g_xy, Fe_xy, Cxy, 2), (g_yy, Fe_yy, Cyy, 3))
+            _collide_component_once!(
+                collision, g, Fe, C_field, ux, uy, ρ, Cxx, Cxy, Cyy,
+                is_solid, tau_plus, λ, component; magic,
+            )
+        end
+    end
+
+    compute_conformation_macro_2d!(Cxx, g_xx)
+    compute_conformation_macro_2d!(Cxy, g_xy)
+    compute_conformation_macro_2d!(Cyy, g_yy)
+    min_eig = min(min_eig, _min_eig_arrays(Cxx, Cxy, Cyy))
+    Cxy_profile = orientation === :horizontal ? vec(mean(Cxy, dims=1)) :
+                                                 vec(mean(Cxy, dims=2))
+    N1_profile = orientation === :horizontal ? vec(mean(Cxx .- Cyy, dims=1)) :
+                                                vec(mean(Cxx .- Cyy, dims=2))
+    return (
+        Cxy_l2 = _rel_l2_profile(Cxy_profile, ref_Cxy),
+        N1_l2 = _rel_l2_profile(N1_profile, ref_N1),
+        min_eig = min_eig,
+        max_abs_C = maximum(maximum(abs, C) for C in (Cxx, Cxy, Cyy)),
+    )
+end
+
 function _apply_poiseuille_patch_wall_bc!(g_post, g_pre, is_solid, q_wall,
                                           C_field, ux, uy, bc, phi_mode)
     if bc === nothing
@@ -1918,6 +2005,104 @@ function _poiseuille_cde_patch_error(; collision=:trt, phi_mode=:pre_opp,
         min_Cyy = minimum(Cyy),
         min_eig = min_eig,
         max_abs_C = maximum(maximum(abs, C) for C in (Cxx, Cxy, Cyy)),
+    )
+end
+
+function _poiseuille_direct_spd_timeline(; collision=:trt, phi_mode=:pre_opp,
+                                         bc=nothing,
+                                         tau_plus=1.0, steps=200,
+                                         orientation=:horizontal,
+                                         magic=1e-6,
+                                         Wi=1.0, u_mean=0.005)
+    Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
+    R = 4.0
+    λ = Wi * R / u_mean
+    ux, uy, Cxx, Cxy, Cyy, _, _ =
+        _poiseuille_patch_profiles(Nx, Ny, u_mean, λ; orientation)
+    is_solid = falses(Nx, Ny)
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    ρ = ones(Float64, Nx, Ny)
+
+    g_xx = zeros(Float64, Nx, Ny, 9)
+    g_xy = zeros(Float64, Nx, Ny, 9)
+    g_yy = zeros(Float64, Nx, Ny, 9)
+    init_conformation_field_2d!(g_xx, Cxx, ux, uy)
+    init_conformation_field_2d!(g_xy, Cxy, ux, uy)
+    init_conformation_field_2d!(g_yy, Cyy, ux, uy)
+    g_xx_buf = similar(g_xx)
+    g_xy_buf = similar(g_xy)
+    g_yy_buf = similar(g_yy)
+    Fe_xx = zeros(Float64, Nx, Ny, 9)
+    Fe_xy = zeros(Float64, Nx, Ny, 9)
+    Fe_yy = zeros(Float64, Nx, Ny, 9)
+    Cxx_post = similar(Cxx)
+    Cxy_post = similar(Cxy)
+    Cyy_post = similar(Cyy)
+
+    min_initial = _min_eig_arrays(Cxx, Cxy, Cyy)
+    min_after_stream = Inf
+    min_after_collision = Inf
+    first_stream_negative = 0
+    first_collision_negative = 0
+
+    for step in 1:steps
+        if orientation === :horizontal
+            stream_periodic_x_wall_y_2d!(g_xx_buf, g_xx, Nx, Ny)
+            stream_periodic_x_wall_y_2d!(g_xy_buf, g_xy, Nx, Ny)
+            stream_periodic_x_wall_y_2d!(g_yy_buf, g_yy, Nx, Ny)
+        else
+            _stream_periodic_y_wall_x_2d!(g_xx_buf, g_xx, Nx, Ny)
+            _stream_periodic_y_wall_x_2d!(g_xy_buf, g_xy, Nx, Ny)
+            _stream_periodic_y_wall_x_2d!(g_yy_buf, g_yy, Nx, Ny)
+        end
+
+        _apply_poiseuille_patch_wall_bc!(
+            g_xx_buf, g_xx, is_solid, q_wall, Cxx, ux, uy, bc, phi_mode,
+        )
+        _apply_poiseuille_patch_wall_bc!(
+            g_xy_buf, g_xy, is_solid, q_wall, Cxy, ux, uy, bc, phi_mode,
+        )
+        _apply_poiseuille_patch_wall_bc!(
+            g_yy_buf, g_yy, is_solid, q_wall, Cyy, ux, uy, bc, phi_mode,
+        )
+
+        g_xx, g_xx_buf = g_xx_buf, g_xx
+        g_xy, g_xy_buf = g_xy_buf, g_xy
+        g_yy, g_yy_buf = g_yy_buf, g_yy
+
+        compute_conformation_macro_2d!(Cxx, g_xx)
+        compute_conformation_macro_2d!(Cxy, g_xy)
+        compute_conformation_macro_2d!(Cyy, g_yy)
+        eig_stream = _min_eig_arrays(Cxx, Cxy, Cyy)
+        min_after_stream = min(min_after_stream, eig_stream)
+        if first_stream_negative == 0 && eig_stream < 0.0
+            first_stream_negative = step
+        end
+
+        for (g, Fe, C_field, component) in
+            ((g_xx, Fe_xx, Cxx, 1), (g_xy, Fe_xy, Cxy, 2), (g_yy, Fe_yy, Cyy, 3))
+            _collide_component_once!(
+                collision, g, Fe, C_field, ux, uy, ρ, Cxx, Cxy, Cyy,
+                is_solid, tau_plus, λ, component; magic,
+            )
+        end
+
+        compute_conformation_macro_2d!(Cxx_post, g_xx)
+        compute_conformation_macro_2d!(Cxy_post, g_xy)
+        compute_conformation_macro_2d!(Cyy_post, g_yy)
+        eig_collision = _min_eig_arrays(Cxx_post, Cxy_post, Cyy_post)
+        min_after_collision = min(min_after_collision, eig_collision)
+        if first_collision_negative == 0 && eig_collision < 0.0
+            first_collision_negative = step
+        end
+    end
+
+    return (;
+        min_initial,
+        min_after_stream,
+        min_after_collision,
+        first_stream_negative,
+        first_collision_negative,
     )
 end
 
@@ -2236,14 +2421,40 @@ end
 
 @testset "P18b2c Poiseuille direct-C SPD ceiling is planar, not cylindrical" begin
     for orientation in (:horizontal, :vertical)
+        source = _poiseuille_direct_source_residual(; orientation, Wi=1.0)
+        collision_only = _poiseuille_direct_collision_only_error(
+            collision=:trt; orientation, magic=1e-6, Wi=1.0, steps=200,
+        )
         direct = _poiseuille_cde_patch_error(
             collision=:trt, tau_plus=1.0, bc=CNEBB();
             orientation, magic=1e-6, Wi=1.0, steps=200,
         )
+        extrap = _poiseuille_cde_patch_error(
+            collision=:trt, tau_plus=1.0, bc=ExtrapEqWallBC();
+            orientation, magic=1e-6, Wi=1.0, steps=200,
+        )
+        timeline = _poiseuille_direct_spd_timeline(
+            collision=:trt, tau_plus=1.0, bc=CNEBB();
+            orientation, magic=1e-6, Wi=1.0, steps=200,
+        )
+
+        @test source.max_source < 1e-13
+        @test source.min_ref_eig > 0.0
+        @test collision_only.Cxy_l2 < P0_ATOL
+        @test collision_only.N1_l2 < P0_ATOL
+        @test collision_only.min_eig > 0.0
         @test direct.Cxy_l2 < 0.12
         @test direct.N1_l2 < 0.25
         @test_broken direct.min_eig > 0.0
         @test direct.min_eig < 0.0
+        @test extrap.Cxy_l2 < 0.01
+        @test extrap.N1_l2 < 0.025
+        @test extrap.min_eig > 0.0
+        @test timeline.min_initial > 0.0
+        @test timeline.min_after_stream < 0.0
+        @test timeline.min_after_collision < 0.0
+        @test timeline.first_stream_negative > 0
+        @test timeline.first_collision_negative > 0
     end
 end
 
