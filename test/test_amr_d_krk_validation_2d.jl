@@ -22,14 +22,29 @@ using Kraken
     @test cases["bfs_scale1.krk"].flow == :bfs
     @test cases["bfs_scale1.krk"].boundary_policy == :open_x_wall_y
     @test cases["bfs_scale1.krk"].runtime_supported
+    result_b = run_conservative_tree_amr_d_case_from_krk_2d(
+        joinpath(convergence_dir, "bfs_scale1.krk"); steps_override=2)
+    @test result_b.flow == :bfs_route_native
+    @test result_b.steps == 2
+    @test isfinite(result_b.mass_drift)
 
     @test cases["square_scale1.krk"].flow == :square
     @test cases["square_scale1.krk"].wall_model == :halfway_bounceback_mask
     @test cases["square_scale1.krk"].runtime_supported
+    result_s = run_conservative_tree_amr_d_case_from_krk_2d(
+        joinpath(convergence_dir, "square_scale1.krk"); steps_override=2)
+    @test result_s.flow == :square_obstacle_route_native
+    @test result_s.steps == 2
+    @test isfinite(result_s.mass_drift)
 
     @test cases["cylinder_scale1.krk"].flow == :cylinder
     @test cases["cylinder_scale1.krk"].wall_model == :halfway_bounceback_mask
     @test cases["cylinder_scale1.krk"].runtime_supported
+    result_y = run_conservative_tree_amr_d_case_from_krk_2d(
+        joinpath(convergence_dir, "cylinder_scale1.krk"); steps_override=2)
+    @test result_y.steps == 2
+    @test isfinite(result_y.Cd)
+    @test isfinite(result_y.mass_drift)
 
     nested_cylinder = cases["cylinder_nested4_probe.krk"]
     @test nested_cylinder.spec_supported

@@ -224,6 +224,14 @@ function _amr_d_boundary_value_2d(setup,
     return default
 end
 
+function _amr_d_single_patch_ranges_2d(setup)
+    ranges = conservative_tree_patch_ranges_from_krk_refines_2d(
+        getproperty(setup, :domain), getproperty(setup, :refinements))
+    length(ranges) == 1 ||
+        throw(ArgumentError("AMR-D route-native one-level .krk cases need exactly one Refine block"))
+    return only(ranges)
+end
+
 function run_conservative_tree_amr_d_case_from_krk_2d(source;
         steps_override=nothing,
         T::Type{<:AbstractFloat}=Float64)
@@ -240,7 +248,72 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
     omega = _amr_d_var_2d(setup, :omega, 1.2)
     rho0 = _amr_d_var_2d(setup, :rho0, 1.0)
 
-    if case.flow == :poiseuille
+    if case.runtime_status == :route_native_one_level_channel
+        domain = getproperty(setup, :domain)
+        Nx = Int(getproperty(domain, :Nx))
+        Ny = Int(getproperty(domain, :Ny))
+        patch_i, patch_j = _amr_d_single_patch_ranges_2d(setup)
+        if case.flow == :poiseuille
+            Fx = _amr_d_body_force_2d(setup, :Fx, 1e-6)
+            return run_conservative_tree_poiseuille_route_native_2d(
+                Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                patch_j_range=patch_j, Fx=Fx, omega=omega, rho=rho0,
+                steps=steps, T=T)
+        elseif case.flow == :couette
+            U = _amr_d_boundary_value_2d(
+                setup, :north, :velocity, :ux, _amr_d_var_2d(setup, :U, 1e-3))
+            return run_conservative_tree_couette_route_native_2d(
+                Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                patch_j_range=patch_j, U=U, omega=omega, rho=rho0,
+                steps=steps, T=T)
+        end
+    elseif case.runtime_status == :route_native_one_level_open_solid
+        domain = getproperty(setup, :domain)
+        Nx = Int(getproperty(domain, :Nx))
+        Ny = Int(getproperty(domain, :Ny))
+        patch_i, patch_j = _amr_d_single_patch_ranges_2d(setup)
+        u_in = _amr_d_boundary_value_2d(
+            setup, :west, :velocity, :ux, _amr_d_var_2d(setup, :u_in, 0.03))
+        rho_out = _amr_d_boundary_value_2d(
+            setup, :east, :pressure, :rho, 1.0)
+        return run_conservative_tree_bfs_route_native_2d(
+            Nx=Nx, Ny=Ny, patch_i_range=patch_i, patch_j_range=patch_j,
+            step_i_leaf=round(Int, _amr_d_var_2d(setup, :step_i_leaf, 16)),
+            step_height_leaf=round(Int, _amr_d_var_2d(
+                setup, :step_height_leaf, 8)),
+            u_in=u_in, rho_out=rho_out, omega=omega, rho=rho0,
+            steps=steps, T=T)
+    elseif case.runtime_status == :route_native_one_level_solid
+        domain = getproperty(setup, :domain)
+        Nx = Int(getproperty(domain, :Nx))
+        Ny = Int(getproperty(domain, :Ny))
+        patch_i, patch_j = _amr_d_single_patch_ranges_2d(setup)
+        Fx = _amr_d_body_force_2d(setup, :Fx, 2e-5)
+        if case.flow == :square
+            Fy = _amr_d_body_force_2d(setup, :Fy, 0.0)
+            return run_conservative_tree_square_obstacle_route_native_2d(
+                Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                patch_j_range=patch_j,
+                obstacle_i_range=round(Int, _amr_d_var_2d(
+                    setup, :obstacle_i0, 22)):round(Int, _amr_d_var_2d(
+                    setup, :obstacle_i1, 27)),
+                obstacle_j_range=round(Int, _amr_d_var_2d(
+                    setup, :obstacle_j0, 12)):round(Int, _amr_d_var_2d(
+                    setup, :obstacle_j1, 17)),
+                Fx=Fx, Fy=Fy, omega=omega, rho=rho0, steps=steps, T=T)
+        elseif case.flow == :cylinder
+            return run_conservative_tree_cylinder_obstacle_route_native_2d(
+                Nx=Nx, Ny=Ny, patch_i_range=patch_i,
+                patch_j_range=patch_j,
+                cx_leaf=_amr_d_var_2d(setup, :cx_leaf, (2 * Nx + 1) / 2),
+                cy_leaf=_amr_d_var_2d(setup, :cy_leaf, (2 * Ny + 1) / 2),
+                radius_leaf=_amr_d_var_2d(setup, :radius_leaf, 3.0),
+                Fx=Fx, omega=omega, rho=rho0, steps=steps,
+                avg_window=round(Int, _amr_d_var_2d(
+                    setup, :avg_window, max(1, div(steps, 4)))),
+                T=T)
+        end
+    elseif case.flow == :poiseuille
         Fx = _amr_d_body_force_2d(setup, :Fx, 1e-6)
         Fy = _amr_d_body_force_2d(setup, :Fy, 0.0)
         return run_conservative_tree_poiseuille_subcycled_2d(
