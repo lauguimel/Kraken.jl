@@ -19,6 +19,45 @@ julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_3d.jl"); include("test/test_conservative_tree_topology_3d.jl"); include("test/test_conservative_tree_streaming_3d.jl")'
 ```
 
+Optional local Metal smoke for the new AMR-D GPU primitives:
+
+```bash
+KRAKEN_TEST_METAL=1 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_gpu_pack_2d.jl")'
+```
+
+## 0. GPU/Metal AMR-D Primitives
+
+Status: first surgical slice done, not yet a complete subcycled macro-flow
+runner.
+
+Implemented:
+
+- device-transferable pull-route pack for multilevel conservative-tree specs;
+- no-atomic pull streaming over a full route table, including stationary wall
+  reflection encoded as normal pull entries;
+- device-transferable active-cell metric pack;
+- KernelAbstractions active-level Guo collision kernel, verified against the
+  CPU AMR-D reference;
+- local Metal smoke guarded by `KRAKEN_TEST_METAL=1`.
+
+Validation:
+
+- CPU backend: `test/test_conservative_tree_gpu_pack_2d.jl` verifies the pull
+  stream against `stream_conservative_tree_routes_F_2d!` and the Guo kernel
+  against `_collide_Guo_conservative_tree_active_level_F_2d!`;
+- Metal backend: same tiny multilevel stream/collision smoke passes when
+  `KRAKEN_TEST_METAL=1` is set.
+
+Remaining before GPU macro-flow acceleration:
+
+- port the subcycling ledgers (`coarse_to_fine`, `fine_to_coarse`,
+  restriction/reflux buffers) to device arrays;
+- replace the direct-level route loop in the scheduler with the pull-stream
+  kernel for each level/event;
+- add GPU kernels for coarse-to-fine injection and fine-to-coarse accumulation;
+- add `backend=MetalBackend()` KRK/macro-flow hooks only after the CPU and
+  Metal schedulers match on nested Poiseuille patch tests.
+
 ## 1. Streaming Composite Natif 2D
 
 Status: done for one ratio-2 patch.

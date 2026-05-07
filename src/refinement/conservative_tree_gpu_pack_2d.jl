@@ -4,6 +4,8 @@
 # arrays. CPU tests replay the pack directly; a later patch can transfer these
 # arrays to CUDA/Metal without changing the route contract.
 
+using KernelAbstractions
+
 struct ConservativeTreeGPURoutePack2D{T}
     cells_per_block::Int32
     block_level::Vector{UInt8}
@@ -21,6 +23,36 @@ struct ConservativeTreeGPURoutePack2D{T}
     direct_routes::Vector{Int32}
     interface_routes::Vector{Int32}
     boundary_routes::Vector{Int32}
+end
+
+struct ConservativeTreeGPUPullRoutePack2D{T,AFirst,ACount,ASrc,AQ,AW}
+    n_cells::Int32
+    pull_first::AFirst
+    pull_count::ACount
+    pull_src::ASrc
+    pull_q::AQ
+    pull_weight::AW
+end
+
+struct ConservativeTreeGPUCellPack2D{T,AId,ALevel,AVolume}
+    n_cells::Int32
+    n_active::Int32
+    active_cell_ids::AId
+    cell_level::ALevel
+    cell_volume::AVolume
+end
+
+function _copy_conservative_tree_gpu_array_2d(backend, host::AbstractArray{T}) where T
+    dev = KernelAbstractions.allocate(backend, T, size(host)...)
+    copyto!(dev, host)
+    return dev
+end
+
+@inline function _conservative_tree_gpu_stream_boundary_policy_2d(
+        boundary::Symbol)
+    boundary in (:skip, :bounceback, :periodic_x_wall_y) ||
+        throw(ArgumentError("GPU pull route pack currently supports boundary=:skip, :bounceback, or :periodic_x_wall_y"))
+    return boundary
 end
 
 function _logical_to_packed_index_2d(packed::ConservativeTreePackedTopology2D)
@@ -96,6 +128,284 @@ function conservative_tree_gpu_route_weight_sums_2d(
         sums[key] = get(sums, key, zero(T)) + pack.route_weight[route_index]
     end
     return sums
+end
+
+"""
+    pack_conservative_tree_gpu_pull_routes_2d(spec, table; boundary=:skip, T=Float32)
+
+Build a no-atomic pull-stream pack for a conservative-tree route table. Each
+output `(cell, q)` owns a short CSR list of incoming packets
+`weight * Fin[src, src_q]`. Stationary wall boundary reflection is encoded as
+normal pull entries to `opposite(q)` in the source cell.
+"""
+function pack_conservative_tree_gpu_pull_routes_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D;
+        boundary::Symbol=:skip,
+        T::Type{<:Real}=Float32)
+    policy = _conservative_tree_gpu_stream_boundary_policy_2d(boundary)
+    n_cells = length(spec.cells)
+    buckets = [Tuple{Int32,UInt8,T}[] for _ in 1:(n_cells * 9)]
+
+    @inbounds for route in table.routes
+        dst = route.dst
+        dst_q = route.q
+        if dst == 0
+            policy == :skip && continue
+            dst = route.src
+            dst_q = d2q9_opposite(route.q)
+        end
+        1 <= dst <= n_cells ||
+            throw(ArgumentError("route destination is outside the spec"))
+        bucket = (dst - 1) * 9 + dst_q
+        push!(buckets[bucket],
+              (Int32(route.src), UInt8(route.q), T(route.weight)))
+    end
+
+    pull_first = zeros(Int32, n_cells, 9)
+    pull_count = zeros(Int32, n_cells, 9)
+    n_entries = sum(length, buckets)
+    pull_src = Vector{Int32}(undef, n_entries)
+    pull_q = Vector{UInt8}(undef, n_entries)
+    pull_weight = Vector{T}(undef, n_entries)
+
+    cursor = 1
+    @inbounds for cell in 1:n_cells, q in 1:9
+        entries = buckets[(cell - 1) * 9 + q]
+        if !isempty(entries)
+            pull_first[cell, q] = Int32(cursor)
+            pull_count[cell, q] = Int32(length(entries))
+            for entry in entries
+                pull_src[cursor] = entry[1]
+                pull_q[cursor] = entry[2]
+                pull_weight[cursor] = entry[3]
+                cursor += 1
+            end
+        end
+    end
+
+    return ConservativeTreeGPUPullRoutePack2D{T,typeof(pull_first),
+        typeof(pull_count),typeof(pull_src),typeof(pull_q),
+        typeof(pull_weight)}(Int32(n_cells), pull_first, pull_count,
+                             pull_src, pull_q, pull_weight)
+end
+
+function transfer_conservative_tree_gpu_pull_pack_2d(
+        pack::ConservativeTreeGPUPullRoutePack2D{T},
+        backend) where T
+    pull_first = _copy_conservative_tree_gpu_array_2d(backend, pack.pull_first)
+    pull_count = _copy_conservative_tree_gpu_array_2d(backend, pack.pull_count)
+    pull_src = _copy_conservative_tree_gpu_array_2d(backend, pack.pull_src)
+    pull_q = _copy_conservative_tree_gpu_array_2d(backend, pack.pull_q)
+    pull_weight = _copy_conservative_tree_gpu_array_2d(backend,
+                                                       pack.pull_weight)
+    return ConservativeTreeGPUPullRoutePack2D{T,typeof(pull_first),
+        typeof(pull_count),typeof(pull_src),typeof(pull_q),
+        typeof(pull_weight)}(pack.n_cells, pull_first, pull_count,
+                             pull_src, pull_q, pull_weight)
+end
+
+function pack_conservative_tree_gpu_cells_2d(
+        spec::ConservativeTreeSpec2D;
+        T::Type{<:Real}=Float32)
+    n_cells = length(spec.cells)
+    active_cell_ids = Int32.(spec.active_cells)
+    cell_level = Vector{UInt8}(undef, n_cells)
+    cell_volume = Vector{T}(undef, n_cells)
+    @inbounds for (cell_id, cell) in pairs(spec.cells)
+        cell_level[cell_id] = UInt8(cell.level)
+        cell_volume[cell_id] = T(cell.metrics.volume)
+    end
+    return ConservativeTreeGPUCellPack2D{T,typeof(active_cell_ids),
+        typeof(cell_level),typeof(cell_volume)}(
+            Int32(n_cells), Int32(length(active_cell_ids)), active_cell_ids,
+            cell_level, cell_volume)
+end
+
+function transfer_conservative_tree_gpu_cell_pack_2d(
+        pack::ConservativeTreeGPUCellPack2D{T},
+        backend) where T
+    active_cell_ids = _copy_conservative_tree_gpu_array_2d(
+        backend, pack.active_cell_ids)
+    cell_level = _copy_conservative_tree_gpu_array_2d(
+        backend, pack.cell_level)
+    cell_volume = _copy_conservative_tree_gpu_array_2d(
+        backend, pack.cell_volume)
+    return ConservativeTreeGPUCellPack2D{T,typeof(active_cell_ids),
+        typeof(cell_level),typeof(cell_volume)}(
+            pack.n_cells, pack.n_active, active_cell_ids, cell_level,
+            cell_volume)
+end
+
+@kernel function _stream_conservative_tree_pull_routes_F_2d_kernel!(
+        Fout, @Const(Fin), @Const(pull_first), @Const(pull_count),
+        @Const(pull_src), @Const(pull_q), @Const(pull_weight),
+        n_cells::Int32)
+    linear = @index(Global)
+    total = Int(n_cells) * 9
+    @inbounds if linear <= total
+        cell = (linear - 1) ÷ 9 + 1
+        q = (linear - 1) % 9 + 1
+        first_entry = Int(pull_first[cell, q])
+        count = Int(pull_count[cell, q])
+        acc = zero(eltype(Fout))
+        for offset in 0:(count - 1)
+            entry = first_entry + offset
+            acc += pull_weight[entry] * Fin[Int(pull_src[entry]),
+                                            Int(pull_q[entry])]
+        end
+        Fout[cell, q] = acc
+    end
+end
+
+function stream_conservative_tree_gpu_pull_routes_F_2d!(
+        Fout::AbstractMatrix,
+        Fin::AbstractMatrix,
+        pack::ConservativeTreeGPUPullRoutePack2D;
+        sync::Bool=true)
+    size(Fin, 1) == Int(pack.n_cells) && size(Fout, 1) == Int(pack.n_cells) ||
+        throw(ArgumentError("F matrices must match pack.n_cells"))
+    size(Fin, 2) == 9 && size(Fout, 2) == 9 ||
+        throw(ArgumentError("F matrices must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(Fin)
+    kernel! = _stream_conservative_tree_pull_routes_F_2d_kernel!(backend)
+    kernel!(Fout, Fin, pack.pull_first, pack.pull_count, pack.pull_src,
+            pack.pull_q, pack.pull_weight, pack.n_cells;
+            ndrange=Int(pack.n_cells) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return Fout
+end
+
+@inline function _conservative_tree_gpu_cx_2d(q::Int)
+    q == 2 && return 1
+    q == 4 && return -1
+    q == 6 && return 1
+    q == 7 && return -1
+    q == 8 && return -1
+    q == 9 && return 1
+    return 0
+end
+
+@inline function _conservative_tree_gpu_cy_2d(q::Int)
+    q == 3 && return 1
+    q == 5 && return -1
+    q == 6 && return 1
+    q == 7 && return 1
+    q == 8 && return -1
+    q == 9 && return -1
+    return 0
+end
+
+@inline function _conservative_tree_gpu_weight_2d(q::Int, ::Type{T}) where T
+    q == 1 && return T(4) / T(9)
+    (q == 2 || q == 3 || q == 4 || q == 5) && return T(1) / T(9)
+    return T(1) / T(36)
+end
+
+@inline function _conservative_tree_gpu_guo_integrated_q_2d(
+        ::Val{Q}, Fq, volume, omega, rho, ux, uy, fx, fy, usq,
+        guo_pref) where Q
+    T = typeof(Fq + volume + omega + rho + ux + uy + fx + fy)
+    cx = T(_conservative_tree_gpu_cx_2d(Q))
+    cy = T(_conservative_tree_gpu_cy_2d(Q))
+    w = _conservative_tree_gpu_weight_2d(Q, T)
+    ci_dot_u = cx * ux + cy * uy
+    ci_dot_F = cx * fx + cy * fy
+    Sq = w * (T(3) * ((cx - ux) * fx + (cy - uy) * fy) +
+              T(9) * ci_dot_u * ci_dot_F)
+    f = Fq / volume
+    feq = feq_2d(Val(Q), rho, ux, uy, usq)
+    return volume * (f - omega * (f - feq) + guo_pref * Sq)
+end
+
+@kernel function _collide_Guo_conservative_tree_active_level_F_2d_kernel!(
+        F, @Const(active_cell_ids), @Const(cell_level), @Const(cell_volume),
+        n_active::Int32, level::UInt8, omega, Fx, Fy)
+    active_index = @index(Global)
+    @inbounds if active_index <= Int(n_active)
+        cell_id = Int(active_cell_ids[active_index])
+        if cell_level[cell_id] == level
+            T = eltype(F)
+            volume = cell_volume[cell_id]
+            f1 = F[cell_id, 1]; f2 = F[cell_id, 2]; f3 = F[cell_id, 3]
+            f4 = F[cell_id, 4]; f5 = F[cell_id, 5]; f6 = F[cell_id, 6]
+            f7 = F[cell_id, 7]; f8 = F[cell_id, 8]; f9 = F[cell_id, 9]
+            mass_before = zero(T)
+            for q in 1:9
+                mass_before += F[cell_id, q]
+            end
+            mx = f2 - f4 + f6 - f7 - f8 + f9
+            my = f3 - f5 + f6 + f7 - f8 - f9
+            rho = mass_before / volume
+            fx = T(Fx)
+            fy = T(Fy)
+            womega = T(omega)
+            ux = (mx / volume + fx / T(2)) / rho
+            uy = (my / volume + fy / T(2)) / rho
+            usq = ux * ux + uy * uy
+            guo_pref = one(T) - womega / T(2)
+
+            g1 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(1), f1, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g2 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(2), f2, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g3 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(3), f3, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g4 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(4), f4, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g5 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(5), f5, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g6 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(6), f6, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g7 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(7), f7, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g8 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(8), f8, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            g9 = _conservative_tree_gpu_guo_integrated_q_2d(
+                Val(9), f9, volume, womega, rho, ux, uy, fx, fy, usq,
+                guo_pref)
+            mass_after = g1 + g2 + g3 + g4 + g5 + g6 + g7 + g8 + g9
+
+            F[cell_id, 1] = g1 + mass_before - mass_after
+            F[cell_id, 2] = g2
+            F[cell_id, 3] = g3
+            F[cell_id, 4] = g4
+            F[cell_id, 5] = g5
+            F[cell_id, 6] = g6
+            F[cell_id, 7] = g7
+            F[cell_id, 8] = g8
+            F[cell_id, 9] = g9
+        end
+    end
+end
+
+function collide_Guo_conservative_tree_gpu_active_level_F_2d!(
+        F::AbstractMatrix,
+        pack::ConservativeTreeGPUCellPack2D,
+        level::Integer,
+        omega,
+        Fx,
+        Fy;
+        sync::Bool=true)
+    0 <= Int(level) <= typemax(UInt8) ||
+        throw(ArgumentError("level must fit in UInt8"))
+    size(F, 1) == Int(pack.n_cells) && size(F, 2) == 9 ||
+        throw(ArgumentError("F must match the conservative-tree cell pack"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _collide_Guo_conservative_tree_active_level_F_2d_kernel!(backend)
+    kernel!(F, pack.active_cell_ids, pack.cell_level, pack.cell_volume,
+            pack.n_active, UInt8(level), omega, Fx, Fy;
+            ndrange=Int(pack.n_active))
+    sync && KernelAbstractions.synchronize(backend)
+    return F
 end
 
 @inline function _gpu_pack_fine_local_2d(patch::ConservativeTreePatch2D,

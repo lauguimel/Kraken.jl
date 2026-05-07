@@ -1,5 +1,6 @@
 using Test
 using Kraken
+using KernelAbstractions
 
 @testset "Conservative tree GPU route pack 2D" begin
     @testset "route pack uses primitive structure-of-arrays" begin
@@ -89,5 +90,98 @@ using Kraken
         wrong_patch = create_conservative_tree_patch_2d(4:6, 3:6)
         @test_throws ArgumentError stream_conservative_tree_gpu_pack_interior_F_2d!(
             similar(coarse_in), wrong_patch, coarse_in, patch_in, pack)
+    end
+
+    @testset "pull route pack streams multilevel spec without atomics" begin
+        blocks = ConservativeTreeRefineBlock2D[
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ]
+        spec = create_conservative_tree_spec_2d(8, 6, blocks)
+        table = create_conservative_tree_route_table_2d(
+            spec; periodic_x=true, sampling=:leaf_equivalent)
+        Fin = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fref = similar(Fin)
+        Fgpu = similar(Fin)
+
+        for cell_id in spec.active_cells, q in 1:9
+            cell = spec.cells[cell_id]
+            Fin[cell_id, q] =
+                0.01 + 0.001 * q + 0.0001 * cell.level +
+                0.00001 * cell.i + 0.000001 * cell.j
+        end
+
+        stream_conservative_tree_routes_F_2d!(
+            Fref, Fin, spec, table; boundary=:periodic_x_wall_y)
+        pull = pack_conservative_tree_gpu_pull_routes_2d(
+            spec, table; boundary=:periodic_x_wall_y, T=Float64)
+        stream_conservative_tree_gpu_pull_routes_F_2d!(Fgpu, Fin, pull)
+
+        @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+        @test_throws ArgumentError pack_conservative_tree_gpu_pull_routes_2d(
+            spec, table; boundary=:periodic_x_moving_wall_y)
+    end
+
+    @testset "active-level Guo collision kernel matches CPU reference" begin
+        spec = create_conservative_tree_spec_2d(7, 5, [
+            ConservativeTreeRefineBlock2D("L1", 2:5, 2:4),
+        ])
+        Fref = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fgpu = similar(Fref)
+        initialize_conservative_tree_equilibrium_F_2d!(
+            Fref, spec; rho=1.0, ux=0.01, uy=-0.002)
+        copyto!(Fgpu, Fref)
+
+        level = 1
+        omega = 1.15
+        Fx = 2e-6
+        Fy = -1e-6
+        Kraken._collide_Guo_conservative_tree_active_level_F_2d!(
+            Fref, spec, level, omega, Fx, Fy)
+        cell_pack = pack_conservative_tree_gpu_cells_2d(spec; T=Float64)
+        collide_Guo_conservative_tree_gpu_active_level_F_2d!(
+            Fgpu, cell_pack, level, omega, Fx, Fy)
+
+        @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+    end
+
+    if get(ENV, "KRAKEN_TEST_METAL", "0") == "1"
+        @testset "Metal smoke for pull stream and active-level collision" begin
+            @eval using Metal
+            if Metal.functional()
+                backend = Metal.MetalBackend()
+                spec = create_conservative_tree_spec_2d(5, 4, [
+                    ConservativeTreeRefineBlock2D("L1", 2:4, 2:3),
+                ])
+                table = create_conservative_tree_route_table_2d(
+                    spec; periodic_x=true, sampling=:leaf_equivalent)
+                Fin = allocate_conservative_tree_F_2d(spec; T=Float32)
+                for cell_id in spec.active_cells, q in 1:9
+                    Fin[cell_id, q] = Float32(0.02 + 0.001 * q + 0.0001 * cell_id)
+                end
+                Fref = similar(Fin)
+                stream_conservative_tree_routes_F_2d!(
+                    Fref, Fin, spec, table; boundary=:periodic_x_wall_y)
+
+                Fd = KernelAbstractions.allocate(backend, Float32, size(Fin)...)
+                Foutd = similar(Fd)
+                copyto!(Fd, Fin)
+                pull = pack_conservative_tree_gpu_pull_routes_2d(
+                    spec, table; boundary=:periodic_x_wall_y, T=Float32)
+                pull_d = transfer_conservative_tree_gpu_pull_pack_2d(
+                    pull, backend)
+                stream_conservative_tree_gpu_pull_routes_F_2d!(
+                    Foutd, Fd, pull_d)
+                @test isapprox(Array(Foutd), Fref; atol=2e-6, rtol=2e-6)
+
+                cell_pack_d = transfer_conservative_tree_gpu_cell_pack_2d(
+                    pack_conservative_tree_gpu_cells_2d(spec; T=Float32),
+                    backend)
+                collide_Guo_conservative_tree_gpu_active_level_F_2d!(
+                    Fd, cell_pack_d, 1, Float32(1.1), Float32(1e-6),
+                    Float32(0))
+                @test all(isfinite, Array(Fd))
+            end
+        end
     end
 end
