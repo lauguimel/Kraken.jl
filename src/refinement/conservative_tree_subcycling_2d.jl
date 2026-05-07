@@ -467,12 +467,23 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
     dst_cell_id = Int(dst_id)
     dst_cell_id == 0 || spec.cells[dst_cell_id].level == parent.level ||
         throw(ArgumentError("fine-to-coarse route destination level mismatch"))
-    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
-    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
+    qi = _check_d2q9_q(q)
     step = Int(substep)
     1 <= step <= bank.schedule.ratio ||
         throw(ArgumentError("substep must be inside 1:$(bank.schedule.ratio)"))
-    qi = _check_d2q9_q(q)
+    packet_slot_i = Int(route_packet_slot)
+    if interface_time_scaling == :level_native && kind == COALESCE_CORNER
+        native_dst = _conservative_tree_level_native_corner_reflux_dst_2d(
+            spec, child_id, qi, step, bank.schedule.ratio, dst_cell_id)
+        if native_dst != dst_cell_id
+            dst_cell_id = native_dst
+            packet_slot_i = 0
+        end
+    end
+    dst_cell_id == 0 || spec.cells[dst_cell_id].level == parent.level ||
+        throw(ArgumentError("fine-to-coarse native destination level mismatch"))
+    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
+    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
     packet = _conservative_tree_f2c_time_factor_2d(
         bank, interface_time_scaling) *
         reconstructed_integrated_D2Q9_packet(
@@ -481,7 +492,7 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
     pair.fine_to_coarse[qi, step, slot] += packet
     dst_cell_id != 0 ||
         throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
-    packet_slot = Int(route_packet_slot)
+    packet_slot = packet_slot_i
     if packet_slot == 0
         packet_slot = _ensure_conservative_tree_route_packet_cache_2d!(
             bank, parent.level, dst_cell_id, qi)
@@ -489,6 +500,32 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
     cache = bank.route_packet_caches[parent.level + 1]
     cache.packets[(packet_slot - 1) * bank.schedule.ratio + step] += packet
     return bank
+end
+
+function _conservative_tree_level_native_corner_reflux_dst_2d(
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int,
+        substep::Int,
+        ratio::Int,
+        fallback_dst::Int)
+    src = spec.cells[src_id]
+    src.level > 0 || return fallback_dst
+    parent = spec.cells[src.parent]
+    remaining_strides = ratio - substep + 1
+    i_final = src.i + d2q9_cx(q) * remaining_strides
+    j_final = src.j + d2q9_cy(q) * remaining_strides
+    nx_child = _conservative_tree_level_size_2d(spec.Nx, src.level)
+    ny_child = _conservative_tree_level_size_2d(spec.Ny, src.level)
+    1 <= i_final <= nx_child && 1 <= j_final <= ny_child ||
+        return fallback_dst
+    dst_i = div(i_final + 1, 2)
+    dst_j = div(j_final + 1, 2)
+    dst_id = conservative_tree_cell_id_2d(
+        spec, parent.level, dst_i, dst_j)
+    dst_id == 0 && return fallback_dst
+    spec.cells[dst_id].active || return fallback_dst
+    return dst_id
 end
 
 function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(

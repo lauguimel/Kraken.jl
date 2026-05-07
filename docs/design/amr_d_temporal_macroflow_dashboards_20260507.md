@@ -120,9 +120,11 @@ Current diagnosis:
   face injection: direct coarse routes move by one coarse cell away from
   interfaces, while coarse-to-fine packets use a boundary-layer child stencil
   without a direct residual. The axis-only rest-state canary is now green.
-  Full D2Q9 local rest invariance is still red only on diagonal corner reflux,
-  which needs a time-aware fine-to-coarse destination. Therefore production
-  macro-flow runners intentionally remain on the stable
+  A second patch made native diagonal fine-to-coarse corner reflux use a
+  final-time destination, reducing the full D2Q9 residual to the fine corner
+  cells. Full D2Q9 local rest invariance is still red because diagonal coarse
+  ghost packets at face/corner contacts must be paired conservatively with that
+  reflux. Therefore production macro-flow runners intentionally remain on the stable
   `sampling=:leaf_equivalent` path until that diagonal closure is fixed.
 - `poiseuille_analytic_profile_2d` now uses the same halfway bounce-back wall
   convention as the Cartesian Poiseuille tests: walls are located half a cell

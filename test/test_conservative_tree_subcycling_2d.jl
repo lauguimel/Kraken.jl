@@ -714,8 +714,9 @@ end
         @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
                        sum(active_population_sums_F_2d(Fin, spec));
                        atol=1e-12, rtol=0)
-        # Diagonal fine-to-coarse corner reflux still needs a time-aware
-        # destination, so the full D2Q9 local rest-state closure remains red.
+        # Diagonal corner closure still needs a ghost/reflux pair that keeps
+        # coarse-face diagonal ghost packets and final-time corner reflux
+        # conservative at the same time.
         @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
                                   Fin[spec.active_cells, :])) <= 1e-14
     end
