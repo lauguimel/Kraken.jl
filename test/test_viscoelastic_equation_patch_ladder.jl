@@ -2502,7 +2502,8 @@ end
 function _square_formulation_spd_probe(; formulation=:direct,
                                        source_scale=0.0,
                                        steps=1_200,
-                                       magic=1e-6)
+                                       magic=1e-6,
+                                       bc_override=nothing)
     geom = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=3)
     u_ref = 0.005
     β = 0.59
@@ -2515,7 +2516,9 @@ function _square_formulation_spd_probe(; formulation=:direct,
     model = formulation === :direct ?
         OldroydB(G=ν_p / λ, λ=λ) :
         LogConfOldroydB(G=ν_p / λ, λ=λ)
-    bc = formulation === :direct ? CNEBB() : LogFieldWallBC()
+    bc = bc_override === nothing ?
+        (formulation === :direct ? CNEBB() : LogFieldWallBC()) :
+        bc_override
     result = run_conformation_step_libb_2d(
         ; geometry=geom, u_ref_mean=u_ref, ν_s,
         polymer_model=model, polymer_bc=bc,
@@ -2861,13 +2864,20 @@ end
     small_magic = _square_formulation_spd_probe(
         ; formulation=:direct, source_scale=0.0, steps=1_200, magic=1e-6,
     )
+    extrap_small_magic = _square_formulation_spd_probe(
+        ; formulation=:direct, source_scale=0.0, steps=1_200, magic=1e-6,
+        bc_override=ExtrapEqWallBC(),
+    )
     robust_magic = _square_formulation_spd_probe(
         ; formulation=:direct, source_scale=0.0, steps=1_200, magic=0.01,
     )
 
     @test small_magic.finite
+    @test extrap_small_magic.finite
     @test robust_magic.finite
     @test small_magic.min_eig < -2e-2
+    @test extrap_small_magic.min_eig < -1.0
+    @test extrap_small_magic.max_abs_C > 100.0
     @test robust_magic.min_eig > 0.5
     @test robust_magic.max_abs_C < small_magic.max_abs_C
 end
