@@ -116,10 +116,14 @@ Current diagnosis:
   `sampling=:level_native` and `sampling=:subcycled_hybrid` modes, and the
   subcycling ledgers have an explicit `interface_time_scaling` switch. The
   surgical canary proves that native direct routes and native time weighting
-  preserve global rest mass, but local rest invariance is still broken at
-  coarse/fine interfaces. Therefore production macro-flow runners intentionally
-  remain on the stable `sampling=:leaf_equivalent` path until the local
-  interface closure is fixed.
+  preserve global rest mass. A follow-up patch tightened native coarse-to-fine
+  face injection: direct coarse routes move by one coarse cell away from
+  interfaces, while coarse-to-fine packets use a boundary-layer child stencil
+  without a direct residual. The axis-only rest-state canary is now green.
+  Full D2Q9 local rest invariance is still red only on diagonal corner reflux,
+  which needs a time-aware fine-to-coarse destination. Therefore production
+  macro-flow runners intentionally remain on the stable
+  `sampling=:leaf_equivalent` path until that diagonal closure is fixed.
 - `poiseuille_analytic_profile_2d` now uses the same halfway bounce-back wall
   convention as the Cartesian Poiseuille tests: walls are located half a cell
   outside the first and last fluid cell centers. The black curve in dashboards

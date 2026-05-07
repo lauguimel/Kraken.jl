@@ -667,12 +667,39 @@ end
         @test native_routes[1].weight == 1.0
         @test direct_spec.cells[native_routes[1].dst].i == 2
 
+        c2f_src = conservative_tree_cell_id_2d(direct_spec, 0, 2, 2)
+        c2f_routes = [native_table.routes[rid] for rid in native_table.interface_routes
+                      if native_table.routes[rid].src == c2f_src &&
+                         native_table.routes[rid].q == 2]
+        @test length(c2f_routes) == 2
+        @test all(route.kind == SPLIT_FACE for route in c2f_routes)
+        @test sort([route.weight for route in c2f_routes]) == [0.5, 0.5]
+
         spec = create_conservative_tree_nested_channel_spec_2d(2)
         table = create_conservative_tree_route_table_2d(
             spec; periodic_x=true, sampling=:level_native)
         Fin = allocate_conservative_tree_F_2d(spec)
         Fout = allocate_conservative_tree_F_2d(spec)
         w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:5
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:periodic_x_wall_y,
+            interface_time_scaling=:level_native)
+
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
+
+        fill!(Fin, 0.0)
+        fill!(Fout, 0.0)
         for cell_id in spec.active_cells
             volume = spec.cells[cell_id].metrics.volume
             for q in 1:9
@@ -687,6 +714,8 @@ end
         @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
                        sum(active_population_sums_F_2d(Fin, spec));
                        atol=1e-12, rtol=0)
+        # Diagonal fine-to-coarse corner reflux still needs a time-aware
+        # destination, so the full D2Q9 local rest-state closure remains red.
         @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
                                   Fin[spec.active_cells, :])) <= 1e-14
     end

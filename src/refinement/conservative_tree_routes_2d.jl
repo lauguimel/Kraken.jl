@@ -170,10 +170,15 @@ function _route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
                                          q::Int;
                                          periodic_x::Bool=false,
                                          sampling::Symbol=:leaf_equivalent)
+    mode = _check_conservative_tree_route_sampling_2d(sampling)
     sample_level = _route_sample_level_for_active_cell_2d(
-        spec, src_id, q; periodic_x=periodic_x, sampling=sampling)
-    return _sampled_route_specs_for_active_cell_2d(
+        spec, src_id, q; periodic_x=periodic_x, sampling=mode)
+    dsts, weights, kinds = _sampled_route_specs_for_active_cell_2d(
         spec, src_id, q, sample_level; periodic_x=periodic_x)
+    if _level_native_c2f_sampling_2d(spec, src_id, sample_level, mode)
+        _normalize_level_native_c2f_route_specs_2d!(dsts, weights, kinds)
+    end
+    return dsts, weights, kinds
 end
 
 function _route_specs_for_active_cell_2d!(
@@ -185,11 +190,16 @@ function _route_specs_for_active_cell_2d!(
         q::Int;
         periodic_x::Bool=false,
         sampling::Symbol=:leaf_equivalent)
+    mode = _check_conservative_tree_route_sampling_2d(sampling)
     sample_level = _route_sample_level_for_active_cell_2d(
-        spec, src_id, q; periodic_x=periodic_x, sampling=sampling)
-    return _sampled_route_specs_for_active_cell_2d!(
+        spec, src_id, q; periodic_x=periodic_x, sampling=mode)
+    _sampled_route_specs_for_active_cell_2d!(
         dsts, weights, kinds, spec, src_id, q, sample_level;
         periodic_x=periodic_x)
+    if _level_native_c2f_sampling_2d(spec, src_id, sample_level, mode)
+        _normalize_level_native_c2f_route_specs_2d!(dsts, weights, kinds)
+    end
+    return dsts, weights, kinds
 end
 
 @inline function _check_conservative_tree_route_sampling_2d(sampling::Symbol)
@@ -238,6 +248,45 @@ function _route_sample_level_for_active_cell_2d(
         return mode == :subcycled_hybrid ? spec.max_level : src.level + 1
     end
     return src.level
+end
+
+@inline function _level_native_c2f_sampling_2d(
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        sample_level::Int,
+        sampling::Symbol)
+    sampling == :level_native || return false
+    return sample_level > spec.cells[src_id].level
+end
+
+@inline function _is_split_route_kind_2d(kind::RouteKind)
+    return kind == SPLIT_FACE || kind == SPLIT_CORNER
+end
+
+function _normalize_level_native_c2f_route_specs_2d!(
+        dsts::Vector{Int},
+        weights::Vector{Float64},
+        kinds::Vector{RouteKind})
+    split_weight = 0.0
+    @inbounds for idx in eachindex(kinds)
+        _is_split_route_kind_2d(kinds[idx]) || continue
+        split_weight += weights[idx]
+    end
+    split_weight > 0 ||
+        throw(ArgumentError("level-native coarse-to-fine route has no split packet"))
+
+    write_idx = 0
+    @inbounds for idx in eachindex(kinds)
+        _is_split_route_kind_2d(kinds[idx]) || continue
+        write_idx += 1
+        dsts[write_idx] = dsts[idx]
+        weights[write_idx] = weights[idx] / split_weight
+        kinds[write_idx] = kinds[idx]
+    end
+    resize!(dsts, write_idx)
+    resize!(weights, write_idx)
+    resize!(kinds, write_idx)
+    return dsts, weights, kinds
 end
 
 function _push_multilevel_link_routes_2d!(
@@ -378,7 +427,8 @@ contract: every active cell is sampled on the finest grid, so coarse same-level
 packets may be split into leaf-equivalent residual routes. `sampling=:level_native`
 is an experimental strict subcycling contract: same-level packets advance by
 one cell of their own level, while coarse sources that stream into a refined
-neighbour are sampled on the adjacent child level. `sampling=:subcycled_hybrid`
+neighbour use a boundary-layer injection stencil with no direct residual.
+`sampling=:subcycled_hybrid`
 keeps native same-level routes away from interfaces but keeps coarse/fine
 interface routes on the existing leaf-equivalent conservative ledger contract.
 """
