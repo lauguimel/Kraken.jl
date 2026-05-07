@@ -1732,8 +1732,12 @@ function poiseuille_analytic_profile_2d(ny::Int, Fx, omega; rho=1)
     ny >= 2 || throw(ArgumentError("ny must be >= 2"))
     T = promote_type(typeof(float(Fx)), typeof(float(omega)), typeof(float(rho)))
     nu = (one(T) / T(omega) - T(0.5)) / T(3)
-    H = T(ny - 1)
-    return [T(Fx) / (T(2) * T(rho) * nu) * T(j - 1) * (H - T(j - 1)) for j in 1:ny]
+    H = T(ny)
+    return [
+        T(Fx) / (T(2) * T(rho) * nu) *
+        (T(j) - T(0.5)) * (H + T(0.5) - T(j))
+        for j in 1:ny
+    ]
 end
 
 function _profile_errors(profile::AbstractVector, reference::AbstractVector)

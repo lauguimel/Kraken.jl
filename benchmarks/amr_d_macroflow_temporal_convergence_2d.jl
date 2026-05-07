@@ -242,8 +242,8 @@ function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
     _ql_lines_finite!(ax4, profile, y_profile; label="AMR-D",
                       color=:orangered, linewidth=2.5)
     _ql_lines_finite!(ax4, analytic, _ql_profile_axis(length(analytic));
-                      label="analytic", color=:black, linestyle=:dash,
-                      linewidth=2.0)
+                      label="steady analytic", color=:black,
+                      linestyle=:dash, linewidth=2.0)
     (_ql_has_finite_pairs(profile, y_profile) ||
      _ql_has_finite_pairs(analytic, _ql_profile_axis(length(analytic)))) &&
         axislegend(ax4, position=:rb)

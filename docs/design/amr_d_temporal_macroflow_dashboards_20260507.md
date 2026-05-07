@@ -10,9 +10,9 @@ one reproducible image.
 
 The output contract is intentionally narrow:
 
-- `debug_dashboard.png`: Cartesian reference fields, AMR-D fields, mesh
-  wireframes overlaid on every field panel, profile probes, references when
-  available, and temporal convergence traces.
+- `debug_dashboard.png`: Cartesian transient reference fields, AMR-D fields,
+  mesh wireframes overlaid on every field panel, profile probes, steady
+  analytic references when available, and temporal convergence traces.
 - `convergence.csv`: checkpoint deltas and final status.
 - `values.csv`: AMR/reference scalar metrics, including raw mass correction.
 
@@ -51,8 +51,9 @@ Completed cases:
 
 Dashboard interpretation:
 
-- The first row is the classic Cartesian reference when a reference is
-  available: mesh, `ux`, and `rho`.
+- The first row is the classic Cartesian transient reference when a reference
+  is available: mesh, `ux`, and `rho`. It is run to the same physical time as
+  the AMR-D checkpoint, not necessarily to the steady analytic limit.
 - The second row is AMR-D: mesh, `ux`, and `rho`.
 - The dashed vertical line is the local profile probe. It is placed at the
   center of the maximum-refinement region, not at a fixed fraction of the
@@ -66,6 +67,10 @@ Dashboard interpretation:
 
 Current diagnosis:
 
+- The nested x-band and y-band dashboards use the same classic Cartesian
+  transient reference for Poiseuille. If those rows look different, inspect the
+  AMR-D row/probe/axis scaling first; the reference CSV values are identical
+  for the two nested channel cases at the same final step.
 - `amr_d_poiseuille_xband_nested4_debug` exposed a previous plotting/probe
   problem. The old probe was outside the refined band. With the probe moved
   into the maximum-level region, the local profile is close to the classic
@@ -76,6 +81,20 @@ Current diagnosis:
   while the Cartesian reference reaches `ux_max=2.306e-3`; the last checkpoint
   has `ux_linf_delta=3.33e-5`, so the run is already near a plateau. Treat this
   as a negative nested/interface diagnostic, not as a validation gate.
+- A separate surgical canary verifies that a full-domain nested Poiseuille
+  tree reproduces the uniform Cartesian transient profile at the same physical
+  time. This isolates the y-band failure to wall-normal refinement/interface
+  placement: the centered y-band leaves the physical walls coarse and places
+  refinement transitions across the dominant shear direction.
+- A local Filippova-Hänel scalar rescaling A/B check at 640 steps
+  (`alpha_c2f=2`, `alpha_f2c=0.5`) did not recover the missing y-band velocity;
+  this points to the wall-normal interface/closure placement rather than a
+  simple missing constant alpha in the current packet reconstruction.
+- `poiseuille_analytic_profile_2d` now uses the same halfway bounce-back wall
+  convention as the Cartesian Poiseuille tests: walls are located half a cell
+  outside the first and last fluid cell centers. The black curve in dashboards
+  should be read as the steady analytic target, not as the transient
+  Cartesian state.
 
 Important caveat: the nested cylinder is a diagnostic probe, not a closed
 validation gate. It needs a relaxed KRK `mass_guard_rtol` and reports

@@ -1,6 +1,53 @@
 using Test
 using Kraken
 
+function _test_full_domain_nested_spec_2d(max_level::Integer)
+    blocks = ConservativeTreeRefineBlock2D[]
+    parent = ""
+    for level in 1:Int(max_level)
+        nx_level = 16 << (level - 1)
+        ny_level = 12 << (level - 1)
+        name = "L$(level)"
+        push!(blocks, ConservativeTreeRefineBlock2D(
+            name, 1:nx_level, 1:ny_level; parent=parent))
+        parent = name
+    end
+    return create_conservative_tree_spec_2d(16, 12, blocks)
+end
+
+function _test_cartesian_poiseuille_profile_2d(max_level::Integer,
+                                               steps::Integer;
+                                               Fx=1e-7,
+                                               omega=1.0,
+                                               rho0=1.0)
+    scale = 1 << Int(max_level)
+    nx = 16 * scale
+    ny = 12 * scale
+    volume = 1.0 / (scale * scale)
+    F = zeros(Float64, nx, ny, 9)
+    Ftmp = similar(F)
+    fill_equilibrium_integrated_D2Q9!(F, volume, rho0, 0.0, 0.0)
+
+    for _ in 1:(Int(steps) * scale)
+        collide_Guo_integrated_D2Q9!(F, volume, omega, Fx, 0.0)
+        stream_periodic_x_wall_y_F_2d!(Ftmp, F)
+        F, Ftmp = Ftmp, F
+    end
+
+    profile = zeros(Float64, ny)
+    for j in 1:ny
+        ux_sum = 0.0
+        for i in 1:nx
+            cell = @view F[i, j, :]
+            rho = mass_F(cell) / volume
+            mx = momentum_F(cell)[1]
+            ux_sum += (mx / volume + Fx / 2) / rho
+        end
+        profile[j] = ux_sum / nx
+    end
+    return profile
+end
+
 @testset "Conservative tree subcycling ledger 2D" begin
     @testset "generic recursive schedule is level agnostic" begin
         schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(3)
@@ -573,6 +620,19 @@ using Kraken
                        atol=1e-12, rtol=0)
         @test maximum(abs.(Fout[spec.active_cells, :] .-
                            Fin[spec.active_cells, :])) <= 1e-14
+    end
+
+    @testset "full-domain nested Poiseuille matches Cartesian at same physical time" begin
+        spec = _test_full_domain_nested_spec_2d(2)
+        amr = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=spec, steps=12, Fx=1e-7, omega=1.0)
+        cart_profile = _test_cartesian_poiseuille_profile_2d(
+            2, 12; Fx=1e-7, omega=1.0)
+
+        @test spec.max_level == 2
+        @test length(spec.active_cells) == 16 * 12 * 4^2
+        @test maximum(abs.(amr.ux_profile .- cart_profile)) < 1e-14
+        @test amr.relative_mass_drift < 1e-13
     end
 
     @testset "subcycled Poiseuille macroflow runs from level 1 to 4" begin

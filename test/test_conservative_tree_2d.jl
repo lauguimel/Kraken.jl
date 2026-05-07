@@ -57,6 +57,19 @@ function _run_cartesian_leaf_poiseuille(nx, ny; Fx=5e-5, steps=5000, omega=1.0)
             mass_initial=mass0)
 end
 
+@testset "Poiseuille analytic profile uses halfway walls" begin
+    ny = 8
+    Fx = 1e-6
+    omega = 1.0
+    ν = (1 / omega - 0.5) / 3
+    profile = poiseuille_analytic_profile_2d(ny, Fx, omega)
+
+    @test profile[1] ≈ Fx / (2ν) * 0.5 * (ny - 0.5)
+    @test profile[end] ≈ profile[1]
+    @test profile[2] > profile[1]
+    @test profile ≈ reverse(profile)
+end
+
 function _fluid_mass_F(F, is_solid)
     total = 0.0
     for q in 1:9, j in axes(F, 2), i in axes(F, 1)
@@ -1017,12 +1030,10 @@ end
         @test abs(horizontal.mass_drift) < 1e-8
         @test full.l2_error < 3.0e-3
         @test full.linf_error < 3.0e-3
-        @test vertical.l2_error < 1.2e-2
+        @test vertical.l2_error < 3.0e-3
         @test vertical.linf_error < 1.7e-2
-        @test horizontal.l2_error < 1.3e-2
+        @test horizontal.l2_error < 3.0e-3
         @test horizontal.linf_error < 1.7e-2
-        @test vertical.l2_error < 2 * full.l2_error
-        @test horizontal.l2_error < 2 * full.l2_error
         @test vertical.ux_profile[div(length(vertical.ux_profile), 2)] >
               vertical.ux_profile[2] + 0.01
         @test horizontal.ux_profile[div(length(horizontal.ux_profile), 2)] >

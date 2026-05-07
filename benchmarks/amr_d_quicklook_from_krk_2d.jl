@@ -757,7 +757,7 @@ function _ql_plot_profiles(path, result, state; title)
                xlabel="ux", ylabel="y/Ly")
     _ql_lines_finite!(ax1, profile, y_mean; label="AMR-D",
                       color=:orangered, linewidth=2.8)
-    _ql_lines_finite!(ax1, analytic, y_mean; label="analytic",
+    _ql_lines_finite!(ax1, analytic, y_mean; label="steady analytic",
                       color=:black, linestyle=:dash, linewidth=2.2)
     (_ql_has_finite_pairs(profile, y_mean) ||
      _ql_has_finite_pairs(analytic, y_mean)) &&
@@ -844,9 +844,10 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
                xlabel="ux", ylabel="y/Ly")
     _ql_lines_finite!(ax1, amr_profile, y_amr; label="AMR-D",
                       color=:orangered, linewidth=2.8)
-    _ql_lines_finite!(ax1, ref_profile, y_ref; label="classic Cartesian",
+    _ql_lines_finite!(ax1, ref_profile, y_ref;
+                      label="classic Cartesian transient",
                       color=:dodgerblue4, linewidth=2.5)
-    _ql_lines_finite!(ax1, analytic, y_amr; label="analytic",
+    _ql_lines_finite!(ax1, analytic, y_amr; label="steady analytic",
                       color=:black, linestyle=:dash, linewidth=2.2)
     (_ql_has_finite_pairs(amr_profile, y_amr) ||
      _ql_has_finite_pairs(ref_profile, y_ref) ||
@@ -858,7 +859,7 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax2, x, amr_state.fields.ux[1:nx, j_mid];
                       label="AMR-D", color=:orangered, linewidth=2.5)
     _ql_lines_finite!(ax2, x, reference_state.fields.ux[1:nx, j_mid];
-                      label="classic Cartesian", color=:dodgerblue4,
+                      label="classic Cartesian transient", color=:dodgerblue4,
                       linewidth=2.3)
     (_ql_has_finite_pairs(x, amr_state.fields.ux[1:nx, j_mid]) ||
      _ql_has_finite_pairs(x, reference_state.fields.ux[1:nx, j_mid])) &&
@@ -869,7 +870,7 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax3, amr_state.fields.ux[i_probe, 1:ny], y;
                       label="AMR-D", color=:orangered, linewidth=2.5)
     _ql_lines_finite!(ax3, reference_state.fields.ux[i_probe, 1:ny], y;
-                      label="classic Cartesian", color=:dodgerblue4,
+                      label="classic Cartesian transient", color=:dodgerblue4,
                       linewidth=2.3)
     (_ql_has_finite_pairs(amr_state.fields.ux[i_probe, 1:ny], y) ||
      _ql_has_finite_pairs(reference_state.fields.ux[i_probe, 1:ny], y)) &&
@@ -880,7 +881,7 @@ function _ql_plot_compare_profiles(path, amr_result, amr_state,
     _ql_lines_finite!(ax4, x, amr_state.fields.rho[1:nx, j_mid];
                       label="AMR-D", color=:orangered, linewidth=2.5)
     _ql_lines_finite!(ax4, x, reference_state.fields.rho[1:nx, j_mid];
-                      label="classic Cartesian", color=:dodgerblue4,
+                      label="classic Cartesian transient", color=:dodgerblue4,
                       linewidth=2.3)
     (_ql_has_finite_pairs(x, amr_state.fields.rho[1:nx, j_mid]) ||
      _ql_has_finite_pairs(x, reference_state.fields.rho[1:nx, j_mid])) &&
@@ -930,7 +931,7 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     fig = Figure(size=(1900, has_convergence ? 2050 : 1650), fontsize=15)
     Label(fig[0, 1:6], title; fontsize=22, tellwidth=false)
 
-    ax11 = _ql_heatmap!(fig, 1, 1, "Cartesian reference mesh",
+    ax11 = _ql_heatmap!(fig, 1, 1, "Cartesian transient reference mesh",
                         Float64.(reference_state.level);
                         colormap=:viridis, colorrange=level_range)
     _ql_overlay_mesh_wireframe!(ax11, ref_mesh;
@@ -939,7 +940,7 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
                                 alpha=0.72, linewidth=0.55)
     _ql_overlay_vertical_probe!(ax11, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax11, reference_state.is_solid)
-    ax12 = _ql_heatmap!(fig, 1, 3, "Cartesian ux + mesh",
+    ax12 = _ql_heatmap!(fig, 1, 3, "Cartesian transient ux + mesh",
                         reference_state.fields.ux;
                         colormap=:balance, colorrange=ux_range)
     _ql_overlay_mesh_wireframe!(ax12, ref_mesh;
@@ -948,7 +949,7 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
                                 alpha=0.35, linewidth=0.45)
     _ql_overlay_vertical_probe!(ax12, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax12, reference_state.is_solid)
-    ax13 = _ql_heatmap!(fig, 1, 5, "Cartesian rho + mesh",
+    ax13 = _ql_heatmap!(fig, 1, 5, "Cartesian transient rho + mesh",
                         reference_state.fields.rho;
                         colormap=:viridis, colorrange=rho_range)
     _ql_overlay_mesh_wireframe!(ax13, ref_mesh;
@@ -995,11 +996,12 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     ax31 = Axis(fig[3, 1:2];
                 title="row-mean ux(y), averaged over all fluid x",
                 xlabel="ux", ylabel="y/Ly")
-    _ql_lines_finite!(ax31, ref_profile, y_ref; label="classic Cartesian",
+    _ql_lines_finite!(ax31, ref_profile, y_ref;
+                      label="classic Cartesian transient",
                       color=:dodgerblue4, linewidth=2.5)
     _ql_lines_finite!(ax31, amr_profile, y_amr; label="AMR-D",
                       color=:orangered, linewidth=2.8)
-    _ql_lines_finite!(ax31, analytic, y_analytic; label="analytic",
+    _ql_lines_finite!(ax31, analytic, y_analytic; label="steady analytic",
                       color=:black, linestyle=:dash, linewidth=2.2)
     (_ql_has_finite_pairs(ref_profile, y_ref) ||
      _ql_has_finite_pairs(amr_profile, y_amr) ||
@@ -1010,12 +1012,12 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
                 title="vertical ux(y) probe at x leaf $i_probe",
                 xlabel="ux", ylabel="y/Ly")
     _ql_lines_finite!(ax32, reference_state.fields.ux[i_probe, 1:ny],
-                      y_probe; label="classic Cartesian",
+                      y_probe; label="classic Cartesian transient",
                       color=:dodgerblue4, linewidth=2.4)
     _ql_lines_finite!(ax32, amr_state.fields.ux[i_probe, 1:ny],
                       y_probe; label="AMR-D", color=:orangered,
                       linewidth=2.6)
-    _ql_lines_finite!(ax32, analytic, y_analytic; label="analytic",
+    _ql_lines_finite!(ax32, analytic, y_analytic; label="steady analytic",
                       color=:black, linestyle=:dash, linewidth=2.0)
     (_ql_has_finite_pairs(reference_state.fields.ux[i_probe, 1:ny],
                           y_probe) ||
