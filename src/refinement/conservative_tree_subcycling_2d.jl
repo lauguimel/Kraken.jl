@@ -1493,7 +1493,7 @@ coarse-to-fine split packets are distributed across child half-steps and
 fine-to-coarse packets are accumulated with the reciprocal half-step weight.
 `interface_time_scaling=:level_native` is experimental and only intended for
 route tables built with `sampling=:level_native`; it preserves global rest mass
-but does not yet close the local rest-state canary at nested interfaces.
+for flat coarse-to-fine packets at nested interfaces.
 `coarse_to_fine_predictor_weight` blends coarse-to-fine packets between the
 committed parent state (`0`) and a local post-collision predictor (`1`).
 Macro-flow runners use a conservative partial blend; transport-only callers
@@ -1534,6 +1534,10 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         interface_time_scaling)
     _check_conservative_tree_coarse_to_fine_prolongation_2d(
         coarse_to_fine_prolongation)
+    if interface_time_scaling == :level_native &&
+       coarse_to_fine_prolongation == :limited_linear
+        throw(ArgumentError("interface_time_scaling=:level_native is closed only with coarse_to_fine_prolongation=:flat"))
+    end
     is_solid === nothing ||
         validate_conservative_tree_solid_mask_resolved_2d(
             spec, table, is_solid)

@@ -176,8 +176,10 @@ function _route_specs_for_active_cell_2d(spec::ConservativeTreeSpec2D,
         spec, src_id, q; periodic_x=periodic_x, sampling=mode)
     dsts, weights, kinds = _sampled_route_specs_for_active_cell_2d(
         spec, src_id, q, sample_level; periodic_x=periodic_x)
-    if _level_native_c2f_sampling_2d(spec, src_id, sample_level, mode)
-        _normalize_level_native_c2f_route_specs_2d!(dsts, weights, kinds)
+    if mode == :level_native
+        _apply_level_native_route_closure_2d!(
+            dsts, weights, kinds, spec, src_id, q, sample_level;
+            periodic_x=periodic_x)
     end
     return dsts, weights, kinds
 end
@@ -197,8 +199,10 @@ function _route_specs_for_active_cell_2d!(
     _sampled_route_specs_for_active_cell_2d!(
         dsts, weights, kinds, spec, src_id, q, sample_level;
         periodic_x=periodic_x)
-    if _level_native_c2f_sampling_2d(spec, src_id, sample_level, mode)
-        _normalize_level_native_c2f_route_specs_2d!(dsts, weights, kinds)
+    if mode == :level_native
+        _apply_level_native_route_closure_2d!(
+            dsts, weights, kinds, spec, src_id, q, sample_level;
+            periodic_x=periodic_x)
     end
     return dsts, weights, kinds
 end
@@ -264,6 +268,10 @@ end
     return kind == SPLIT_FACE || kind == SPLIT_CORNER
 end
 
+@inline function _is_diagonal_route_q_2d(q::Int)
+    return d2q9_cx(q) != 0 && d2q9_cy(q) != 0
+end
+
 function _normalize_level_native_c2f_route_specs_2d!(
         dsts::Vector{Int},
         weights::Vector{Float64},
@@ -287,6 +295,79 @@ function _normalize_level_native_c2f_route_specs_2d!(
     resize!(dsts, write_idx)
     resize!(weights, write_idx)
     resize!(kinds, write_idx)
+    return dsts, weights, kinds
+end
+
+function _level_native_diagonal_corner_closure_route_specs_2d!(
+        dsts::Vector{Int},
+        weights::Vector{Float64},
+        kinds::Vector{RouteKind},
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int,
+        sample_level::Int;
+        periodic_x::Bool=false)
+    src = spec.cells[src_id]
+    src.level < spec.max_level || return false
+    _is_diagonal_route_q_2d(q) || return false
+
+    raw_dsts = Int[]
+    raw_weights = Float64[]
+    raw_kinds = RouteKind[]
+    _sampled_route_specs_for_active_cell_2d!(
+        raw_dsts, raw_weights, raw_kinds, spec, src_id, q, src.level + 1;
+        periodic_x=periodic_x)
+
+    split_idx = 0
+    split_count = 0
+    @inbounds for idx in eachindex(raw_kinds)
+        raw_kinds[idx] == SPLIT_CORNER || continue
+        split_count += 1
+        split_idx = idx
+    end
+    split_count == 1 || return false
+
+    native_dsts = copy(dsts)
+    native_kinds = copy(kinds)
+    empty!(dsts)
+    empty!(weights)
+    empty!(kinds)
+
+    # A diagonal entering through a single refined corner is consumed over two
+    # fine half-steps. Half of the coarse packet is enough to preserve a
+    # uniform rest population locally; a full packet creates the level-native
+    # corner surplus seen in the rest-state canary.
+    push!(dsts, raw_dsts[split_idx])
+    push!(weights, 0.5)
+    push!(kinds, SPLIT_CORNER)
+
+    if sample_level == src.level
+        @inbounds for idx in eachindex(native_kinds)
+            (native_kinds[idx] == DIRECT ||
+             native_kinds[idx] == ROUTE_BOUNDARY) || continue
+            push!(dsts, native_dsts[idx])
+            push!(weights, native_kinds[idx] == DIRECT ? 0.75 : 0.5)
+            push!(kinds, native_kinds[idx])
+        end
+    end
+    return true
+end
+
+function _apply_level_native_route_closure_2d!(
+        dsts::Vector{Int},
+        weights::Vector{Float64},
+        kinds::Vector{RouteKind},
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int,
+        sample_level::Int;
+        periodic_x::Bool=false)
+    _level_native_diagonal_corner_closure_route_specs_2d!(
+        dsts, weights, kinds, spec, src_id, q, sample_level;
+        periodic_x=periodic_x) && return dsts, weights, kinds
+    if _level_native_c2f_sampling_2d(spec, src_id, sample_level, :level_native)
+        _normalize_level_native_c2f_route_specs_2d!(dsts, weights, kinds)
+    end
     return dsts, weights, kinds
 end
 

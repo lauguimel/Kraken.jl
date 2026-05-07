@@ -49,10 +49,17 @@ solid-mask plots only.
 
 Nested subcycled channel/solid cases accept two optional numeric A/B knobs:
 
+- `Define route_sampling = 1` selects the closed level-native AMR-D route
+  contract. `0` restores the older leaf-equivalent reference scatter, and `2`
+  selects the hybrid route table. Nested D defaults to `1` for flat
+  coarse-to-fine packets, and to `0` when `c2f_prolongation = 1` because the
+  limited-linear A/B path is still defined on the leaf-equivalent scatter.
 - `Define c2f_prolongation = 0` keeps the production flat coarse-to-fine
   packet geometry. `1` enables the explicit experimental limited-linear
   prolongation. `poiseuille_yband_nested4_limited_debug.krk` is the reference
   A/B input for this path.
 - `Define coarse_to_fine_predictor_weight = 0.5` controls the conservative
   temporal predictor blend. Use `0` for committed parent state only and `1`
-  for the local post-collision parent predictor.
+  for the local post-collision parent predictor. The default is `1` for the
+  closed `level_native` route contract and `0.5` for the older leaf-equivalent
+  route contract.

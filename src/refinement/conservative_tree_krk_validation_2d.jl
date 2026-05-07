@@ -200,6 +200,10 @@ function _amr_d_var_2d(setup, name::Symbol, default)
     return haskey(vars, name) ? vars[name] : default
 end
 
+@inline function _amr_d_has_var_2d(setup, name::Symbol)
+    return haskey(getproperty(setup, :user_vars), name)
+end
+
 function _amr_d_c2f_prolongation_2d(setup)
     raw = _amr_d_var_2d(setup, :coarse_to_fine_prolongation,
                         _amr_d_var_2d(setup, :c2f_prolongation, 0.0))
@@ -209,6 +213,27 @@ function _amr_d_c2f_prolongation_2d(setup)
     code == 0 && return :flat
     code == 1 && return :limited_linear
     throw(ArgumentError("coarse_to_fine_prolongation must be 0 (:flat) or 1 (:limited_linear)"))
+end
+
+function _amr_d_route_sampling_2d(setup, c2f_prolongation::Symbol)
+    route_key = _amr_d_has_var_2d(setup, :route_sampling)
+    legacy_key = _amr_d_has_var_2d(setup, :amr_d_route_sampling)
+    default = c2f_prolongation == :limited_linear ? 0.0 : 1.0
+    raw = route_key ? getproperty(setup, :user_vars)[:route_sampling] :
+          legacy_key ? getproperty(setup, :user_vars)[:amr_d_route_sampling] :
+          default
+    code = round(Int, raw)
+    abs(Float64(raw) - code) <= eps(Float64) ||
+        throw(ArgumentError("route_sampling must be 0 (:leaf_equivalent), 1 (:level_native), or 2 (:subcycled_hybrid)"))
+    sampling = code == 0 ? :leaf_equivalent :
+               code == 1 ? :level_native :
+               code == 2 ? :subcycled_hybrid : :invalid
+    if sampling == :level_native && c2f_prolongation == :limited_linear &&
+       (route_key || legacy_key)
+        throw(ArgumentError("route_sampling=1 (:level_native) is closed only for flat coarse-to-fine prolongation; use route_sampling=0 with c2f_prolongation=1"))
+    end
+    sampling != :invalid && return sampling
+    throw(ArgumentError("route_sampling must be 0 (:leaf_equivalent), 1 (:level_native), or 2 (:subcycled_hybrid)"))
 end
 
 function _amr_d_constant_expr_2d(expr, default)
@@ -268,8 +293,12 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
     resolved_mass_guard_rtol = mass_guard_rtol === nothing ?
         krk_mass_guard_rtol : mass_guard_rtol
     c2f_prolongation = _amr_d_c2f_prolongation_2d(setup)
+    route_sampling = _amr_d_route_sampling_2d(setup, c2f_prolongation)
+    default_c2f_predictor_weight =
+        _default_conservative_tree_c2f_predictor_weight_2d(route_sampling)
     c2f_predictor_weight =
-        _amr_d_var_2d(setup, :coarse_to_fine_predictor_weight, 0.5)
+        _amr_d_var_2d(setup, :coarse_to_fine_predictor_weight,
+                      default_c2f_predictor_weight)
 
     if case.runtime_status == :route_native_one_level_channel
         domain = getproperty(setup, :domain)
@@ -356,6 +385,7 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
                 omega=omega, Fx=Fx, Fy=Fy, rho0=rho0,
                 coarse_to_fine_prolongation=c2f_prolongation,
                 coarse_to_fine_predictor_weight=c2f_predictor_weight,
+                route_sampling=route_sampling,
                 mass_guard_rtol=resolved_mass_guard_rtol, T=T)
         elseif case.flow == :cylinder
             is_solid = cylinder_solid_mask_leaf_2d(
@@ -370,6 +400,7 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
                 Fx=Fx, Fy=0.0, rho0=rho0,
                 coarse_to_fine_prolongation=c2f_prolongation,
                 coarse_to_fine_predictor_weight=c2f_predictor_weight,
+                route_sampling=route_sampling,
                 mass_guard_rtol=resolved_mass_guard_rtol, T=T)
         end
     elseif case.flow == :poiseuille
@@ -380,6 +411,7 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
             Fx=Fx, Fy=Fy, rho0=rho0,
             coarse_to_fine_prolongation=c2f_prolongation,
             coarse_to_fine_predictor_weight=c2f_predictor_weight,
+            route_sampling=route_sampling,
             mass_guard_rtol=resolved_mass_guard_rtol, T=T)
     elseif case.flow == :couette
         U = _amr_d_boundary_value_2d(
@@ -389,6 +421,7 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
             U=U, rho0=rho0,
             coarse_to_fine_prolongation=c2f_prolongation,
             coarse_to_fine_predictor_weight=c2f_predictor_weight,
+            route_sampling=route_sampling,
             mass_guard_rtol=resolved_mass_guard_rtol,
             T=T)
     end

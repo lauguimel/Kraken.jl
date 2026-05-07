@@ -79,11 +79,33 @@ using Kraken
     @test result_limited.steps == 2
     @test isfinite(result_limited.relative_mass_drift)
 
+    setup_limited_bad_sampling = load_kraken(
+        joinpath(convergence_dir, "poiseuille_nested4_channel.krk"))
+    setup_limited_bad_sampling.user_vars[:c2f_prolongation] = 1.0
+    setup_limited_bad_sampling.user_vars[:route_sampling] = 1.0
+    @test_throws ArgumentError run_conservative_tree_amr_d_case_from_krk_2d(
+        setup_limited_bad_sampling; steps_override=1)
+
     setup_bad_prolongation = load_kraken(
         joinpath(convergence_dir, "poiseuille_nested4_channel.krk"))
     setup_bad_prolongation.user_vars[:c2f_prolongation] = 2.0
     @test_throws ArgumentError run_conservative_tree_amr_d_case_from_krk_2d(
         setup_bad_prolongation; steps_override=1)
+
+    setup_leaf_equiv = load_kraken(
+        joinpath(convergence_dir, "poiseuille_nested4_channel.krk"))
+    setup_leaf_equiv.user_vars[:route_sampling] = 0.0
+    result_leaf_equiv = run_conservative_tree_amr_d_case_from_krk_2d(
+        setup_leaf_equiv; steps_override=1)
+    @test result_leaf_equiv.max_level == 4
+    @test result_leaf_equiv.steps == 1
+    @test isfinite(result_leaf_equiv.relative_mass_drift)
+
+    setup_bad_sampling = load_kraken(
+        joinpath(convergence_dir, "poiseuille_nested4_channel.krk"))
+    setup_bad_sampling.user_vars[:route_sampling] = 3.0
+    @test_throws ArgumentError run_conservative_tree_amr_d_case_from_krk_2d(
+        setup_bad_sampling; steps_override=1)
 
     nested_couette = cases["couette_nested4_channel.krk"]
     @test nested_couette.max_level == 4

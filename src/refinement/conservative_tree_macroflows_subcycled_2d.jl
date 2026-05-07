@@ -59,6 +59,28 @@ function _check_conservative_tree_channel_max_level_2d(max_level::Integer)
     return ml
 end
 
+function _check_conservative_tree_sampling_prolongation_contract_2d(
+        sampling::Symbol,
+        prolongation::Symbol)
+    if sampling == :level_native && prolongation == :limited_linear
+        throw(ArgumentError("route_sampling=:level_native is closed only with coarse_to_fine_prolongation=:flat; use route_sampling=:leaf_equivalent for limited-linear prolongation"))
+    end
+    return nothing
+end
+
+@inline function _default_conservative_tree_c2f_predictor_weight_2d(
+        sampling::Symbol)
+    return sampling == :level_native ? 1.0 : 0.5
+end
+
+@inline function _resolve_conservative_tree_c2f_predictor_weight_2d(
+        weight,
+        sampling::Symbol)
+    weight === nothing &&
+        return _default_conservative_tree_c2f_predictor_weight_2d(sampling)
+    return weight
+end
+
 @inline function conservative_tree_leaf_equivalent_level_scale_2d(
         spec::ConservativeTreeSpec2D,
         level::Integer)
@@ -512,7 +534,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         alpha_f2c=1,
         coarse_to_fine_prolongation::Symbol=:flat,
         coarse_to_fine_state::Symbol=:owned,
-        coarse_to_fine_predictor_weight=0.5,
+        coarse_to_fine_predictor_weight=nothing,
+        route_sampling::Symbol=:level_native,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -523,7 +546,15 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         create_conservative_tree_nested_channel_spec_2d(max_level) : spec
     spec_run.max_level == Int(max_level) ||
         throw(ArgumentError("max_level must match spec.max_level"))
-    table = create_conservative_tree_route_table_2d(spec_run; periodic_x=true)
+    sampling = _check_conservative_tree_route_sampling_2d(route_sampling)
+    _check_conservative_tree_sampling_prolongation_contract_2d(
+        sampling, coarse_to_fine_prolongation)
+    c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
+        coarse_to_fine_predictor_weight, sampling)
+    interface_time_scaling = sampling == :level_native ?
+        :level_native : :leaf_equivalent
+    table = create_conservative_tree_route_table_2d(
+        spec_run; periodic_x=true, sampling=sampling)
     F = allocate_conservative_tree_F_2d(spec_run; T=T)
     Ftmp = similar(F)
     schedule = create_conservative_tree_subcycle_schedule_2d(spec_run.max_level)
@@ -556,7 +587,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
             coarse_to_fine_prolongation=coarse_to_fine_prolongation,
             coarse_to_fine_state=coarse_to_fine_state,
-            coarse_to_fine_predictor_weight=coarse_to_fine_predictor_weight,
+            coarse_to_fine_predictor_weight=c2f_predictor_weight,
+            interface_time_scaling=interface_time_scaling,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
             Fsource=Fsource, Fscratch=Fscratch)
@@ -595,7 +627,8 @@ function run_conservative_tree_couette_subcycled_2d(;
         alpha_f2c=1,
         coarse_to_fine_prolongation::Symbol=:flat,
         coarse_to_fine_state::Symbol=:owned,
-        coarse_to_fine_predictor_weight=0.5,
+        coarse_to_fine_predictor_weight=nothing,
+        route_sampling::Symbol=:level_native,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -606,7 +639,15 @@ function run_conservative_tree_couette_subcycled_2d(;
         create_conservative_tree_nested_channel_spec_2d(max_level) : spec
     spec_run.max_level == Int(max_level) ||
         throw(ArgumentError("max_level must match spec.max_level"))
-    table = create_conservative_tree_route_table_2d(spec_run; periodic_x=true)
+    sampling = _check_conservative_tree_route_sampling_2d(route_sampling)
+    _check_conservative_tree_sampling_prolongation_contract_2d(
+        sampling, coarse_to_fine_prolongation)
+    c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
+        coarse_to_fine_predictor_weight, sampling)
+    interface_time_scaling = sampling == :level_native ?
+        :level_native : :leaf_equivalent
+    table = create_conservative_tree_route_table_2d(
+        spec_run; periodic_x=true, sampling=sampling)
     F = allocate_conservative_tree_F_2d(spec_run; T=T)
     Ftmp = similar(F)
     schedule = create_conservative_tree_subcycle_schedule_2d(spec_run.max_level)
@@ -638,7 +679,8 @@ function run_conservative_tree_couette_subcycled_2d(;
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
             coarse_to_fine_prolongation=coarse_to_fine_prolongation,
             coarse_to_fine_state=coarse_to_fine_state,
-            coarse_to_fine_predictor_weight=coarse_to_fine_predictor_weight,
+            coarse_to_fine_predictor_weight=c2f_predictor_weight,
+            interface_time_scaling=interface_time_scaling,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
             Fsource=Fsource, Fscratch=Fscratch)
@@ -679,7 +721,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         alpha_f2c=1,
         coarse_to_fine_prolongation::Symbol=:flat,
         coarse_to_fine_state::Symbol=:owned,
-        coarse_to_fine_predictor_weight=0.5,
+        coarse_to_fine_predictor_weight=nothing,
+        route_sampling::Symbol=:level_native,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -692,7 +735,15 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         throw(ArgumentError("max_level must match spec.max_level"))
     solid = BitMatrix(is_solid_leaf)
     _check_conservative_tree_leaf_solid_mask_2d(spec_run, solid)
-    table = create_conservative_tree_route_table_2d(spec_run; periodic_x=true)
+    sampling = _check_conservative_tree_route_sampling_2d(route_sampling)
+    _check_conservative_tree_sampling_prolongation_contract_2d(
+        sampling, coarse_to_fine_prolongation)
+    c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
+        coarse_to_fine_predictor_weight, sampling)
+    interface_time_scaling = sampling == :level_native ?
+        :level_native : :leaf_equivalent
+    table = create_conservative_tree_route_table_2d(
+        spec_run; periodic_x=true, sampling=sampling)
     validate_conservative_tree_solid_mask_resolved_2d(spec_run, table, solid)
 
     F = allocate_conservative_tree_F_2d(spec_run; T=T)
@@ -730,7 +781,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
             coarse_to_fine_prolongation=coarse_to_fine_prolongation,
             coarse_to_fine_state=coarse_to_fine_state,
-            coarse_to_fine_predictor_weight=coarse_to_fine_predictor_weight,
+            coarse_to_fine_predictor_weight=c2f_predictor_weight,
+            interface_time_scaling=interface_time_scaling,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
             Fsource=Fsource, Fscratch=Fscratch, is_solid=solid)

@@ -698,6 +698,40 @@ end
         spec = create_conservative_tree_nested_channel_spec_2d(2)
         table = create_conservative_tree_route_table_2d(
             spec; periodic_x=true, sampling=:level_native)
+        southwest_corner = [route for route in table.routes
+                            if route.src == 20 && route.q == 6]
+        @test length(southwest_corner) == 1
+        @test southwest_corner[1].dst == 193
+        @test southwest_corner[1].kind == SPLIT_CORNER
+        @test southwest_corner[1].weight == 0.5
+
+        southeast_touch = [route for route in table.routes
+                           if route.src == 21 && route.q == 7]
+        @test length(southeast_touch) == 2
+        @test any(route.dst == 193 && route.kind == SPLIT_CORNER &&
+                  route.weight == 0.5 for route in southeast_touch)
+        @test any(route.dst == 36 && route.kind == DIRECT &&
+                  route.weight == 0.75 for route in southeast_touch)
+
+        face_diagonal = [route for route in table.routes
+                         if route.src == 21 && route.q == 6]
+        @test length(face_diagonal) == 2
+        @test all(route.kind == SPLIT_CORNER for route in face_diagonal)
+        @test sort([route.weight for route in face_diagonal]) == [0.5, 0.5]
+
+        wall_touch_spec = create_conservative_tree_spec_2d(16, 12, [
+            ConservativeTreeRefineBlock2D("X1", 6:10, 1:12),
+        ])
+        wall_touch_table = create_conservative_tree_route_table_2d(
+            wall_touch_spec; periodic_x=true, sampling=:level_native)
+        wall_corner = [route for route in wall_touch_table.routes
+                       if route.src == 5 && route.q == 9]
+        @test length(wall_corner) == 2
+        @test any(route.kind == SPLIT_CORNER && route.weight == 0.5
+                  for route in wall_corner)
+        @test any(route.kind == ROUTE_BOUNDARY && route.weight == 0.5
+                  for route in wall_corner)
+
         Fin = allocate_conservative_tree_F_2d(spec)
         Fout = allocate_conservative_tree_F_2d(spec)
         w = weights(D2Q9())
@@ -734,11 +768,48 @@ end
         @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
                        sum(active_population_sums_F_2d(Fin, spec));
                        atol=1e-12, rtol=0)
-        # Diagonal corner closure still needs a ghost/reflux pair that keeps
-        # coarse-face diagonal ghost packets and final-time corner reflux
-        # conservative at the same time.
-        @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
-                                  Fin[spec.active_cells, :])) <= 1e-14
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
+
+        spec4 = create_conservative_tree_nested_channel_spec_2d(4)
+        table4 = create_conservative_tree_route_table_2d(
+            spec4; periodic_x=true, sampling=:level_native)
+        Fin4 = allocate_conservative_tree_F_2d(spec4)
+        Fout4 = allocate_conservative_tree_F_2d(spec4)
+        for cell_id in spec4.active_cells
+            volume = spec4.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin4[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout4, Fin4, spec4, table4; boundary=:periodic_x_wall_y,
+            interface_time_scaling=:level_native)
+        @test isapprox(sum(active_population_sums_F_2d(Fout4, spec4)),
+                       sum(active_population_sums_F_2d(Fin4, spec4));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout4[spec4.active_cells, :] .-
+                           Fin4[spec4.active_cells, :])) <= 1e-14
+
+        Finw = allocate_conservative_tree_F_2d(wall_touch_spec)
+        Foutw = allocate_conservative_tree_F_2d(wall_touch_spec)
+        for cell_id in wall_touch_spec.active_cells
+            volume = wall_touch_spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Finw[cell_id, q] = w[q] * volume
+            end
+        end
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Foutw, Finw, wall_touch_spec, wall_touch_table;
+            boundary=:periodic_x_wall_y, interface_time_scaling=:level_native)
+        @test isapprox(sum(active_population_sums_F_2d(Foutw, wall_touch_spec)),
+                       sum(active_population_sums_F_2d(Finw, wall_touch_spec));
+                       atol=1e-12, rtol=0)
+
+        @test_throws ArgumentError run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, steps=1, route_sampling=:level_native,
+            coarse_to_fine_prolongation=:limited_linear)
     end
 
     @testset "full-domain nested Poiseuille matches Cartesian at same physical time" begin
