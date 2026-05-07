@@ -1,6 +1,47 @@
 using Test
 using Kraken
 
+function _test_amr_d_leaf_velocity_stats_2d(result; Fx=0.0)
+    spec = result.spec
+    F = result.F
+    leaf_nx = Kraken._conservative_tree_level_size_2d(spec.Nx, spec.max_level)
+    leaf_ny = Kraken._conservative_tree_level_size_2d(spec.Ny, spec.max_level)
+    ux = Matrix{Float64}(undef, leaf_nx, leaf_ny)
+    uy = Matrix{Float64}(undef, leaf_nx, leaf_ny)
+    @inbounds for cell_id in spec.active_cells
+        cell = spec.cells[cell_id]
+        scale = 1 << (spec.max_level - cell.level)
+        volume = cell.metrics.volume
+        mass = zero(Float64)
+        mx = zero(Float64)
+        my = zero(Float64)
+        for q in 1:9
+            Fq = F[cell_id, q]
+            mass += Fq
+            mx += d2q9_cx(q) * Fq
+            my += d2q9_cy(q) * Fq
+        end
+        rho = mass / volume
+        fx = Kraken.conservative_tree_leaf_equivalent_force_2d(
+            Fx, spec, cell.level)
+        ux_cell = (mx / volume + fx / 2) / rho
+        uy_cell = (my / volume) / rho
+        for sj in 1:scale, si in 1:scale
+            ux[(cell.i - 1) * scale + si, (cell.j - 1) * scale + sj] =
+                ux_cell
+            uy[(cell.i - 1) * scale + si, (cell.j - 1) * scale + sj] =
+                uy_cell
+        end
+    end
+    x_spread = maximum(maximum(@view ux[:, j]) - minimum(@view ux[:, j])
+                       for j in 1:leaf_ny)
+    return (;
+        ux_min=minimum(ux),
+        ux_max=maximum(ux),
+        uy_linf=maximum(abs, uy),
+        x_spread=x_spread)
+end
+
 @testset "AMR D .krk validation helpers" begin
     convergence_dir = joinpath(dirname(@__DIR__), "benchmarks", "krk",
                                "amr_d_convergence_2d")
@@ -123,6 +164,14 @@ using Kraken
     @test cases["poiseuille_yband_nested4_debug.krk"].max_level == 4
     @test cases["poiseuille_yband_nested4_debug.krk"].runtime_status ==
           :subcycled_nested_channel
+    result_yband = run_conservative_tree_amr_d_case_from_krk_2d(
+        joinpath(convergence_dir, "poiseuille_yband_nested4_debug.krk");
+        steps_override=1)
+    yband_stats = _test_amr_d_leaf_velocity_stats_2d(result_yband; Fx=1e-7)
+    @test yband_stats.ux_min > 0
+    @test yband_stats.uy_linf < 1e-12
+    @test yband_stats.x_spread < 1e-12
+
     @test cases["poiseuille_yband_nested4_limited_debug.krk"].max_level == 4
     @test cases["poiseuille_yband_nested4_limited_debug.krk"].runtime_status ==
           :subcycled_nested_channel
