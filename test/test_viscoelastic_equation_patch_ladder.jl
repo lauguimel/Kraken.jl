@@ -2400,7 +2400,9 @@ function _square_formulation_spd_probe(; formulation=:direct,
     end
     max_abs_C = maximum(maximum(abs, C[fluid])
                         for C in (result.C_xx, result.C_xy, result.C_yy))
-    return (; result, finite, min_eig, min_i, min_j, max_abs_C)
+    max_abs_u = max(maximum(abs, result.ux[fluid]),
+                    maximum(abs, result.uy[fluid]))
+    return (; result, finite, min_eig, min_i, min_j, max_abs_C, max_abs_u)
 end
 
 function _poiseuille_prod_gradient_source_residual(; orientation=:horizontal,
@@ -2721,6 +2723,42 @@ end
     @test small_magic.min_eig < -2e-2
     @test robust_magic.min_eig > 0.5
     @test robust_magic.max_abs_C < small_magic.max_abs_C
+end
+
+@testset "P18b2c6 square log-conf is only weakly sensitive to TRT magic" begin
+    for source_scale in (0.0, 1.0)
+        small_magic = _square_formulation_spd_probe(
+            ; formulation=:log, source_scale, steps=1_200, magic=1e-6,
+        )
+        robust_magic = _square_formulation_spd_probe(
+            ; formulation=:log, source_scale, steps=1_200, magic=0.01,
+        )
+        damped_magic = _square_formulation_spd_probe(
+            ; formulation=:log, source_scale, steps=1_200, magic=0.25,
+        )
+
+        @test small_magic.finite
+        @test robust_magic.finite
+        @test damped_magic.finite
+        @test small_magic.min_eig > 0.35
+        @test robust_magic.min_eig > 0.35
+        @test damped_magic.min_eig > 0.35
+        @test isfinite(small_magic.max_abs_C)
+        @test isfinite(robust_magic.max_abs_C)
+        @test isfinite(damped_magic.max_abs_C)
+        @test maximum((small_magic.max_abs_C,
+                       robust_magic.max_abs_C,
+                       damped_magic.max_abs_C)) /
+              minimum((small_magic.max_abs_C,
+                       robust_magic.max_abs_C,
+                       damped_magic.max_abs_C)) < 1.15
+        @test maximum((small_magic.max_abs_u,
+                       robust_magic.max_abs_u,
+                       damped_magic.max_abs_u)) /
+              minimum((small_magic.max_abs_u,
+                       robust_magic.max_abs_u,
+                       damped_magic.max_abs_u)) < 1.05
+    end
 end
 
 @testset "P18b2d cartesian step log-conf smoke: square and BFS" begin
