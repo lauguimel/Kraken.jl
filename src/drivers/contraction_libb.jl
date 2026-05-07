@@ -39,7 +39,7 @@
                                     bcspec=nothing,
                                     ρ_out=1.0, tau_plus=1.0,
                                     hermite_source_mode=:liu_direct,
-                                    conformation_magic=0.25,
+                                    conformation_magic=1e-6,
                                     conformation_divergence_mode=:trace_free,
                                     source_scale_dynamics=1.0,
                                     max_steps=200_000, avg_window=20_000,
@@ -74,8 +74,9 @@ Concrete cases are supplied as `StepChannelGeometry2D` specs, e.g.
   source only on full-fluid cells; wall-intersected cells are left to explicit
   polymer wall-traction accounting.
 - `conformation_magic` : TRT magic parameter Λₚ for conformation/log-conf.
-  The default `0.25` gives `tau_minus=1.0` when `tau_plus=1.0`, i.e. no
-  anti-symmetric TRT tuning in production validation.
+  The default `1e-6` matches the Liu-style low-diffusion conformation setting
+  used by the near-Newtonian Poiseuille/square canaries. Larger values such as
+  `0.01` or `0.25` are stability/audit parameters, not validation defaults.
 - `conformation_divergence_mode` : velocity-gradient trace handling for the
   conformation source. Defaults to `:trace_free`, matching the validated
   cylinder driver and the analytic Poiseuille CDE ladder.
@@ -92,7 +93,7 @@ function run_conformation_step_libb_2d(;
         bcspec::Union{Nothing,BCSpec2D}=nothing,
         ρ_out=1.0, tau_plus=1.0,
         hermite_source_mode::Symbol=:liu_direct,
-        conformation_magic::Real=0.25,
+        conformation_magic::Real=1e-6,
         conformation_divergence_mode::Symbol=:trace_free,
         source_scale_dynamics::Union{Nothing,Real}=nothing,
         solvent_source_on_cutlinks::Bool=false,
@@ -320,7 +321,7 @@ function run_conformation_contraction_libb_2d(;
         bcspec::Union{Nothing,BCSpec2D}=nothing,
         ρ_out=1.0, tau_plus=1.0,
         hermite_source_mode::Symbol=:liu_direct,
-        conformation_magic::Real=0.25,
+        conformation_magic::Real=1e-6,
         conformation_divergence_mode::Symbol=:trace_free,
         allow_diagnostic_polymer_bc::Bool=false,
         allow_diagnostic_conformation_collision::Bool=false,

@@ -510,7 +510,7 @@ end
                                          drag_stride=1,
                                          drag_mode=:auto,
                                          hermite_source_mode=:liu_direct,
-                                         conformation_magic=0.25,
+                                         conformation_magic=1e-6,
                                          momentum_exchange_mode=:mei_reconstruct,
                                          backend, FT)
 
@@ -559,11 +559,11 @@ Confined-cylinder Oldroyd-B benchmark using:
   `TRT+LI-BB` collision kernel.
 
 `conformation_magic` is the TRT magic parameter Λₚ for the conformation/log-
-conformation populations, i.e. `tau_minus = Λₚ/(tau_plus-0.5)+0.5`. With the
-validated `tau_plus=1.0` window, the default `0.25` gives `tau_minus=1.0`,
-so the conformation transport is BGK-equivalent and validation does not depend
-on anti-symmetric TRT tuning. Smaller values such as `0.01` or `1e-6` are
-explicit audit parameters; do not use them as hidden production defaults.
+conformation populations, i.e. `tau_minus = Λₚ/(tau_plus-0.5)+0.5`. The
+default `1e-6` follows the Liu-style low-diffusion conformation setting and is
+required by the near-Newtonian Poiseuille/square canaries. Larger values such
+as `0.01` or `0.25` are explicit stability/audit parameters; they change the
+near-Newtonian stress response and must not be hidden validation defaults.
 `conformation_collision` windows are guarded by the analytic CDE patch tests:
 TRT is validated at `tau_plus=1.0`, while `:regularized` and `:liu_eq26` are
 validated at `tau_plus=0.50001`. Other combinations require
@@ -602,7 +602,7 @@ function run_conformation_cylinder_libb_2d(;
         hermite_source_mode::Symbol=:liu_direct,
         solvent_source_mode::Symbol=:post_collision,
         solvent_magic::Real=3/16,
-        conformation_magic::Real=0.25,
+        conformation_magic::Real=1e-6,
         conformation_collision::Symbol=:trt,
         conformation_divergence_mode::Symbol=:trace_free,
         conformation_gradient_mode::Symbol=:wall_aware,
