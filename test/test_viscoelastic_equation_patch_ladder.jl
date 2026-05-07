@@ -1506,7 +1506,8 @@ end
 function _collision_patch_moments(collision; tau_plus=1.0, λ=2.0,
                                   dudx=0.0, dudy=0.0, dvdx=0.0, dvdy=0.0,
                                   cxx=1.0, cxy=0.0, cyy=1.0, component=1,
-                                  divergence_mode::Symbol=:numerical)
+                                  divergence_mode::Symbol=:numerical,
+                                  magic=2.5e-7)
     Nx = Ny = 5
     ux, uy, i0, j0 = _linear_velocity_patch(; Nx, Ny, dudx, dudy, dvdx, dvdy)
     is_solid = falses(Nx, Ny)
@@ -1528,7 +1529,7 @@ function _collision_patch_moments(collision; tau_plus=1.0, λ=2.0,
     else
         _collide_component_once!(
             collision, g, Fe_prev, C_field, ux, uy, ρ, Cxx, Cxy, Cyy,
-            is_solid, tau_plus, λ, component; divergence_mode,
+            is_solid, tau_plus, λ, component; magic, divergence_mode,
         )
     end
 
@@ -1546,7 +1547,8 @@ function _logconf_collision_patch_moments(; tau_plus=1.0, λ=1e30,
                                           dvdx=0.0, dvdy=0.0,
                                           ψxx=log(1.3), ψxy=0.0,
                                           ψyy=log(0.8), component=1,
-                                          divergence_mode::Symbol=:numerical)
+                                          divergence_mode::Symbol=:numerical,
+                                          magic=1e-6)
     Nx = Ny = 5
     ux, uy, i0, j0 = _linear_velocity_patch(; Nx, Ny, dudx, dudy, dvdx, dvdy)
     is_solid = falses(Nx, Ny)
@@ -1559,13 +1561,14 @@ function _logconf_collision_patch_moments(; tau_plus=1.0, λ=1e30,
     g0 = copy(g)
     collide_logconf_2d!(
         g, Ψ_field, ux, uy, Ψxx, Ψxy, Ψyy, is_solid, tau_plus, λ;
-        magic=1e-6, component, divergence_mode,
+        magic, component, divergence_mode,
     )
     Δ = [g[i0, j0, q] - g0[i0, j0, q] for q in 1:9]
     return (
         mass = sum(Δ),
         mom_x = sum(D2Q9_CX[q] * Δ[q] for q in 1:9),
         mom_y = sum(D2Q9_CY[q] * Δ[q] for q in 1:9),
+        max_pop_delta = maximum(abs, Δ),
     )
 end
 
@@ -1594,6 +1597,59 @@ end
         @test abs(moments.mom_x) < 5e-13
         @test abs(moments.mom_y) < 5e-13
         @test moments.max_pop_delta < 5e-13
+    end
+end
+
+@testset "P14b bulk high-Wi shear fixed points are not magic-tuned" begin
+    λ = 100.0
+    for Wi in (1.0, 2.0, 5.0, 10.0),
+        magic in (1e-6, 0.01, 0.25),
+        case in (
+            (dudx=0.0, dudy=Wi / λ, dvdx=0.0, dvdy=0.0,
+             cxx=1.0 + 2.0 * Wi^2, cxy=Wi, cyy=1.0),
+            (dudx=0.0, dudy=0.0, dvdx=Wi / λ, dvdy=0.0,
+             cxx=1.0, cxy=Wi, cyy=1.0 + 2.0 * Wi^2),
+        )
+
+        direct_source = _direct_source_tuple(
+            case.cxx, case.cxy, case.cyy,
+            case.dudx, case.dudy, case.dvdx, case.dvdy, λ,
+        )
+        ψxx, ψxy, ψyy = _log_spd_2x2(case.cxx, case.cxy, case.cyy)
+        log_source = _logconf_source_tuple(
+            ψxx, ψxy, ψyy,
+            case.dudx, case.dudy, case.dvdx, case.dvdy, λ,
+        )
+
+        @test maximum(abs, direct_source) < 2e-13
+        @test maximum(abs, log_source) < 2e-10
+        @test _min_eig_spd_2x2(case.cxx, case.cxy, case.cyy) > 0.0
+
+        for component in 1:3
+            direct = _collision_patch_moments(
+                :trt; λ, magic, component,
+                dudx=case.dudx, dudy=case.dudy,
+                dvdx=case.dvdx, dvdy=case.dvdy,
+                cxx=case.cxx, cxy=case.cxy, cyy=case.cyy,
+                divergence_mode=:trace_free,
+            )
+            logc = _logconf_collision_patch_moments(
+                ; λ, magic, component,
+                dudx=case.dudx, dudy=case.dudy,
+                dvdx=case.dvdx, dvdy=case.dvdy,
+                ψxx, ψxy, ψyy,
+                divergence_mode=:trace_free,
+            )
+
+            @test abs(direct.mass) < 2e-11
+            @test abs(direct.mom_x) < 2e-11
+            @test abs(direct.mom_y) < 2e-11
+            @test direct.max_pop_delta < 2e-11
+            @test abs(logc.mass) < 2e-11
+            @test abs(logc.mom_x) < 2e-11
+            @test abs(logc.mom_y) < 2e-11
+            @test logc.max_pop_delta < 2e-11
+        end
     end
 end
 
