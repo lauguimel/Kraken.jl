@@ -109,6 +109,17 @@ Current diagnosis:
   local A/B audit showed that it can improve some y-band profiles, but it must
   close split, direct residual, boundary, and recursive parent states as one
   link-level conservative packet group before it is safe to expose.
+- A route-sampling audit isolated another candidate cause: subcycled coarse
+  same-level packets should eventually move one cell of their own level, while
+  the current production table keeps the historical leaf-equivalent sampling.
+  `create_conservative_tree_route_table_2d` now has explicit experimental
+  `sampling=:level_native` and `sampling=:subcycled_hybrid` modes, and the
+  subcycling ledgers have an explicit `interface_time_scaling` switch. The
+  surgical canary proves that native direct routes and native time weighting
+  preserve global rest mass, but local rest invariance is still broken at
+  coarse/fine interfaces. Therefore production macro-flow runners intentionally
+  remain on the stable `sampling=:leaf_equivalent` path until the local
+  interface closure is fixed.
 - `poiseuille_analytic_profile_2d` now uses the same halfway bounce-back wall
   convention as the Cartesian Poiseuille tests: walls are located half a cell
   outside the first and last fluid cell centers. The black curve in dashboards

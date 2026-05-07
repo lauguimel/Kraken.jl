@@ -452,7 +452,8 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
         kind::RouteKind,
         substep::Integer,
         route_packet_slot::Integer=0;
-        alpha=1)
+        alpha=1,
+        interface_time_scaling::Symbol=:leaf_equivalent)
     kind == COALESCE_FACE || kind == COALESCE_CORNER ||
         throw(ArgumentError("route must be a fine-to-coarse coalesce route"))
 
@@ -472,9 +473,11 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
     1 <= step <= bank.schedule.ratio ||
         throw(ArgumentError("substep must be inside 1:$(bank.schedule.ratio)"))
     qi = _check_d2q9_q(q)
-    packet = reconstructed_integrated_D2Q9_packet(
+    packet = _conservative_tree_f2c_time_factor_2d(
+        bank, interface_time_scaling) *
+        reconstructed_integrated_D2Q9_packet(
         @view(F[child_id, :]), child.metrics.volume, qi, weight;
-        alpha=alpha) / bank.schedule.ratio
+        alpha=alpha)
     pair.fine_to_coarse[qi, step, slot] += packet
     dst_cell_id != 0 ||
         throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
@@ -498,11 +501,13 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
         kind::RouteKind,
         substep::Integer,
         route_packet_slot::Integer=0;
-        alpha=1)
+        alpha=1,
+        interface_time_scaling::Symbol=:leaf_equivalent)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
         bank, F, src_id, dst_id, q, weight, kind, substep,
-        route_packet_slot; alpha=alpha)
+        route_packet_slot; alpha=alpha,
+        interface_time_scaling=interface_time_scaling)
 end
 
 @inline function _conservative_tree_child_slot_2d(ix::Int, iy::Int)
@@ -721,11 +726,33 @@ end
     return policy in (:periodic_x_wall_y, :periodic_x_moving_wall_y)
 end
 
+@inline function _check_conservative_tree_interface_time_scaling_2d(
+        scaling::Symbol)
+    scaling in (:leaf_equivalent, :level_native) ||
+        throw(ArgumentError("interface_time_scaling must be :leaf_equivalent or :level_native"))
+    return scaling
+end
+
+@inline function _conservative_tree_c2f_time_factor_2d(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        scaling::Symbol)
+    mode = _check_conservative_tree_interface_time_scaling_2d(scaling)
+    return mode == :leaf_equivalent ? bank.schedule.ratio : 1
+end
+
+@inline function _conservative_tree_f2c_time_factor_2d(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D{T},
+        scaling::Symbol) where T
+    mode = _check_conservative_tree_interface_time_scaling_2d(scaling)
+    return mode == :leaf_equivalent ? inv(T(bank.schedule.ratio)) : one(T)
+end
+
 function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         F::AbstractMatrix,
         route::ConservativeTreeRoute2D;
-        alpha=1)
+        alpha=1,
+        interface_time_scaling::Symbol=:leaf_equivalent)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER ||
         throw(ArgumentError("route must be a coarse-to-fine split route"))
@@ -745,8 +772,9 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
     slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
     ix, iy = _conservative_tree_child_index_in_parent_2d(parent, child)
     qi = _check_d2q9_q(route.q)
-    packet = bank.schedule.ratio * _subcycle_route_packet_2d(
-        F, spec, route; alpha=alpha)
+    packet = _conservative_tree_c2f_time_factor_2d(
+        bank, interface_time_scaling) *
+        _subcycle_route_packet_2d(F, spec, route; alpha=alpha)
 
     @inbounds for substep in 1:bank.schedule.ratio
         pair.coarse_to_fine[ix, iy, qi, substep, slot] +=
@@ -761,10 +789,12 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
         route::ConservativeTreeRoute2D,
         substep::Integer,
         route_packet_slot::Integer=0;
-        alpha=1)
+        alpha=1,
+        interface_time_scaling::Symbol=:leaf_equivalent)
     return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
         bank, F, route.src, route.dst, route.q, route.weight, route.kind,
-        substep, route_packet_slot; alpha=alpha)
+        substep, route_packet_slot; alpha=alpha,
+        interface_time_scaling=interface_time_scaling)
 end
 
 function conservative_tree_subcycle_sync_down_routes_F_2d!(
@@ -772,7 +802,8 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
         event::ConservativeTreeSubcycleEvent2D,
         F::AbstractMatrix,
         table::ConservativeTreeRouteTable2D;
-        alpha=1)
+        alpha=1,
+        interface_time_scaling::Symbol=:leaf_equivalent)
     parent_level = _check_subcycle_spatial_sync_down_event_2d(bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
@@ -781,7 +812,8 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
         route_id = table.interface_routes[route_pos]
         route = table.routes[route_id]
         conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
-            bank, F, route; alpha=alpha)
+            bank, F, route; alpha=alpha,
+            interface_time_scaling=interface_time_scaling)
     end
     return bank
 end
@@ -791,7 +823,8 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         event::ConservativeTreeSubcycleEvent2D,
         F::AbstractMatrix,
         table::ConservativeTreeRouteTable2D;
-        alpha=1)
+        alpha=1,
+        interface_time_scaling::Symbol=:leaf_equivalent)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
@@ -807,7 +840,8 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         packet_slot = bank.route_packet_slot_by_route[route_id]
         _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
             bank, F, route.src, route.dst, route.q, route.weight, route.kind,
-            substep, packet_slot; alpha=alpha)
+            substep, packet_slot; alpha=alpha,
+            interface_time_scaling=interface_time_scaling)
     end
     return bank
 end
@@ -867,7 +901,8 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D,
         F::AbstractMatrix;
-        alpha=1)
+        alpha=1,
+        interface_time_scaling::Symbol=:leaf_equivalent)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
     child_level = parent_level + 1
@@ -885,7 +920,8 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
             dst_id == 0 && continue
             _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
                 bank, F, src_id, dst_id, q, 1.0, kind, substep,
-                packet_slot; alpha=alpha)
+                packet_slot; alpha=alpha,
+                interface_time_scaling=interface_time_scaling)
         end
     end
     return bank
@@ -1158,6 +1194,7 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
         rho_wall=1,
         alpha_c2f=1,
         alpha_f2c=1,
+        interface_time_scaling::Symbol=:leaf_equivalent,
         is_solid=nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
@@ -1183,7 +1220,8 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
             reset_conservative_tree_subcycle_spatial_pair_2d!(
                 bank, event.src_level)
             conservative_tree_subcycle_sync_down_routes_F_2d!(
-                bank, event, Fstate, table; alpha=alpha_c2f)
+                bank, event, Fstate, table; alpha=alpha_c2f,
+                interface_time_scaling=interface_time_scaling)
         elseif event.phase == :advance
             fill!(Fscratch, zero(eltype(Fscratch)))
             level = event.src_level
@@ -1191,9 +1229,11 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
                 _add_and_clear_conservative_tree_level_rows_2d!(
                     Fstate, Fpending, spec, level)
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
-                    bank, event, Fstate, table; alpha=alpha_f2c)
+                    bank, event, Fstate, table; alpha=alpha_f2c,
+                    interface_time_scaling=interface_time_scaling)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
-                    bank, event, Fstate; alpha=alpha_f2c)
+                    bank, event, Fstate; alpha=alpha_f2c,
+                    interface_time_scaling=interface_time_scaling)
             end
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch, Fstate, spec, table, level, policy;
@@ -1237,6 +1277,12 @@ closure is performed here.
 
 `alpha_c2f` and `alpha_f2c` are the Filippova-Hanel style non-equilibrium
 rescaling factors for coarse-to-fine and fine-to-coarse interface packets.
+`interface_time_scaling=:leaf_equivalent` keeps the historical packet weights:
+coarse-to-fine split packets are distributed across child half-steps and
+fine-to-coarse packets are accumulated with the reciprocal half-step weight.
+`interface_time_scaling=:level_native` is experimental and only intended for
+route tables built with `sampling=:level_native`; it preserves global rest mass
+but does not yet close the local rest-state canary at nested interfaces.
 `coarse_to_fine_predictor_weight` blends coarse-to-fine packets between the
 committed parent state (`0`) and a local post-collision predictor (`1`).
 Macro-flow runners use a conservative partial blend; transport-only callers
@@ -1257,6 +1303,7 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         rho_wall=1,
         alpha_c2f=1,
         alpha_f2c=1,
+        interface_time_scaling::Symbol=:leaf_equivalent,
         coarse_to_fine_state::Symbol=:owned,
         coarse_to_fine_predictor_weight=0,
         pre_stream_level! = nothing,
@@ -1271,6 +1318,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
     _check_conservative_tree_coarse_to_fine_state_2d(coarse_to_fine_state)
     _check_conservative_tree_coarse_to_fine_predictor_weight_2d(
         coarse_to_fine_predictor_weight)
+    _check_conservative_tree_interface_time_scaling_2d(
+        interface_time_scaling)
     is_solid === nothing ||
         validate_conservative_tree_solid_mask_resolved_2d(
             spec, table, is_solid)
@@ -1348,7 +1397,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
                 Fparent = Fsource_run
             end
             conservative_tree_subcycle_sync_down_routes_F_2d!(
-                route_bank_run, event, Fparent, table; alpha=alpha_c2f)
+                route_bank_run, event, Fparent, table; alpha=alpha_c2f,
+                interface_time_scaling=interface_time_scaling)
         elseif event.phase == :advance
             level = event.src_level
             buffers = state_bank_run.levels[level + 1]
@@ -1362,9 +1412,12 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
 
             if level > 0
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
-                    route_bank_run, event, Fsource_run, table; alpha=alpha_f2c)
+                    route_bank_run, event, Fsource_run, table;
+                    alpha=alpha_f2c,
+                    interface_time_scaling=interface_time_scaling)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
-                    route_bank_run, event, Fsource_run; alpha=alpha_f2c)
+                    route_bank_run, event, Fsource_run; alpha=alpha_f2c,
+                    interface_time_scaling=interface_time_scaling)
             end
 
             fill!(Fscratch_run, zero(eltype(Fscratch_run)))

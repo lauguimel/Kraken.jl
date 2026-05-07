@@ -645,6 +645,52 @@ end
                            Fin[spec.active_cells, :])) <= 1e-14
     end
 
+    @testset "level-native route sampling is isolated behind explicit scaling" begin
+        direct_spec = create_conservative_tree_spec_2d(6, 4, [
+            ConservativeTreeRefineBlock2D("patch", 3:4, 2:3),
+        ])
+        src = conservative_tree_cell_id_2d(direct_spec, 0, 1, 2)
+        leaf_table = create_conservative_tree_route_table_2d(
+            direct_spec; sampling=:leaf_equivalent)
+        native_table = create_conservative_tree_route_table_2d(
+            direct_spec; sampling=:level_native)
+        leaf_routes = [leaf_table.routes[rid] for rid in leaf_table.direct_routes
+                       if leaf_table.routes[rid].src == src &&
+                          leaf_table.routes[rid].q == 2]
+        native_routes = [native_table.routes[rid] for rid in native_table.direct_routes
+                         if native_table.routes[rid].src == src &&
+                            native_table.routes[rid].q == 2]
+
+        @test length(leaf_routes) == 2
+        @test sort([route.weight for route in leaf_routes]) == [0.5, 0.5]
+        @test length(native_routes) == 1
+        @test native_routes[1].weight == 1.0
+        @test direct_spec.cells[native_routes[1].dst].i == 2
+
+        spec = create_conservative_tree_nested_channel_spec_2d(2)
+        table = create_conservative_tree_route_table_2d(
+            spec; periodic_x=true, sampling=:level_native)
+        Fin = allocate_conservative_tree_F_2d(spec)
+        Fout = allocate_conservative_tree_F_2d(spec)
+        w = weights(D2Q9())
+        for cell_id in spec.active_cells
+            volume = spec.cells[cell_id].metrics.volume
+            for q in 1:9
+                Fin[cell_id, q] = w[q] * volume
+            end
+        end
+
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:periodic_x_wall_y,
+            interface_time_scaling=:level_native)
+
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test_broken maximum(abs.(Fout[spec.active_cells, :] .-
+                                  Fin[spec.active_cells, :])) <= 1e-14
+    end
+
     @testset "full-domain nested Poiseuille matches Cartesian at same physical time" begin
         spec = _test_full_domain_nested_spec_2d(2)
         amr = run_conservative_tree_poiseuille_subcycled_2d(
