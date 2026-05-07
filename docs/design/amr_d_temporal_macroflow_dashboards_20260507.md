@@ -99,12 +99,16 @@ Current diagnosis:
   (`alpha_c2f=2`, `alpha_f2c=0.5`) did not recover the missing y-band velocity;
   this points to the wall-normal interface/closure placement rather than a
   simple missing constant alpha in the current packet reconstruction.
-- Current working hypothesis: the recursive scheduler is conservative and its
-  wall bounce-back is correct in full-domain nested canaries, but the
-  coarse/fine exchange lacks the temporal interface closure needed when the
-  dominant shear crosses horizontal L/L+1 interfaces. The next fix should be a
-  surgical predictor/interpolation test for coarse-to-fine packets before any
-  macro-flow rerun.
+- A conservative coarse-to-fine temporal predictor is now wired into the
+  subcycled macro-flow runners. It uses a 50% blend between the committed
+  parent state and a local post-collision parent predictor for coarse-to-fine
+  packets, while keeping the flat packet geometry. Surgical tests show that it
+  reduces the short-time wall-normal y-band bias while preserving roundoff mass
+  conservation and keeping the x-band `linf` regression below 5% on the canary.
+- Limited-linear spatial prolongation remains a separate future patch. The
+  local A/B audit showed that it can improve some y-band profiles, but it must
+  close split, direct residual, boundary, and recursive parent states as one
+  link-level conservative packet group before it is safe to expose.
 - `poiseuille_analytic_profile_2d` now uses the same halfway bounce-back wall
   convention as the Cartesian Poiseuille tests: walls are located half a cell
   outside the first and last fluid cell centers. The black curve in dashboards

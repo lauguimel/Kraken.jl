@@ -510,6 +510,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         rho0=1,
         alpha_c2f=1,
         alpha_f2c=1,
+        coarse_to_fine_state::Symbol=:owned,
+        coarse_to_fine_predictor_weight=0.5,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -551,6 +553,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Ftmp, F, spec_run, table; boundary=:periodic_x_wall_y,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
+            coarse_to_fine_state=coarse_to_fine_state,
+            coarse_to_fine_predictor_weight=coarse_to_fine_predictor_weight,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
             Fsource=Fsource, Fscratch=Fscratch)
@@ -587,6 +591,8 @@ function run_conservative_tree_couette_subcycled_2d(;
         rho0=1,
         alpha_c2f=1,
         alpha_f2c=1,
+        coarse_to_fine_state::Symbol=:owned,
+        coarse_to_fine_predictor_weight=0.5,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -627,6 +633,8 @@ function run_conservative_tree_couette_subcycled_2d(;
             Ftmp, F, spec_run, table; boundary=:periodic_x_moving_wall_y,
             u_south=zero(T), u_north=U, rho_wall=rho0,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
+            coarse_to_fine_state=coarse_to_fine_state,
+            coarse_to_fine_predictor_weight=coarse_to_fine_predictor_weight,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
             Fsource=Fsource, Fscratch=Fscratch)
@@ -665,6 +673,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         rho0=1,
         alpha_c2f=1,
         alpha_f2c=1,
+        coarse_to_fine_state::Symbol=:owned,
+        coarse_to_fine_predictor_weight=0.5,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -713,6 +723,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Ftmp, F, spec_run, table; boundary=:periodic_x_wall_y,
             alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
+            coarse_to_fine_state=coarse_to_fine_state,
+            coarse_to_fine_predictor_weight=coarse_to_fine_predictor_weight,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
             Fsource=Fsource, Fscratch=Fscratch, is_solid=solid)

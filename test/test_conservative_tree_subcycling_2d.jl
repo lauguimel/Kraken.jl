@@ -22,6 +22,13 @@ function _test_center_yband_nested_spec_2d()
     ])
 end
 
+function _test_center_xband_nested_spec_2d()
+    return create_conservative_tree_spec_2d(16, 12, [
+        ConservativeTreeRefineBlock2D("X1", 5:12, 1:12),
+        ConservativeTreeRefineBlock2D("X2", 11:22, 1:24; parent="X1"),
+    ])
+end
+
 function _test_wall_refined_ybands_nested_spec_2d()
     return create_conservative_tree_spec_2d(16, 12, [
         ConservativeTreeRefineBlock2D("B1", 1:16, 1:5),
@@ -671,6 +678,41 @@ end
         @test walls_l2 < 0.2 * center_l2
         @test abs(maximum(walls.ux_profile) - maximum(cart)) <
               abs(maximum(center.ux_profile) - maximum(cart))
+    end
+
+    @testset "coarse-fine temporal predictor reduces wall-normal bias" begin
+        steps = 192
+        cart = _test_cartesian_poiseuille_profile_2d(
+            2, steps; Fx=1e-7, omega=1.0)
+
+        center_flat = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_center_yband_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0,
+            coarse_to_fine_predictor_weight=0,
+            enforce_mass=false)
+        center_predicted = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_center_yband_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0,
+            enforce_mass=false)
+        flat_diff = center_flat.ux_profile .- cart
+        predicted_diff = center_predicted.ux_profile .- cart
+        flat_l2 = sqrt(sum(flat_diff .^ 2) / length(flat_diff))
+        predicted_l2 = sqrt(sum(predicted_diff .^ 2) / length(predicted_diff))
+
+        x_flat = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_center_xband_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0,
+            coarse_to_fine_predictor_weight=0,
+            enforce_mass=false)
+        x_predicted = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_center_xband_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0,
+            enforce_mass=false)
+        x_flat_linf = maximum(abs.(x_flat.ux_profile .- cart))
+        x_predicted_linf = maximum(abs.(x_predicted.ux_profile .- cart))
+
+        @test predicted_l2 < 0.75 * flat_l2
+        @test x_predicted_linf <= 1.05 * x_flat_linf
     end
 
     @testset "subcycled Poiseuille macroflow runs from level 1 to 4" begin

@@ -702,6 +702,25 @@ end
         alpha=alpha)
 end
 
+@inline function _check_conservative_tree_coarse_to_fine_state_2d(
+        coarse_to_fine_state::Symbol)
+    coarse_to_fine_state in (:owned, :postcollision) ||
+        throw(ArgumentError("coarse_to_fine_state must be :owned or :postcollision"))
+    return coarse_to_fine_state
+end
+
+@inline function _check_conservative_tree_coarse_to_fine_predictor_weight_2d(
+        weight)
+    w = Float64(weight)
+    0 <= w <= 1 ||
+        throw(ArgumentError("coarse_to_fine_predictor_weight must be in [0, 1]"))
+    return weight
+end
+
+@inline function _conservative_tree_periodic_x_policy_2d(policy::Symbol)
+    return policy in (:periodic_x_wall_y, :periodic_x_moving_wall_y)
+end
+
 function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         F::AbstractMatrix,
@@ -1052,8 +1071,9 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
     @inbounds for route_pos in table.boundary_route_ranges_by_level[level + 1]
         route_id = table.boundary_routes[route_pos]
         route = table.routes[route_id]
-        _conservative_tree_cell_is_solid_2d(
-            spec, spec.cells[route.src], is_solid) && continue
+        src_cell = spec.cells[route.src]
+        _conservative_tree_cell_is_solid_2d(spec, src_cell, is_solid) &&
+            continue
         if policy != :skip
             Fout[route.src, d2q9_opposite(route.q)] +=
                 _conservative_tree_boundary_reflection_packet_2d(
@@ -1217,6 +1237,10 @@ closure is performed here.
 
 `alpha_c2f` and `alpha_f2c` are the Filippova-Hanel style non-equilibrium
 rescaling factors for coarse-to-fine and fine-to-coarse interface packets.
+`coarse_to_fine_predictor_weight` blends coarse-to-fine packets between the
+committed parent state (`0`) and a local post-collision predictor (`1`).
+Macro-flow runners use a conservative partial blend; transport-only callers
+default to `0`.
 `pre_stream_level!`, when provided, is called as
 `pre_stream_level!(Fsource, spec, level, event)` immediately before direct
 routes for that level are streamed. Macro-flow runners use it to apply local
@@ -1233,6 +1257,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         rho_wall=1,
         alpha_c2f=1,
         alpha_f2c=1,
+        coarse_to_fine_state::Symbol=:owned,
+        coarse_to_fine_predictor_weight=0,
         pre_stream_level! = nothing,
         schedule = nothing,
         route_bank = nothing,
@@ -1242,6 +1268,9 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         is_solid=nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
+    _check_conservative_tree_coarse_to_fine_state_2d(coarse_to_fine_state)
+    _check_conservative_tree_coarse_to_fine_predictor_weight_2d(
+        coarse_to_fine_predictor_weight)
     is_solid === nothing ||
         validate_conservative_tree_solid_mask_resolved_2d(
             spec, table, is_solid)
@@ -1276,7 +1305,6 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
     reset_conservative_tree_subcycle_spatial_bank_2d!(route_bank_run)
     reset_conservative_tree_subcycle_buffer_bank_2d!(state_bank_run)
     conservative_tree_subcycle_store_active_owned_2d!(state_bank_run, Fin)
-
     Fsource_run = Fsource === nothing ? similar(Fout) : Fsource
     Fscratch_run = Fscratch === nothing ? similar(Fout) : Fscratch
     _check_conservative_tree_F_2d(Fsource_run, spec)
@@ -1287,8 +1315,40 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             reset_conservative_tree_subcycle_spatial_pair_2d!(
                 route_bank_run, event.src_level)
             parent_owned = state_bank_run.levels[event.src_level + 1].owned
+            Fparent = parent_owned
+            predictor_weight = coarse_to_fine_state == :postcollision ?
+                one(eltype(Fsource_run)) :
+                eltype(Fsource_run)(coarse_to_fine_predictor_weight)
+            needs_level_source = predictor_weight > zero(predictor_weight)
+            if needs_level_source
+                fill!(Fsource_run, zero(eltype(Fsource_run)))
+                _copy_conservative_tree_level_rows_2d!(
+                    Fsource_run, parent_owned, spec, event.src_level)
+                conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
+                    Fsource_run, state_bank_run, event.src_level)
+                Fparent = Fsource_run
+            end
+            if predictor_weight > zero(predictor_weight)
+                fill!(Fscratch_run, zero(eltype(Fscratch_run)))
+                _copy_conservative_tree_level_rows_2d!(
+                    Fscratch_run, parent_owned, spec, event.src_level)
+                conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
+                    Fscratch_run, state_bank_run, event.src_level)
+                pre_stream_level! === nothing ||
+                    pre_stream_level!(Fscratch_run, spec, event.src_level, event)
+                @inbounds for (cell_id, cell) in pairs(spec.cells)
+                    cell.level == event.src_level || continue
+                    for q in 1:9
+                        Fsource_run[cell_id, q] =
+                            (one(predictor_weight) - predictor_weight) *
+                            Fsource_run[cell_id, q] +
+                            predictor_weight * Fscratch_run[cell_id, q]
+                    end
+                end
+                Fparent = Fsource_run
+            end
             conservative_tree_subcycle_sync_down_routes_F_2d!(
-                route_bank_run, event, parent_owned, table; alpha=alpha_c2f)
+                route_bank_run, event, Fparent, table; alpha=alpha_c2f)
         elseif event.phase == :advance
             level = event.src_level
             buffers = state_bank_run.levels[level + 1]
