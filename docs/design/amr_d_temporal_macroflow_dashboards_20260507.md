@@ -118,10 +118,17 @@ Current diagnosis:
 - Limited-linear spatial prolongation is available only as an explicit
   experimental kernel option. It preserves four-level rest mass after the
   restriction fix and slightly improves short-time y-band L2 in local A/B runs,
-  but it is not exposed through KRK and is not the production default. The
-  production macro-flow runners intentionally stay on flat coarse-to-fine
-  packets until the wall-normal interface closure has a stronger validation
-  story and a cheaper packet cache.
+  but it is not the production default. The production macro-flow runners
+  intentionally stay on flat coarse-to-fine packets until the wall-normal
+  interface closure has a stronger validation story and a cheaper packet cache.
+- The limited-linear A/B path is now reproducible from KRK through
+  `Define c2f_prolongation = 1`; `poiseuille_yband_nested4_limited_debug.krk`
+  is the reference input. At 640 steps it improves the y-band quicklook
+  (`ux_max=9.01e-4`, `linf_profile_vs_reference=2.51e-4`) relative to the flat
+  y-band run (`ux_max=8.63e-4`, `linf_profile_vs_reference=3.04e-4`), while
+  keeping corrected mass drift at zero. Its raw mass correction is larger and
+  the current implementation resamples routes, so it remains an experimental
+  diagnostic rather than the default production path.
 - A route-sampling audit isolated another candidate cause: subcycled coarse
   same-level packets should eventually move one cell of their own level, while
   the current production table keeps the historical leaf-equivalent sampling.

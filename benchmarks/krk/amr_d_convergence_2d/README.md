@@ -46,3 +46,13 @@ profile plots are readable after a short local run. The
 `cylinder_lift_nested4_probe.krk` input is an off-centre cylinder target for
 future lift/CD validation; today it is expected to produce static mesh and
 solid-mask plots only.
+
+Nested subcycled channel/solid cases accept two optional numeric A/B knobs:
+
+- `Define c2f_prolongation = 0` keeps the production flat coarse-to-fine
+  packet geometry. `1` enables the explicit experimental limited-linear
+  prolongation. `poiseuille_yband_nested4_limited_debug.krk` is the reference
+  A/B input for this path.
+- `Define coarse_to_fine_predictor_weight = 0.5` controls the conservative
+  temporal predictor blend. Use `0` for committed parent state only and `1`
+  for the local post-collision parent predictor.

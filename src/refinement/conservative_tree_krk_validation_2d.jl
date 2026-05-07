@@ -200,6 +200,17 @@ function _amr_d_var_2d(setup, name::Symbol, default)
     return haskey(vars, name) ? vars[name] : default
 end
 
+function _amr_d_c2f_prolongation_2d(setup)
+    raw = _amr_d_var_2d(setup, :coarse_to_fine_prolongation,
+                        _amr_d_var_2d(setup, :c2f_prolongation, 0.0))
+    code = round(Int, raw)
+    abs(Float64(raw) - code) <= eps(Float64) ||
+        throw(ArgumentError("coarse_to_fine_prolongation must be 0 (:flat) or 1 (:limited_linear)"))
+    code == 0 && return :flat
+    code == 1 && return :limited_linear
+    throw(ArgumentError("coarse_to_fine_prolongation must be 0 (:flat) or 1 (:limited_linear)"))
+end
+
 function _amr_d_constant_expr_2d(expr, default)
     try
         return Float64(evaluate(expr))
@@ -256,6 +267,9 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
     krk_mass_guard_rtol = _amr_d_var_2d(setup, :mass_guard_rtol, nothing)
     resolved_mass_guard_rtol = mass_guard_rtol === nothing ?
         krk_mass_guard_rtol : mass_guard_rtol
+    c2f_prolongation = _amr_d_c2f_prolongation_2d(setup)
+    c2f_predictor_weight =
+        _amr_d_var_2d(setup, :coarse_to_fine_predictor_weight, 0.5)
 
     if case.runtime_status == :route_native_one_level_channel
         domain = getproperty(setup, :domain)
@@ -340,6 +354,8 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
                 flow=:square_obstacle_subcycled, max_level=case.max_level,
                 spec=spec, is_solid_leaf=is_solid, steps=steps,
                 omega=omega, Fx=Fx, Fy=Fy, rho0=rho0,
+                coarse_to_fine_prolongation=c2f_prolongation,
+                coarse_to_fine_predictor_weight=c2f_predictor_weight,
                 mass_guard_rtol=resolved_mass_guard_rtol, T=T)
         elseif case.flow == :cylinder
             is_solid = cylinder_solid_mask_leaf_2d(
@@ -352,6 +368,8 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
                 max_level=case.max_level, spec=spec,
                 is_solid_leaf=is_solid, steps=steps, omega=omega,
                 Fx=Fx, Fy=0.0, rho0=rho0,
+                coarse_to_fine_prolongation=c2f_prolongation,
+                coarse_to_fine_predictor_weight=c2f_predictor_weight,
                 mass_guard_rtol=resolved_mass_guard_rtol, T=T)
         end
     elseif case.flow == :poiseuille
@@ -360,13 +378,18 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
         return run_conservative_tree_poiseuille_subcycled_2d(
             max_level=case.max_level, spec=spec, steps=steps, omega=omega,
             Fx=Fx, Fy=Fy, rho0=rho0,
+            coarse_to_fine_prolongation=c2f_prolongation,
+            coarse_to_fine_predictor_weight=c2f_predictor_weight,
             mass_guard_rtol=resolved_mass_guard_rtol, T=T)
     elseif case.flow == :couette
         U = _amr_d_boundary_value_2d(
             setup, :north, :velocity, :ux, _amr_d_var_2d(setup, :U, 1e-3))
         return run_conservative_tree_couette_subcycled_2d(
             max_level=case.max_level, spec=spec, steps=steps, omega=omega,
-            U=U, rho0=rho0, mass_guard_rtol=resolved_mass_guard_rtol,
+            U=U, rho0=rho0,
+            coarse_to_fine_prolongation=c2f_prolongation,
+            coarse_to_fine_predictor_weight=c2f_predictor_weight,
+            mass_guard_rtol=resolved_mass_guard_rtol,
             T=T)
     end
 

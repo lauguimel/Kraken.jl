@@ -69,6 +69,22 @@ using Kraken
     @test result_p.steps == 2
     @test isfinite(result_p.relative_mass_drift)
 
+    setup_limited = load_kraken(
+        joinpath(convergence_dir, "poiseuille_nested4_channel.krk"))
+    setup_limited.user_vars[:c2f_prolongation] = 1.0
+    setup_limited.user_vars[:coarse_to_fine_predictor_weight] = 1.0
+    result_limited = run_conservative_tree_amr_d_case_from_krk_2d(
+        setup_limited; steps_override=2)
+    @test result_limited.max_level == 4
+    @test result_limited.steps == 2
+    @test isfinite(result_limited.relative_mass_drift)
+
+    setup_bad_prolongation = load_kraken(
+        joinpath(convergence_dir, "poiseuille_nested4_channel.krk"))
+    setup_bad_prolongation.user_vars[:c2f_prolongation] = 2.0
+    @test_throws ArgumentError run_conservative_tree_amr_d_case_from_krk_2d(
+        setup_bad_prolongation; steps_override=1)
+
     nested_couette = cases["couette_nested4_channel.krk"]
     @test nested_couette.max_level == 4
     @test nested_couette.runtime_status == :subcycled_nested_channel
@@ -85,6 +101,16 @@ using Kraken
     @test cases["poiseuille_yband_nested4_debug.krk"].max_level == 4
     @test cases["poiseuille_yband_nested4_debug.krk"].runtime_status ==
           :subcycled_nested_channel
+    @test cases["poiseuille_yband_nested4_limited_debug.krk"].max_level == 4
+    @test cases["poiseuille_yband_nested4_limited_debug.krk"].runtime_status ==
+          :subcycled_nested_channel
+    result_y_limited = run_conservative_tree_amr_d_case_from_krk_2d(
+        joinpath(convergence_dir,
+                 "poiseuille_yband_nested4_limited_debug.krk");
+        steps_override=1)
+    @test result_y_limited.max_level == 4
+    @test result_y_limited.steps == 1
+    @test isfinite(result_y_limited.relative_mass_drift)
     @test cases["poiseuille_wall_ybands_nested4_debug.krk"].max_level == 4
     @test cases["poiseuille_wall_ybands_nested4_debug.krk"].runtime_status ==
           :subcycled_nested_channel
