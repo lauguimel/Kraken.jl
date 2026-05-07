@@ -57,12 +57,12 @@ using Kraken, KernelAbstractions
         # coarse end-to-end smoke test, not a wall-BC equivalence proof.
         @test rel_diff < 0.02   # < 2 % at Wi ≈ 0.012
         @test isfinite(r2.Cd) && r2.Cd > 0
-        @test r1.drag_mode === :post_source_mea
+        @test r1.drag_mode === :explicit_split
         @test r1.hermite_source_mode === :liu_direct
         @test r1.solvent_source_mode === :post_collision
         @test r1.conformation_magic == 0.25
         @test r1.momentum_exchange_mode === :mei_reconstruct
-        @test r1.Cd == r1.Cd_mea_post_source
+        @test r1.Cd == r1.Cd_split_explicit
         @test r1.Cd_split_explicit ≈ r1.Cd_s + r1.Cd_p
     end
 

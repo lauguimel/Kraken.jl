@@ -481,6 +481,49 @@ function _periodic_shear_decay_ratio(ν; νp=0.0, steps=200,
     return 2.0 * amp / (Nx * Ny * amp0)
 end
 
+function _streamed_hermite_source_momentum(tau_xx, tau_xy, tau_yy;
+                                           s_plus,
+                                           ce_correction=false,
+                                           source_scale=1.0)
+    Nx, Ny = size(tau_xx)
+    f = zeros(Float64, Nx, Ny, 9)
+    streamed = similar(f)
+    is_solid = falses(Nx, Ny)
+    apply_hermite_source_2d!(
+        f, is_solid, s_plus, tau_xx, tau_xy, tau_yy;
+        ce_correction, source_scale,
+    )
+    stream_2d!(streamed, f, Nx, Ny; sync=true)
+    return streamed
+end
+
+function _momentum_from_populations(f, i, j)
+    return (
+        Fx=sum(D2Q9_CX[q] * f[i, j, q] for q in 1:9),
+        Fy=sum(D2Q9_CY[q] * f[i, j, q] for q in 1:9),
+    )
+end
+
+function _near_newtonian_poiseuille_microfield(; λ, νp, γ0, curvature)
+    Nx, Ny = 4, 4
+    y0 = 1.5
+    Cxx = zeros(Float64, Nx, Ny)
+    Cxy = zeros(Float64, Nx, Ny)
+    Cyy = ones(Float64, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        y = j - 1
+        γ = γ0 + curvature * (y - y0)
+        wi_local = λ * γ
+        Cxx[i, j] = 1.0 + 2.0 * wi_local^2
+        Cxy[i, j] = wi_local
+    end
+    τxx = zeros(Float64, Nx, Ny)
+    τxy = zeros(Float64, Nx, Ny)
+    τyy = zeros(Float64, Nx, Ny)
+    update_polymer_stress!(τxx, τxy, τyy, Cxx, Cxy, Cyy, OldroydB(G=νp / λ, λ=λ))
+    return (; τxx, τxy, τyy, max_wi=maximum(abs.(Cxy)))
+end
+
 @testset "P1 Hermite polymer source moments: τxx orientation" begin
     s_plus = 0.8
     txx = 0.12
@@ -557,6 +600,54 @@ end
     @test abs(direct - reference) < 3e-5
     @test abs(over_scaled - reference) > 1e-2
     @test abs(ce_scaled - reference) > 1e-2
+end
+
+@testset "P1d Hermite source streaming gives analytic stress divergence on 2x2 core" begin
+    Nx, Ny = 4, 4
+    x = [i - 1.0 for i in 1:Nx, j in 1:Ny]
+    y = [j - 1.0 for i in 1:Nx, j in 1:Ny]
+    ∂xτxx, ∂yτxy = 0.013, 0.023
+    ∂xτxy, ∂yτyy = 0.019, 0.031
+    τxx = 0.11 .+ ∂xτxx .* x .- 0.017 .* y
+    τxy = -0.03 .+ ∂xτxy .* x .+ ∂yτxy .* y
+    τyy = 0.07 .- 0.029 .* x .+ ∂yτyy .* y
+    s_plus = 0.82
+
+    for ce_correction in (false, true)
+        streamed = _streamed_hermite_source_momentum(
+            τxx, τxy, τyy; s_plus, ce_correction,
+        )
+        gain = s_plus * (ce_correction ? inv(1.0 - s_plus / 2.0) : 1.0)
+        expected = (Fx=gain * (∂xτxx + ∂yτxy),
+                    Fy=gain * (∂xτxy + ∂yτyy))
+        for i in 2:3, j in 2:3
+            actual = _momentum_from_populations(streamed, i, j)
+            @test actual.Fx ≈ expected.Fx atol=P0_ATOL
+            @test actual.Fy ≈ expected.Fy atol=P0_ATOL
+        end
+    end
+end
+
+@testset "P1e near-Newtonian Poiseuille microfield maps to analytic polymer viscosity" begin
+    λ = 10.0
+    νp = 0.041
+    γ0 = 6.0e-5
+    curvature = 1.6e-5
+    s_plus = 1.25
+    p = _near_newtonian_poiseuille_microfield(
+        ; λ, νp, γ0, curvature,
+    )
+    @test p.max_wi < 1.0e-3
+
+    streamed = _streamed_hermite_source_momentum(
+        p.τxx, p.τxy, p.τyy; s_plus, ce_correction=false,
+    )
+    expected_Fx = s_plus * νp * curvature
+    for i in 2:3, j in 2:3
+        actual = _momentum_from_populations(streamed, i, j)
+        @test actual.Fx ≈ expected_Fx atol=5e-18
+        @test actual.Fy ≈ 0.0 atol=5e-18
+    end
 end
 
 @testset "P2 D2Q9 streaming: single interior link orientations" begin
@@ -2895,11 +2986,19 @@ end
         backend=KernelAbstractions.CPU(),
         FT=Float64,
     )
-    post = run_conformation_cylinder_libb_2d(; common..., drag_mode=:post_source_mea)
+    auto = run_conformation_cylinder_libb_2d(; common...)
+    @test_throws ErrorException run_conformation_cylinder_libb_2d(;
+        common..., drag_mode=:post_source_mea,
+    )
+    post = run_conformation_cylinder_libb_2d(;
+        common..., drag_mode=:post_source_mea, allow_diagnostic_force_mode=true,
+    )
     split = run_conformation_cylinder_libb_2d(; common..., drag_mode=:explicit_split)
 
+    @test auto.drag_mode === :explicit_split
     @test post.drag_mode === :post_source_mea
     @test split.drag_mode === :explicit_split
+    @test auto.Cd ≈ auto.Cd_split_explicit atol=P0_ATOL
     @test post.Cd ≈ post.Cd_mea_post_source atol=P0_ATOL
     @test split.Cd ≈ split.Cd_split_explicit atol=P0_ATOL
     @test post.Cd_mea_post_source ≈ split.Cd_mea_post_source atol=P0_ATOL
@@ -4863,6 +4962,54 @@ end
         @test solid.Fx ≈ case.solid.Fx atol=P0_ATOL
         @test solid.Fy ≈ case.solid.Fy atol=P0_ATOL
     end
+end
+
+@testset "P23e halfway flat wall separates full-fluid source from wall traction" begin
+    Nx, Ny = 4, 4
+    is_solid = falses(Nx, Ny)
+    is_solid[3, 2] = true
+    is_solid[3, 3] = true
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    q_wall[2, 2, 2] = 0.5
+    q_wall[2, 3, 2] = 0.5
+
+    τ = 0.12
+    tau_xx = fill(τ, Nx, Ny)
+    tau_xy = zeros(Float64, Nx, Ny)
+    tau_yy = zeros(Float64, Nx, Ny)
+    s_plus = 1.0
+    base = zeros(Float64, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        base[i, j, q] = equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+    end
+    uwx = zeros(Float64, Nx, Ny, 9)
+    uwy = zeros(Float64, Nx, Ny, 9)
+    before = compute_drag_libb_mei_2d(base, q_wall, uwx, uwy, Nx, Ny)
+
+    full_fluid = copy(base)
+    apply_hermite_source_full_fluid_2d!(
+        full_fluid, is_solid, q_wall, s_plus, tau_xx, tau_xy, tau_yy;
+        ce_correction=false,
+    )
+    after_full = compute_drag_libb_mei_2d(full_fluid, q_wall, uwx, uwy, Nx, Ny)
+
+    with_cut = copy(base)
+    apply_hermite_source_2d!(
+        with_cut, is_solid, s_plus, tau_xx, tau_xy, tau_yy;
+        ce_correction=false,
+    )
+    after_cut = compute_drag_libb_mei_2d(with_cut, q_wall, uwx, uwy, Nx, Ny)
+
+    explicit_wall_traction = -2.0 * τ
+    cut_source_mea = 2.0 * (-s_plus * τ / 3.0) * 2.0
+
+    @test after_full.Fx - before.Fx ≈ 0.0 atol=P0_ATOL
+    @test after_full.Fy - before.Fy ≈ 0.0 atol=P0_ATOL
+    @test after_cut.Fx - before.Fx ≈ cut_source_mea atol=P0_ATOL
+    @test after_cut.Fy - before.Fy ≈ 0.0 atol=P0_ATOL
+    @test explicit_wall_traction ≈ -0.24 atol=P0_ATOL
+    @test abs(after_full.Fx - before.Fx - explicit_wall_traction) > 0.2
+    @test abs(after_cut.Fx - before.Fx - explicit_wall_traction) > 0.07
 end
 
 @testset "P23c curved Hermite source MEA is not surface traction" begin

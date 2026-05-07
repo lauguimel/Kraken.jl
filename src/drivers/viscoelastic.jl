@@ -508,7 +508,7 @@ end
                                          inlet=:parabolic, ρ_out=1.0,
                                          max_steps, avg_window,
                                          drag_stride=1,
-                                         drag_mode=:post_source_mea,
+                                         drag_mode=:auto,
                                          hermite_source_mode=:liu_direct,
                                          conformation_magic=0.25,
                                          momentum_exchange_mode=:mei_reconstruct,
@@ -531,12 +531,15 @@ Confined-cylinder Oldroyd-B benchmark using:
 - `:uniform` inlet:   u_mean = u_in  (plug flow)
 
 `drag_mode` controls the reported `Cd`:
-- `:post_source_mea` (default): raw MEA after source injection, matching the
-  coupled discrete Liu/Yu force path. The low-Wi Newtonian-limit coarse canary
-  converges with this mode as the cut-link cylinder is refined.
-- `:explicit_split`: `Cd = Cd_s + Cd_p`, the explicit polymer surface-traction
-  diagnostic. It is useful for stress quadrature audits but under-counts the
-  coupled discrete force near cut-links on the Newtonian-limit canary.
+- `:auto` (default): uses `:explicit_split` when the post-collision Hermite
+  source is restricted to full-fluid cells, otherwise `:post_source_mea`.
+- `:post_source_mea`: raw MEA after source injection, matching the coupled
+  discrete Liu/Yu force path only when the Hermite source is also applied on
+  cut-link cells. With `solvent_source_on_cutlinks=false`, it misses the
+  analytic halfway-wall polymer traction and is audit-only.
+- `:explicit_split`: `Cd = Cd_s + Cd_p`, combining solvent MEA before source
+  with the explicit polymer surface-traction integral. This is the validation
+  force path when the bulk Hermite source skips cut-link cells.
 - `:source_scaled_mea`: diagnostic cancellation path retained for audits only;
   callers must pass `allow_diagnostic_force_mode=true`.
 
@@ -595,7 +598,7 @@ function run_conformation_cylinder_libb_2d(;
         inlet::Symbol=:parabolic, ρ_out=1.0,
         tau_plus=1.0,
         max_steps=100_000, avg_window=10_000, drag_stride::Int=1,
-        drag_mode::Symbol=:post_source_mea,
+        drag_mode::Symbol=:auto,
         hermite_source_mode::Symbol=:liu_direct,
         solvent_source_mode::Symbol=:post_collision,
         solvent_magic::Real=3/16,
@@ -623,8 +626,8 @@ function run_conformation_cylinder_libb_2d(;
         allow_diagnostic_log_wall_bc::Bool=false,
         backend=KernelAbstractions.CPU(), FT=Float64)
     drag_stride > 0 || error("drag_stride must be positive")
-    drag_mode in (:source_scaled_mea, :post_source_mea, :explicit_split) ||
-        error("unknown drag_mode $(drag_mode); expected :source_scaled_mea, :post_source_mea, or :explicit_split")
+    drag_mode in (:auto, :source_scaled_mea, :post_source_mea, :explicit_split) ||
+        error("unknown drag_mode $(drag_mode); expected :auto, :source_scaled_mea, :post_source_mea, or :explicit_split")
     hermite_source_mode in (:liu_direct, :ce_corrected) ||
         error("unknown hermite_source_mode $(hermite_source_mode); expected :liu_direct or :ce_corrected")
     solvent_source_mode in (:post_collision, :integrated_collision) ||
@@ -649,8 +652,19 @@ function run_conformation_cylinder_libb_2d(;
         error("hydrodynamic_warmup_steps must be non-negative")
     _assert_validation_polymer_wall_bc(polymer_bc;
                                        allow_diagnostic=allow_diagnostic_polymer_bc)
+    if drag_mode === :auto
+        drag_mode = (solvent_source_mode === :post_collision &&
+                     !solvent_source_on_cutlinks) ?
+                    :explicit_split : :post_source_mea
+    end
     if drag_mode === :source_scaled_mea && !allow_diagnostic_force_mode
         error("drag_mode=:source_scaled_mea is a diagnostic cancellation path, not a validation force law; use :post_source_mea or pass allow_diagnostic_force_mode=true in audit code.")
+    end
+    if drag_mode === :post_source_mea &&
+       solvent_source_mode === :post_collision &&
+       !solvent_source_on_cutlinks &&
+       !allow_diagnostic_force_mode
+        error("drag_mode=:post_source_mea with solvent_source_on_cutlinks=false misses analytic halfway-wall polymer traction; use drag_mode=:explicit_split, enable solvent_source_on_cutlinks, or pass allow_diagnostic_force_mode=true for an audit-only run.")
     end
     _assert_validation_conformation_collision_window(conformation_collision, tau_plus;
         allow_diagnostic=allow_diagnostic_conformation_collision)
