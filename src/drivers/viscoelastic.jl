@@ -510,7 +510,7 @@ end
                                          drag_stride=1,
                                          drag_mode=:post_source_mea,
                                          hermite_source_mode=:liu_direct,
-                                         conformation_magic=1e-6,
+                                         conformation_magic=0.01,
                                          momentum_exchange_mode=:mei_reconstruct,
                                          backend, FT)
 
@@ -553,9 +553,11 @@ Confined-cylinder Oldroyd-B benchmark using:
   `TRT+LI-BB` collision kernel.
 
 `conformation_magic` is the TRT magic parameter Λₚ for the conformation/log-
-conformation populations, i.e. `tau_minus = Λₚ/(tau_plus-0.5)+0.5`. The
-default is the Liu/Yu-style near-maximum anti-symmetric relaxation `1e-6`;
-Kraken's historical hydrodynamic value `0.25` is a diagnostic opt-in.
+conformation populations, i.e. `tau_minus = Λₚ/(tau_plus-0.5)+0.5`. With the
+validated `tau_plus=1.0` window, very small Λₚ puts the anti-symmetric
+relaxation almost at its stability limit; the default `0.01` is the
+high-Wi/corner-stable production value. Use `1e-6` only for Liu-parameter
+audits where the canary explicitly freezes that behavior.
 `conformation_collision` windows are guarded by the analytic CDE patch tests:
 TRT is validated at `tau_plus=1.0`, while `:regularized` and `:liu_eq26` are
 validated at `tau_plus=0.50001`. Other combinations require
@@ -594,7 +596,7 @@ function run_conformation_cylinder_libb_2d(;
         hermite_source_mode::Symbol=:liu_direct,
         solvent_source_mode::Symbol=:post_collision,
         solvent_magic::Real=3/16,
-        conformation_magic::Real=1e-6,
+        conformation_magic::Real=0.01,
         conformation_collision::Symbol=:trt,
         conformation_divergence_mode::Symbol=:trace_free,
         conformation_gradient_mode::Symbol=:wall_aware,

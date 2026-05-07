@@ -2354,7 +2354,8 @@ end
 
 function _square_formulation_spd_probe(; formulation=:direct,
                                        source_scale=0.0,
-                                       steps=1_200)
+                                       steps=1_200,
+                                       magic=1e-6)
     geom = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=3)
     u_ref = 0.005
     β = 0.59
@@ -2372,7 +2373,7 @@ function _square_formulation_spd_probe(; formulation=:direct,
         ; geometry=geom, u_ref_mean=u_ref, ν_s,
         polymer_model=model, polymer_bc=bc,
         hermite_source_mode=:liu_direct,
-        conformation_magic=1e-6,
+        conformation_magic=magic,
         conformation_divergence_mode=:trace_free,
         source_scale_dynamics=source_scale,
         max_steps=steps, avg_window=100,
@@ -2707,6 +2708,21 @@ end
     @test logc.min_eig > 0.25
 end
 
+@testset "P18b2c5 square direct-C SPD is controlled by TRT magic" begin
+    small_magic = _square_formulation_spd_probe(
+        ; formulation=:direct, source_scale=0.0, steps=1_200, magic=1e-6,
+    )
+    robust_magic = _square_formulation_spd_probe(
+        ; formulation=:direct, source_scale=0.0, steps=1_200, magic=0.01,
+    )
+
+    @test small_magic.finite
+    @test robust_magic.finite
+    @test small_magic.min_eig < -2e-2
+    @test robust_magic.min_eig > 0.5
+    @test robust_magic.max_abs_C < small_magic.max_abs_C
+end
+
 @testset "P18b2d cartesian step log-conf smoke: square and BFS" begin
     u_ref = 0.005
     β = 0.59
@@ -2785,7 +2801,7 @@ end
     end
 end
 
-@testset "P18b3 cartesian step driver defaults use validated CDE knobs" begin
+@testset "P18b3 cartesian step driver defaults use robust CDE knobs" begin
     geom = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=2)
     result = run_conformation_step_libb_2d(;
         geometry=geom,
@@ -2797,7 +2813,7 @@ end
         max_steps=1,
         avg_window=1,
     )
-    @test result.conformation_magic ≈ 1e-6 atol=0.0 rtol=0.0
+    @test result.conformation_magic ≈ 0.01 atol=0.0 rtol=0.0
     @test haskey(pairs(result), :conformation_divergence_mode)
     @test result.conformation_divergence_mode === :trace_free
     @test result.hermite_source_mode === :liu_direct
