@@ -20,6 +20,7 @@ const TEMP_DEFAULT_CASES = [
     "cylinder_scale1.krk",
     "poiseuille_xband_nested4_debug.krk",
     "poiseuille_yband_nested4_debug.krk",
+    "poiseuille_wall_ybands_nested4_debug.krk",
     "couette_yband_nested4_debug.krk",
     "cylinder_nested4_probe.krk",
 ]

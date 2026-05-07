@@ -46,6 +46,8 @@ Completed cases:
 - `amr_d_cylinder_scale1`: converged at 2560 steps.
 - `amr_d_poiseuille_xband_nested4_debug`: max step cap, 2560 steps.
 - `amr_d_poiseuille_yband_nested4_debug`: max step cap, 2560 steps.
+- `amr_d_poiseuille_wall_ybands_nested4_debug`: wall-refined y-band control
+  case added after the first dashboard sweep.
 - `amr_d_couette_yband_nested4_debug`: max step cap, 2560 steps.
 - `amr_d_cylinder_nested4_probe`: max step cap, 2560 steps.
 
@@ -86,10 +88,23 @@ Current diagnosis:
   time. This isolates the y-band failure to wall-normal refinement/interface
   placement: the centered y-band leaves the physical walls coarse and places
   refinement transitions across the dominant shear direction.
+- `poiseuille_wall_ybands_nested4_debug.krk` is the reproducible control for
+  this diagnosis. It refines both physical wall bands with the same ratio-16
+  nesting and is now part of the temporal dashboard case list. It matches the
+  Cartesian transient closely at 200 steps (`linf_profile_vs_reference =
+  4.2e-6`) but overshoots by 2560 steps (`ux_max = 3.86e-3` vs Cartesian
+  `2.31e-3`). This confirms that wall-normal coarse/fine interface closure is
+  still not validation-grade.
 - A local Filippova-Hänel scalar rescaling A/B check at 640 steps
   (`alpha_c2f=2`, `alpha_f2c=0.5`) did not recover the missing y-band velocity;
   this points to the wall-normal interface/closure placement rather than a
   simple missing constant alpha in the current packet reconstruction.
+- Current working hypothesis: the recursive scheduler is conservative and its
+  wall bounce-back is correct in full-domain nested canaries, but the
+  coarse/fine exchange lacks the temporal interface closure needed when the
+  dominant shear crosses horizontal L/L+1 interfaces. The next fix should be a
+  surgical predictor/interpolation test for coarse-to-fine packets before any
+  macro-flow rerun.
 - `poiseuille_analytic_profile_2d` now uses the same halfway bounce-back wall
   convention as the Cartesian Poiseuille tests: walls are located half a cell
   outside the first and last fluid cell centers. The black curve in dashboards

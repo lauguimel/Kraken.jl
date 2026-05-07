@@ -15,6 +15,22 @@ function _test_full_domain_nested_spec_2d(max_level::Integer)
     return create_conservative_tree_spec_2d(16, 12, blocks)
 end
 
+function _test_center_yband_nested_spec_2d()
+    return create_conservative_tree_spec_2d(16, 12, [
+        ConservativeTreeRefineBlock2D("C1", 1:16, 3:10),
+        ConservativeTreeRefineBlock2D("C2", 1:32, 7:18; parent="C1"),
+    ])
+end
+
+function _test_wall_refined_ybands_nested_spec_2d()
+    return create_conservative_tree_spec_2d(16, 12, [
+        ConservativeTreeRefineBlock2D("B1", 1:16, 1:5),
+        ConservativeTreeRefineBlock2D("B2", 1:32, 1:8; parent="B1"),
+        ConservativeTreeRefineBlock2D("T1", 1:16, 8:12),
+        ConservativeTreeRefineBlock2D("T2", 1:32, 17:24; parent="T1"),
+    ])
+end
+
 function _test_cartesian_poiseuille_profile_2d(max_level::Integer,
                                                steps::Integer;
                                                Fx=1e-7,
@@ -633,6 +649,28 @@ end
         @test length(spec.active_cells) == 16 * 12 * 4^2
         @test maximum(abs.(amr.ux_profile .- cart_profile)) < 1e-14
         @test amr.relative_mass_drift < 1e-13
+    end
+
+    @testset "short-time wall-normal Poiseuille improves with wall coverage" begin
+        steps = 96
+        center = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_center_yband_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0)
+        walls = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_wall_refined_ybands_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0)
+        cart = _test_cartesian_poiseuille_profile_2d(
+            2, steps; Fx=1e-7, omega=1.0)
+
+        center_diff = center.ux_profile .- cart
+        walls_diff = walls.ux_profile .- cart
+        center_l2 = sqrt(sum(center_diff .^ 2) / length(center_diff))
+        walls_l2 = sqrt(sum(walls_diff .^ 2) / length(walls_diff))
+
+        @test maximum(abs.(walls_diff)) < maximum(abs.(center_diff))
+        @test walls_l2 < 0.2 * center_l2
+        @test abs(maximum(walls.ux_profile) - maximum(cart)) <
+              abs(maximum(center.ux_profile) - maximum(cart))
     end
 
     @testset "subcycled Poiseuille macroflow runs from level 1 to 4" begin

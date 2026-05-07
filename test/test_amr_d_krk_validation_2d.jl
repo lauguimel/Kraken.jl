@@ -85,6 +85,22 @@ using Kraken
     @test cases["poiseuille_yband_nested4_debug.krk"].max_level == 4
     @test cases["poiseuille_yband_nested4_debug.krk"].runtime_status ==
           :subcycled_nested_channel
+    @test cases["poiseuille_wall_ybands_nested4_debug.krk"].max_level == 4
+    @test cases["poiseuille_wall_ybands_nested4_debug.krk"].runtime_status ==
+          :subcycled_nested_channel
+    wall_ybands_spec = create_conservative_tree_spec_from_krk_2d(load_kraken(
+        joinpath(convergence_dir,
+                 "poiseuille_wall_ybands_nested4_debug.krk")))
+    south_j = 1
+    north_j = wall_ybands_spec.Ny << wall_ybands_spec.max_level
+    @test any(wall_ybands_spec.cells[id].level ==
+              wall_ybands_spec.max_level &&
+              wall_ybands_spec.cells[id].j == south_j
+              for id in wall_ybands_spec.active_cells)
+    @test any(wall_ybands_spec.cells[id].level ==
+              wall_ybands_spec.max_level &&
+              wall_ybands_spec.cells[id].j == north_j
+              for id in wall_ybands_spec.active_cells)
     @test cases["couette_yband_nested4_debug.krk"].max_level == 4
     @test cases["couette_yband_nested4_debug.krk"].runtime_status ==
           :subcycled_nested_channel
