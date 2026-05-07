@@ -531,15 +531,13 @@ Confined-cylinder Oldroyd-B benchmark using:
 - `:uniform` inlet:   u_mean = u_in  (plug flow)
 
 `drag_mode` controls the reported `Cd`:
-- `:auto` (default): uses `:explicit_split` when the post-collision Hermite
-  source is restricted to full-fluid cells, otherwise `:post_source_mea`.
-- `:post_source_mea`: raw MEA after source injection, matching the coupled
-  discrete Liu/Yu force path only when the Hermite source is also applied on
-  cut-link cells. With `solvent_source_on_cutlinks=false`, it misses the
-  analytic halfway-wall polymer traction and is audit-only.
+- `:auto` (default): uses `:explicit_split`.
+- `:post_source_mea`: raw MEA after source injection. It is audit-only for
+  viscoelastic wall validation because the Hermite population source is not a
+  physical surface-traction quadrature, even when applied on cut-link cells.
 - `:explicit_split`: `Cd = Cd_s + Cd_p`, combining solvent MEA before source
   with the explicit polymer surface-traction integral. This is the validation
-  force path when the bulk Hermite source skips cut-link cells.
+  force path.
 - `:source_scaled_mea`: diagnostic cancellation path retained for audits only;
   callers must pass `allow_diagnostic_force_mode=true`.
 
@@ -551,10 +549,10 @@ Confined-cylinder Oldroyd-B benchmark using:
 
 `solvent_source_mode` controls where the Hermite stress source is inserted:
 - `:post_collision` (default): current split path, `TRT+LI-BB` then
-  a standalone Hermite source. By default it is restricted to full-fluid
-  cells (`solvent_source_on_cutlinks=false`); cut-link polymer traction must be
-  accounted for by the explicit wall-stress integral, not by a bulk source
-  applied on wall-intersected cells.
+  a standalone Hermite source. By default it is applied on fluid cut-link
+  cells as well (`solvent_source_on_cutlinks=true`) so the near-wall momentum
+  equation is not under-forced. Wall traction is still reported by the explicit
+  split, not by post-source MEA.
 - `:integrated_collision`: experimental path, source fused into the
   `TRT+LI-BB` collision kernel.
 
@@ -618,7 +616,7 @@ function run_conformation_cylinder_libb_2d(;
         source_scale_dynamics::Union{Nothing,Real}=nothing,
         hydrodynamic_warmup_steps::Integer=0,
         solvent_source_on_domain_walls::Bool=false,
-        solvent_source_on_cutlinks::Bool=false,
+        solvent_source_on_cutlinks::Bool=true,
         diagnostic_interval::Integer=0,
         allow_diagnostic_polymer_bc::Bool=false,
         allow_diagnostic_force_mode::Bool=false,
@@ -653,18 +651,15 @@ function run_conformation_cylinder_libb_2d(;
     _assert_validation_polymer_wall_bc(polymer_bc;
                                        allow_diagnostic=allow_diagnostic_polymer_bc)
     if drag_mode === :auto
-        drag_mode = (solvent_source_mode === :post_collision &&
-                     !solvent_source_on_cutlinks) ?
-                    :explicit_split : :post_source_mea
+        drag_mode = :explicit_split
     end
     if drag_mode === :source_scaled_mea && !allow_diagnostic_force_mode
-        error("drag_mode=:source_scaled_mea is a diagnostic cancellation path, not a validation force law; use :post_source_mea or pass allow_diagnostic_force_mode=true in audit code.")
+        error("drag_mode=:source_scaled_mea is a diagnostic cancellation path, not a validation force law; use :explicit_split or pass allow_diagnostic_force_mode=true in audit code.")
     end
     if drag_mode === :post_source_mea &&
        solvent_source_mode === :post_collision &&
-       !solvent_source_on_cutlinks &&
        !allow_diagnostic_force_mode
-        error("drag_mode=:post_source_mea with solvent_source_on_cutlinks=false misses analytic halfway-wall polymer traction; use drag_mode=:explicit_split, enable solvent_source_on_cutlinks, or pass allow_diagnostic_force_mode=true for an audit-only run.")
+        error("drag_mode=:post_source_mea is audit-only for viscoelastic wall validation; Hermite source MEA is not a physical polymer surface-traction quadrature. Use drag_mode=:explicit_split or pass allow_diagnostic_force_mode=true for an audit-only run.")
     end
     _assert_validation_conformation_collision_window(conformation_collision, tau_plus;
         allow_diagnostic=allow_diagnostic_conformation_collision)

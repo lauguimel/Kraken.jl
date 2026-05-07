@@ -163,7 +163,7 @@ source_scale_dynamics =
 solvent_source_on_domain_walls =
     get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_DOMAIN_WALLS", "0") == "1"
 solvent_source_on_cutlinks =
-    get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_CUTLINKS", "0") == "1"
+    get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_CUTLINKS", "1") == "1"
 conformation_magic =
     parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "1e-6"))
 tau_plus =

@@ -2946,6 +2946,7 @@ end
     @test haskey(pairs(result), :conformation_divergence_mode)
     @test result.conformation_divergence_mode === :trace_free
     @test result.hermite_source_mode === :liu_direct
+    @test result.solvent_source_on_cutlinks === true
 end
 
 @testset "P18b4 cylinder source scale does not double-apply CE correction" begin
@@ -2996,6 +2997,7 @@ end
     split = run_conformation_cylinder_libb_2d(; common..., drag_mode=:explicit_split)
 
     @test auto.drag_mode === :explicit_split
+    @test auto.solvent_source_on_cutlinks === true
     @test post.drag_mode === :post_source_mea
     @test split.drag_mode === :explicit_split
     @test auto.Cd ≈ auto.Cd_split_explicit atol=P0_ATOL

@@ -70,9 +70,10 @@ Concrete cases are supplied as `StepChannelGeometry2D` specs, e.g.
   isolation runs.
 - `source_scale_dynamics` : multiplier for the Hermite polymer source injected
   into the hydrodynamic populations. Use `0.0` for CDE-only coupling canaries.
-- `solvent_source_on_cutlinks` : when `false` (default), inject the Hermite
-  source only on full-fluid cells; wall-intersected cells are left to explicit
-  polymer wall-traction accounting.
+- `solvent_source_on_cutlinks` : when `true` (default), inject the Hermite
+  source on fluid cut-link cells as well as full-fluid cells. Force reporting
+  must still use an explicit wall-traction split; skipping the source in
+  cut-link cells under-forces near-wall momentum in the Newtonian limit.
 - `conformation_magic` : TRT magic parameter Λₚ for conformation/log-conf.
   The default `1e-6` matches the Liu-style low-diffusion conformation setting
   used by the near-Newtonian Poiseuille/square canaries. Larger values such as
@@ -96,7 +97,7 @@ function run_conformation_step_libb_2d(;
         conformation_magic::Real=1e-6,
         conformation_divergence_mode::Symbol=:trace_free,
         source_scale_dynamics::Union{Nothing,Real}=nothing,
-        solvent_source_on_cutlinks::Bool=false,
+        solvent_source_on_cutlinks::Bool=true,
         allow_diagnostic_polymer_bc::Bool=false,
         allow_diagnostic_conformation_collision::Bool=false,
         allow_diagnostic_log_wall_bc::Bool=false,

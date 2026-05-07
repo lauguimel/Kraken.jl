@@ -62,6 +62,13 @@ function parse_items(value::AbstractString)
     return [Symbol(strip(x)) for x in split(value, r"[,;]") if !isempty(strip(x))]
 end
 
+function parse_bool(value::AbstractString)
+    v = lowercase(strip(value))
+    v in ("1", "true", "yes", "on") && return true
+    v in ("0", "false", "no", "off") && return false
+    error("invalid boolean value $value")
+end
+
 function polymer_bc_from_symbol(name::Symbol)
     name === :cnebb && return CNEBB()
     name in (:extrap_eq, :extrapeq) && return ExtrapEqWallBC()
@@ -178,7 +185,7 @@ function run_square_visco(; geom, backend, FT, u_ref_mean, nu_s, nu_p,
                           drag_stride, momentum_exchange_mode, solvent_magic,
                           conformation_magic, hermite_source_mode,
                           force_link_mode, conformation_divergence_mode,
-                          source_scale_dynamics)
+                          source_scale_dynamics, solvent_source_on_cutlinks)
     Nx, Ny = geom.Nx, geom.Ny
     geom_d = transfer_step_geometry_2d(geom, backend)
     u_profile_h = parabolic_face_profile_2d(geom; face=:west,
@@ -259,10 +266,20 @@ function run_square_visco(; geom, backend, FT, u_ref_mean, nu_s, nu_p,
             fy_p_sum += drag_p.Fy
         end
 
-        apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
-                                  tau_xx, tau_xy, tau_yy;
-                                  ce_correction = hermite_source_mode === :ce_corrected,
-                                  source_scale = source_scale_dynamics)
+        if solvent_source_on_cutlinks
+            apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
+                                      tau_xx, tau_xy, tau_yy;
+                                      ce_correction = hermite_source_mode === :ce_corrected,
+                                      source_scale = source_scale_dynamics)
+        else
+            apply_hermite_source_full_fluid_2d!(
+                f_out, is_solid, q_wall, s_plus_s,
+                tau_xx, tau_xy, tau_yy;
+                ce_correction = hermite_source_mode === :ce_corrected,
+                source_scale = source_scale_dynamics,
+                apply_y_domain_walls = false,
+            )
+        end
 
         if do_sample
             drag_post = drag_from_mode(f_out, q_force, uw_x, uw_y, Nx, Ny,
@@ -360,6 +377,8 @@ conformation_divergence_mode =
     Symbol(get(ENV, "KRAKEN_CONFORMATION_DIVERGENCE_MODE", "trace_free"))
 hermite_source_mode = Symbol(get(ENV, "KRAKEN_HERMITE_SOURCE_MODE", "liu_direct"))
 source_scale_dynamics = parse(Float64, get(ENV, "KRAKEN_SOURCE_SCALE_DYNAMICS", "1.0"))
+solvent_source_on_cutlinks =
+    parse_bool(get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_CUTLINKS", "true"))
 bc_names = parse_items(get(ENV, "KRAKEN_POLYMER_BCS", "cnebb,extrap_eq"))
 
 geom = square_obstacle_channel_geometry_2d(; H=height, side=side,
@@ -381,6 +400,7 @@ println("steps                = $max_steps, avg_window=$avg_window, drag_stride=
 println("force_link_mode      = ", force_link_mode)
 println("divergence_mode      = ", conformation_divergence_mode)
 println("source_scale         = ", source_scale_dynamics)
+println("source_on_cutlinks   = ", solvent_source_on_cutlinks)
 println("force links          = ",
         count(>(0), obstacle_only_q_wall(geom, FT; link_mode=force_link_mode)))
 println("=" ^ 96)
@@ -403,7 +423,7 @@ for bc_name in bc_names
         polymer_bc, max_steps, avg_window, drag_stride,
         momentum_exchange_mode, solvent_magic, conformation_magic,
         hermite_source_mode, force_link_mode, conformation_divergence_mode,
-        source_scale_dynamics)
+        source_scale_dynamics, solvent_source_on_cutlinks)
     @printf("%-18s %-12s %-9s %-12.6f %-12.6f %-12.6f %-12.6f %-12.6f %-12.6f\n",
             "visco_nup0", string(bc_name), "0",
             zero_poly.Cd_post, zero_poly.Cd_post / newt.Cd,
@@ -413,7 +433,8 @@ for bc_name in bc_names
         nu_s, nu_p, lambda_val, polymer_bc, max_steps, avg_window,
         drag_stride, momentum_exchange_mode, solvent_magic,
         conformation_magic, hermite_source_mode, force_link_mode,
-        conformation_divergence_mode, source_scale_dynamics)
+        conformation_divergence_mode, source_scale_dynamics,
+        solvent_source_on_cutlinks)
     @printf("%-18s %-12s %-9.3g %-12.6f %-12.6f %-12.6f %-12.6f %-12.6f %-12.6f\n",
             "visco_lowwi", string(bc_name), wi,
             low_wi.Cd_post, low_wi.Cd_post / newt.Cd,
