@@ -4,16 +4,20 @@
 
 `benchmarks/amr_d_macroflow_temporal_convergence_2d.jl` runs the AMR-D
 macro-flow KRK cases with temporal convergence checkpoints and writes one
-dashboard plus one mesh-level image per case.
+dashboard per case. The mesh is overlaid directly on the field panels so the
+field, the refinement pattern, and the profile probe location are inspected in
+one reproducible image.
 
 The output contract is intentionally narrow:
 
-- `debug_dashboard.png`: fields, profiles, references when available, and
-  temporal convergence trace.
-- `mesh_levels.png`: three mesh wireframe panels using `viridis`, `magma`, and
-  `plasma`; wireframe color is tied to AMR level.
+- `debug_dashboard.png`: Cartesian reference fields, AMR-D fields, mesh
+  wireframes overlaid on every field panel, profile probes, references when
+  available, and temporal convergence traces.
 - `convergence.csv`: checkpoint deltas and final status.
 - `values.csv`: AMR/reference scalar metrics, including raw mass correction.
+
+There is no separate `mesh_levels.png` anymore. The dashboard is the visual
+artifact to archive for documentation and debugging.
 
 ## Reproduction
 
@@ -44,6 +48,34 @@ Completed cases:
 - `amr_d_poiseuille_yband_nested4_debug`: max step cap, 2560 steps.
 - `amr_d_couette_yband_nested4_debug`: max step cap, 2560 steps.
 - `amr_d_cylinder_nested4_probe`: max step cap, 2560 steps.
+
+Dashboard interpretation:
+
+- The first row is the classic Cartesian reference when a reference is
+  available: mesh, `ux`, and `rho`.
+- The second row is AMR-D: mesh, `ux`, and `rho`.
+- The dashed vertical line is the local profile probe. It is placed at the
+  center of the maximum-refinement region, not at a fixed fraction of the
+  domain.
+- The bottom profiles distinguish `row-mean ux(y)` from the local vertical
+  probe. The row mean averages all fluid cells in `x`; on a local refinement
+  band it intentionally includes coarse and fine regions and can show level
+  transition stair steps. The vertical probe is the local validation slice.
+- When convergence rows are available, the last row shows temporal `ux`, `rho`,
+  and corrected mass drift.
+
+Current diagnosis:
+
+- `amr_d_poiseuille_xband_nested4_debug` exposed a previous plotting/probe
+  problem. The old probe was outside the refined band. With the probe moved
+  into the maximum-level region, the local profile is close to the classic
+  Cartesian reference at 2560 AMR-D steps. The row mean can still show steps
+  because it averages across both coarse and refined regions.
+- `amr_d_poiseuille_yband_nested4_debug` is not a plotting-only problem and is
+  not fixed by the current 2560-step run. AMR-D reaches `ux_max=1.197e-3`
+  while the Cartesian reference reaches `ux_max=2.306e-3`; the last checkpoint
+  has `ux_linf_delta=3.33e-5`, so the run is already near a plateau. Treat this
+  as a negative nested/interface diagnostic, not as a validation gate.
 
 Important caveat: the nested cylinder is a diagnostic probe, not a closed
 validation gate. It needs a relaxed KRK `mass_guard_rtol` and reports

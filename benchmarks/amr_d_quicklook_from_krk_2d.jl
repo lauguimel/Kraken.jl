@@ -527,6 +527,104 @@ function _ql_rect!(ax, i0, i1, j0, j1; color, linewidth)
     return ax
 end
 
+function _ql_mesh_segments_by_level(rows, lmin::Int, lmax::Int)
+    nlevels = max(lmax - lmin + 1, 0)
+    segments = [Point2f[] for _ in 1:nlevels]
+    for r in rows
+        idx = clamp(r.level - lmin + 1, 1, nlevels)
+        pts = segments[idx]
+        x0 = Float32(r.leaf_i_min - 0.5)
+        x1 = Float32(r.leaf_i_max + 0.5)
+        y0 = Float32(r.leaf_j_min - 0.5)
+        y1 = Float32(r.leaf_j_max + 0.5)
+        push!(pts,
+              Point2f(x0, y0), Point2f(x1, y0),
+              Point2f(x1, y0), Point2f(x1, y1),
+              Point2f(x1, y1), Point2f(x0, y1),
+              Point2f(x0, y1), Point2f(x0, y0))
+    end
+    return segments
+end
+
+function _ql_regular_grid_segments(leaf_nx::Int, leaf_ny::Int,
+                                   stride::Int)
+    pts = Point2f[]
+    for i in 1:stride:(leaf_nx + 1)
+        x = Float32(i - 0.5)
+        push!(pts, Point2f(x, 0.5f0), Point2f(x, Float32(leaf_ny) + 0.5f0))
+    end
+    for j in 1:stride:(leaf_ny + 1)
+        y = Float32(j - 0.5)
+        push!(pts, Point2f(0.5f0, y), Point2f(Float32(leaf_nx) + 0.5f0, y))
+    end
+    push!(pts,
+          Point2f(0.5f0, 0.5f0), Point2f(Float32(leaf_nx) + 0.5f0, 0.5f0),
+          Point2f(Float32(leaf_nx) + 0.5f0, 0.5f0),
+          Point2f(Float32(leaf_nx) + 0.5f0, Float32(leaf_ny) + 0.5f0),
+          Point2f(Float32(leaf_nx) + 0.5f0, Float32(leaf_ny) + 0.5f0),
+          Point2f(0.5f0, Float32(leaf_ny) + 0.5f0),
+          Point2f(0.5f0, Float32(leaf_ny) + 0.5f0), Point2f(0.5f0, 0.5f0))
+    return pts
+end
+
+function _ql_overlay_mesh_wireframe!(ax, rows; leaf_nx::Int, leaf_ny::Int,
+                                     palette=:viridis, alpha=0.90,
+                                     linewidth=0.75)
+    isempty(rows) && return ax
+    levels = [r.level for r in rows]
+    lmin = minimum(levels)
+    lmax = maximum(levels)
+
+    if lmin == lmax && length(rows) > 8000
+        stride = max(1, ceil(Int, max(leaf_nx, leaf_ny) / 64))
+        pts = _ql_regular_grid_segments(leaf_nx, leaf_ny, stride)
+        linesegments!(ax, pts; color=(:black, 0.28), linewidth=0.55)
+        return ax
+    end
+
+    segments_by_level = _ql_mesh_segments_by_level(rows, lmin, lmax)
+    colors = cgrad(palette, max(lmax - lmin + 1, 2), categorical=true)
+    for (idx, pts) in pairs(segments_by_level)
+        isempty(pts) && continue
+        level = lmin + idx - 1
+        lw = linewidth + 0.16 * max(level - lmin, 0)
+        linesegments!(ax, pts; color=(colors[idx], alpha), linewidth=lw)
+    end
+    return ax
+end
+
+function _ql_mesh_cells_from_result_state(result, state)
+    result isa AMRDCartesianChannelQuicklook2D &&
+        return _ql_mesh_cells_uniform(state.leaf_nx, state.leaf_ny,
+                                      getproperty(result, :max_level))
+    hasproperty(result, :spec) &&
+        return _ql_mesh_cells_from_spec(getproperty(result, :spec))
+    if hasproperty(result, :coarse_F) && hasproperty(result, :patch)
+        coarse = getproperty(result, :coarse_F)
+        return _ql_mesh_cells_from_patch(size(coarse, 1), size(coarse, 2),
+                                         getproperty(result, :patch))
+    end
+    return _ql_mesh_cells_uniform(
+        state.leaf_nx, state.leaf_ny, maximum(state.level))
+end
+
+function _ql_probe_i_from_max_level(level::AbstractMatrix{<:Integer})
+    finite_levels = [l for l in level if l >= 0]
+    isempty(finite_levels) && return max(1, size(level, 1) ÷ 2)
+    lmax = maximum(finite_levels)
+    idxs = findall(==(lmax), level)
+    isempty(idxs) && return max(1, size(level, 1) ÷ 2)
+    imin = minimum(I[1] for I in idxs)
+    imax = maximum(I[1] for I in idxs)
+    return clamp(round(Int, 0.5 * (imin + imax)), 1, size(level, 1))
+end
+
+function _ql_overlay_vertical_probe!(ax, i_probe::Int, leaf_ny::Int)
+    lines!(ax, [i_probe, i_probe], [0.5, leaf_ny + 0.5];
+           color=(:black, 0.88), linewidth=2.2, linestyle=:dash)
+    return ax
+end
+
 function _ql_level_color(level::Int)
     palette = (:gray35, :dodgerblue4, :seagreen4, :orange3, :crimson)
     return palette[clamp(level + 1, 1, length(palette))]
@@ -809,7 +907,8 @@ function _ql_profile_residual(profile::AbstractVector,
 end
 
 function _ql_plot_debug_dashboard(path, amr_result, amr_state,
-                                  reference_result, reference_state; title)
+                                  reference_result, reference_state; title,
+                                  convergence_rows=nothing)
     ux_range = _ql_finite_colorrange(vcat(vec(amr_state.fields.ux),
                                           vec(reference_state.fields.ux));
                                      symmetric=true)
@@ -818,32 +917,73 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     level_min = min(minimum(amr_state.level), minimum(reference_state.level))
     level_max = max(maximum(amr_state.level), maximum(reference_state.level))
     level_range = _ql_safe_colorrange(level_min, level_max)
+    amr_mesh = _ql_mesh_cells_from_result_state(amr_result, amr_state)
+    ref_mesh = _ql_mesh_cells_from_result_state(reference_result,
+                                               reference_state)
 
-    fig = Figure(size=(1900, 1650), fontsize=15)
-    ax11 = _ql_heatmap!(fig, 1, 1, "$title cartesian mesh",
+    nx = min(amr_state.leaf_nx, reference_state.leaf_nx)
+    ny = min(amr_state.leaf_ny, reference_state.leaf_ny)
+    i_probe = clamp(_ql_probe_i_from_max_level(amr_state.level), 1, nx)
+    y_probe = (collect(1:ny) .- 0.5) ./ ny
+
+    has_convergence = convergence_rows !== nothing && !isempty(convergence_rows)
+    fig = Figure(size=(1900, has_convergence ? 2050 : 1650), fontsize=15)
+    Label(fig[0, 1:6], title; fontsize=22, tellwidth=false)
+
+    ax11 = _ql_heatmap!(fig, 1, 1, "Cartesian reference mesh",
                         Float64.(reference_state.level);
                         colormap=:viridis, colorrange=level_range)
+    _ql_overlay_mesh_wireframe!(ax11, ref_mesh;
+                                leaf_nx=reference_state.leaf_nx,
+                                leaf_ny=reference_state.leaf_ny,
+                                alpha=0.72, linewidth=0.55)
+    _ql_overlay_vertical_probe!(ax11, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax11, reference_state.is_solid)
-    ax12 = _ql_heatmap!(fig, 1, 3, "$title cartesian ux",
+    ax12 = _ql_heatmap!(fig, 1, 3, "Cartesian ux + mesh",
                         reference_state.fields.ux;
                         colormap=:balance, colorrange=ux_range)
+    _ql_overlay_mesh_wireframe!(ax12, ref_mesh;
+                                leaf_nx=reference_state.leaf_nx,
+                                leaf_ny=reference_state.leaf_ny,
+                                alpha=0.35, linewidth=0.45)
+    _ql_overlay_vertical_probe!(ax12, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax12, reference_state.is_solid)
-    ax13 = _ql_heatmap!(fig, 1, 5, "$title cartesian rho",
+    ax13 = _ql_heatmap!(fig, 1, 5, "Cartesian rho + mesh",
                         reference_state.fields.rho;
                         colormap=:viridis, colorrange=rho_range)
+    _ql_overlay_mesh_wireframe!(ax13, ref_mesh;
+                                leaf_nx=reference_state.leaf_nx,
+                                leaf_ny=reference_state.leaf_ny,
+                                alpha=0.35, linewidth=0.45)
+    _ql_overlay_vertical_probe!(ax13, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax13, reference_state.is_solid)
 
-    ax21 = _ql_heatmap!(fig, 2, 1, "$title AMR-D mesh",
+    ax21 = _ql_heatmap!(fig, 2, 1, "AMR-D mesh",
                         Float64.(amr_state.level);
                         colormap=:viridis, colorrange=level_range)
+    _ql_overlay_mesh_wireframe!(ax21, amr_mesh;
+                                leaf_nx=amr_state.leaf_nx,
+                                leaf_ny=amr_state.leaf_ny,
+                                alpha=0.96, linewidth=0.95)
+    _ql_overlay_vertical_probe!(ax21, i_probe, amr_state.leaf_ny)
     _ql_overlay_solid!(ax21, amr_state.is_solid)
-    ax22 = _ql_heatmap!(fig, 2, 3, "$title AMR-D ux",
+    ax22 = _ql_heatmap!(fig, 2, 3, "AMR-D ux + mesh",
                         amr_state.fields.ux;
                         colormap=:balance, colorrange=ux_range)
+    _ql_overlay_mesh_wireframe!(ax22, amr_mesh;
+                                leaf_nx=amr_state.leaf_nx,
+                                leaf_ny=amr_state.leaf_ny,
+                                alpha=0.92, linewidth=0.82)
+    _ql_overlay_vertical_probe!(ax22, i_probe, amr_state.leaf_ny)
     _ql_overlay_solid!(ax22, amr_state.is_solid)
-    ax23 = _ql_heatmap!(fig, 2, 5, "$title AMR-D rho",
+    ax23 = _ql_heatmap!(fig, 2, 5, "AMR-D rho + mesh",
                         amr_state.fields.rho;
                         colormap=:viridis, colorrange=rho_range)
+    _ql_overlay_mesh_wireframe!(ax23, amr_mesh;
+                                leaf_nx=amr_state.leaf_nx,
+                                leaf_ny=amr_state.leaf_ny,
+                                alpha=0.92, linewidth=0.82)
+    _ql_overlay_vertical_probe!(ax23, i_probe, amr_state.leaf_ny)
     _ql_overlay_solid!(ax23, amr_state.is_solid)
 
     amr_profile, analytic = _ql_profile_vectors(amr_result, amr_state)
@@ -851,10 +991,9 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     y_amr = _ql_profile_axis(length(amr_profile))
     y_ref = _ql_profile_axis(length(ref_profile))
     y_analytic = _ql_profile_axis(length(analytic))
-    amr_residual = _ql_profile_residual(amr_profile, analytic)
-    ref_residual = _ql_profile_residual(ref_profile, analytic)
 
-    ax31 = Axis(fig[3, 1:2]; title="$title mean ux(y) vs analytic",
+    ax31 = Axis(fig[3, 1:2];
+                title="row-mean ux(y), averaged over all fluid x",
                 xlabel="ux", ylabel="y/Ly")
     _ql_lines_finite!(ax31, ref_profile, y_ref; label="classic Cartesian",
                       color=:dodgerblue4, linewidth=2.5)
@@ -867,11 +1006,8 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
      _ql_has_finite_pairs(analytic, y_analytic)) &&
         axislegend(ax31, position=:rb)
 
-    nx = min(amr_state.leaf_nx, reference_state.leaf_nx)
-    ny = min(amr_state.leaf_ny, reference_state.leaf_ny)
-    i_probe = clamp(round(Int, 0.75 * nx), 1, nx)
-    y_probe = (collect(1:ny) .- 0.5) ./ ny
-    ax32 = Axis(fig[3, 3:4]; title="$title vertical ux probe vs analytic",
+    ax32 = Axis(fig[3, 3:4];
+                title="vertical ux(y) probe at x leaf $i_probe",
                 xlabel="ux", ylabel="y/Ly")
     _ql_lines_finite!(ax32, reference_state.fields.ux[i_probe, 1:ny],
                       y_probe; label="classic Cartesian",
@@ -887,18 +1023,52 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
      _ql_has_finite_pairs(analytic, y_analytic)) &&
         axislegend(ax32, position=:rb)
 
-    err_range = _ql_finite_colorrange(vcat(amr_residual, ref_residual);
+    probe_diff = amr_state.fields.ux[i_probe, 1:ny] .-
+        reference_state.fields.ux[i_probe, 1:ny]
+    mean_diff = _ql_profile_residual(amr_profile, ref_profile)
+    err_range = _ql_finite_colorrange(vcat(probe_diff, mean_diff);
                                       symmetric=true)
-    ax33 = Axis(fig[3, 5:6]; title="$title mean profile error",
-                xlabel="ux - analytic", ylabel="y/Ly")
-    _ql_lines_finite!(ax33, ref_residual, y_ref; label="classic Cartesian",
-                      color=:dodgerblue4, linewidth=2.4)
-    _ql_lines_finite!(ax33, amr_residual, y_amr; label="AMR-D",
+    ax33 = Axis(fig[3, 5:6];
+                title="AMR-D minus Cartesian profile errors",
+                xlabel="ux difference", ylabel="y/Ly")
+    _ql_lines_finite!(ax33, mean_diff, y_amr; label="row mean",
+                      color=:purple4, linewidth=2.4)
+    _ql_lines_finite!(ax33, probe_diff, y_probe; label="vertical probe",
                       color=:orangered, linewidth=2.6)
     xlims!(ax33, err_range...)
-    (_ql_has_finite_pairs(ref_residual, y_ref) ||
-     _ql_has_finite_pairs(amr_residual, y_amr)) &&
+    (_ql_has_finite_pairs(mean_diff, y_amr) ||
+     _ql_has_finite_pairs(probe_diff, y_probe)) &&
         axislegend(ax33, position=:rb)
+
+    if has_convergence
+        steps = [r.step for r in convergence_rows]
+        ux_linf = [r.ux_linf_delta for r in convergence_rows]
+        ux_limit = [r.ux_delta_limit for r in convergence_rows]
+        rho_linf = [r.rho_linf_delta for r in convergence_rows]
+        rho_limit = [r.rho_delta_limit for r in convergence_rows]
+        mass_drift = [r.mass_rel_drift for r in convergence_rows]
+
+        ax41 = Axis(fig[4, 1:2]; title="temporal ux convergence",
+                    xlabel="steps", ylabel="Linf delta ux")
+        _ql_lines_finite!(ax41, steps, ux_linf; label="delta ux",
+                          color=:dodgerblue4, linewidth=2.4)
+        _ql_lines_finite!(ax41, steps, ux_limit; label="limit",
+                          color=:black, linestyle=:dash, linewidth=2.0)
+        axislegend(ax41, position=:rt)
+
+        ax42 = Axis(fig[4, 3:4]; title="temporal rho convergence",
+                    xlabel="steps", ylabel="Linf delta rho")
+        _ql_lines_finite!(ax42, steps, rho_linf; label="delta rho",
+                          color=:seagreen4, linewidth=2.4)
+        _ql_lines_finite!(ax42, steps, rho_limit; label="limit",
+                          color=:black, linestyle=:dash, linewidth=2.0)
+        axislegend(ax42, position=:rt)
+
+        ax43 = Axis(fig[4, 5:6]; title="mass drift after correction",
+                    xlabel="steps", ylabel="relative drift")
+        _ql_lines_finite!(ax43, steps, mass_drift; label="mass drift",
+                          color=:crimson, linewidth=2.4)
+    end
 
     save(path, fig)
     return path

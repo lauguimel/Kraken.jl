@@ -179,11 +179,10 @@ function _temp_write_convergence_csv(path, rows)
 end
 
 function _temp_existing_case_summary(case, case_dir::AbstractString)
-    mesh_png = joinpath(case_dir, "mesh_levels.png")
     dashboard_png = joinpath(case_dir, "debug_dashboard.png")
     convergence_csv = joinpath(case_dir, "convergence.csv")
     values_csv = joinpath(case_dir, "values.csv")
-    all(isfile, (mesh_png, dashboard_png, convergence_csv, values_csv)) ||
+    all(isfile, (dashboard_png, convergence_csv, values_csv)) ||
         return nothing
 
     lines = readlines(convergence_csv)
@@ -192,57 +191,9 @@ function _temp_existing_case_summary(case, case_dir::AbstractString)
     length(fields) >= 3 || return nothing
     return (;
         case=case.name, flow=case.flow, status=Symbol(fields[3]),
-        steps=parse(Int, fields[2]), outdir=case_dir, mesh_png=mesh_png,
+        steps=parse(Int, fields[2]), outdir=case_dir,
         dashboard_png=dashboard_png, convergence_csv=convergence_csv,
         values_csv=values_csv)
-end
-
-function _temp_mesh_segments_by_level(rows, lmin::Int, lmax::Int)
-    nlevels = max(lmax - lmin + 1, 0)
-    segments = [Point2f[] for _ in 1:nlevels]
-    for r in rows
-        idx = clamp(r.level - lmin + 1, 1, nlevels)
-        pts = segments[idx]
-        x0 = Float32(r.leaf_i_min - 0.5)
-        x1 = Float32(r.leaf_i_max + 0.5)
-        y0 = Float32(r.leaf_j_min - 0.5)
-        y1 = Float32(r.leaf_j_max + 0.5)
-        push!(pts,
-              Point2f(x0, y0), Point2f(x1, y0),
-              Point2f(x1, y0), Point2f(x1, y1),
-              Point2f(x1, y1), Point2f(x0, y1),
-              Point2f(x0, y1), Point2f(x0, y0))
-    end
-    return segments
-end
-
-function _temp_plot_mesh_levels(path, rows; title, leaf_nx, leaf_ny,
-                                is_solid=falses(0, 0))
-    palettes = (:viridis, :magma, :plasma)
-    fig = Figure(size=(2100, 700), fontsize=15)
-    levels = [r.level for r in rows]
-    lmin = isempty(levels) ? 0 : minimum(levels)
-    lmax = isempty(levels) ? 1 : maximum(levels)
-    nlevels = max(lmax - lmin + 1, 0)
-    segments_by_level = _temp_mesh_segments_by_level(rows, lmin, lmax)
-
-    for (col, palette) in enumerate(palettes)
-        ax = Axis(fig[1, col]; title="$title mesh $(palette)",
-                  xlabel="x leaf", ylabel="y leaf", aspect=DataAspect())
-        _ql_overlay_solid!(ax, is_solid)
-        colors = cgrad(palette, max(nlevels, 2), categorical=true)
-        for (idx, pts) in pairs(segments_by_level)
-            isempty(pts) && continue
-            level = lmin + idx - 1
-            linewidth = level == lmax ? 0.55 : 0.35
-            linesegments!(ax, pts; color=(colors[idx], 0.70),
-                          linewidth=linewidth)
-        end
-        xlims!(ax, 0.5, leaf_nx + 0.5)
-        ylims!(ax, 0.5, leaf_ny + 0.5)
-    end
-    save(path, fig)
-    return path
 end
 
 function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
@@ -250,26 +201,43 @@ function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
     speed_range = _ql_finite_colorrange(state.fields.speed)
     rho_range = _ql_finite_colorrange(state.fields.rho)
     ux_range = _ql_finite_colorrange(state.fields.ux; symmetric=true)
+    level_range = _ql_safe_colorrange(minimum(state.level),
+                                      maximum(state.level))
+    mesh_rows = _ql_mesh_cells_from_result_state(amr.result, state)
+    i_probe = _ql_probe_i_from_max_level(state.level)
     profile, analytic = _ql_profile_vectors(amr.result, state)
     y_profile = _ql_profile_axis(length(profile))
     steps = [r.step for r in convergence_rows]
     ux_delta = [r.ux_linf_delta for r in convergence_rows]
 
-    fig = Figure(size=(1900, 1250), fontsize=15)
-    ax1 = _ql_heatmap!(fig, 1, 1, "$(case.name) AMR-D |u|",
+    fig = Figure(size=(1900, 1650), fontsize=15)
+    Label(fig[0, 1:6], case.name; fontsize=22, tellwidth=false)
+    ax1 = _ql_heatmap!(fig, 1, 1, "AMR-D |u| + mesh",
                        state.fields.speed; colormap=:viridis,
                        colorrange=speed_range)
+    _ql_overlay_mesh_wireframe!(ax1, mesh_rows; leaf_nx=state.leaf_nx,
+                                leaf_ny=state.leaf_ny, alpha=0.92,
+                                linewidth=0.82)
+    _ql_overlay_vertical_probe!(ax1, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax1, state.is_solid)
-    ax2 = _ql_heatmap!(fig, 1, 3, "$(case.name) AMR-D ux",
+    ax2 = _ql_heatmap!(fig, 1, 3, "AMR-D ux + mesh",
                        state.fields.ux; colormap=:balance,
                        colorrange=ux_range)
+    _ql_overlay_mesh_wireframe!(ax2, mesh_rows; leaf_nx=state.leaf_nx,
+                                leaf_ny=state.leaf_ny, alpha=0.92,
+                                linewidth=0.82)
+    _ql_overlay_vertical_probe!(ax2, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax2, state.is_solid)
-    ax3 = _ql_heatmap!(fig, 1, 5, "$(case.name) AMR-D rho",
+    ax3 = _ql_heatmap!(fig, 1, 5, "AMR-D rho + mesh",
                        state.fields.rho; colormap=:magma,
                        colorrange=rho_range)
+    _ql_overlay_mesh_wireframe!(ax3, mesh_rows; leaf_nx=state.leaf_nx,
+                                leaf_ny=state.leaf_ny, alpha=0.92,
+                                linewidth=0.82)
+    _ql_overlay_vertical_probe!(ax3, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax3, state.is_solid)
 
-    ax4 = Axis(fig[2, 1:2]; title="$(case.name) mean ux(y)",
+    ax4 = Axis(fig[2, 1:2]; title="row-mean ux(y), averaged over fluid x",
                xlabel="ux", ylabel="y/Ly")
     _ql_lines_finite!(ax4, profile, y_profile; label="AMR-D",
                       color=:orangered, linewidth=2.5)
@@ -280,14 +248,17 @@ function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
      _ql_has_finite_pairs(analytic, _ql_profile_axis(length(analytic)))) &&
         axislegend(ax4, position=:rb)
 
-    ax5 = Axis(fig[2, 3:4]; title="$(case.name) temporal convergence",
+    ax5 = Axis(fig[2, 3:4]; title="temporal ux convergence",
                xlabel="steps", ylabel="Linf delta ux")
     _ql_lines_finite!(ax5, steps, ux_delta; color=:dodgerblue4,
                       linewidth=2.4)
-    ax6 = _ql_heatmap!(fig, 2, 5, "$(case.name) level",
+    ax6 = _ql_heatmap!(fig, 2, 5, "AMR-D level + mesh",
                        Float64.(state.level); colormap=:plasma,
-                       colorrange=_ql_safe_colorrange(
-                           minimum(state.level), maximum(state.level)))
+                       colorrange=level_range)
+    _ql_overlay_mesh_wireframe!(ax6, mesh_rows; leaf_nx=state.leaf_nx,
+                                leaf_ny=state.leaf_ny, alpha=0.96,
+                                linewidth=0.95)
+    _ql_overlay_vertical_probe!(ax6, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax6, state.is_solid)
     save(path, fig)
     return path
@@ -297,21 +268,9 @@ function _temp_final_dashboard(path, case, amr, reference, convergence_rows)
     if reference !== nothing
         return _ql_plot_debug_dashboard(
             path, amr.result, amr.state, reference.result, reference.state;
-            title=case.name)
+            title=case.name, convergence_rows=convergence_rows)
     end
     return _temp_plot_single_dashboard(path, case, amr, convergence_rows)
-end
-
-function _temp_mesh_rows(result, state)
-    result isa AMRDCartesianChannelQuicklook2D &&
-        return _ql_mesh_cells_uniform(state.leaf_nx, state.leaf_ny,
-                                      getproperty(result, :max_level))
-    hasproperty(result, :spec) &&
-        return _ql_mesh_cells_from_spec(getproperty(result, :spec))
-    return _ql_mesh_cells_from_patch(
-        size(getproperty(result, :coarse_F), 1),
-        size(getproperty(result, :coarse_F), 2),
-        getproperty(result, :patch))
 end
 
 function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
@@ -413,11 +372,6 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         _temp_write_convergence_csv(
             joinpath(case_dir, "convergence.csv"), convergence_rows)
         _temp_write_values_csv(joinpath(case_dir, "values.csv"), value_rows)
-        mesh_rows = _temp_mesh_rows(amr.result, amr.state)
-        _temp_plot_mesh_levels(
-            joinpath(case_dir, "mesh_levels.png"), mesh_rows;
-            title=case.name, leaf_nx=amr.state.leaf_nx,
-            leaf_ny=amr.state.leaf_ny, is_solid=amr.state.is_solid)
         _temp_final_dashboard(
             joinpath(case_dir, "debug_dashboard.png"), case, amr_record,
             reference, convergence_rows)
@@ -425,7 +379,6 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         push!(summary_rows, (;
             case=case.name, flow=case.flow, status=final_status,
             steps=steps, outdir=case_dir,
-            mesh_png=joinpath(case_dir, "mesh_levels.png"),
             dashboard_png=joinpath(case_dir, "debug_dashboard.png"),
             convergence_csv=joinpath(case_dir, "convergence.csv"),
             values_csv=joinpath(case_dir, "values.csv")))
@@ -435,11 +388,11 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
     end
 
     open(joinpath(outdir, "summary.csv"), "w") do io
-        println(io, "case,flow,status,steps,outdir,mesh_png,dashboard_png,convergence_csv,values_csv")
+        println(io, "case,flow,status,steps,outdir,dashboard_png,convergence_csv,values_csv")
         for r in summary_rows
             println(io, join((r.case, r.flow, r.status, r.steps, r.outdir,
-                              r.mesh_png, r.dashboard_png,
-                              r.convergence_csv, r.values_csv), ","))
+                              r.dashboard_png, r.convergence_csv,
+                              r.values_csv), ","))
         end
     end
     return summary_rows
