@@ -643,6 +643,26 @@ end
                        atol=1e-12, rtol=0)
         @test maximum(abs.(Fout[spec.active_cells, :] .-
                            Fin[spec.active_cells, :])) <= 1e-14
+
+        fill!(Fout, 0.0)
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:periodic_x_wall_y,
+            coarse_to_fine_predictor_weight=0.5)
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
+
+        fill!(Fout, 0.0)
+        Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+            Fout, Fin, spec, table; boundary=:periodic_x_wall_y,
+            coarse_to_fine_prolongation=:limited_linear)
+        @test isapprox(sum(active_population_sums_F_2d(Fout, spec)),
+                       sum(active_population_sums_F_2d(Fin, spec));
+                       atol=1e-12, rtol=0)
+        @test maximum(abs.(Fout[spec.active_cells, :] .-
+                           Fin[spec.active_cells, :])) <= 1e-14
     end
 
     @testset "level-native route sampling is isolated behind explicit scaling" begin

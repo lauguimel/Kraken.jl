@@ -17,6 +17,7 @@ struct ConservativeTreeRouteTable2D
     boundary_route_ranges_by_level::Vector{UnitRange{Int}}
     split_route_ranges_by_parent_level::Vector{UnitRange{Int}}
     coalesce_route_ranges_by_child_level::Vector{UnitRange{Int}}
+    source_q_has_split_route::Matrix{Bool}
 end
 
 function _active_leaf_covering_sample_2d(spec::ConservativeTreeSpec2D,
@@ -404,6 +405,19 @@ function _partition_interface_route_ids_by_level_2d!(
     return split_ranges, coalesce_ranges
 end
 
+function _source_q_split_route_flags_2d(
+        spec::ConservativeTreeSpec2D,
+        routes::Vector{ConservativeTreeRoute2D},
+        interface_routes::Vector{Int})
+    flags = falses(length(spec.cells), 9)
+    @inbounds for route_id in interface_routes
+        route = routes[route_id]
+        _is_split_route_kind_2d(route.kind) || continue
+        flags[route.src, route.q] = true
+    end
+    return flags
+end
+
 """
     create_conservative_tree_route_table_2d(spec; periodic_x=false,
                                             sampling=:leaf_equivalent)
@@ -477,10 +491,12 @@ function create_conservative_tree_route_table_2d(spec::ConservativeTreeSpec2D;
     split_ranges, coalesce_ranges =
         _partition_interface_route_ids_by_level_2d!(
             interface_routes, spec, routes)
+    source_q_has_split_route = _source_q_split_route_flags_2d(
+        spec, routes, interface_routes)
 
     return ConservativeTreeRouteTable2D(
         links, routes, same_level_links, coarse_to_fine_links,
         fine_to_coarse_links, boundary_links, direct_routes, interface_routes,
         boundary_routes, direct_ranges, boundary_ranges,
-        split_ranges, coalesce_ranges)
+        split_ranges, coalesce_ranges, source_q_has_split_route)
 end

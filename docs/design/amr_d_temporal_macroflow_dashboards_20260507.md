@@ -69,6 +69,13 @@ Dashboard interpretation:
 
 Current diagnosis:
 
+- A 2026-05-07 follow-up fixed a real initialization bug in the buffered
+  scheduler: inactive parent restriction buffers are now built immediately
+  after the active state is stored, before the first `sync_down`. Without this,
+  predictor and spatial reconstruction paths saw zero-valued inactive parents
+  at the first coarse/fine exchange. Surgical guards now cover four-level
+  periodic-x wall-y rest states with both `coarse_to_fine_predictor_weight=0.5`
+  and `coarse_to_fine_prolongation=:limited_linear`.
 - The nested x-band and y-band dashboards use the same classic Cartesian
   transient reference for Poiseuille. If those rows look different, inspect the
   AMR-D row/probe/axis scaling first; the reference CSV values are identical
@@ -79,10 +86,12 @@ Current diagnosis:
   Cartesian reference at 2560 AMR-D steps. The row mean can still show steps
   because it averages across both coarse and refined regions.
 - `amr_d_poiseuille_yband_nested4_debug` is not a plotting-only problem and is
-  not fixed by the current 2560-step run. AMR-D reaches `ux_max=1.197e-3`
-  while the Cartesian reference reaches `ux_max=2.306e-3`; the last checkpoint
-  has `ux_linf_delta=3.33e-5`, so the run is already near a plateau. Treat this
-  as a negative nested/interface diagnostic, not as a validation gate.
+  not fixed by the current 2560-step run. After the initial-restriction fix,
+  the 640-step local dashboard is much healthier (`ux_max=8.63e-4` vs
+  Cartesian `9.60e-4`), but the 2560-step run still plateaus low
+  (`ux_max=1.269e-3` vs Cartesian `2.306e-3`) with zero corrected mass drift.
+  Treat this as a negative nested/interface diagnostic, not as a validation
+  gate.
 - A separate surgical canary verifies that a full-domain nested Poiseuille
   tree reproduces the uniform Cartesian transient profile at the same physical
   time. This isolates the y-band failure to wall-normal refinement/interface
@@ -95,20 +104,24 @@ Current diagnosis:
   4.2e-6`) but overshoots by 2560 steps (`ux_max = 3.86e-3` vs Cartesian
   `2.31e-3`). This confirms that wall-normal coarse/fine interface closure is
   still not validation-grade.
-- A local Filippova-Hänel scalar rescaling A/B check at 640 steps
-  (`alpha_c2f=2`, `alpha_f2c=0.5`) did not recover the missing y-band velocity;
-  this points to the wall-normal interface/closure placement rather than a
-  simple missing constant alpha in the current packet reconstruction.
+- A local Filippova-Hänel scalar rescaling A/B check at 640 steps was rerun
+  after the restriction fix. `alpha_c2f=2`, `alpha_f2c=0.5` still does not
+  recover the missing y-band velocity and is slightly worse than `1,1`; this
+  points to the wall-normal interface/closure placement rather than a simple
+  missing constant alpha in the current packet reconstruction.
 - A conservative coarse-to-fine temporal predictor is now wired into the
   subcycled macro-flow runners. It uses a 50% blend between the committed
   parent state and a local post-collision parent predictor for coarse-to-fine
   packets, while keeping the flat packet geometry. Surgical tests show that it
   reduces the short-time wall-normal y-band bias while preserving roundoff mass
   conservation and keeping the x-band `linf` regression below 5% on the canary.
-- Limited-linear spatial prolongation remains a separate future patch. The
-  local A/B audit showed that it can improve some y-band profiles, but it must
-  close split, direct residual, boundary, and recursive parent states as one
-  link-level conservative packet group before it is safe to expose.
+- Limited-linear spatial prolongation is available only as an explicit
+  experimental kernel option. It preserves four-level rest mass after the
+  restriction fix and slightly improves short-time y-band L2 in local A/B runs,
+  but it is not exposed through KRK and is not the production default. The
+  production macro-flow runners intentionally stay on flat coarse-to-fine
+  packets until the wall-normal interface closure has a stronger validation
+  story and a cheaper packet cache.
 - A route-sampling audit isolated another candidate cause: subcycled coarse
   same-level packets should eventually move one cell of their own level, while
   the current production table keeps the historical leaf-equivalent sampling.

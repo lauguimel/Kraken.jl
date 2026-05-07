@@ -744,6 +744,158 @@ end
         alpha=alpha)
 end
 
+@inline function _check_conservative_tree_coarse_to_fine_prolongation_2d(
+        prolongation::Symbol)
+    prolongation in (:flat, :limited_linear) ||
+        throw(ArgumentError("coarse_to_fine_prolongation must be :flat or :limited_linear"))
+    return prolongation
+end
+
+@inline function _conservative_tree_same_level_Fq_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        level::Int,
+        i::Int,
+        j::Int,
+        q::Int;
+        periodic_x::Bool=false)
+    nx = _conservative_tree_level_size_2d(spec.Nx, level)
+    ny = _conservative_tree_level_size_2d(spec.Ny, level)
+    ii = periodic_x ? mod1(i, nx) : i
+    1 <= ii <= nx && 1 <= j <= ny ||
+        return false, zero(eltype(F))
+    cell_id = conservative_tree_cell_id_2d(spec, level, ii, j)
+    cell_id == 0 && return false, zero(eltype(F))
+    return true, F[cell_id, q]
+end
+
+function _conservative_tree_limited_same_level_slope_x_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int;
+        periodic_x::Bool=false)
+    src = spec.cells[src_id]
+    center = F[src_id, q]
+    has_left, left_value = _conservative_tree_same_level_Fq_2d(
+        F, spec, src.level, src.i - 1, src.j, q; periodic_x=periodic_x)
+    has_right, right_value = _conservative_tree_same_level_Fq_2d(
+        F, spec, src.level, src.i + 1, src.j, q; periodic_x=periodic_x)
+    if has_left && has_right
+        return _minmod(center - left_value, right_value - center)
+    elseif has_left
+        return center - left_value
+    elseif has_right
+        return right_value - center
+    end
+    return zero(center)
+end
+
+function _conservative_tree_limited_same_level_slope_y_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int)
+    src = spec.cells[src_id]
+    center = F[src_id, q]
+    has_south, south_value = _conservative_tree_same_level_Fq_2d(
+        F, spec, src.level, src.i, src.j - 1, q)
+    has_north, north_value = _conservative_tree_same_level_Fq_2d(
+        F, spec, src.level, src.i, src.j + 1, q)
+    if has_south && has_north
+        return _minmod(center - south_value, north_value - center)
+    elseif has_south
+        return center - south_value
+    elseif has_north
+        return north_value - center
+    end
+    return zero(center)
+end
+
+function _conservative_tree_limited_linear_child_packet_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int,
+        si::Int,
+        sj::Int,
+        scale::Int;
+        periodic_x::Bool=false)
+    center = F[src_id, q]
+    sx = _conservative_tree_limited_same_level_slope_x_2d(
+        F, spec, src_id, q; periodic_x=periodic_x)
+    sy = _conservative_tree_limited_same_level_slope_y_2d(
+        F, spec, src_id, q)
+
+    area = inv(typeof(center)(scale * scale))
+    max_offset = typeof(center)(scale - 1) / typeof(center)(2 * scale)
+    max_delta = (abs(sx) + abs(sy)) * max_offset * area
+    base = center * area
+    if max_delta > zero(max_delta) && base < max_delta
+        theta = base / max_delta
+        sx *= theta
+        sy *= theta
+    end
+
+    xoff = (typeof(center)(si) - (typeof(center)(scale) + one(center)) / 2) /
+        typeof(center)(scale)
+    yoff = (typeof(center)(sj) - (typeof(center)(scale) + one(center)) / 2) /
+        typeof(center)(scale)
+    return base + (sx * xoff + sy * yoff) * area
+end
+
+function _conservative_tree_limited_linear_sampled_route_packet_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        route::ConservativeTreeRoute2D;
+        periodic_x::Bool=false)
+    src = spec.cells[route.src]
+    sample_level = spec.max_level
+    src.level < sample_level ||
+        throw(ArgumentError("limited-linear sampled route source is already finest"))
+    q = _check_d2q9_q(route.q)
+    cx = d2q9_cx(q)
+    cy = d2q9_cy(q)
+    scale = 1 << (sample_level - src.level)
+    nx_sample = _conservative_tree_level_size_2d(spec.Nx, sample_level)
+    packet = zero(eltype(F))
+
+    @inbounds for sj in 1:scale, si in 1:scale
+        sample_i = (src.i - 1) * scale + si + cx
+        sample_j = (src.j - 1) * scale + sj + cy
+        if periodic_x
+            sample_i = mod1(sample_i, nx_sample)
+        end
+        dst_id = _active_leaf_covering_sample_2d(
+            spec, sample_level, sample_i, sample_j)
+        dst_id == route.dst || continue
+        kind = _route_kind_for_level_pair_2d(src, spec.cells[dst_id], q)
+        kind == route.kind || continue
+        packet += _conservative_tree_limited_linear_child_packet_2d(
+            F, spec, route.src, q, si, sj, scale; periodic_x=periodic_x)
+    end
+    return packet
+end
+
+function _subcycle_coarse_to_fine_route_packet_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        route::ConservativeTreeRoute2D;
+        alpha=1,
+        coarse_to_fine_prolongation::Symbol=:flat,
+        periodic_x::Bool=false)
+    mode = _check_conservative_tree_coarse_to_fine_prolongation_2d(
+        coarse_to_fine_prolongation)
+    if mode == :limited_linear
+        a = typeof(zero(eltype(F)) + alpha)(alpha)
+        a == one(a) ||
+            throw(ArgumentError("limited-linear coarse-to-fine prolongation currently requires alpha_c2f = 1"))
+        return _conservative_tree_limited_linear_sampled_route_packet_2d(
+            F, spec, route; periodic_x=periodic_x)
+    end
+    return _subcycle_route_packet_2d(F, spec, route; alpha=alpha)
+end
+
 @inline function _check_conservative_tree_coarse_to_fine_state_2d(
         coarse_to_fine_state::Symbol)
     coarse_to_fine_state in (:owned, :postcollision) ||
@@ -789,7 +941,9 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
         F::AbstractMatrix,
         route::ConservativeTreeRoute2D;
         alpha=1,
-        interface_time_scaling::Symbol=:leaf_equivalent)
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        coarse_to_fine_prolongation::Symbol=:flat,
+        periodic_x::Bool=false)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER ||
         throw(ArgumentError("route must be a coarse-to-fine split route"))
@@ -811,7 +965,10 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
     qi = _check_d2q9_q(route.q)
     packet = _conservative_tree_c2f_time_factor_2d(
         bank, interface_time_scaling) *
-        _subcycle_route_packet_2d(F, spec, route; alpha=alpha)
+        _subcycle_coarse_to_fine_route_packet_2d(
+            F, spec, route; alpha=alpha,
+            coarse_to_fine_prolongation=coarse_to_fine_prolongation,
+            periodic_x=periodic_x)
 
     @inbounds for substep in 1:bank.schedule.ratio
         pair.coarse_to_fine[ix, iy, qi, substep, slot] +=
@@ -840,7 +997,9 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
         F::AbstractMatrix,
         table::ConservativeTreeRouteTable2D;
         alpha=1,
-        interface_time_scaling::Symbol=:leaf_equivalent)
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        coarse_to_fine_prolongation::Symbol=:flat,
+        periodic_x::Bool=false)
     parent_level = _check_subcycle_spatial_sync_down_event_2d(bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
@@ -850,7 +1009,9 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
         route = table.routes[route_id]
         conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
             bank, F, route; alpha=alpha,
-            interface_time_scaling=interface_time_scaling)
+            interface_time_scaling=interface_time_scaling,
+            coarse_to_fine_prolongation=coarse_to_fine_prolongation,
+            periodic_x=periodic_x)
     end
     return bank
 end
@@ -1124,8 +1285,12 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
         u_south=0,
         u_north=0,
         rho_wall=1,
-        is_solid=nothing)
+        is_solid=nothing,
+        coarse_to_fine_prolongation::Symbol=:flat,
+        periodic_x::Bool=false)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
+    prolongation = _check_conservative_tree_coarse_to_fine_prolongation_2d(
+        coarse_to_fine_prolongation)
 
     @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
         route_id = table.direct_routes[route_pos]
@@ -1133,12 +1298,21 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
         src_cell = spec.cells[route.src]
         _conservative_tree_cell_is_solid_2d(spec, src_cell, is_solid) &&
             continue
+        packet = if prolongation == :limited_linear &&
+                    route.weight < 1.0 &&
+                    src_cell.level < spec.max_level &&
+                    table.source_q_has_split_route[route.src, route.q]
+            _conservative_tree_limited_linear_sampled_route_packet_2d(
+                Fin, spec, route; periodic_x=periodic_x)
+        else
+            route.weight * Fin[route.src, route.q]
+        end
         if _conservative_tree_cell_is_solid_2d(
                 spec, spec.cells[route.dst], is_solid)
             Fout[route.src, d2q9_opposite(route.q)] +=
-                route.weight * Fin[route.src, route.q]
+                packet
         else
-            Fout[route.dst, route.q] += route.weight * Fin[route.src, route.q]
+            Fout[route.dst, route.q] += packet
         end
     end
     @inbounds for route_pos in table.boundary_route_ranges_by_level[level + 1]
@@ -1341,6 +1515,7 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         alpha_c2f=1,
         alpha_f2c=1,
         interface_time_scaling::Symbol=:leaf_equivalent,
+        coarse_to_fine_prolongation::Symbol=:flat,
         coarse_to_fine_state::Symbol=:owned,
         coarse_to_fine_predictor_weight=0,
         pre_stream_level! = nothing,
@@ -1357,6 +1532,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         coarse_to_fine_predictor_weight)
     _check_conservative_tree_interface_time_scaling_2d(
         interface_time_scaling)
+    _check_conservative_tree_coarse_to_fine_prolongation_2d(
+        coarse_to_fine_prolongation)
     is_solid === nothing ||
         validate_conservative_tree_solid_mask_resolved_2d(
             spec, table, is_solid)
@@ -1391,10 +1568,12 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
     reset_conservative_tree_subcycle_spatial_bank_2d!(route_bank_run)
     reset_conservative_tree_subcycle_buffer_bank_2d!(state_bank_run)
     conservative_tree_subcycle_store_active_owned_2d!(state_bank_run, Fin)
+    conservative_tree_subcycle_restrict_all_levels_2d!(state_bank_run)
     Fsource_run = Fsource === nothing ? similar(Fout) : Fsource
     Fscratch_run = Fscratch === nothing ? similar(Fout) : Fscratch
     _check_conservative_tree_F_2d(Fsource_run, spec)
     _check_conservative_tree_F_2d(Fscratch_run, spec)
+    periodic_x = _conservative_tree_periodic_x_policy_2d(policy)
 
     for event in schedule_run.events
         if event.phase == :sync_down
@@ -1405,7 +1584,9 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             predictor_weight = coarse_to_fine_state == :postcollision ?
                 one(eltype(Fsource_run)) :
                 eltype(Fsource_run)(coarse_to_fine_predictor_weight)
-            needs_level_source = predictor_weight > zero(predictor_weight)
+            needs_level_source =
+                predictor_weight > zero(predictor_weight) ||
+                coarse_to_fine_prolongation == :limited_linear
             if needs_level_source
                 fill!(Fsource_run, zero(eltype(Fsource_run)))
                 _copy_conservative_tree_level_rows_2d!(
@@ -1435,7 +1616,9 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             end
             conservative_tree_subcycle_sync_down_routes_F_2d!(
                 route_bank_run, event, Fparent, table; alpha=alpha_c2f,
-                interface_time_scaling=interface_time_scaling)
+                interface_time_scaling=interface_time_scaling,
+                coarse_to_fine_prolongation=coarse_to_fine_prolongation,
+                periodic_x=periodic_x)
         elseif event.phase == :advance
             level = event.src_level
             buffers = state_bank_run.levels[level + 1]
@@ -1461,7 +1644,9 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch_run, Fsource_run, spec, table, level, policy;
                 u_south=u_south, u_north=u_north, rho_wall=rho_wall,
-                is_solid=is_solid)
+                is_solid=is_solid,
+                coarse_to_fine_prolongation=coarse_to_fine_prolongation,
+                periodic_x=periodic_x)
             if level > 0
                 fill!(buffers.ghost_from_coarse,
                       zero(eltype(buffers.ghost_from_coarse)))
