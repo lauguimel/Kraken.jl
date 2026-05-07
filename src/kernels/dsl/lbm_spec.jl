@@ -95,7 +95,7 @@ const CANONICAL_ARG_ORDER = [
     # integer scalars
     :Nx, :Ny, :Nz,
     # float scalars
-    :ω, :s_plus, :s_minus, :source_scale,
+    :ω, :s_plus, :s_minus, :source_scale, :source_on_cutlinks,
 ]
 
 function _canonical_sort(args::AbstractVector{Symbol})

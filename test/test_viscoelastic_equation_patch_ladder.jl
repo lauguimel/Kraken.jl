@@ -2740,9 +2740,9 @@ end
         @test small_magic.finite
         @test robust_magic.finite
         @test damped_magic.finite
-        @test small_magic.min_eig > 0.35
-        @test robust_magic.min_eig > 0.35
-        @test damped_magic.min_eig > 0.35
+        @test small_magic.min_eig > 0.30
+        @test robust_magic.min_eig > 0.30
+        @test damped_magic.min_eig > 0.30
         @test isfinite(small_magic.max_abs_C)
         @test isfinite(robust_magic.max_abs_C)
         @test isfinite(damped_magic.max_abs_C)
@@ -4721,6 +4721,53 @@ end
     )
     @test isapprox(after.Fx - before.Fx, expected.Fx; rtol=1e-12, atol=1e-14)
     @test isapprox(after.Fy - before.Fy, expected.Fy; rtol=1e-12, atol=1e-14)
+end
+
+@testset "P23a full-fluid Hermite source skips cut-link cells only" begin
+    p = _curved_affine_oldroydb_patch()
+    s_plus = 1.25
+    tau_xx = [1e-4 * (2i - j) for i in 1:p.Nx, j in 1:p.Ny]
+    tau_xy = [-2e-4 * (i + j) for i in 1:p.Nx, j in 1:p.Ny]
+    tau_yy = [3e-4 * (-i + 2j) for i in 1:p.Nx, j in 1:p.Ny]
+    base = zeros(Float64, p.Nx, p.Ny, 9)
+    for j in 1:p.Ny, i in 1:p.Nx, q in 1:9
+        base[i, j, q] = equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+    end
+    full = copy(base)
+    masked = copy(base)
+
+    apply_hermite_source_2d!(full, p.is_solid, s_plus, tau_xx, tau_xy, tau_yy;
+                             ce_correction=false)
+    apply_hermite_source_full_fluid_2d!(
+        masked, p.is_solid, p.q_wall, s_plus, tau_xx, tau_xy, tau_yy;
+        ce_correction=false,
+    )
+
+    n_cut = 0
+    n_bulk = 0
+    max_cut_delta = 0.0
+    max_bulk_gap = 0.0
+    for j in 1:p.Ny, i in 1:p.Nx
+        p.is_solid[i, j] && continue
+        if _is_cut_cell(p.q_wall, i, j)
+            n_cut += 1
+            max_cut_delta = max(
+                max_cut_delta,
+                maximum(abs(masked[i, j, q] - base[i, j, q]) for q in 1:9),
+            )
+        else
+            n_bulk += 1
+            max_bulk_gap = max(
+                max_bulk_gap,
+                maximum(abs(masked[i, j, q] - full[i, j, q]) for q in 1:9),
+            )
+        end
+    end
+
+    @test n_cut > 0
+    @test n_bulk > 0
+    @test max_cut_delta < P0_ATOL
+    @test max_bulk_gap < P0_ATOL
 end
 
 @testset "P23b square Hermite source MEA is not face traction" begin

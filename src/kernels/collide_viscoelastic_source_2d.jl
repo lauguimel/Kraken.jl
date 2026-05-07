@@ -176,6 +176,61 @@ end
     return false
 end
 
+@kernel function apply_hermite_source_full_fluid_2d_kernel!(
+        f, @Const(is_solid), @Const(q_wall), s_plus,
+        @Const(tau_p_xx), @Const(tau_p_xy), @Const(tau_p_yy),
+        source_scale, apply_domain_walls, Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds if !is_solid[i, j] &&
+                 !_has_wall_cut_link_2d(q_wall, i, j) &&
+                 (apply_domain_walls ||
+                  (i != 1 && i != Nx && j != 1 && j != Ny))
+        T = eltype(f)
+        txx = tau_p_xx[i,j]; txy = tau_p_xy[i,j]; tyy = tau_p_yy[i,j]
+        pre = -s_plus * T(9.0/2.0) * source_scale
+        cs2 = T(1/3)
+        wr = T(4/9); wa = T(1/9); we = T(1/36)
+
+        T1 = pre * wr * (-cs2*(txx + tyy))
+        T2 = pre * wa * ((one(T)-cs2)*txx - cs2*tyy)
+        T3 = pre * wa * (-cs2*txx + (one(T)-cs2)*tyy)
+        T6 = pre * we * ((one(T)-cs2)*txx + (one(T)-cs2)*tyy + T(2)*txy)
+        T7 = pre * we * ((one(T)-cs2)*txx + (one(T)-cs2)*tyy - T(2)*txy)
+
+        f[i,j,1] += T1
+        f[i,j,2] += T2; f[i,j,4] += T2
+        f[i,j,3] += T3; f[i,j,5] += T3
+        f[i,j,6] += T6; f[i,j,8] += T6
+        f[i,j,7] += T7; f[i,j,9] += T7
+    end
+end
+
+"""
+    apply_hermite_source_full_fluid_2d!(f, is_solid, q_wall, s_plus,
+        tau_p_xx, tau_p_xy, tau_p_yy; ce_correction=true)
+
+Post-collision Hermite stress source restricted to cells with no explicit
+cut-link in `q_wall`. This is the full-fluid volumetric source counterpart to
+an explicit polymer wall-traction integral; it avoids injecting the bulk
+Hermite population source on wall-intersected cells.
+"""
+function apply_hermite_source_full_fluid_2d!(f, is_solid, q_wall, s_plus,
+                                             tau_p_xx, tau_p_xy, tau_p_yy;
+                                             ce_correction::Bool=true,
+                                             source_scale::Real=1,
+                                             apply_y_domain_walls::Bool=true)
+    backend = KernelAbstractions.get_backend(f)
+    Nx, Ny = size(f, 1), size(f, 2)
+    T = eltype(f)
+    source_scale_t = T(source_scale) *
+        (ce_correction ? inv(one(T) - T(s_plus) / T(2)) : one(T))
+    kernel! = apply_hermite_source_full_fluid_2d_kernel!(backend)
+    kernel!(f, is_solid, q_wall, T(s_plus), tau_p_xx, tau_p_xy, tau_p_yy,
+            source_scale_t, apply_y_domain_walls, Nx, Ny;
+            ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
 @inline function _clean_stress_sample_2d(is_solid, q_wall, i, j, Nx, Ny)
     return 1 <= i <= Nx && 1 <= j <= Ny &&
            !is_solid[i, j] &&

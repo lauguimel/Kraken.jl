@@ -548,7 +548,10 @@ Confined-cylinder Oldroyd-B benchmark using:
 
 `solvent_source_mode` controls where the Hermite stress source is inserted:
 - `:post_collision` (default): current split path, `TRT+LI-BB` then
-  `apply_hermite_source_2d!`.
+  a standalone Hermite source. By default it is restricted to full-fluid
+  cells (`solvent_source_on_cutlinks=false`); cut-link polymer traction must be
+  accounted for by the explicit wall-stress integral, not by a bulk source
+  applied on wall-intersected cells.
 - `:integrated_collision`: experimental path, source fused into the
   `TRT+LI-BB` collision kernel.
 
@@ -612,6 +615,7 @@ function run_conformation_cylinder_libb_2d(;
         source_scale_dynamics::Union{Nothing,Real}=nothing,
         hydrodynamic_warmup_steps::Integer=0,
         solvent_source_on_domain_walls::Bool=false,
+        solvent_source_on_cutlinks::Bool=false,
         diagnostic_interval::Integer=0,
         allow_diagnostic_polymer_bc::Bool=false,
         allow_diagnostic_force_mode::Bool=false,
@@ -689,7 +693,7 @@ function run_conformation_cylinder_libb_2d(;
     source_scale_dynamics = isnothing(source_scale_dynamics) ?
         1.0 : Float64(source_scale_dynamics)
 
-    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Re_R Re_D Wi beta λ_p tau_plus solvent_magic conformation_magic conformation_collision conformation_divergence_mode conformation_gradient_mode conformation_initial_condition hydrodynamic_warmup_steps wall_geometry inlet u_max u_ref drag_mode hermite_source_mode solvent_source_mode momentum_exchange_mode source_stress_reconstruction source_stress_reconstruction_order source_scale_dynamics solvent_source_on_domain_walls polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
+    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Re_R Re_D Wi beta λ_p tau_plus solvent_magic conformation_magic conformation_collision conformation_divergence_mode conformation_gradient_mode conformation_initial_condition hydrodynamic_warmup_steps wall_geometry inlet u_max u_ref drag_mode hermite_source_mode solvent_source_mode momentum_exchange_mode source_stress_reconstruction source_stress_reconstruction_order source_scale_dynamics solvent_source_on_domain_walls solvent_source_on_cutlinks polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
 
     # Precompute cylinder cut-link geometry (q_wall ∈ [0,1] per link)
     q_wall_h, is_solid_h = precompute_q_wall_cylinder(Nx, Ny, cx_f, cy_f,
@@ -882,7 +886,8 @@ function run_conformation_cylinder_libb_2d(;
                                              tau_p_xx, tau_p_xy, tau_p_yy,
                                              Nx, Ny, FT(ν_s);
                                              Λ = solvent_magic,
-                                             source_scale = FT(source_scale_dynamics))
+                                             source_scale = FT(source_scale_dynamics),
+                                             source_on_cutlinks = solvent_source_on_cutlinks)
         else
             fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
                                       q_wall, uw_x, uw_y, Nx, Ny, FT(ν_s);
@@ -937,11 +942,21 @@ function run_conformation_cylinder_libb_2d(;
                 source_tau_xy = tau_p_xy_source
                 source_tau_yy = tau_p_yy_source
             end
-            apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
-                                       source_tau_xx, source_tau_xy, source_tau_yy;
-                                       ce_correction = hermite_source_mode === :ce_corrected,
-                                       source_scale = source_scale_dynamics,
-                                       apply_y_domain_walls = solvent_source_on_domain_walls)
+            if solvent_source_on_cutlinks
+                apply_hermite_source_2d!(f_out, is_solid, s_plus_s,
+                                           source_tau_xx, source_tau_xy, source_tau_yy;
+                                           ce_correction = hermite_source_mode === :ce_corrected,
+                                           source_scale = source_scale_dynamics,
+                                           apply_y_domain_walls = solvent_source_on_domain_walls)
+            else
+                apply_hermite_source_full_fluid_2d!(
+                    f_out, is_solid, q_wall, s_plus_s,
+                    source_tau_xx, source_tau_xy, source_tau_yy;
+                    ce_correction = hermite_source_mode === :ce_corrected,
+                    source_scale = source_scale_dynamics,
+                    apply_y_domain_walls = solvent_source_on_domain_walls,
+                )
+            end
         end
 
         # Total MEA after direct stress embedding. This is the default Cd path
@@ -1118,6 +1133,7 @@ function run_conformation_cylinder_libb_2d(;
             source_stress_reconstruction=source_stress_reconstruction,
             source_stress_reconstruction_order=source_stress_reconstruction_order,
             solvent_source_on_domain_walls=solvent_source_on_domain_walls,
+            solvent_source_on_cutlinks=solvent_source_on_cutlinks,
             solvent_magic=Float64(solvent_magic),
             conformation_magic=Float64(conformation_magic),
             conformation_collision=conformation_collision,

@@ -332,7 +332,8 @@ export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!,
        apply_ylw_balance_conformation_2d!,
        reset_cutlink_conformation_equilibrium_2d!
 export collide_viscoelastic_source_2d!, collide_viscoelastic_source_guo_2d!
-export apply_hermite_source_2d!, reconstruct_wall_cell_stress_from_interior_2d!
+export apply_hermite_source_2d!, apply_hermite_source_full_fluid_2d!,
+       reconstruct_wall_cell_stress_from_interior_2d!
 export reconstruct_wall_link_value_2d
 # 3D viscoelastic (D3Q19 port)
 export collide_conformation_3d!, init_conformation_field_3d!

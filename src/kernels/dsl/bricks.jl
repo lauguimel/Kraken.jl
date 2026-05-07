@@ -145,7 +145,8 @@ end
 "TRT collision with Liu/Yu Hermite stress source written directly to f_out."
 struct CollideTRTDirectHermite <: LBMBrick end
 required_args(::CollideTRTDirectHermite) =
-    (:f_out, :s_plus, :s_minus, :tau_p_xx, :tau_p_xy, :tau_p_yy, :source_scale)
+    (:f_out, :s_plus, :s_minus, :q_wall,
+     :tau_p_xx, :tau_p_xy, :tau_p_yy, :source_scale, :source_on_cutlinks)
 emit_code(::CollideTRTDirectHermite) = quote
     feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
     feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
@@ -159,10 +160,17 @@ emit_code(::CollideTRTDirectHermite) = quote
     a = (s_plus + s_minus) * T(0.5)
     b = (s_plus - s_minus) * T(0.5)
 
+    cut_link = false
+    if !source_on_cutlinks
+        for qsrc in 2:9
+            cut_link |= q_wall[i, j, qsrc] > zero(T)
+        end
+    end
     txx = tau_p_xx[i, j]
     txy = tau_p_xy[i, j]
     tyy = tau_p_yy[i, j]
-    pre = -s_plus * T(9.0 / 2.0) * source_scale
+    local_source_scale = cut_link ? zero(T) : source_scale
+    pre = -s_plus * T(9.0 / 2.0) * local_source_scale
     cs2 = T(1 / 3)
     wr = T(4 / 9)
     wa = T(1 / 9)

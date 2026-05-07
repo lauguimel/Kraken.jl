@@ -81,7 +81,8 @@ function fused_trt_libb_v2_hermite_step!(f_out, f_in, ρ, ux, uy, is_solid,
                                            q_wall, uw_link_x, uw_link_y,
                                            tau_p_xx, tau_p_xy, tau_p_yy,
                                            Nx, Ny, ν; Λ::Real=3/16,
-                                           source_scale::Real=1)
+                                           source_scale::Real=1,
+                                           source_on_cutlinks::Bool=true)
     backend = KernelAbstractions.get_backend(f_in)
     ET = eltype(f_in)
     s_plus, s_minus = trt_rates(ν; Λ=Λ)
@@ -89,6 +90,7 @@ function fused_trt_libb_v2_hermite_step!(f_out, f_in, ρ, ux, uy, is_solid,
     kernel!(f_out, ρ, ux, uy, f_in, is_solid,
             q_wall, uw_link_x, uw_link_y,
             tau_p_xx, tau_p_xy, tau_p_yy,
-            Nx, Ny, ET(s_plus), ET(s_minus), ET(source_scale);
+            Nx, Ny, ET(s_plus), ET(s_minus), ET(source_scale),
+            source_on_cutlinks;
             ndrange=(Nx, Ny))
 end
