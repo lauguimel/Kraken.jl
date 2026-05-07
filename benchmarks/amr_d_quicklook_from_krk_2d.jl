@@ -527,10 +527,13 @@ function _ql_rect!(ax, i0, i1, j0, j1; color, linewidth)
     return ax
 end
 
-function _ql_mesh_segments_by_level(rows, lmin::Int, lmax::Int)
+function _ql_mesh_segments_by_level(rows, lmin::Int, lmax::Int;
+                                    max_level=nothing)
+    draw_lmax = max_level === nothing ? lmax : min(lmax, Int(max_level))
     nlevels = max(lmax - lmin + 1, 0)
     segments = [Point2f[] for _ in 1:nlevels]
     for r in rows
+        r.level <= draw_lmax || continue
         idx = clamp(r.level - lmin + 1, 1, nlevels)
         pts = segments[idx]
         x0 = Float32(r.leaf_i_min - 0.5)
@@ -569,28 +572,41 @@ end
 
 function _ql_overlay_mesh_wireframe!(ax, rows; leaf_nx::Int, leaf_ny::Int,
                                      palette=:viridis, alpha=0.90,
-                                     linewidth=0.75)
+                                     linewidth=0.75, wire_color=nothing,
+                                     max_level=nothing)
     isempty(rows) && return ax
     levels = [r.level for r in rows]
     lmin = minimum(levels)
     lmax = maximum(levels)
+    draw_lmax = max_level === nothing ? lmax : min(lmax, Int(max_level))
 
     if lmin == lmax && length(rows) > 8000
-        stride = max(1, ceil(Int, max(leaf_nx, leaf_ny) / 64))
+        stride = max_level === nothing || lmin <= Int(max_level) ? 1 :
+            1 << min(lmin - Int(max_level), 30)
         pts = _ql_regular_grid_segments(leaf_nx, leaf_ny, stride)
-        linesegments!(ax, pts; color=(:black, 0.28), linewidth=0.55)
+        color = wire_color === nothing ? :black : wire_color
+        linesegments!(ax, pts; color=(color, alpha), linewidth=linewidth)
         return ax
     end
 
-    segments_by_level = _ql_mesh_segments_by_level(rows, lmin, lmax)
+    segments_by_level = _ql_mesh_segments_by_level(
+        rows, lmin, lmax; max_level=draw_lmax)
     colors = cgrad(palette, max(lmax - lmin + 1, 2), categorical=true)
     for (idx, pts) in pairs(segments_by_level)
         isempty(pts) && continue
         level = lmin + idx - 1
+        level <= draw_lmax || continue
         lw = linewidth + 0.16 * max(level - lmin, 0)
-        linesegments!(ax, pts; color=(colors[idx], alpha), linewidth=lw)
+        color = wire_color === nothing ? colors[idx] : wire_color
+        linesegments!(ax, pts; color=(color, alpha), linewidth=lw)
     end
     return ax
+end
+
+function _ql_dashboard_max_wire_level()
+    raw = strip(get(ENV, "KRK_AMR_D_DASHBOARD_MAX_WIRE_LEVEL", "3"))
+    isempty(raw) && return 3
+    return parse(Int, raw)
 end
 
 function _ql_mesh_cells_from_result_state(result, state)
@@ -921,6 +937,7 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     amr_mesh = _ql_mesh_cells_from_result_state(amr_result, amr_state)
     ref_mesh = _ql_mesh_cells_from_result_state(reference_result,
                                                reference_state)
+    max_wire_level = _ql_dashboard_max_wire_level()
 
     nx = min(amr_state.leaf_nx, reference_state.leaf_nx)
     ny = min(amr_state.leaf_ny, reference_state.leaf_ny)
@@ -937,25 +954,19 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     _ql_overlay_mesh_wireframe!(ax11, ref_mesh;
                                 leaf_nx=reference_state.leaf_nx,
                                 leaf_ny=reference_state.leaf_ny,
-                                alpha=0.72, linewidth=0.55)
+                                alpha=0.78, linewidth=0.82,
+                                wire_color=:black,
+                                max_level=max_wire_level)
     _ql_overlay_vertical_probe!(ax11, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax11, reference_state.is_solid)
-    ax12 = _ql_heatmap!(fig, 1, 3, "Cartesian transient ux + mesh",
+    ax12 = _ql_heatmap!(fig, 1, 3, "Cartesian transient ux",
                         reference_state.fields.ux;
                         colormap=:balance, colorrange=ux_range)
-    _ql_overlay_mesh_wireframe!(ax12, ref_mesh;
-                                leaf_nx=reference_state.leaf_nx,
-                                leaf_ny=reference_state.leaf_ny,
-                                alpha=0.35, linewidth=0.45)
     _ql_overlay_vertical_probe!(ax12, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax12, reference_state.is_solid)
-    ax13 = _ql_heatmap!(fig, 1, 5, "Cartesian transient rho + mesh",
+    ax13 = _ql_heatmap!(fig, 1, 5, "Cartesian transient rho",
                         reference_state.fields.rho;
                         colormap=:viridis, colorrange=rho_range)
-    _ql_overlay_mesh_wireframe!(ax13, ref_mesh;
-                                leaf_nx=reference_state.leaf_nx,
-                                leaf_ny=reference_state.leaf_ny,
-                                alpha=0.35, linewidth=0.45)
     _ql_overlay_vertical_probe!(ax13, i_probe, reference_state.leaf_ny)
     _ql_overlay_solid!(ax13, reference_state.is_solid)
 
@@ -965,25 +976,19 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     _ql_overlay_mesh_wireframe!(ax21, amr_mesh;
                                 leaf_nx=amr_state.leaf_nx,
                                 leaf_ny=amr_state.leaf_ny,
-                                alpha=0.96, linewidth=0.95)
+                                alpha=0.92, linewidth=1.05,
+                                wire_color=:black,
+                                max_level=max_wire_level)
     _ql_overlay_vertical_probe!(ax21, i_probe, amr_state.leaf_ny)
     _ql_overlay_solid!(ax21, amr_state.is_solid)
-    ax22 = _ql_heatmap!(fig, 2, 3, "AMR-D ux + mesh",
+    ax22 = _ql_heatmap!(fig, 2, 3, "AMR-D ux",
                         amr_state.fields.ux;
                         colormap=:balance, colorrange=ux_range)
-    _ql_overlay_mesh_wireframe!(ax22, amr_mesh;
-                                leaf_nx=amr_state.leaf_nx,
-                                leaf_ny=amr_state.leaf_ny,
-                                alpha=0.92, linewidth=0.82)
     _ql_overlay_vertical_probe!(ax22, i_probe, amr_state.leaf_ny)
     _ql_overlay_solid!(ax22, amr_state.is_solid)
-    ax23 = _ql_heatmap!(fig, 2, 5, "AMR-D rho + mesh",
+    ax23 = _ql_heatmap!(fig, 2, 5, "AMR-D rho",
                         amr_state.fields.rho;
                         colormap=:viridis, colorrange=rho_range)
-    _ql_overlay_mesh_wireframe!(ax23, amr_mesh;
-                                leaf_nx=amr_state.leaf_nx,
-                                leaf_ny=amr_state.leaf_ny,
-                                alpha=0.92, linewidth=0.82)
     _ql_overlay_vertical_probe!(ax23, i_probe, amr_state.leaf_ny)
     _ql_overlay_solid!(ax23, amr_state.is_solid)
 

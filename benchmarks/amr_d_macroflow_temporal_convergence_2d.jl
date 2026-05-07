@@ -199,12 +199,12 @@ end
 
 function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
     state = amr.state
-    speed_range = _ql_finite_colorrange(state.fields.speed)
     rho_range = _ql_finite_colorrange(state.fields.rho)
     ux_range = _ql_finite_colorrange(state.fields.ux; symmetric=true)
     level_range = _ql_safe_colorrange(minimum(state.level),
                                       maximum(state.level))
     mesh_rows = _ql_mesh_cells_from_result_state(amr.result, state)
+    max_wire_level = _ql_dashboard_max_wire_level()
     i_probe = _ql_probe_i_from_max_level(state.level)
     profile, analytic = _ql_profile_vectors(amr.result, state)
     y_profile = _ql_profile_axis(length(profile))
@@ -213,28 +213,23 @@ function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
 
     fig = Figure(size=(1900, 1650), fontsize=15)
     Label(fig[0, 1:6], case.name; fontsize=22, tellwidth=false)
-    ax1 = _ql_heatmap!(fig, 1, 1, "AMR-D |u| + mesh",
-                       state.fields.speed; colormap=:viridis,
-                       colorrange=speed_range)
+    ax1 = _ql_heatmap!(fig, 1, 1, "AMR-D mesh",
+                       Float64.(state.level); colormap=:viridis,
+                       colorrange=level_range)
     _ql_overlay_mesh_wireframe!(ax1, mesh_rows; leaf_nx=state.leaf_nx,
                                 leaf_ny=state.leaf_ny, alpha=0.92,
-                                linewidth=0.82)
+                                linewidth=1.05, wire_color=:black,
+                                max_level=max_wire_level)
     _ql_overlay_vertical_probe!(ax1, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax1, state.is_solid)
-    ax2 = _ql_heatmap!(fig, 1, 3, "AMR-D ux + mesh",
+    ax2 = _ql_heatmap!(fig, 1, 3, "AMR-D ux",
                        state.fields.ux; colormap=:balance,
                        colorrange=ux_range)
-    _ql_overlay_mesh_wireframe!(ax2, mesh_rows; leaf_nx=state.leaf_nx,
-                                leaf_ny=state.leaf_ny, alpha=0.92,
-                                linewidth=0.82)
     _ql_overlay_vertical_probe!(ax2, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax2, state.is_solid)
-    ax3 = _ql_heatmap!(fig, 1, 5, "AMR-D rho + mesh",
+    ax3 = _ql_heatmap!(fig, 1, 5, "AMR-D rho",
                        state.fields.rho; colormap=:magma,
                        colorrange=rho_range)
-    _ql_overlay_mesh_wireframe!(ax3, mesh_rows; leaf_nx=state.leaf_nx,
-                                leaf_ny=state.leaf_ny, alpha=0.92,
-                                linewidth=0.82)
     _ql_overlay_vertical_probe!(ax3, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax3, state.is_solid)
 
@@ -253,12 +248,9 @@ function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
                xlabel="steps", ylabel="Linf delta ux")
     _ql_lines_finite!(ax5, steps, ux_delta; color=:dodgerblue4,
                       linewidth=2.4)
-    ax6 = _ql_heatmap!(fig, 2, 5, "AMR-D level + mesh",
+    ax6 = _ql_heatmap!(fig, 2, 5, "AMR-D level",
                        Float64.(state.level); colormap=:plasma,
                        colorrange=level_range)
-    _ql_overlay_mesh_wireframe!(ax6, mesh_rows; leaf_nx=state.leaf_nx,
-                                leaf_ny=state.leaf_ny, alpha=0.96,
-                                linewidth=0.95)
     _ql_overlay_vertical_probe!(ax6, i_probe, state.leaf_ny)
     _ql_overlay_solid!(ax6, state.is_solid)
     save(path, fig)
