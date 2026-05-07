@@ -145,6 +145,38 @@ using KernelAbstractions
         @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
     end
 
+    @testset "direct-level pull packs match scheduler route primitive" begin
+        blocks = ConservativeTreeRefineBlock2D[
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ]
+        spec = create_conservative_tree_spec_2d(8, 6, blocks)
+        table = create_conservative_tree_route_table_2d(
+            spec; periodic_x=true, sampling=:leaf_equivalent)
+        Fin = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fref = similar(Fin)
+        Fgpu = similar(Fin)
+
+        for (cell_id, cell) in pairs(spec.cells), q in 1:9
+            Fin[cell_id, q] =
+                0.02 + 0.001 * q + 0.0001 * cell.level +
+                0.00001 * cell.i + 0.000001 * cell.j
+        end
+
+        for level in 0:spec.max_level
+            fill!(Fref, 0)
+            fill!(Fgpu, 0)
+            Kraken._stream_conservative_tree_direct_level_routes_F_2d!(
+                Fref, Fin, spec, table, level, :periodic_x_wall_y;
+                periodic_x=true)
+            pull = pack_conservative_tree_gpu_direct_level_pull_routes_2d(
+                spec, table, level; boundary=:periodic_x_wall_y, T=Float64)
+            stream_conservative_tree_gpu_pull_routes_F_2d!(Fgpu, Fin, pull)
+
+            @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+        end
+    end
+
     if get(ENV, "KRAKEN_TEST_METAL", "0") == "1"
         @testset "Metal smoke for pull stream and active-level collision" begin
             @eval using Metal
@@ -172,6 +204,18 @@ using KernelAbstractions
                     pull, backend)
                 stream_conservative_tree_gpu_pull_routes_F_2d!(
                     Foutd, Fd, pull_d)
+                @test isapprox(Array(Foutd), Fref; atol=2e-6, rtol=2e-6)
+
+                level_pull = pack_conservative_tree_gpu_direct_level_pull_routes_2d(
+                    spec, table, 1; boundary=:periodic_x_wall_y, T=Float32)
+                level_pull_d = transfer_conservative_tree_gpu_pull_pack_2d(
+                    level_pull, backend)
+                fill!(Fref, 0)
+                Kraken._stream_conservative_tree_direct_level_routes_F_2d!(
+                    Fref, Fin, spec, table, 1, :periodic_x_wall_y;
+                    periodic_x=true)
+                stream_conservative_tree_gpu_pull_routes_F_2d!(
+                    Foutd, Fd, level_pull_d)
                 @test isapprox(Array(Foutd), Fref; atol=2e-6, rtol=2e-6)
 
                 cell_pack_d = transfer_conservative_tree_gpu_cell_pack_2d(

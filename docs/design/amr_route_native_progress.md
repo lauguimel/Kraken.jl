@@ -35,6 +35,8 @@ Implemented:
 - device-transferable pull-route pack for multilevel conservative-tree specs;
 - no-atomic pull streaming over a full route table, including stationary wall
   reflection encoded as normal pull entries;
+- scheduler-aligned direct-level pull packs, excluding interface routes so
+  coarse/fine traffic remains ledger-owned;
 - device-transferable active-cell metric pack;
 - KernelAbstractions active-level Guo collision kernel, verified against the
   CPU AMR-D reference;

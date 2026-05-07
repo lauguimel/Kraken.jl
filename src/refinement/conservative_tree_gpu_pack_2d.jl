@@ -130,28 +130,26 @@ function conservative_tree_gpu_route_weight_sums_2d(
     return sums
 end
 
-"""
-    pack_conservative_tree_gpu_pull_routes_2d(spec, table; boundary=:skip, T=Float32)
-
-Build a no-atomic pull-stream pack for a conservative-tree route table. Each
-output `(cell, q)` owns a short CSR list of incoming packets
-`weight * Fin[src, src_q]`. Stationary wall boundary reflection is encoded as
-normal pull entries to `opposite(q)` in the source cell.
-"""
-function pack_conservative_tree_gpu_pull_routes_2d(
+function _pack_conservative_tree_gpu_pull_route_ids_2d(
         spec::ConservativeTreeSpec2D,
-        table::ConservativeTreeRouteTable2D;
+        table::ConservativeTreeRouteTable2D,
+        route_ids;
         boundary::Symbol=:skip,
         T::Type{<:Real}=Float32)
     policy = _conservative_tree_gpu_stream_boundary_policy_2d(boundary)
     n_cells = length(spec.cells)
     buckets = [Tuple{Int32,UInt8,T}[] for _ in 1:(n_cells * 9)]
 
-    @inbounds for route in table.routes
+    @inbounds for route_id in route_ids
+        route = table.routes[route_id]
         dst = route.dst
         dst_q = route.q
         if dst == 0
             policy == :skip && continue
+            if policy == :periodic_x_wall_y
+                d2q9_cy(route.q) != 0 ||
+                    throw(ArgumentError("periodic-x wall-y GPU pack received an x-boundary route; rebuild the route table with periodic_x=true"))
+            end
             dst = route.src
             dst_q = d2q9_opposite(route.q)
         end
@@ -188,6 +186,52 @@ function pack_conservative_tree_gpu_pull_routes_2d(
         typeof(pull_count),typeof(pull_src),typeof(pull_q),
         typeof(pull_weight)}(Int32(n_cells), pull_first, pull_count,
                              pull_src, pull_q, pull_weight)
+end
+
+"""
+    pack_conservative_tree_gpu_pull_routes_2d(spec, table; boundary=:skip, T=Float32)
+
+Build a no-atomic pull-stream pack for a conservative-tree route table. Each
+output `(cell, q)` owns a short CSR list of incoming packets
+`weight * Fin[src, src_q]`. Stationary wall boundary reflection is encoded as
+normal pull entries to `opposite(q)` in the source cell.
+"""
+function pack_conservative_tree_gpu_pull_routes_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D;
+        boundary::Symbol=:skip,
+        T::Type{<:Real}=Float32)
+    return _pack_conservative_tree_gpu_pull_route_ids_2d(
+        spec, table, eachindex(table.routes); boundary=boundary, T=T)
+end
+
+"""
+    pack_conservative_tree_gpu_direct_level_pull_routes_2d(spec, table, level;
+                                                           boundary=:skip,
+                                                           T=Float32)
+
+Build the no-atomic pull-stream pack for the scheduler's direct route pass at
+one active level. Interface routes are deliberately excluded; coarse/fine
+packets remain owned by the subcycling ledgers.
+"""
+function pack_conservative_tree_gpu_direct_level_pull_routes_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D,
+        level::Integer;
+        boundary::Symbol=:skip,
+        T::Type{<:Real}=Float32)
+    l = Int(level)
+    0 <= l <= spec.max_level ||
+        throw(ArgumentError("level is outside the conservative-tree spec"))
+    route_ids = Int[]
+    @inbounds for route_pos in table.direct_route_ranges_by_level[l + 1]
+        push!(route_ids, table.direct_routes[route_pos])
+    end
+    @inbounds for route_pos in table.boundary_route_ranges_by_level[l + 1]
+        push!(route_ids, table.boundary_routes[route_pos])
+    end
+    return _pack_conservative_tree_gpu_pull_route_ids_2d(
+        spec, table, route_ids; boundary=boundary, T=T)
 end
 
 function transfer_conservative_tree_gpu_pull_pack_2d(
