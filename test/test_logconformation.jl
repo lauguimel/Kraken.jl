@@ -60,7 +60,7 @@ using Kraken, KernelAbstractions
         @test r1.drag_mode === :post_source_mea
         @test r1.hermite_source_mode === :liu_direct
         @test r1.solvent_source_mode === :post_collision
-        @test r1.conformation_magic == 0.01
+        @test r1.conformation_magic == 0.25
         @test r1.momentum_exchange_mode === :mei_reconstruct
         @test r1.Cd == r1.Cd_mea_post_source
         @test r1.Cd_split_explicit ≈ r1.Cd_s + r1.Cd_p

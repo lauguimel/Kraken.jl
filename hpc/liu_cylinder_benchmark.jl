@@ -18,6 +18,10 @@
 #   Wi=0.5 → Cd ≈ 126.31
 #   Wi=1.0 → Cd ≈ 151.31
 #
+# By default this script keeps Liu's small polymer TRT magic parameter
+# (`Λp=1e-6`; the cylinder section also reports `2.5e-7`). The production
+# driver default is intentionally different and BGK-equivalent.
+#
 # Usage:
 #   julia --project=. hpc/liu_cylinder_benchmark.jl
 #   KRAKEN_LIU_VARIANTS=cnebb_wall_aware,extrap_eq_wallfit4 \
@@ -158,8 +162,12 @@ source_scale_dynamics =
     parse(Float64, get(ENV, "KRAKEN_SOURCE_SCALE_DYNAMICS", "1.0"))
 solvent_source_on_domain_walls =
     get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_DOMAIN_WALLS", "0") == "1"
+solvent_source_on_cutlinks =
+    get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_CUTLINKS", "0") == "1"
 conformation_magic =
     parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "1e-6"))
+tau_plus =
+    parse(Float64, get(ENV, "KRAKEN_TAU_PLUS", "1.0"))
 conformation_collision =
     Symbol(get(ENV, "KRAKEN_CONFORMATION_COLLISION", "trt"))
 conformation_divergence_mode =
@@ -174,7 +182,7 @@ diagnostic_interval =
 println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
 println("VARIANTS=$(join((v.label for v in variants), ","))")
 println("MODELS=$(join(models, ","))")
-println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
+println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks tau_plus=$tau_plus conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
 
 for R in R_values
     # Liu uses Re = U_avg · R / ν → solve for ν_total given u_mean, R, Re
@@ -220,7 +228,7 @@ for R in R_values
         r = run_conformation_cylinder_libb_2d(;
                 Nx=Nx, Ny=Ny, radius=R, cx=cx, cy=cy,
                 u_mean=FT(u_mean), ν_s=FT(ν_s),
-                polymer_model=polymer_model, tau_plus=one(FT),
+                polymer_model=polymer_model, tau_plus=FT(tau_plus),
                 inlet=:parabolic, ρ_out=one(FT),
                 max_steps=max_steps, avg_window=avg_window,
                 polymer_bc=variant.bc,
@@ -237,11 +245,13 @@ for R in R_values
                 source_stress_reconstruction_order=source_stress_reconstruction_order,
                 source_scale_dynamics=source_scale_dynamics,
                 solvent_source_on_domain_walls=solvent_source_on_domain_walls,
+                solvent_source_on_cutlinks=solvent_source_on_cutlinks,
                 diagnostic_interval=diagnostic_interval,
                 allow_diagnostic_polymer_bc=!(variant.bc isa CNEBB ||
                                               variant.bc isa ExtrapEqWallBC),
                 allow_diagnostic_force_mode=drag_mode === :source_scaled_mea,
-                allow_diagnostic_conformation_collision=conformation_collision !== :trt,
+                allow_diagnostic_conformation_collision=
+                    conformation_collision !== :trt || abs(tau_plus - 1.0) > 1e-12,
                 allow_diagnostic_log_wall_bc=model_name === :logconf,
                 backend=backend, FT=FT)
         dt = time() - t0

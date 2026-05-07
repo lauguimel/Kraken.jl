@@ -2839,7 +2839,7 @@ end
     end
 end
 
-@testset "P18b3 cartesian step driver defaults use robust CDE knobs" begin
+@testset "P18b3 cartesian step driver defaults use BGK-equivalent CDE knobs" begin
     geom = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=2)
     result = run_conformation_step_libb_2d(;
         geometry=geom,
@@ -2851,7 +2851,7 @@ end
         max_steps=1,
         avg_window=1,
     )
-    @test result.conformation_magic ≈ 0.01 atol=0.0 rtol=0.0
+    @test result.conformation_magic ≈ 0.25 atol=0.0 rtol=0.0
     @test haskey(pairs(result), :conformation_divergence_mode)
     @test result.conformation_divergence_mode === :trace_free
     @test result.hermite_source_mode === :liu_direct
