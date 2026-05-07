@@ -534,13 +534,16 @@ end
     @test m_yy ≈ -s_plus * scale * tyy atol=P0_ATOL
 end
 
-@testset "P1c Hermite polymer source can skip y-domain walls" begin
+@testset "P1c Hermite polymer source can skip domain walls" begin
     full = _hermite_source_delta_field(; apply_y_domain_walls=true)
     skipped = _hermite_source_delta_field(; apply_y_domain_walls=false)
     Nx, Ny, _ = size(full)
+    @test maximum(abs, skipped[1, :, :]) < P0_ATOL
+    @test maximum(abs, skipped[Nx, :, :]) < P0_ATOL
     @test maximum(abs, skipped[:, 1, :]) < P0_ATOL
     @test maximum(abs, skipped[:, Ny, :]) < P0_ATOL
-    @test maximum(abs, skipped[:, 2:Ny-1, :] .- full[:, 2:Ny-1, :]) < P0_ATOL
+    @test maximum(abs, skipped[2:Nx-1, 2:Ny-1, :] .-
+                       full[2:Nx-1, 2:Ny-1, :]) < P0_ATOL
 end
 
 @testset "P1b bulk Hermite source recovers Newtonian shear viscosity" begin
