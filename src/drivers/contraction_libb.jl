@@ -97,8 +97,8 @@ function run_conformation_step_libb_2d(;
         backend=KernelAbstractions.CPU(), FT=Float64)
     hermite_source_mode in (:ce_corrected, :liu_direct) ||
         error("unknown hermite_source_mode $(hermite_source_mode); expected :ce_corrected or :liu_direct")
-    conformation_divergence_mode in (:numerical, :trace_free) ||
-        error("unknown conformation_divergence_mode $(conformation_divergence_mode); expected :numerical or :trace_free")
+    conformation_divergence_mode in (:numerical, :trace_free, :trace_free_conservative) ||
+        error("unknown conformation_divergence_mode $(conformation_divergence_mode); expected :numerical, :trace_free, or :trace_free_conservative")
     _assert_validation_polymer_wall_bc(polymer_bc;
                                        allow_diagnostic=allow_diagnostic_polymer_bc)
     _assert_validation_conformation_collision_window(:trt, tau_plus;

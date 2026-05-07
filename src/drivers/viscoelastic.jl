@@ -608,6 +608,7 @@ function run_conformation_cylinder_libb_2d(;
         source_stress_reconstruction::Symbol=:interior,
         source_stress_reconstruction_order::Integer=2,
         source_scale_dynamics::Union{Nothing,Real}=nothing,
+        hydrodynamic_warmup_steps::Integer=0,
         solvent_source_on_domain_walls::Bool=false,
         diagnostic_interval::Integer=0,
         allow_diagnostic_polymer_bc::Bool=false,
@@ -624,8 +625,8 @@ function run_conformation_cylinder_libb_2d(;
         error("unknown solvent_source_mode $(solvent_source_mode); expected :post_collision or :integrated_collision")
     conformation_collision in (:trt, :regularized, :liu_eq26) ||
         error("unknown conformation_collision $(conformation_collision); expected :trt, :regularized, or :liu_eq26")
-    conformation_divergence_mode in (:numerical, :trace_free) ||
-        error("unknown conformation_divergence_mode $(conformation_divergence_mode); expected :numerical or :trace_free")
+    conformation_divergence_mode in (:numerical, :trace_free, :trace_free_conservative) ||
+        error("unknown conformation_divergence_mode $(conformation_divergence_mode); expected :numerical, :trace_free, or :trace_free_conservative")
     conformation_gradient_mode in (:wall_aware, :embedded_axis, :wallfit4) ||
         error("unknown conformation_gradient_mode $(conformation_gradient_mode); expected :wall_aware, :embedded_axis, or :wallfit4")
     conformation_initial_condition in (:identity, :inlet_profile) ||
@@ -638,6 +639,8 @@ function run_conformation_cylinder_libb_2d(;
         error("unknown source_stress_reconstruction $(source_stress_reconstruction); expected :raw or :interior")
     source_stress_reconstruction_order in (1, 2) ||
         error("source_stress_reconstruction_order must be 1 or 2")
+    hydrodynamic_warmup_steps >= 0 ||
+        error("hydrodynamic_warmup_steps must be non-negative")
     _assert_validation_polymer_wall_bc(polymer_bc;
                                        allow_diagnostic=allow_diagnostic_polymer_bc)
     if drag_mode === :source_scaled_mea && !allow_diagnostic_force_mode
@@ -684,7 +687,7 @@ function run_conformation_cylinder_libb_2d(;
     source_scale_dynamics = isnothing(source_scale_dynamics) ?
         1.0 : Float64(source_scale_dynamics)
 
-    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Re_R Re_D Wi beta λ_p tau_plus solvent_magic conformation_magic conformation_collision conformation_divergence_mode conformation_gradient_mode conformation_initial_condition wall_geometry inlet u_max u_ref drag_mode hermite_source_mode solvent_source_mode momentum_exchange_mode source_stress_reconstruction source_stress_reconstruction_order source_scale_dynamics solvent_source_on_domain_walls polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
+    @info "Conformation cylinder (LI-BB V2)" Nx Ny radius Re Re_R Re_D Wi beta λ_p tau_plus solvent_magic conformation_magic conformation_collision conformation_divergence_mode conformation_gradient_mode conformation_initial_condition hydrodynamic_warmup_steps wall_geometry inlet u_max u_ref drag_mode hermite_source_mode solvent_source_mode momentum_exchange_mode source_stress_reconstruction source_stress_reconstruction_order source_scale_dynamics solvent_source_on_domain_walls polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model)
 
     # Precompute cylinder cut-link geometry (q_wall ∈ [0,1] per link)
     q_wall_h, is_solid_h = precompute_q_wall_cylinder(Nx, Ny, cx_f, cy_f,
@@ -755,6 +758,18 @@ function run_conformation_cylinder_libb_2d(;
     end
     copyto!(ux, ux_h)
     copyto!(uy, uy_h)
+
+    if hydrodynamic_warmup_steps > 0
+        for _ in 1:hydrodynamic_warmup_steps
+            fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                      q_wall, uw_x, uw_y, Nx, Ny, FT(ν_s);
+                                      Λ = solvent_magic)
+            apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν_s, Nx, Ny;
+                                 Λ = solvent_magic)
+            f_in, f_out = f_out, f_in
+        end
+        compute_macroscopic_2d!(ρ, ux, uy, f_in; sync=true)
+    end
 
     # Evolved field: C (direct) or Ψ = log(C) (log-conformation).
     # At quiescent equilibrium C = I ⇒ Ψ = 0.
@@ -1107,6 +1122,7 @@ function run_conformation_cylinder_libb_2d(;
             conformation_divergence_mode=conformation_divergence_mode,
             conformation_gradient_mode=conformation_gradient_mode,
             conformation_initial_condition=conformation_initial_condition,
+            hydrodynamic_warmup_steps=hydrodynamic_warmup_steps,
             conformation_gradient_stats=conformation_gradient_stats,
             wall_geometry=wall_geometry,
             momentum_exchange_mode=momentum_exchange_mode,

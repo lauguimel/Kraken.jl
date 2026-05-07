@@ -39,8 +39,15 @@ Uses analytical 2×2 eigendecomposition of the symmetric Ψ matrix.
 @inline function logconf_source_2d(Ψxx::T, Ψxy::T, Ψyy::T,
                                      dudx::T, dudy::T, dvdx::T, dvdy::T,
                                      λ::T, component::Int) where {T<:AbstractFloat}
-    divu = dudx + dvdy
+    return logconf_source_with_divergence_2d(
+        Ψxx, Ψxy, Ψyy, dudx, dudy, dvdx, dvdy, dudx + dvdy, λ, component,
+    )
+end
 
+@inline function logconf_source_with_divergence_2d(
+        Ψxx::T, Ψxy::T, Ψyy::T,
+        dudx::T, dudy::T, dvdx::T, dvdy::T,
+        advective_divu::T, λ::T, component::Int) where {T<:AbstractFloat}
     # Eigendecomposition of symmetric Ψ = [Ψxx Ψxy; Ψxy Ψyy]
     tr = Ψxx + Ψyy
     diff = Ψxx - Ψyy
@@ -97,11 +104,11 @@ Uses analytical 2×2 eigendecomposition of the symmetric Ψ matrix.
     # (S'_12 = S'_21 in eigenframe; Ω contribution is antisymmetric but
     #  [Ω, Ψ'] is symmetric after commutation since Ψ' is diagonal)
     if component == 1
-        return c2*S11p - T(2)*cs*S12p + s2*S22p + Ψxx * divu
+        return c2*S11p - T(2)*cs*S12p + s2*S22p + Ψxx * advective_divu
     elseif component == 2
-        return cs*S11p + (c2 - s2)*S12p - cs*S22p + Ψxy * divu
+        return cs*S11p + (c2 - s2)*S12p - cs*S22p + Ψxy * advective_divu
     else
-        return s2*S11p + T(2)*cs*S12p + c2*S22p + Ψyy * divu
+        return s2*S11p + T(2)*cs*S12p + c2*S22p + Ψyy * advective_divu
     end
 end
 
@@ -131,12 +138,17 @@ end
         dvdx = _wall_aware_dx_2d(uy, is_solid, i, j, Nx, T)
         dudy = _wall_aware_dy_2d(ux, is_solid, i, j, Ny, T)
         dvdy = _wall_aware_dy_2d(uy, is_solid, i, j, Ny, T)
+        raw_dudx = dudx
+        raw_dvdy = dvdy
         dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
             dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
 
         Ψxx = Ψ_xx_f[i, j]; Ψxy = Ψ_xy_f[i, j]; Ψyy = Ψ_yy_f[i, j]
-        S = logconf_source_2d(Ψxx, Ψxy, Ψyy, dudx, dudy, dvdx, dvdy,
-                                T(lambda), component)
+        S = logconf_source_with_divergence_2d(
+            Ψxx, Ψxy, Ψyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
 
         g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
         g6 = g[i,j,6]; g7 = g[i,j,7]; g8 = g[i,j,8]; g9 = g[i,j,9]
@@ -236,12 +248,17 @@ end
             grad_wall_i, grad_wall_j, grad_wall_q,
             grad_is_wall, grad_count, i, j, 2, T,
         )
+        raw_dudx = dudx
+        raw_dvdy = dvdy
         dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
             dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
 
         Ψxx = Ψ_xx_f[i, j]; Ψxy = Ψ_xy_f[i, j]; Ψyy = Ψ_yy_f[i, j]
-        S = logconf_source_2d(Ψxx, Ψxy, Ψyy, dudx, dudy, dvdx, dvdy,
-                              T(lambda), component)
+        S = logconf_source_with_divergence_2d(
+            Ψxx, Ψxy, Ψyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
 
         g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
         g6 = g[i,j,6]; g7 = g[i,j,7]; g8 = g[i,j,8]; g9 = g[i,j,9]

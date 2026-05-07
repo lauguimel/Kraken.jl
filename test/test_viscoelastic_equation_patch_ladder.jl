@@ -1447,6 +1447,34 @@ function _collision_patch_moments(collision; tau_plus=1.0, λ=2.0,
     )
 end
 
+function _logconf_collision_patch_moments(; tau_plus=1.0, λ=1e30,
+                                          dudx=0.0, dudy=0.0,
+                                          dvdx=0.0, dvdy=0.0,
+                                          ψxx=log(1.3), ψxy=0.0,
+                                          ψyy=log(0.8), component=1,
+                                          divergence_mode::Symbol=:numerical)
+    Nx = Ny = 5
+    ux, uy, i0, j0 = _linear_velocity_patch(; Nx, Ny, dudx, dudy, dvdx, dvdy)
+    is_solid = falses(Nx, Ny)
+    Ψxx = fill(ψxx, Nx, Ny)
+    Ψxy = fill(ψxy, Nx, Ny)
+    Ψyy = fill(ψyy, Nx, Ny)
+    Ψ_field = component == 1 ? Ψxx : component == 2 ? Ψxy : Ψyy
+    g = zeros(Float64, Nx, Ny, 9)
+    init_conformation_field_2d!(g, Ψ_field, ux, uy)
+    g0 = copy(g)
+    collide_logconf_2d!(
+        g, Ψ_field, ux, uy, Ψxx, Ψxy, Ψyy, is_solid, tau_plus, λ;
+        magic=1e-6, component, divergence_mode,
+    )
+    Δ = [g[i0, j0, q] - g0[i0, j0, q] for q in 1:9]
+    return (
+        mass = sum(Δ),
+        mom_x = sum(D2Q9_CX[q] * Δ[q] for q in 1:9),
+        mom_y = sum(D2Q9_CY[q] * Δ[q] for q in 1:9),
+    )
+end
+
 @testset "P14 conformation collisions: analytic stationary fixed points" begin
     λ = 2.0
     γ = 0.03
@@ -1493,6 +1521,34 @@ end
         @test abs(projected.mass) < 5e-13
         @test abs(projected.mom_x) < 5e-13
         @test abs(projected.mom_y) < 5e-13
+    end
+end
+
+@testset "P15a2 trace-free conservative mode keeps raw advective divergence" begin
+    a = 0.01
+    raw_divu = 2a
+    for collision in (:trt, :regularized, :liu_eq26),
+        tau_plus in (1.0, 0.50001),
+        component in (1, 3)
+
+        split = _collision_patch_moments(
+            collision; tau_plus, dudx=a, dvdy=a, component,
+            divergence_mode=:trace_free_conservative,
+        )
+        coeff = 1.0 - 0.5 / tau_plus
+        @test split.mass ≈ raw_divu atol=5e-13
+        @test split.mom_x ≈ coeff * raw_divu * 0.02 atol=5e-13
+        @test split.mom_y ≈ coeff * raw_divu * -0.01 atol=5e-13
+    end
+
+    for (component, ψ) in ((1, log(1.3)), (3, log(0.8)))
+        split = _logconf_collision_patch_moments(
+            dudx=a, dvdy=a, component=component,
+            divergence_mode=:trace_free_conservative,
+        )
+        @test split.mass ≈ raw_divu * ψ atol=5e-13
+        @test split.mom_x ≈ 0.5 * raw_divu * ψ * 0.02 atol=5e-13
+        @test split.mom_y ≈ 0.5 * raw_divu * ψ * -0.01 atol=5e-13
     end
 end
 
@@ -2293,6 +2349,56 @@ function _square_logconf_force_coupling_probe(; source_scale=1.0, steps=200)
     )
 end
 
+function _square_formulation_spd_probe(; formulation=:direct,
+                                       source_scale=0.0,
+                                       steps=1_200)
+    geom = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=3)
+    u_ref = 0.005
+    β = 0.59
+    Re = 1.0
+    Wi = 1.0
+    ν_total = u_ref * geom.H_ref / Re
+    λ = Wi * (geom.H_ref / 2) / u_ref
+    ν_s = β * ν_total
+    ν_p = (1 - β) * ν_total
+    model = formulation === :direct ?
+        OldroydB(G=ν_p / λ, λ=λ) :
+        LogConfOldroydB(G=ν_p / λ, λ=λ)
+    bc = formulation === :direct ? CNEBB() : LogFieldWallBC()
+    result = run_conformation_step_libb_2d(
+        ; geometry=geom, u_ref_mean=u_ref, ν_s,
+        polymer_model=model, polymer_bc=bc,
+        hermite_source_mode=:liu_direct,
+        conformation_magic=1e-6,
+        conformation_divergence_mode=:trace_free,
+        source_scale_dynamics=source_scale,
+        max_steps=steps, avg_window=100,
+        allow_diagnostic_log_wall_bc=formulation === :log,
+        backend=KernelAbstractions.CPU(), FT=Float64,
+    )
+    fluid = .!result.is_solid
+    finite = all(isfinite, result.ux[fluid]) &&
+             all(isfinite, result.C_xx[fluid]) &&
+             all(isfinite, result.C_xy[fluid]) &&
+             all(isfinite, result.C_yy[fluid])
+    min_eig = Inf
+    min_i = 0
+    min_j = 0
+    for j in axes(result.C_xx, 2), i in axes(result.C_xx, 1)
+        result.is_solid[i, j] && continue
+        eig = _min_eig_spd_2x2(result.C_xx[i, j], result.C_xy[i, j],
+                               result.C_yy[i, j])
+        if eig < min_eig
+            min_eig = eig
+            min_i = i
+            min_j = j
+        end
+    end
+    max_abs_C = maximum(maximum(abs, C[fluid])
+                        for C in (result.C_xx, result.C_xy, result.C_yy))
+    return (; result, finite, min_eig, min_i, min_j, max_abs_C)
+end
+
 function _poiseuille_prod_gradient_source_residual(; orientation=:horizontal,
                                                    mode::Symbol=:embedded_axis)
     Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
@@ -2575,6 +2681,27 @@ end
     @test flow_delta < 5e-4
     @test C_delta > 1e-2
     @test C_delta < 0.2
+end
+
+@testset "P18b2c4 square obstacle separates direct SPD loss from log CDE" begin
+    direct = _square_formulation_spd_probe(
+        ; formulation=:direct, source_scale=0.0, steps=1_200,
+    )
+    logc = _square_formulation_spd_probe(
+        ; formulation=:log, source_scale=0.0, steps=1_200,
+    )
+
+    @test direct.finite
+    @test logc.finite
+    @test direct.max_abs_C < 20.0
+    @test logc.max_abs_C < 30.0
+
+    # Direct-C loses SPD on the Cartesian square even with polymer forcing
+    # disabled, while log-conformation preserves SPD on the same CDE.
+    @test direct.min_eig < -2e-2
+    @test direct.min_i > 0
+    @test direct.min_j > 0
+    @test logc.min_eig > 0.25
 end
 
 @testset "P18b2d cartesian step log-conf smoke: square and BFS" begin
@@ -6514,4 +6641,20 @@ end
         @test all(isfinite, r.C_xy[fluid])
         @test all(isfinite, r.C_yy[fluid])
     end
+end
+
+@testset "P18m cylinder CDE can start from a warmed hydrodynamic field" begin
+    model = OldroydB(G=0.004, λ=1.0)
+    r = run_conformation_cylinder_libb_2d(
+        ; Nx=32, Ny=16, radius=3, cx=8.0, cy=7.5,
+        u_mean=0.005, ν_s=0.06, polymer_model=model,
+        polymer_bc=ExtrapEqWallBC(), max_steps=1, avg_window=1,
+        hydrodynamic_warmup_steps=2,
+        backend=KernelAbstractions.CPU(), FT=Float64,
+    )
+    @test r.hydrodynamic_warmup_steps == 2
+    @test r.first_nonfinite_step == 0
+    @test all(isfinite, r.C_xx[.!r.is_solid])
+    @test all(isfinite, r.C_xy[.!r.is_solid])
+    @test all(isfinite, r.C_yy[.!r.is_solid])
 end

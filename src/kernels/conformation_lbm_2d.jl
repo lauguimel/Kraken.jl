@@ -433,20 +433,28 @@ end
 @inline function conformation_source_2d(cxx::T, cxy::T, cyy::T,
                                         dudx::T, dudy::T, dvdx::T, dvdy::T,
                                         λ::T, component::Int) where {T<:AbstractFloat}
-    divu = dudx + dvdy
+    return conformation_source_with_divergence_2d(
+        cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, dudx + dvdy, λ, component,
+    )
+end
+
+@inline function conformation_source_with_divergence_2d(
+        cxx::T, cxy::T, cyy::T,
+        dudx::T, dudy::T, dvdx::T, dvdy::T,
+        advective_divu::T, λ::T, component::Int) where {T<:AbstractFloat}
     inv_λ = one(T) / λ
     if component == 1
-        return -inv_λ * (cxx - one(T)) + T(2) * (cxx*dudx + cxy*dudy) + cxx*divu
+        return -inv_λ * (cxx - one(T)) + T(2) * (cxx*dudx + cxy*dudy) + cxx*advective_divu
     elseif component == 2
-        return -inv_λ * cxy + (cxx*dvdx + cyy*dudy + cxy*(dudx + dvdy)) + cxy*divu
+        return -inv_λ * cxy + (cxx*dvdx + cyy*dudy + cxy*(dudx + dvdy)) + cxy*advective_divu
     else
-        return -inv_λ * (cyy - one(T)) + T(2) * (cxy*dvdx + cyy*dvdy) + cyy*divu
+        return -inv_λ * (cyy - one(T)) + T(2) * (cxy*dvdx + cyy*dvdy) + cyy*advective_divu
     end
 end
 
 @inline function _apply_conformation_divergence_mode_2d(
         dudx::T, dudy::T, dvdx::T, dvdy::T, mode::Int) where {T<:AbstractFloat}
-    if mode == 1
+    if mode == 1 || mode == 2
         half_trace = T(0.5) * (dudx + dvdy)
         return dudx - half_trace, dudy, dvdx, dvdy - half_trace
     end
@@ -456,7 +464,15 @@ end
 @inline function _conformation_divergence_mode_code(mode::Symbol)
     mode === :numerical && return 0
     mode === :trace_free && return 1
-    error("unknown conformation_divergence_mode $(mode); expected :numerical or :trace_free")
+    mode === :trace_free_conservative && return 2
+    error("unknown conformation_divergence_mode $(mode); expected :numerical, :trace_free, or :trace_free_conservative")
+end
+
+@inline function _conformation_advective_divergence_2d(
+        raw_dudx::T, raw_dvdy::T, dudx::T, dvdy::T,
+        mode::Int) where {T<:AbstractFloat}
+    mode == 2 && return raw_dudx + raw_dvdy
+    return dudx + dvdy
 end
 
 @kernel function collide_conformation_2d_kernel!(g, @Const(C_field), @Const(ux), @Const(uy),
@@ -480,12 +496,18 @@ end
         dvdx = _wall_aware_dx_2d(uy, is_solid, i, j, Nx, T)
         dudy = _wall_aware_dy_2d(ux, is_solid, i, j, Ny, T)
         dvdy = _wall_aware_dy_2d(uy, is_solid, i, j, Ny, T)
+        raw_dudx = dudx
+        raw_dvdy = dvdy
         dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
             dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
 
         # Source term Φ_αβ
         cxx = C_xx_f[i, j]; cxy = C_xy_f[i, j]; cyy = C_yy_f[i, j]
-        S = conformation_source_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, T(lambda), component)
+        S = conformation_source_with_divergence_2d(
+            cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
 
         # Pre-load all 9 populations
         g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
@@ -620,12 +642,17 @@ end
             grad_wall_i, grad_wall_j, grad_wall_q,
             grad_is_wall, grad_count, i, j, 2, T,
         )
+        raw_dudx = dudx
+        raw_dvdy = dvdy
         dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
             dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
 
         cxx = C_xx_f[i, j]; cxy = C_xy_f[i, j]; cyy = C_yy_f[i, j]
-        S = conformation_source_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
-                                   T(lambda), component)
+        S = conformation_source_with_divergence_2d(
+            cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
 
         g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
         g6 = g[i,j,6]; g7 = g[i,j,7]; g8 = g[i,j,8]; g9 = g[i,j,9]
@@ -727,11 +754,17 @@ end
         dvdx = _wall_aware_dx_2d(uy, is_solid, i, j, Nx, T)
         dudy = _wall_aware_dy_2d(ux, is_solid, i, j, Ny, T)
         dvdy = _wall_aware_dy_2d(uy, is_solid, i, j, Ny, T)
+        raw_dudx = dudx
+        raw_dvdy = dvdy
         dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
             dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
 
         cxx = C_xx_f[i, j]; cxy = C_xy_f[i, j]; cyy = C_yy_f[i, j]
-        S = conformation_source_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, T(lambda), component)
+        S = conformation_source_with_divergence_2d(
+            cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
 
         g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
         g6 = g[i,j,6]; g7 = g[i,j,7]; g8 = g[i,j,8]; g9 = g[i,j,9]
@@ -843,11 +876,17 @@ end
         dvdx = _wall_aware_dx_2d(uy, is_solid, i, j, Nx, T)
         dudy = _wall_aware_dy_2d(ux, is_solid, i, j, Ny, T)
         dvdy = _wall_aware_dy_2d(uy, is_solid, i, j, Ny, T)
+        raw_dudx = dudx
+        raw_dvdy = dvdy
         dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
             dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
 
         cxx = C_xx_f[i, j]; cxy = C_xy_f[i, j]; cyy = C_yy_f[i, j]
-        S = conformation_source_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, T(lambda), component)
+        S = conformation_source_with_divergence_2d(
+            cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
 
         ωp = one(T) / T(tau_plus)
         ωm = one(T) / T(tau_minus)
