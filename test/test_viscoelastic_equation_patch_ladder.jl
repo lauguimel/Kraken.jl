@@ -6781,13 +6781,12 @@ end
     end
 end
 
-function _square_obstacle_affine_velocity_patch(;
+function _cartesian_affine_velocity_patch(geom;
         dudx=0.002, dudy=0.003, dvdx=-0.001, dvdy=-0.002,
-        u0=0.015, v0=-0.01)
-    geom = square_obstacle_channel_geometry_2d(; H=24, side=6, L_up=3, L_down=4)
+        u0=0.015, v0=-0.01,
+        cx0=geom.i_step + (geom.H_ref - 1) / 2,
+        cy0=(geom.Ny - 1) / 2)
     Nx, Ny = geom.Nx, geom.Ny
-    cx0 = geom.i_step + (geom.H_ref - 1) / 2
-    cy0 = (Ny - 1) / 2
     ux = [
         u0 + dudx * ((i - 1) - cx0) + dudy * ((j - 1) - cy0)
         for i in 1:Nx, j in 1:Ny
@@ -6810,8 +6809,46 @@ function _square_obstacle_affine_velocity_patch(;
               cx0, cy0)
 end
 
+function _square_obstacle_affine_velocity_patch(;
+        dudx=0.002, dudy=0.003, dvdx=-0.001, dvdy=-0.002,
+        u0=0.015, v0=-0.01)
+    geom = square_obstacle_channel_geometry_2d(; H=24, side=6, L_up=3, L_down=4)
+    return _cartesian_affine_velocity_patch(
+        geom; dudx, dudy, dvdx, dvdy, u0, v0,
+    )
+end
+
+function _bfs_affine_velocity_patch(;
+        dudx=0.002, dudy=0.003, dvdx=-0.001, dvdy=-0.002,
+        u0=0.015, v0=-0.01)
+    geom = backward_facing_step_geometry_2d(; H_in=8, expansion_ratio=2,
+                                            L_up=3, L_down=5)
+    return _cartesian_affine_velocity_patch(
+        geom; dudx, dudy, dvdx, dvdy, u0, v0,
+        cx0=geom.i_step - 1.0,
+        cy0=first(geom.inlet_open) - 1.0,
+    )
+end
+
+@inline function _cartesian_near_wall_cell(geom, i, j)
+    _is_cut_cell(geom.q_wall, i, j) && return true
+    for q in 2:9
+        ni = i + Int(D2Q9_CX[q])
+        nj = j + Int(D2Q9_CY[q])
+        if 1 <= ni <= geom.Nx && 1 <= nj <= geom.Ny && geom.is_solid[ni, nj]
+            return true
+        end
+    end
+    return false
+end
+
 function _square_obstacle_prod_gradient_stats(mode::Symbol)
-    p = _square_obstacle_affine_velocity_patch()
+    return _cartesian_prod_gradient_stats(
+        _square_obstacle_affine_velocity_patch(), mode,
+    )
+end
+
+function _cartesian_prod_gradient_stats(p, mode::Symbol)
     stencils = Kraken.precompute_conformation_gradient_stencils_2d(
         p.geom.is_solid, p.geom.q_wall; mode,
         max_terms=mode === :embedded_axis ? 4 : 64,
@@ -6825,12 +6862,7 @@ function _square_obstacle_prod_gradient_stats(mode::Symbol)
     for j in 1:p.geom.Ny, i in 1:p.geom.Nx
         p.geom.is_solid[i, j] && continue
         is_cut = _is_cut_cell(p.geom.q_wall, i, j)
-        near = is_cut || any(
-            1 <= i + Int(D2Q9_CX[q]) <= p.geom.Nx &&
-            1 <= j + Int(D2Q9_CY[q]) <= p.geom.Ny &&
-            p.geom.is_solid[i + Int(D2Q9_CX[q]), j + Int(D2Q9_CY[q])]
-            for q in 2:9
-        )
+        near = _cartesian_near_wall_cell(p.geom, i, j)
         near || continue
         grad = Kraken.conformation_velocity_gradient_from_stencils_2d(
             p.ux, p.uy, p.uwx, p.uwy, stencils, i, j,
@@ -6881,6 +6913,177 @@ function _square_obstacle_extrap_eq_affine_once_stats()
     return (; max_macro, max_sum, n_cut)
 end
 
+function _collide_logconf_cde_state_prod_gradient!(
+        gxx, gxy, gyy, Ψxx, Ψxy, Ψyy, ux, uy, is_solid, λ,
+        stencils, uwx, uwy)
+    Kraken.collide_logconf_2d_with_gradient_stencils!(
+        gxx, Ψxx, ux, uy, Ψxx, Ψxy, Ψyy, is_solid,
+        uwx, uwy, stencils, 1.0, λ; magic=1e-6,
+        component=1, divergence_mode=:trace_free,
+    )
+    Kraken.collide_logconf_2d_with_gradient_stencils!(
+        gxy, Ψxy, ux, uy, Ψxx, Ψxy, Ψyy, is_solid,
+        uwx, uwy, stencils, 1.0, λ; magic=1e-6,
+        component=2, divergence_mode=:trace_free,
+    )
+    Kraken.collide_logconf_2d_with_gradient_stencils!(
+        gyy, Ψyy, ux, uy, Ψxx, Ψxy, Ψyy, is_solid,
+        uwx, uwy, stencils, 1.0, λ; magic=1e-6,
+        component=3, divergence_mode=:trace_free,
+    )
+    compute_conformation_macro_2d!(Ψxx, gxx)
+    compute_conformation_macro_2d!(Ψxy, gxy)
+    compute_conformation_macro_2d!(Ψyy, gyy)
+    return nothing
+end
+
+function _cartesian_field_error_stats(geom, Axx, Axy, Ayy, axx, axy, ayy;
+                                      xmargin=3)
+    max_cut = 0.0
+    max_near = 0.0
+    max_far = 0.0
+    n_cut = 0
+    n_near = 0
+    n_far = 0
+    for j in 1:geom.Ny, i in xmargin:geom.Nx-xmargin+1
+        geom.is_solid[i, j] && continue
+        err = max(abs(Axx[i, j] - axx), abs(Axy[i, j] - axy),
+                  abs(Ayy[i, j] - ayy))
+        if _is_cut_cell(geom.q_wall, i, j)
+            n_cut += 1
+            max_cut = max(max_cut, err)
+        elseif _cartesian_near_wall_cell(geom, i, j)
+            n_near += 1
+            max_near = max(max_near, err)
+        else
+            n_far += 1
+            max_far = max(max_far, err)
+        end
+    end
+    return (; max_cut, max_near, max_far, n_cut, n_near, n_far)
+end
+
+function _cartesian_stationary_cde_stats(p, bc; formulation::Symbol,
+                                         gradient_mode::Symbol=:embedded_axis,
+                                         steps::Int=1, λ=3.0)
+    cxx, cxy, cyy = _stationary_direct_conformation_incompressible(
+        p.dudx, p.dudy, p.dvdx, p.dvdy, λ,
+    )
+    axx, axy, ayy = if formulation === :direct
+        (cxx, cxy, cyy)
+    elseif formulation === :log
+        _log_spd_2x2(cxx, cxy, cyy)
+    else
+        error("unknown formulation $(formulation)")
+    end
+
+    Axx = fill(axx, p.geom.Nx, p.geom.Ny)
+    Axy = fill(axy, p.geom.Nx, p.geom.Ny)
+    Ayy = fill(ayy, p.geom.Nx, p.geom.Ny)
+    gxx = zeros(Float64, p.geom.Nx, p.geom.Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Axx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Axy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Ayy, p.ux, p.uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+
+    stencils = if gradient_mode in (:embedded_axis, :wallfit4)
+        Kraken.precompute_conformation_gradient_stencils_2d(
+            p.geom.is_solid, p.geom.q_wall; mode=gradient_mode,
+            max_terms=gradient_mode === :embedded_axis ? 4 : 64,
+            FT=Float64,
+        )
+    elseif gradient_mode === :wall_aware
+        nothing
+    else
+        error("unknown gradient_mode $(gradient_mode)")
+    end
+
+    xmargin = steps + 2
+    max_stream_cut = 0.0
+    max_stream_near = 0.0
+    max_stream_far = 0.0
+    max_collision_cut = 0.0
+    max_collision_near = 0.0
+    max_collision_far = 0.0
+    n_cut = 0
+    n_near = 0
+    n_far = 0
+
+    for _ in 1:steps
+        stream_2d!(bxx, gxx, p.geom.Nx, p.geom.Ny; sync=true)
+        stream_2d!(bxy, gxy, p.geom.Nx, p.geom.Ny; sync=true)
+        stream_2d!(byy, gyy, p.geom.Nx, p.geom.Ny; sync=true)
+        apply_polymer_wall_bc!(
+            bxx, gxx, p.geom.is_solid, p.geom.q_wall, Axx, p.ux, p.uy, bc,
+        )
+        apply_polymer_wall_bc!(
+            bxy, gxy, p.geom.is_solid, p.geom.q_wall, Axy, p.ux, p.uy, bc,
+        )
+        apply_polymer_wall_bc!(
+            byy, gyy, p.geom.is_solid, p.geom.q_wall, Ayy, p.ux, p.uy, bc,
+        )
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+
+        compute_conformation_macro_2d!(Axx, gxx)
+        compute_conformation_macro_2d!(Axy, gxy)
+        compute_conformation_macro_2d!(Ayy, gyy)
+        stream_stats = _cartesian_field_error_stats(
+            p.geom, Axx, Axy, Ayy, axx, axy, ayy; xmargin,
+        )
+        max_stream_cut = max(max_stream_cut, stream_stats.max_cut)
+        max_stream_near = max(max_stream_near, stream_stats.max_near)
+        max_stream_far = max(max_stream_far, stream_stats.max_far)
+        n_cut = max(n_cut, stream_stats.n_cut)
+        n_near = max(n_near, stream_stats.n_near)
+        n_far = max(n_far, stream_stats.n_far)
+
+        if formulation === :direct
+            if stencils === nothing
+                _collide_direct_cde_state!(
+                    gxx, gxy, gyy, Axx, Axy, Ayy,
+                    p.ux, p.uy, p.geom.is_solid, λ,
+                )
+            else
+                _collide_direct_cde_state_prod_gradient!(
+                    gxx, gxy, gyy, Axx, Axy, Ayy,
+                    p.ux, p.uy, p.geom.is_solid, λ,
+                    stencils, p.uwx, p.uwy,
+                )
+            end
+        else
+            if stencils === nothing
+                _collide_logconf_cde_state!(
+                    gxx, gxy, gyy, Axx, Axy, Ayy,
+                    p.ux, p.uy, p.geom.is_solid, λ,
+                )
+            else
+                _collide_logconf_cde_state_prod_gradient!(
+                    gxx, gxy, gyy, Axx, Axy, Ayy,
+                    p.ux, p.uy, p.geom.is_solid, λ,
+                    stencils, p.uwx, p.uwy,
+                )
+            end
+        end
+
+        collision_stats = _cartesian_field_error_stats(
+            p.geom, Axx, Axy, Ayy, axx, axy, ayy; xmargin,
+        )
+        max_collision_cut = max(max_collision_cut, collision_stats.max_cut)
+        max_collision_near = max(max_collision_near, collision_stats.max_near)
+        max_collision_far = max(max_collision_far, collision_stats.max_far)
+    end
+
+    return (; max_stream_cut, max_stream_near, max_stream_far,
+              max_collision_cut, max_collision_near, max_collision_far,
+              n_cut, n_near, n_far)
+end
+
 @testset "P18l prototype extrap-eq BC: M11 square obstacle remontée" begin
     for mode in (:embedded_axis, :wallfit4)
         stats = _square_obstacle_prod_gradient_stats(mode)
@@ -6895,6 +7098,45 @@ end
     @test fill_stats.n_cut > 0
     @test fill_stats.max_macro < P0_ATOL
     @test fill_stats.max_sum < P0_ATOL
+end
+
+@testset "P18l prototype extrap-eq BC: M12 cartesian Oldroyd-B local closure" begin
+    for p in (_square_obstacle_affine_velocity_patch(
+                  dudx=0.0, dudy=0.003, dvdx=0.0, dvdy=0.0,
+                  u0=0.0, v0=0.0,
+              ),
+              _bfs_affine_velocity_patch(
+                  dudx=0.0, dudy=0.003, dvdx=0.0, dvdy=0.0,
+                  u0=0.0, v0=0.0,
+              ))
+        for mode in (:embedded_axis, :wallfit4)
+            stats = _cartesian_prod_gradient_stats(p, mode)
+            @test stats.n_cut > 0
+            @test stats.max_cut_gradient < 5e-14
+            @test stats.max_near_gradient < 5e-14
+            @test stats.stats.max_count <= (mode === :embedded_axis ? 4 : 64)
+        end
+
+        direct = _cartesian_stationary_cde_stats(
+            p, ExtrapEqWallBC(); formulation=:direct,
+            gradient_mode=:embedded_axis, steps=1,
+        )
+        @test direct.n_cut > 0 && direct.n_far > 0
+        @test direct.max_stream_cut < P0_ATOL
+        @test direct.max_stream_far < P0_ATOL
+        @test direct.max_collision_cut < P0_ATOL
+        @test direct.max_collision_far < P0_ATOL
+
+        logc = _cartesian_stationary_cde_stats(
+            p, LogFieldWallBC(); formulation=:log,
+            gradient_mode=:embedded_axis, steps=1,
+        )
+        @test logc.n_cut > 0 && logc.n_far > 0
+        @test logc.max_stream_cut < P0_ATOL
+        @test logc.max_stream_far < P0_ATOL
+        @test logc.max_collision_cut < P0_ATOL
+        @test logc.max_collision_far < P0_ATOL
+    end
 end
 
 function _prod_extrap_eq_wall_bc_rebalanced!(g_post, is_solid, q_wall, C, ux, uy)
