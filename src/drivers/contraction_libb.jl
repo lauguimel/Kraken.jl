@@ -19,7 +19,8 @@
 #   halfway-BB at the step and to the kernel's halfway-BB fallback at
 #   N/S domain edges in the upstream channel).
 # - Modular `BCSpec2D`: ZouHeVelocity at west, ZouHePressure at east.
-# - Conformation TRT-LBM (Liu 2025) + CNEBB at solid walls.
+# - Conformation LBM collision (`:trt`, `:regularized`, or `:liu_eq26`)
+#   + polymer wall BC at solid walls.
 # - Hermite source post-collision on f_out (no double-counting drag).
 #
 # Outputs the macroscopic ψ/C/τ_p fields and the post-processing helpers
@@ -39,6 +40,7 @@
                                     bcspec=nothing,
                                     ρ_out=1.0, tau_plus=1.0,
                                     hermite_source_mode=:liu_direct,
+                                    conformation_collision=:trt,
                                     conformation_magic=1e-6,
                                     conformation_divergence_mode=:trace_free,
                                     source_scale_dynamics=1.0,
@@ -78,6 +80,9 @@ Concrete cases are supplied as `StepChannelGeometry2D` specs, e.g.
   The default `1e-6` matches the Liu-style low-diffusion conformation setting
   used by the near-Newtonian Poiseuille/square canaries. Larger values such as
   `0.01` or `0.25` are stability/audit parameters, not validation defaults.
+- `conformation_collision` : direct-C collision path. `:trt` is the raw
+  population TRT path; `:regularized` and `:liu_eq26` use the moment
+  reconstruction paths validated by the CDE patch ladder.
 - `conformation_divergence_mode` : velocity-gradient trace handling for the
   conformation source. Defaults to `:trace_free`, matching the validated
   cylinder driver and the analytic Poiseuille CDE ladder.
@@ -94,6 +99,7 @@ function run_conformation_step_libb_2d(;
         bcspec::Union{Nothing,BCSpec2D}=nothing,
         ρ_out=1.0, tau_plus=1.0,
         hermite_source_mode::Symbol=:liu_direct,
+        conformation_collision::Symbol=:trt,
         conformation_magic::Real=1e-6,
         conformation_divergence_mode::Symbol=:trace_free,
         source_scale_dynamics::Union{Nothing,Real}=nothing,
@@ -105,11 +111,13 @@ function run_conformation_step_libb_2d(;
         backend=KernelAbstractions.CPU(), FT=Float64)
     hermite_source_mode in (:ce_corrected, :liu_direct) ||
         error("unknown hermite_source_mode $(hermite_source_mode); expected :ce_corrected or :liu_direct")
+    conformation_collision in (:trt, :regularized, :liu_eq26) ||
+        error("unknown conformation_collision $(conformation_collision); expected :trt, :regularized, or :liu_eq26")
     conformation_divergence_mode in (:numerical, :trace_free, :trace_free_conservative) ||
         error("unknown conformation_divergence_mode $(conformation_divergence_mode); expected :numerical, :trace_free, or :trace_free_conservative")
     _assert_validation_polymer_wall_bc(polymer_bc;
                                        allow_diagnostic=allow_diagnostic_polymer_bc)
-    _assert_validation_conformation_collision_window(:trt, tau_plus;
+    _assert_validation_conformation_collision_window(conformation_collision, tau_plus;
         allow_diagnostic=allow_diagnostic_conformation_collision)
 
     # Resolve polymer model
@@ -120,6 +128,8 @@ function run_conformation_step_libb_2d(;
     end
     _assert_validation_log_wall_bc(polymer_model, polymer_bc;
         allow_diagnostic=allow_diagnostic_log_wall_bc)
+    uses_log_conformation(polymer_model) && conformation_collision !== :trt &&
+        error("$(conformation_collision) conformation collision is only implemented for direct-C, not log-conformation")
     λ_p     = polymer_relaxation_time(polymer_model)
     ν_p_eff = polymer_modulus(polymer_model) * λ_p   # G·λ for Oldroyd-B / FENE
 
@@ -142,7 +152,7 @@ function run_conformation_step_libb_2d(;
     source_scale_dynamics = isnothing(source_scale_dynamics) ?
         1.0 : Float64(source_scale_dynamics)
 
-    @info "Conformation step-channel (LI-BB V2)" geometry=geom_h.name Nx Ny H_ref=geom_h.H_ref H_in=geom_h.H_in H_out=geom_h.H_out i_step j_low j_high Re Wi beta λ_p tau_plus hermite_source_mode conformation_magic conformation_divergence_mode source_scale_dynamics solvent_source_on_cutlinks polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model) u_ref_mean u_in_mean
+    @info "Conformation step-channel (LI-BB V2)" geometry=geom_h.name Nx Ny H_ref=geom_h.H_ref H_in=geom_h.H_in H_out=geom_h.H_out i_step j_low j_high Re Wi beta λ_p tau_plus hermite_source_mode conformation_collision conformation_magic conformation_divergence_mode source_scale_dynamics solvent_source_on_cutlinks polymer_bc=typeof(polymer_bc) polymer_model=typeof(polymer_model) u_ref_mean u_in_mean
 
     # Geometry/spec: host object for initialization, device object for kernels.
     geom = transfer_step_geometry_2d(geom_h, backend)
@@ -209,6 +219,9 @@ function run_conformation_step_libb_2d(;
     init_conformation_field_2d!(g_xy, Ψ_xy, ux, uy)
     init_conformation_field_2d!(g_yy, Ψ_yy, ux, uy)
     g_xx_buf = similar(g_xx); g_xy_buf = similar(g_xy); g_yy_buf = similar(g_yy)
+    Fe_xx_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    Fe_xy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    Fe_yy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
 
     tau_p_xx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     tau_p_xy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
@@ -269,6 +282,14 @@ function run_conformation_step_libb_2d(;
             collide_logconf_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=2, divergence_mode=conformation_divergence_mode)
             collide_logconf_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=3, divergence_mode=conformation_divergence_mode)
             psi_to_C_2d!(C_xx, C_xy, C_yy, Ψ_xx, Ψ_xy, Ψ_yy)
+        elseif conformation_collision === :regularized
+            collide_conformation_regularized_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=1, divergence_mode=conformation_divergence_mode)
+            collide_conformation_regularized_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=2, divergence_mode=conformation_divergence_mode)
+            collide_conformation_regularized_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=3, divergence_mode=conformation_divergence_mode)
+        elseif conformation_collision === :liu_eq26
+            collide_conformation_liu_eq26_2d!(g_xx, Fe_xx_prev, Ψ_xx, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=1, divergence_mode=conformation_divergence_mode)
+            collide_conformation_liu_eq26_2d!(g_xy, Fe_xy_prev, Ψ_xy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=2, divergence_mode=conformation_divergence_mode)
+            collide_conformation_liu_eq26_2d!(g_yy, Fe_yy_prev, Ψ_yy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=3, divergence_mode=conformation_divergence_mode)
         else
             collide_conformation_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=1, divergence_mode=conformation_divergence_mode)
             collide_conformation_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=conformation_magic, component=2, divergence_mode=conformation_divergence_mode)
@@ -309,6 +330,7 @@ function run_conformation_step_libb_2d(;
             source_scale_dynamics=source_scale_dynamics,
             solvent_source_on_cutlinks=solvent_source_on_cutlinks,
             conformation_magic=Float64(conformation_magic),
+            conformation_collision=conformation_collision,
             conformation_divergence_mode=conformation_divergence_mode,
             Re=Re, Wi=Wi, beta=beta, u_ref=Float64(u_ref_mean),
             H_ref=geom_h.H_ref, H_out=geom_h.H_out)
@@ -322,6 +344,7 @@ function run_conformation_contraction_libb_2d(;
         bcspec::Union{Nothing,BCSpec2D}=nothing,
         ρ_out=1.0, tau_plus=1.0,
         hermite_source_mode::Symbol=:liu_direct,
+        conformation_collision::Symbol=:trt,
         conformation_magic::Real=1e-6,
         conformation_divergence_mode::Symbol=:trace_free,
         allow_diagnostic_polymer_bc::Bool=false,
@@ -334,7 +357,8 @@ function run_conformation_contraction_libb_2d(;
     return run_conformation_step_libb_2d(;
         geometry, u_ref_mean=u_out_mean, ν_s, ν_p, lambda,
         polymer_model, polymer_bc, bcspec, ρ_out, tau_plus,
-        hermite_source_mode, conformation_magic, conformation_divergence_mode,
+        hermite_source_mode, conformation_collision,
+        conformation_magic, conformation_divergence_mode,
         allow_diagnostic_polymer_bc,
         allow_diagnostic_conformation_collision,
         allow_diagnostic_log_wall_bc,
