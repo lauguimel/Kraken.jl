@@ -1402,4 +1402,29 @@ end
             end
         end
     end
+
+    @testset "M8d BFS passive log-FV polymer pipeline stays SPD" begin
+        result = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.08, nu_p=0.02, lambda=5.0,
+            u_mean=0.01, Fx_body=2e-7,
+            hydro_steps=60, polymer_steps=20,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test result.min_c_eig > 0.9
+        @test result.max_abs_psi > 0
+        @test result.max_abs_psi < 0.12
+        @test result.max_abs_tau > 0
+        @test result.max_abs_tau < 1e-3
+        @test result.max_speed > 1e-4
+        @test result.rho_min > 0.98
+        @test result.rho_max < 1.02
+        @test all(isfinite, result.psixx)
+        @test all(isfinite, result.psixy)
+        @test all(isfinite, result.psiyy)
+        @test all(isfinite, result.tauxx)
+        @test all(isfinite, result.tauxy)
+        @test all(isfinite, result.tauyy)
+    end
 end

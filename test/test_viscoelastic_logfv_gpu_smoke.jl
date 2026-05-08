@@ -536,6 +536,20 @@ end
         @test all(isfinite, low_beta_square.ux)
         @test all(isfinite, low_beta_square.psixx)
 
+        passive_bfs = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
+            H_in=3, expansion_ratio=2, L_up=2, L_down=2,
+            nu_s=0.08, nu_p=0.02, lambda=5.0,
+            u_mean=0.01, Fx_body=2e-7,
+            hydro_steps=5, polymer_steps=2,
+            backend=backend, T=FT,
+        )
+        @test passive_bfs.min_c_eig > 0.9
+        @test passive_bfs.max_abs_psi >= 0
+        @test passive_bfs.rho_min > 0.95
+        @test passive_bfs.rho_max < 1.05
+        @test all(isfinite, passive_bfs.psixx)
+        @test all(isfinite, passive_bfs.tauxx)
+
         @info "Log-FV GPU smoke passed" backend=backend_name FT=FT substeps=coupled.polymer_substeps square_substeps=square.polymer_substeps low_beta_square_substeps=low_beta_square.polymer_substeps
     end
 end

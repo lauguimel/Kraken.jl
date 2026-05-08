@@ -757,3 +757,232 @@ function run_viscoelastic_logfv_square_periodic_2d(;
         rho_max=maximum(rho_cpu),
     )
 end
+
+"""
+    run_viscoelastic_logfv_bfs_passive_2d(; kwargs...)
+
+Run a passive log-FV polymer canary on a backward-facing-step geometry.
+
+The hydrodynamic BFS field is first advanced with the modular LI-BB V2 +
+Guo-field solvent step. The resulting velocity is then frozen while the
+cell-centered log-conformation polymer equation is advanced with open-x
+advection, solid-aware gradients, and the local Oldroyd-B source. No polymer
+force is fed back into the solvent in this canary.
+"""
+function run_viscoelastic_logfv_bfs_passive_2d(;
+    H_in::Integer=4,
+    expansion_ratio::Integer=2,
+    L_up::Integer=2,
+    L_down::Integer=4,
+    nu_s::Real=0.08,
+    nu_p::Real=0.02,
+    lambda::Real=5.0,
+    u_mean::Real=0.01,
+    Fx_body::Real=2e-7,
+    hydro_steps::Integer=60,
+    polymer_steps::Integer=20,
+    polymer_substeps=:auto,
+    max_polymer_substeps::Integer=64,
+    backend=KernelAbstractions.CPU(),
+    T=Float64,
+)
+    H_in >= 3 || throw(ArgumentError("H_in must be >= 3"))
+    expansion_ratio >= 2 || throw(ArgumentError("expansion_ratio must be >= 2"))
+    nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
+    nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
+    lambda > 0 || throw(ArgumentError("lambda must be positive"))
+    hydro_steps >= 0 || throw(ArgumentError("hydro_steps must be non-negative"))
+    polymer_steps >= 0 || throw(ArgumentError("polymer_steps must be non-negative"))
+
+    geom_h = backward_facing_step_geometry_2d(;
+        H_in=Int(H_in),
+        expansion_ratio=Int(expansion_ratio),
+        L_up=Int(L_up),
+        L_down=Int(L_down),
+        FT=T,
+    )
+    geom = transfer_step_geometry_2d(geom_h, backend)
+    Nx, Ny = geom_h.Nx, geom_h.Ny
+    is_solid = geom.is_solid
+    q_wall = geom.q_wall
+    is_solid_h = geom_h.is_solid
+
+    nu_s_t = T(nu_s)
+    nu_p_t = T(nu_p)
+    lambda_t = T(lambda)
+    prefactor_t = nu_p_t / lambda_t
+    Fx_body_t = T(Fx_body)
+    u_profile_h = parabolic_face_profile_2d(geom_h; face=:west, mean_velocity=T(u_mean), FT=T)
+    u_profile = KernelAbstractions.allocate(backend, T, Ny)
+    copyto!(u_profile, u_profile_h)
+    bcspec = default_step_bcspec_2d(geom, u_profile, one(T))
+
+    f_in = KernelAbstractions.allocate(backend, T, Nx, Ny, 9)
+    f_out = KernelAbstractions.allocate(backend, T, Nx, Ny, 9)
+    f_in_h = zeros(T, Nx, Ny, 9)
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        ux0 = is_solid_h[i, j] ? zero(T) : u_profile_h[j]
+        f_in_h[i, j, q] = equilibrium(D2Q9(), one(T), ux0, zero(T), q)
+    end
+    copyto!(f_in, f_in_h)
+    fill!(f_out, zero(T))
+
+    rho = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    ux = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    uy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    uwx = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+    uwy = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+    fx_h = [is_solid_h[i, j] ? zero(T) : Fx_body_t for i in 1:Nx, j in 1:Ny]
+    fy_h = zeros(T, Nx, Ny)
+    fx = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    fy = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    copyto!(fx, fx_h)
+    copyto!(fy, fy_h)
+
+    for _ in 1:hydro_steps
+        fused_trt_libb_v2_guo_field_step!(
+            f_out, f_in, rho, ux, uy, is_solid, q_wall, uwx, uwy, fx, fy,
+            Nx, Ny, nu_s_t;
+        )
+        apply_bc_rebuild_2d!(f_out, f_in, bcspec, nu_s_t, Nx, Ny)
+        f_in, f_out = f_out, f_in
+    end
+    logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_in, fx, fy)
+    KernelAbstractions.synchronize(backend)
+
+    ux_cpu_after_hydro = Array(ux)
+    ux_east_h = copy(@view ux_cpu_after_hydro[Nx, :])
+    ux_east = KernelAbstractions.allocate(backend, T, Ny)
+    copyto!(ux_east, ux_east_h)
+
+    subcycle_estimate = logfv_oldroydb_subcycle_estimate(
+        0.0,
+        Float64(lambda_t),
+        1.0;
+        min_substeps=1,
+        max_substeps=max_polymer_substeps,
+    )
+    selected_polymer_substeps = if polymer_substeps === :auto
+        subcycle_estimate.recommended
+    elseif polymer_substeps isa Integer
+        polymer_substeps >= 1 || throw(ArgumentError("polymer_substeps must be >= 1"))
+        polymer_substeps
+    else
+        throw(ArgumentError("polymer_substeps must be an integer or :auto"))
+    end
+    dt_poly = one(T) / T(selected_polymer_substeps)
+
+    psixx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psiyy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixx_adv = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixy_adv = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psiyy_adv = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixx_next = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixy_next = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psiyy_next = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    west_xx = KernelAbstractions.zeros(backend, T, Ny)
+    west_xy = KernelAbstractions.zeros(backend, T, Ny)
+    west_yy = KernelAbstractions.zeros(backend, T, Ny)
+    east_xx = KernelAbstractions.zeros(backend, T, Ny)
+    east_xy = KernelAbstractions.zeros(backend, T, Ny)
+    east_yy = KernelAbstractions.zeros(backend, T, Ny)
+    ux_face = KernelAbstractions.zeros(backend, T, Nx + 1, Ny)
+    uy_face = KernelAbstractions.zeros(backend, T, Nx, Ny + 1)
+    dudx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    dudy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    dvdx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    dvdy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    tauxx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    tauxy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    tauyy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+
+    for _ in 1:polymer_steps
+        logfv_cell_velocity_to_faces_openx_solid_aware_2d!(
+            ux_face, uy_face, ux, uy, is_solid, u_profile, ux_east;
+            sync=false,
+        )
+        logfv_advect_upwind_openx_solid_aware_2d!(
+            psixx_adv, psixy_adv, psiyy_adv,
+            psixx, psixy, psiyy,
+            west_xx, west_xy, west_yy,
+            east_xx, east_xy, east_yy,
+            ux_face, uy_face, is_solid, one(T);
+            sync=false,
+        )
+        logfv_velocity_gradient_solid_aware_2d!(dudx, dudy, dvdx, dvdy, ux, uy, is_solid, one(T), one(T); sync=false)
+
+        psixx_work, psixy_work, psiyy_work = psixx_adv, psixy_adv, psiyy_adv
+        for _ in 1:selected_polymer_substeps
+            logfv_step_oldroydb_log_2d!(
+                psixx_next, psixy_next, psiyy_next,
+                psixx_work, psixy_work, psiyy_work,
+                dudx, dudy, dvdx, dvdy,
+                lambda_t, dt_poly;
+                sync=false,
+            )
+            psixx_work, psixx_next = psixx_next, psixx_work
+            psixy_work, psixy_next = psixy_next, psixy_work
+            psiyy_work, psiyy_next = psiyy_next, psiyy_work
+        end
+        psixx, psixx_adv = psixx_work, psixx
+        psixy, psixy_adv = psixy_work, psixy
+        psiyy, psiyy_adv = psiyy_work, psiyy
+    end
+    logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor_t)
+    KernelAbstractions.synchronize(backend)
+
+    rho_cpu = Array(rho)
+    ux_cpu = Array(ux)
+    uy_cpu = Array(uy)
+    psixx_cpu = Array(psixx)
+    psixy_cpu = Array(psixy)
+    psiyy_cpu = Array(psiyy)
+    tauxx_cpu = Array(tauxx)
+    tauxy_cpu = Array(tauxy)
+    tauyy_cpu = Array(tauyy)
+
+    min_c_eig = Inf
+    max_speed = 0.0
+    for j in 1:Ny, i in 1:Nx
+        if !is_solid_h[i, j]
+            cxx, cxy, cyy = logfv_exp_sym2_2d(psixx_cpu[i, j], psixy_cpu[i, j], psiyy_cpu[i, j])
+            min_c_eig = min(min_c_eig, logfv_min_eig_sym2_2d(cxx, cxy, cyy))
+            max_speed = max(max_speed, hypot(Float64(ux_cpu[i, j]), Float64(uy_cpu[i, j])))
+        end
+    end
+    fluid_mask = .!is_solid_h
+    max_abs_psi = max(maximum(abs, psixx_cpu), maximum(abs, psixy_cpu), maximum(abs, psiyy_cpu))
+    max_abs_tau = max(maximum(abs, tauxx_cpu), maximum(abs, tauxy_cpu), maximum(abs, tauyy_cpu))
+
+    return (;
+        geometry=geom_h,
+        Nx,
+        Ny,
+        nu_s=Float64(nu_s_t),
+        nu_p=Float64(nu_p_t),
+        lambda=Float64(lambda_t),
+        u_mean=Float64(u_mean),
+        Fx_body=Float64(Fx_body_t),
+        hydro_steps,
+        polymer_steps,
+        polymer_substeps=selected_polymer_substeps,
+        subcycle_estimate,
+        rho=rho_cpu,
+        ux=ux_cpu,
+        uy=uy_cpu,
+        psixx=psixx_cpu,
+        psixy=psixy_cpu,
+        psiyy=psiyy_cpu,
+        tauxx=tauxx_cpu,
+        tauxy=tauxy_cpu,
+        tauyy=tauyy_cpu,
+        is_solid=is_solid_h,
+        min_c_eig,
+        max_speed,
+        max_abs_psi,
+        max_abs_tau,
+        rho_min=minimum(rho_cpu[fluid_mask]),
+        rho_max=maximum(rho_cpu[fluid_mask]),
+    )
+end
