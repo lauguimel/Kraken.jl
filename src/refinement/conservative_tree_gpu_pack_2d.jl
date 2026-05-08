@@ -34,11 +34,12 @@ struct ConservativeTreeGPUPullRoutePack2D{T,AFirst,ACount,ASrc,AQ,AW}
     pull_weight::AW
 end
 
-struct ConservativeTreeGPUCellPack2D{T,AId,ALevel,AVolume}
+struct ConservativeTreeGPUCellPack2D{T,AId,ALevel,AActive,AVolume}
     n_cells::Int32
     n_active::Int32
     active_cell_ids::AId
     cell_level::ALevel
+    cell_active::AActive
     cell_volume::AVolume
 end
 
@@ -255,15 +256,17 @@ function pack_conservative_tree_gpu_cells_2d(
     n_cells = length(spec.cells)
     active_cell_ids = Int32.(spec.active_cells)
     cell_level = Vector{UInt8}(undef, n_cells)
+    cell_active = Vector{UInt8}(undef, n_cells)
     cell_volume = Vector{T}(undef, n_cells)
     @inbounds for (cell_id, cell) in pairs(spec.cells)
         cell_level[cell_id] = UInt8(cell.level)
+        cell_active[cell_id] = cell.active ? UInt8(1) : UInt8(0)
         cell_volume[cell_id] = T(cell.metrics.volume)
     end
     return ConservativeTreeGPUCellPack2D{T,typeof(active_cell_ids),
-        typeof(cell_level),typeof(cell_volume)}(
+        typeof(cell_level),typeof(cell_active),typeof(cell_volume)}(
             Int32(n_cells), Int32(length(active_cell_ids)), active_cell_ids,
-            cell_level, cell_volume)
+            cell_level, cell_active, cell_volume)
 end
 
 function transfer_conservative_tree_gpu_cell_pack_2d(
@@ -273,12 +276,128 @@ function transfer_conservative_tree_gpu_cell_pack_2d(
         backend, pack.active_cell_ids)
     cell_level = _copy_conservative_tree_gpu_array_2d(
         backend, pack.cell_level)
+    cell_active = _copy_conservative_tree_gpu_array_2d(
+        backend, pack.cell_active)
     cell_volume = _copy_conservative_tree_gpu_array_2d(
         backend, pack.cell_volume)
     return ConservativeTreeGPUCellPack2D{T,typeof(active_cell_ids),
-        typeof(cell_level),typeof(cell_volume)}(
+        typeof(cell_level),typeof(cell_active),typeof(cell_volume)}(
             pack.n_cells, pack.n_active, active_cell_ids, cell_level,
-            cell_volume)
+            cell_active, cell_volume)
+end
+
+@inline function _conservative_tree_gpu_level_row_selected_2d(
+        cell_level, cell_active, cell::Int, level::UInt8, active_only::Bool)
+    cell_level[cell] == level || return false
+    active_only && cell_active[cell] == UInt8(0) && return false
+    return true
+end
+
+@kernel function _copy_conservative_tree_gpu_level_rows_2d_kernel!(
+        Fdst, @Const(Fsrc), @Const(cell_level), @Const(cell_active),
+        n_cells::Int32, level::UInt8, active_only::Bool)
+    linear = @index(Global)
+    total = Int(n_cells) * 9
+    @inbounds if linear <= total
+        cell = (linear - 1) ÷ 9 + 1
+        q = (linear - 1) % 9 + 1
+        if _conservative_tree_gpu_level_row_selected_2d(
+                cell_level, cell_active, cell, level, active_only)
+            Fdst[cell, q] = Fsrc[cell, q]
+        end
+    end
+end
+
+function copy_conservative_tree_gpu_level_rows_2d!(
+        Fdst::AbstractMatrix,
+        Fsrc::AbstractMatrix,
+        pack::ConservativeTreeGPUCellPack2D,
+        level::Integer;
+        active_only::Bool=false,
+        sync::Bool=true)
+    0 <= Int(level) <= typemax(UInt8) ||
+        throw(ArgumentError("level must fit in UInt8"))
+    size(Fdst, 1) == Int(pack.n_cells) && size(Fsrc, 1) == Int(pack.n_cells) ||
+        throw(ArgumentError("F matrices must match pack.n_cells"))
+    size(Fdst, 2) == 9 && size(Fsrc, 2) == 9 ||
+        throw(ArgumentError("F matrices must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(Fdst)
+    kernel! = _copy_conservative_tree_gpu_level_rows_2d_kernel!(backend)
+    kernel!(Fdst, Fsrc, pack.cell_level, pack.cell_active, pack.n_cells,
+            UInt8(level), active_only; ndrange=Int(pack.n_cells) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return Fdst
+end
+
+@kernel function _add_and_clear_conservative_tree_gpu_level_rows_2d_kernel!(
+        Fdst, Fpending, @Const(cell_level), @Const(cell_active),
+        n_cells::Int32, level::UInt8, active_only::Bool)
+    linear = @index(Global)
+    total = Int(n_cells) * 9
+    @inbounds if linear <= total
+        cell = (linear - 1) ÷ 9 + 1
+        q = (linear - 1) % 9 + 1
+        if _conservative_tree_gpu_level_row_selected_2d(
+                cell_level, cell_active, cell, level, active_only)
+            Fdst[cell, q] += Fpending[cell, q]
+            Fpending[cell, q] = zero(eltype(Fpending))
+        end
+    end
+end
+
+function add_and_clear_conservative_tree_gpu_level_rows_2d!(
+        Fdst::AbstractMatrix,
+        Fpending::AbstractMatrix,
+        pack::ConservativeTreeGPUCellPack2D,
+        level::Integer;
+        active_only::Bool=false,
+        sync::Bool=true)
+    0 <= Int(level) <= typemax(UInt8) ||
+        throw(ArgumentError("level must fit in UInt8"))
+    size(Fdst, 1) == Int(pack.n_cells) &&
+        size(Fpending, 1) == Int(pack.n_cells) ||
+        throw(ArgumentError("F matrices must match pack.n_cells"))
+    size(Fdst, 2) == 9 && size(Fpending, 2) == 9 ||
+        throw(ArgumentError("F matrices must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(Fdst)
+    kernel! = _add_and_clear_conservative_tree_gpu_level_rows_2d_kernel!(backend)
+    kernel!(Fdst, Fpending, pack.cell_level, pack.cell_active, pack.n_cells,
+            UInt8(level), active_only; ndrange=Int(pack.n_cells) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return Fdst
+end
+
+@kernel function _zero_conservative_tree_gpu_level_rows_2d_kernel!(
+        F, @Const(cell_level), @Const(cell_active), n_cells::Int32,
+        level::UInt8, active_only::Bool)
+    linear = @index(Global)
+    total = Int(n_cells) * 9
+    @inbounds if linear <= total
+        cell = (linear - 1) ÷ 9 + 1
+        q = (linear - 1) % 9 + 1
+        if _conservative_tree_gpu_level_row_selected_2d(
+                cell_level, cell_active, cell, level, active_only)
+            F[cell, q] = zero(eltype(F))
+        end
+    end
+end
+
+function zero_conservative_tree_gpu_level_rows_2d!(
+        F::AbstractMatrix,
+        pack::ConservativeTreeGPUCellPack2D,
+        level::Integer;
+        active_only::Bool=false,
+        sync::Bool=true)
+    0 <= Int(level) <= typemax(UInt8) ||
+        throw(ArgumentError("level must fit in UInt8"))
+    size(F, 1) == Int(pack.n_cells) && size(F, 2) == 9 ||
+        throw(ArgumentError("F must match the conservative-tree cell pack"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _zero_conservative_tree_gpu_level_rows_2d_kernel!(backend)
+    kernel!(F, pack.cell_level, pack.cell_active, pack.n_cells,
+            UInt8(level), active_only; ndrange=Int(pack.n_cells) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return F
 end
 
 @kernel function _stream_conservative_tree_pull_routes_F_2d_kernel!(

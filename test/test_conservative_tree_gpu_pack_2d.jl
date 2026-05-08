@@ -177,6 +177,51 @@ using KernelAbstractions
         end
     end
 
+    @testset "level row kernels match scheduler row utilities" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ])
+        Fsrc = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fcopy_ref = fill(-1.0, size(Fsrc))
+        Fcopy_gpu = similar(Fcopy_ref)
+        Fadd_ref = fill(0.25, size(Fsrc))
+        Fadd_gpu = copy(Fadd_ref)
+        Fpending_ref = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fpending_gpu = similar(Fpending_ref)
+        for (cell_id, cell) in pairs(spec.cells), q in 1:9
+            Fsrc[cell_id, q] =
+                0.03 + 0.001 * q + 0.0001 * cell.level +
+                0.00001 * cell.i + 0.000001 * cell.j
+            Fpending_ref[cell_id, q] = 0.5 * Fsrc[cell_id, q]
+        end
+        copyto!(Fcopy_gpu, Fcopy_ref)
+        copyto!(Fpending_gpu, Fpending_ref)
+        pack = pack_conservative_tree_gpu_cells_2d(spec; T=Float64)
+
+        for level in 0:spec.max_level
+            Kraken._copy_conservative_tree_level_rows_2d!(
+                Fcopy_ref, Fsrc, spec, level)
+            copy_conservative_tree_gpu_level_rows_2d!(
+                Fcopy_gpu, Fsrc, pack, level)
+            @test isapprox(Fcopy_gpu, Fcopy_ref; atol=1e-14, rtol=0)
+
+            Kraken._add_and_clear_conservative_tree_level_rows_2d!(
+                Fadd_ref, Fpending_ref, spec, level)
+            add_and_clear_conservative_tree_gpu_level_rows_2d!(
+                Fadd_gpu, Fpending_gpu, pack, level)
+            @test isapprox(Fadd_gpu, Fadd_ref; atol=1e-14, rtol=0)
+            @test isapprox(Fpending_gpu, Fpending_ref; atol=1e-14, rtol=0)
+        end
+
+        zero_conservative_tree_gpu_level_rows_2d!(Fcopy_gpu, pack, 1;
+                                                  active_only=true)
+        for cell_id in spec.active_cells
+            spec.cells[cell_id].level == 1 || continue
+            @test all(Fcopy_gpu[cell_id, :] .== 0.0)
+        end
+    end
+
     if get(ENV, "KRAKEN_TEST_METAL", "0") == "1"
         @testset "Metal smoke for pull stream and active-level collision" begin
             @eval using Metal
@@ -221,6 +266,15 @@ using KernelAbstractions
                 cell_pack_d = transfer_conservative_tree_gpu_cell_pack_2d(
                     pack_conservative_tree_gpu_cells_2d(spec; T=Float32),
                     backend)
+                Fcopyd = similar(Fd)
+                fill!(Fcopyd, Float32(-1))
+                copy_conservative_tree_gpu_level_rows_2d!(
+                    Fcopyd, Fd, cell_pack_d, 1)
+                Fcopy = fill(Float32(-1), size(Fin))
+                Kraken._copy_conservative_tree_level_rows_2d!(
+                    Fcopy, Fin, spec, 1)
+                @test isapprox(Array(Fcopyd), Fcopy; atol=2e-6, rtol=2e-6)
+
                 collide_Guo_conservative_tree_gpu_active_level_F_2d!(
                     Fd, cell_pack_d, 1, Float32(1.1), Float32(1e-6),
                     Float32(0))

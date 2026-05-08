@@ -38,6 +38,7 @@ Implemented:
 - scheduler-aligned direct-level pull packs, excluding interface routes so
   coarse/fine traffic remains ledger-owned;
 - device-transferable active-cell metric pack;
+- GPU level-row copy/add-clear/zero kernels for scheduler buffer movement;
 - KernelAbstractions active-level Guo collision kernel, verified against the
   CPU AMR-D reference;
 - local Metal smoke guarded by `KRAKEN_TEST_METAL=1`.
