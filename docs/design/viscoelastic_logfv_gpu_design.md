@@ -337,13 +337,16 @@ Kernel rules:
 The first macro driver may run on a single uniform Cartesian grid, but
 the backend must not be designed as a single-grid dead end. The
 `SLBM-paper` branch is developing AMR-like infrastructure, so the
-log-FV polymer path must stay patch-local.
+log-FV polymer path must stay patch-local. The intended AMR model is
+Basilisk-style quadtree refinement in 2D: each refined parent cell maps
+to four child cells at the next level.
 
 Required constraints:
 
 ```text
 all kernels operate on one rectangular patch at a time
 dx, dy are explicit kernel arguments
+level id and refinement ratio are explicit at wrapper/driver level
 interior update excludes halo/ghost cells unless a kernel says otherwise
 boundary, halo, prolongation, and restriction are separate operators
 no hidden global Nx/Ny assumptions in polymer state structs
@@ -355,13 +358,16 @@ For early uniform-grid canaries, this means:
 ```text
 uniform grid = one patch with no refinement
 physical boundaries = patch boundary operators
-future AMR interfaces = patch exchange/prolong/restrict wrappers
+future AMR interfaces = quadtree patch exchange/prolong/restrict wrappers
 ```
 
 Refinement-sensitive quantities:
 
 - `Psi` must be prolongated/restricted in log space, not by silently
   reconstructing/clipping `C`.
+- Parent-to-child prolongation is 1-to-4 per level in 2D. Child-to-parent
+  restriction should preserve the cell average of `Psi` or of a documented
+  conservative proxy; do not average stresses and call that the state.
 - `tau_p` and `Fp = div(tau_p)` should be recomputed from `Psi` on each
   level after exchange when possible.
 - Flux-form advection must eventually use conservative coarse/fine flux
