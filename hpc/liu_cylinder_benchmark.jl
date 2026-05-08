@@ -227,10 +227,11 @@ for R in R_values
         @printf("%-22s %-6s %-10.3f %-10s %-8s %-14s (%.0fs, Cl=%.3g)\n",
                 "Newtonian", "-", rn.Cd, "-", "-", "-", dt, rn.Cl)
     end
-    @printf("%-22s %-9s %-6s %-10s %-10s %-10s %-10s %-8s %-9s %-14s\n",
+    @printf("%-22s %-9s %-6s %-10s %-10s %-10s %-10s %-10s %-10s %-10s %-9s %-14s\n",
             "variant", "model", "Wi", "Cd_report", "Cd_post", "Cd_split",
-            "Cd_Liu", "err%", "bad_step", "gradient")
-    println("-"^104)
+            "Cd_Liu", "err_rep%", "err_post%", "err_split%", "bad_step",
+            "gradient")
+    println("-"^126)
 
     for variant in variants, model_name in models, Wi in Wi_values
         # Liu: Wi = λ · U_c / R with U_c = U_avg = u_mean
@@ -274,10 +275,13 @@ for R in R_values
         dt = time() - t0
 
         ref = get(liu_ref, (R, Wi), NaN)
-        err = isnan(ref) ? NaN : (r.Cd - ref) / ref * 100
-        @printf("%-22s %-9s %-6.3f %-10.3f %-10.3f %-10.3f %-10.3f %-8.2f %-9d %-14s (%.0fs)\n",
+        err_report = isnan(ref) ? NaN : (r.Cd - ref) / ref * 100
+        err_post = isnan(ref) ? NaN : (r.Cd_mea_post_source - ref) / ref * 100
+        err_split = isnan(ref) ? NaN : (r.Cd_split_explicit - ref) / ref * 100
+        @printf("%-22s %-9s %-6.3f %-10.3f %-10.3f %-10.3f %-10.3f %-10.2f %-10.2f %-10.2f %-9d %-14s (%.0fs)\n",
                 variant.label, string(model_name), Wi, r.Cd,
-                r.Cd_mea_post_source, r.Cd_split_explicit, ref, err,
+                r.Cd_mea_post_source, r.Cd_split_explicit, ref, err_report,
+                err_post, err_split,
                 r.first_nonfinite_step, string(variant.gradient), dt)
     end
 end
