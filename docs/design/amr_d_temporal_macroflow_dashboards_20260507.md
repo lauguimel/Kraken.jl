@@ -45,6 +45,8 @@ julia --project=. benchmarks/amr_d_macroflow_temporal_convergence_2d.jl
 
 Use `KRK_AMR_D_TEMP_BACKEND=cuda` on Aqua/H100, or
 `KRK_AMR_D_TEMP_BACKEND=auto` to select CUDA first, then Metal, then CPU.
+Set `KRK_AMR_D_TEMP_REFERENCE=none` for an AMR-only GPU dashboard; the default
+`auto` mode also runs the classic Cartesian channel reference when available.
 
 The GPU path is currently wired for route-native nested channel AMR-D:
 Poiseuille with periodic-x wall-y boundaries and Couette with periodic-x
@@ -58,6 +60,10 @@ atomic Float32 reduction is faster on some local Metal debug cases but can
 leave a visible mass residual.
 Nested solid probes still run through the CPU AMR-D route path until the
 solid-interface GPU ledgers are validated.
+The classic Cartesian reference in the temporal dashboard is still the dense
+CPU integrated-population solver. Each case now writes `runtime.csv` so the
+AMR-D backend, reference backend, precision, step count, and elapsed time are
+explicit instead of inferred from activity monitors.
 `KRK_AMR_D_TEMP_SINGLE_STEP=1` is recommended for local Metal runs because the
 default temporal sweep reruns each case from zero at every checkpoint
 (`max_steps`, `2*max_steps`, ...), which is useful for convergence traces but

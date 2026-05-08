@@ -109,9 +109,24 @@ function _temp_case_paths()
 end
 
 function _temp_reference_method(case)
-    case.runtime_status == :subcycled_nested_channel && return :cartesian_classic
-    case.max_level <= 1 && return :leaf_oracle
-    return nothing
+    raw = lowercase(strip(get(ENV, "KRK_AMR_D_TEMP_REFERENCE", "auto")))
+    raw in ("none", "off", "0", "false") && return nothing
+    raw in ("", "auto") && begin
+        case.runtime_status == :subcycled_nested_channel &&
+            return :cartesian_classic
+        case.max_level <= 1 && return :leaf_oracle
+        return nothing
+    end
+    if raw in ("cartesian", "cartesian_classic")
+        case.runtime_status == :subcycled_nested_channel &&
+            return :cartesian_classic
+        return nothing
+    end
+    if raw == "leaf_oracle"
+        case.max_level <= 1 && return :leaf_oracle
+        return nothing
+    end
+    throw(ArgumentError("KRK_AMR_D_TEMP_REFERENCE must be auto, none, cartesian_classic, or leaf_oracle"))
 end
 
 function _temp_run_case(setup, case; steps::Int, method::Symbol, T=Float64,
@@ -231,10 +246,28 @@ function _temp_write_convergence_csv(path, rows)
     return path
 end
 
+function _temp_csv_text(x)
+    return replace(String(x), "," => ";")
+end
+
+function _temp_write_runtime_csv(path, rows)
+    open(path, "w") do io
+        println(io, "case,method,backend,T,steps,elapsed_s,notes")
+        for r in rows
+            @printf(io, "%s,%s,%s,%s,%d,%.9e,%s\n",
+                    _temp_csv_text(r.case), _temp_csv_text(r.method),
+                    _temp_csv_text(r.backend), _temp_csv_text(r.T_name),
+                    r.steps, r.elapsed_s, _temp_csv_text(r.notes))
+        end
+    end
+    return path
+end
+
 function _temp_existing_case_summary(case, case_dir::AbstractString)
     dashboard_png = joinpath(case_dir, "debug_dashboard.png")
     convergence_csv = joinpath(case_dir, "convergence.csv")
     values_csv = joinpath(case_dir, "values.csv")
+    runtime_csv = joinpath(case_dir, "runtime.csv")
     all(isfile, (dashboard_png, convergence_csv, values_csv)) ||
         return nothing
 
@@ -246,7 +279,7 @@ function _temp_existing_case_summary(case, case_dir::AbstractString)
         case=case.name, flow=case.flow, status=Symbol(fields[3]),
         steps=parse(Int, fields[2]), outdir=case_dir,
         dashboard_png=dashboard_png, convergence_csv=convergence_csv,
-        values_csv=values_csv)
+        values_csv=values_csv, runtime_csv=runtime_csv)
 end
 
 function _temp_plot_single_dashboard(path, case, amr, convergence_rows)
@@ -328,6 +361,7 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         skip_existing::Bool=_temp_env_bool("KRK_AMR_D_TEMP_SKIP_EXISTING"),
         single_step::Bool=_temp_env_bool("KRK_AMR_D_TEMP_SINGLE_STEP"),
         backend=nothing,
+        backend_name::AbstractString="cpu",
         T::Type{<:AbstractFloat}=Float64)
     mkpath(outdir)
     summary_rows = NamedTuple[]
@@ -349,7 +383,8 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
                 continue
             end
         end
-        println("running ", case.name)
+        println("running ", case.name, " amr_d backend=", backend_name,
+                " T=", T)
         flush(stdout)
 
         krk_start_steps = max(1, Int(getproperty(setup, :max_steps)))
@@ -357,12 +392,16 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         steps = single_step ? final_cap : krk_start_steps
         previous = nothing
         convergence_rows = NamedTuple[]
+        runtime_rows = NamedTuple[]
+        amr_elapsed_s = 0.0
         amr = nothing
         final_status = :not_converged
 
         while true
+            t_amr = time()
             amr = _temp_run_case(setup, case; steps=steps,
                                  method=:amr_d, backend=backend, T=T)
+            amr_elapsed_s += time() - t_amr
             ux_linf = NaN
             ux_l2 = NaN
             rho_linf = NaN
@@ -404,10 +443,37 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         end
 
         reference_method = _temp_reference_method(case)
-        reference = reference_method === nothing ? nothing :
-            merge(_temp_run_case(setup, case; steps=steps,
-                                 method=reference_method, T=T),
-                  (; method=reference_method,))
+        push!(runtime_rows, (;
+            case=case.name, method=:amr_d, backend=Symbol(backend_name),
+            T_name=Symbol(nameof(T)), steps=steps,
+            elapsed_s=amr_elapsed_s,
+            notes="AMR-D conservative-tree route path"))
+        reference = nothing
+        if reference_method !== nothing
+            reference_backend = reference_method == :cartesian_classic ?
+                "cpu_classic_dense" : "cpu_leaf_oracle"
+            reference_method == :cartesian_classic && backend !== nothing &&
+                println("running ", case.name,
+                        " reference=cartesian_classic backend=",
+                        reference_backend,
+                        " note=AMR backend is ", backend_name)
+            t_ref = time()
+            reference = merge(_temp_run_case(setup, case; steps=steps,
+                                             method=reference_method, T=T),
+                              (; method=reference_method,))
+            ref_elapsed_s = time() - t_ref
+            push!(runtime_rows, (;
+                case=case.name, method=reference_method,
+                backend=Symbol(reference_backend), T_name=Symbol(nameof(T)),
+                steps=getproperty(reference.result, :steps),
+                elapsed_s=ref_elapsed_s,
+                notes=reference_method == :cartesian_classic ?
+                    "classic dense Cartesian reference; CPU until Cartesian GPU reference is wired" :
+                    "leaf-oracle reference"))
+        else
+            println("skipping ", case.name,
+                    " reference because KRK_AMR_D_TEMP_REFERENCE=none")
+        end
         amr_record = merge(amr, (; method=:amr_d,))
         value_rows = [_temp_values_row(case, :amr_d, amr.result,
                                        amr.state, reference)]
@@ -419,6 +485,8 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         _temp_write_convergence_csv(
             joinpath(case_dir, "convergence.csv"), convergence_rows)
         _temp_write_values_csv(joinpath(case_dir, "values.csv"), value_rows)
+        runtime_csv = _temp_write_runtime_csv(
+            joinpath(case_dir, "runtime.csv"), runtime_rows)
         _temp_final_dashboard(
             joinpath(case_dir, "debug_dashboard.png"), case, amr_record,
             reference, convergence_rows)
@@ -428,18 +496,19 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
             steps=steps, outdir=case_dir,
             dashboard_png=joinpath(case_dir, "debug_dashboard.png"),
             convergence_csv=joinpath(case_dir, "convergence.csv"),
-            values_csv=joinpath(case_dir, "values.csv")))
+            values_csv=joinpath(case_dir, "values.csv"),
+            runtime_csv=runtime_csv))
         println("finished ", case.name, " ", final_status,
                 " steps=", steps)
         flush(stdout)
     end
 
     open(joinpath(outdir, "summary.csv"), "w") do io
-        println(io, "case,flow,status,steps,outdir,dashboard_png,convergence_csv,values_csv")
+        println(io, "case,flow,status,steps,outdir,dashboard_png,convergence_csv,values_csv,runtime_csv")
         for r in summary_rows
             println(io, join((r.case, r.flow, r.status, r.steps, r.outdir,
                               r.dashboard_png, r.convergence_csv,
-                              r.values_csv), ","))
+                              r.values_csv, r.runtime_csv), ","))
         end
     end
     return summary_rows
@@ -450,9 +519,10 @@ function main()
     T = _temp_float_type(backend_name)
     println("AMR-D temporal runner backend=", backend_name, " T=", T)
     rows = backend === nothing ?
-        run_amr_d_temporal_convergence_2d(; backend=backend, T=T) :
+        run_amr_d_temporal_convergence_2d(;
+            backend=backend, backend_name=backend_name, T=T) :
         Base.invokelatest(run_amr_d_temporal_convergence_2d;
-                          backend=backend, T=T)
+                          backend=backend, backend_name=backend_name, T=T)
     outdir = get(ENV, "KRK_AMR_D_TEMP_OUTDIR", TEMP_DEFAULT_OUTDIR)
     println("wrote ", joinpath(outdir, "summary.csv"))
     for row in rows
