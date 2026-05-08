@@ -296,25 +296,14 @@ function run_viscoelastic_logfv_poiseuille_frozen_force_2d(;
     for j in 1:Ny, i in 1:Nx
         fx_total_h[i, j] += Fx_body_t
     end
-    if force_boundary_fill === :nearest
-        for j in 1:Ny
-            fx_total_h[1, j] = fx_total_h[2, j]
-            fy_total_h[1, j] = fy_total_h[2, j]
-            fx_total_h[Nx, j] = fx_total_h[Nx - 1, j]
-            fy_total_h[Nx, j] = fy_total_h[Nx - 1, j]
-        end
-        for i in 1:Nx
-            fx_total_h[i, 1] = fx_total_h[i, 2]
-            fy_total_h[i, 1] = fy_total_h[i, 2]
-            fx_total_h[i, Ny] = fx_total_h[i, Ny - 1]
-            fy_total_h[i, Ny] = fy_total_h[i, Ny - 1]
-        end
-    end
 
     fx_total = KernelAbstractions.allocate(backend, T, Nx, Ny)
     fy_total = KernelAbstractions.allocate(backend, T, Nx, Ny)
     copyto!(fx_total, fx_total_h)
     copyto!(fy_total, fy_total_h)
+    if force_boundary_fill === :nearest
+        logfv_fill_nearest_boundary_2d!(fx_total, fy_total)
+    end
 
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(nu_lbm_t), u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, T; backend=backend)

@@ -457,6 +457,29 @@ end
         end
     end
 
+    @testset "M4 force boundary fill copies nearest interior halo" begin
+        Nx, Ny = 6, 5
+        fx = [100i + j for i in 1:Nx, j in 1:Ny]
+        fy = [-10i + 0.5j for i in 1:Nx, j in 1:Ny]
+        fx0 = copy(fx)
+        fy0 = copy(fy)
+
+        Kraken.logfv_fill_nearest_boundary_2d!(fx, fy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            ii = clamp(i, 2, Nx - 1)
+            jj = clamp(j, 2, Ny - 1)
+            if i == 1 || i == Nx || j == 1 || j == Ny
+                @test fx[i, j] == fx0[ii, jj]
+                @test fy[i, j] == fy0[ii, jj]
+            else
+                @test fx[i, j] == fx0[i, j]
+                @test fy[i, j] == fy0[i, j]
+            end
+        end
+    end
+
     @testset "M5 local Couette conformation, stress, force, and BSD are analytical" begin
         Nx, Ny = 8, 18
         height = 1.0

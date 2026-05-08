@@ -248,6 +248,30 @@ function logfv_bsd_correct_force_centered_2d!(
     return nothing
 end
 
+@kernel function logfv_fill_nearest_boundary_2d_kernel!(fx, fy, Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if i == 1 || i == Nx || j == 1 || j == Ny
+                ii = min(max(i, 2), Nx - 1)
+                jj = min(max(j, 2), Ny - 1)
+                fx[i, j] = fx[ii, jj]
+                fy[i, j] = fy[ii, jj]
+            end
+        end
+    end
+end
+
+function logfv_fill_nearest_boundary_2d!(fx, fy; sync::Bool=true)
+    backend = KernelAbstractions.get_backend(fx)
+    Nx, Ny = size(fx)
+    Nx >= 3 && Ny >= 3 || throw(ArgumentError("nearest boundary fill requires at least 3x3 cells"))
+    kernel! = logfv_fill_nearest_boundary_2d_kernel!(backend)
+    kernel!(fx, fy, Nx, Ny; ndrange=(Nx, Ny))
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_compute_macroscopic_forced_field_2d_kernel!(
     rho, ux, uy,
     @Const(f), @Const(fx), @Const(fy),
