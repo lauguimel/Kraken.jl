@@ -208,6 +208,46 @@ function logfv_polymer_force_centered_2d!(
     return nothing
 end
 
+@kernel function logfv_bsd_correct_force_centered_2d_kernel!(
+    fx_out, fy_out,
+    @Const(fx_poly), @Const(fy_poly),
+    @Const(ux), @Const(uy),
+    zeta_nu_p, inv_dx2, inv_dy2, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if i > 1 && i < Nx && j > 1 && j < Ny
+                lap_ux = (ux[i + 1, j] - 2 * ux[i, j] + ux[i - 1, j]) * inv_dx2 +
+                         (ux[i, j + 1] - 2 * ux[i, j] + ux[i, j - 1]) * inv_dy2
+                lap_uy = (uy[i + 1, j] - 2 * uy[i, j] + uy[i - 1, j]) * inv_dx2 +
+                         (uy[i, j + 1] - 2 * uy[i, j] + uy[i, j - 1]) * inv_dy2
+                fx_out[i, j] = fx_poly[i, j] - zeta_nu_p * lap_ux
+                fy_out[i, j] = fy_poly[i, j] - zeta_nu_p * lap_uy
+            else
+                fx_out[i, j] = fx_poly[i, j]
+                fy_out[i, j] = fy_poly[i, j]
+            end
+        end
+    end
+end
+
+function logfv_bsd_correct_force_centered_2d!(
+    fx_out, fy_out, fx_poly, fy_poly, ux, uy, zeta, nu_p, dx, dy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(fx_out)
+    Nx, Ny = size(fx_out)
+    kernel! = logfv_bsd_correct_force_centered_2d_kernel!(backend)
+    kernel!(
+        fx_out, fy_out, fx_poly, fy_poly, ux, uy,
+        zeta * nu_p, inv(dx * dx), inv(dy * dy), Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_advect_upwind_2d_kernel!(
     psixx_out, psixy_out, psiyy_out,
     @Const(psixx), @Const(psixy), @Const(psiyy),

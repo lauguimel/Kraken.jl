@@ -40,6 +40,11 @@ function _poiseuille_shear(y, height, umax)
     return 4 * umax / height * (1 - 2y / height)
 end
 
+function _poiseuille_ux(y, height, umax)
+    η = y / height
+    return 4 * umax * η * (1 - η)
+end
+
 function _oldroydb_simple_shear_from_identity(γ, λ, t)
     e = exp(-t / λ)
     return (
@@ -397,6 +402,54 @@ end
             @test fy[i, 1] == 0.0
             @test fx[i, Ny] == 0.0
             @test fy[i, Ny] == 0.0
+        end
+    end
+
+    @testset "M4 BSD force correction preserves continuum balance" begin
+        Nx, Ny = 7, 21
+        height = 1.0
+        dx = 1.0
+        dy = height / Ny
+        umax = 0.06
+        λ = 5.0
+        prefactor = 0.11
+        nu_p = prefactor * λ
+        lapu = -8 * umax / height^2
+
+        psixx = zeros(Float64, Nx, Ny)
+        psixy = zeros(Float64, Nx, Ny)
+        psiyy = zeros(Float64, Nx, Ny)
+        ux = zeros(Float64, Nx, Ny)
+        uy = zeros(Float64, Nx, Ny)
+        for j in 1:Ny, i in 1:Nx
+            y = height * (j - 0.5) / Ny
+            γ = _poiseuille_shear(y, height, umax)
+            psixx[i, j], psixy[i, j], psiyy[i, j] = _sym2_log(_oldroydb_simple_shear_stationary(γ, λ)...)
+            ux[i, j] = _poiseuille_ux(y, height, umax)
+        end
+
+        tauxx = similar(psixx)
+        tauxy = similar(psixy)
+        tauyy = similar(psiyy)
+        fx_poly = similar(psixx)
+        fy_poly = similar(psixx)
+        fx_total = similar(psixx)
+        fy_total = similar(psixx)
+
+        Kraken.logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor)
+        Kraken.logfv_polymer_force_centered_2d!(fx_poly, fy_poly, tauxx, tauxy, tauyy, dx, dy)
+
+        for zeta in (0.0, 0.5, 1.0)
+            Kraken.logfv_bsd_correct_force_centered_2d!(
+                fx_total, fy_total, fx_poly, fy_poly, ux, uy, zeta, nu_p, dx, dy,
+            )
+            KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+            expected_fx = (1 - zeta) * nu_p * lapu
+            for j in 2:(Ny - 1), i in 2:(Nx - 1)
+                @test fx_total[i, j] ≈ expected_fx atol=1e-13 rtol=1e-13
+                @test fy_total[i, j] ≈ 0.0 atol=1e-13
+            end
         end
     end
 end
