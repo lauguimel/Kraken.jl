@@ -520,9 +520,9 @@ produces `ROUTE_BOUNDARY` routes for wall/open-boundary closures.
 `sampling=:leaf_equivalent` preserves the original non-subcycled route-native
 contract: every active cell is sampled on the finest grid, so coarse same-level
 packets may be split into leaf-equivalent residual routes. `sampling=:level_native`
-is an experimental strict subcycling contract: same-level packets advance by
-one cell of their own level, while coarse sources that stream into a refined
-neighbour use a boundary-layer injection stencil with no direct residual.
+is the strict subcycling contract: same-level packets advance by one cell of
+their own level, while coarse sources that stream into a refined neighbour use
+a boundary-layer injection stencil with no direct residual.
 `sampling=:subcycled_hybrid`
 keeps native same-level routes away from interfaces but keeps coarse/fine
 interface routes on the existing leaf-equivalent conservative ledger contract.

@@ -829,10 +829,12 @@ end
         steps = 96
         center = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_center_yband_nested_spec_2d(),
-            steps=steps, Fx=1e-7, omega=1.0)
+            steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:leaf_equivalent)
         walls = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_wall_refined_ybands_nested_spec_2d(),
-            steps=steps, Fx=1e-7, omega=1.0)
+            steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:leaf_equivalent)
         cart = _test_cartesian_poiseuille_profile_2d(
             2, steps; Fx=1e-7, omega=1.0)
 
@@ -855,11 +857,13 @@ end
         center_flat = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_center_yband_nested_spec_2d(),
             steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:leaf_equivalent,
             coarse_to_fine_predictor_weight=0,
             enforce_mass=false)
         center_predicted = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_center_yband_nested_spec_2d(),
             steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:leaf_equivalent,
             enforce_mass=false)
         flat_diff = center_flat.ux_profile .- cart
         predicted_diff = center_predicted.ux_profile .- cart
@@ -869,17 +873,39 @@ end
         x_flat = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_center_xband_nested_spec_2d(),
             steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:leaf_equivalent,
             coarse_to_fine_predictor_weight=0,
             enforce_mass=false)
         x_predicted = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_center_xband_nested_spec_2d(),
             steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:leaf_equivalent,
             enforce_mass=false)
         x_flat_linf = maximum(abs.(x_flat.ux_profile .- cart))
         x_predicted_linf = maximum(abs.(x_predicted.ux_profile .- cart))
 
         @test predicted_l2 < 0.75 * flat_l2
         @test x_predicted_linf <= 1.05 * x_flat_linf
+    end
+
+    @testset "level-native nested bands stay close to Poiseuille analytic profile" begin
+        steps = 1024
+        xband = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_center_xband_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0, enforce_mass=false)
+        yband = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_center_yband_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0, enforce_mass=false)
+        wall_bands = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, spec=_test_wall_refined_ybands_nested_spec_2d(),
+            steps=steps, Fx=1e-7, omega=1.0, enforce_mass=false)
+
+        @test xband.linf_error < 3e-5
+        @test yband.linf_error < 3e-5
+        @test wall_bands.linf_error < 2e-5
+        @test xband.relative_mass_drift < 1e-12
+        @test yband.relative_mass_drift < 1e-12
+        @test wall_bands.relative_mass_drift < 1e-12
     end
 
     @testset "subcycled Poiseuille macroflow runs from level 1 to 4" begin

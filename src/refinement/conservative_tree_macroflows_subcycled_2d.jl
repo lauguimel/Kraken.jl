@@ -535,7 +535,7 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         coarse_to_fine_prolongation::Symbol=:flat,
         coarse_to_fine_state::Symbol=:owned,
         coarse_to_fine_predictor_weight=nothing,
-        route_sampling::Symbol=:leaf_equivalent,
+        route_sampling::Symbol=:level_native,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -560,7 +560,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
     schedule = create_conservative_tree_subcycle_schedule_2d(spec_run.max_level)
     route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
         spec_run; schedule=schedule, T=T)
-    prepare_conservative_tree_subcycle_route_packet_cache_2d!(route_bank, table)
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+        route_bank, table; periodic_x=true)
     state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
         spec_run; schedule=schedule, T=T)
     Fsource = similar(F)
@@ -628,7 +629,7 @@ function run_conservative_tree_couette_subcycled_2d(;
         coarse_to_fine_prolongation::Symbol=:flat,
         coarse_to_fine_state::Symbol=:owned,
         coarse_to_fine_predictor_weight=nothing,
-        route_sampling::Symbol=:leaf_equivalent,
+        route_sampling::Symbol=:level_native,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -653,7 +654,8 @@ function run_conservative_tree_couette_subcycled_2d(;
     schedule = create_conservative_tree_subcycle_schedule_2d(spec_run.max_level)
     route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
         spec_run; schedule=schedule, T=T)
-    prepare_conservative_tree_subcycle_route_packet_cache_2d!(route_bank, table)
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+        route_bank, table; periodic_x=true)
     state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
         spec_run; schedule=schedule, T=T)
     Fsource = similar(F)
@@ -722,7 +724,7 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         coarse_to_fine_prolongation::Symbol=:flat,
         coarse_to_fine_state::Symbol=:owned,
         coarse_to_fine_predictor_weight=nothing,
-        route_sampling::Symbol=:leaf_equivalent,
+        route_sampling::Symbol=:level_native,
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
@@ -751,7 +753,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
     schedule = create_conservative_tree_subcycle_schedule_2d(spec_run.max_level)
     route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
         spec_run; schedule=schedule, T=T)
-    prepare_conservative_tree_subcycle_route_packet_cache_2d!(route_bank, table)
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+        route_bank, table; periodic_x=true)
     state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
         spec_run; schedule=schedule, T=T)
     Fsource = similar(F)

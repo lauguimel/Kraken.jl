@@ -391,7 +391,8 @@ end
 
 function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        table::ConservativeTreeRouteTable2D)
+        table::ConservativeTreeRouteTable2D;
+        periodic_x::Bool=false)
     _check_conservative_tree_subcycle_route_table_2d(table)
     resize!(bank.route_packet_slot_by_route, length(table.routes))
     fill!(bank.route_packet_slot_by_route, 0)
@@ -431,7 +432,7 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
             src.active && continue
             for q in 1:9
                 dst_id, _ = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
-                    bank.spec, src_id, q)
+                    bank.spec, src_id, q; periodic_x=periodic_x)
                 dst_id == 0 && continue
                 inactive_slots[local_idx, q] =
                     _ensure_conservative_tree_route_packet_cache_2d!(
@@ -453,7 +454,8 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
         substep::Integer,
         route_packet_slot::Integer=0;
         alpha=1,
-        interface_time_scaling::Symbol=:leaf_equivalent)
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        periodic_x::Bool=false)
     kind == COALESCE_FACE || kind == COALESCE_CORNER ||
         throw(ArgumentError("route must be a fine-to-coarse coalesce route"))
 
@@ -474,7 +476,8 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
     packet_slot_i = Int(route_packet_slot)
     if interface_time_scaling == :level_native && kind == COALESCE_CORNER
         native_dst = _conservative_tree_level_native_corner_reflux_dst_2d(
-            spec, child_id, qi, step, bank.schedule.ratio, dst_cell_id)
+            spec, child_id, qi, step, bank.schedule.ratio, dst_cell_id;
+            periodic_x=periodic_x)
         if native_dst != dst_cell_id
             dst_cell_id = native_dst
             packet_slot_i = 0
@@ -508,7 +511,8 @@ function _conservative_tree_level_native_corner_reflux_dst_2d(
         q::Int,
         substep::Int,
         ratio::Int,
-        fallback_dst::Int)
+        fallback_dst::Int;
+        periodic_x::Bool=false)
     src = spec.cells[src_id]
     src.level > 0 || return fallback_dst
     parent = spec.cells[src.parent]
@@ -517,8 +521,12 @@ function _conservative_tree_level_native_corner_reflux_dst_2d(
     j_final = src.j + d2q9_cy(q) * remaining_strides
     nx_child = _conservative_tree_level_size_2d(spec.Nx, src.level)
     ny_child = _conservative_tree_level_size_2d(spec.Ny, src.level)
-    1 <= i_final <= nx_child && 1 <= j_final <= ny_child ||
+    if periodic_x
+        i_final = mod1(i_final, nx_child)
+    elseif !(1 <= i_final <= nx_child)
         return fallback_dst
+    end
+    1 <= j_final <= ny_child || return fallback_dst
     dst_i = div(i_final + 1, 2)
     dst_j = div(j_final + 1, 2)
     dst_id = conservative_tree_cell_id_2d(
@@ -539,12 +547,14 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
         substep::Integer,
         route_packet_slot::Integer=0;
         alpha=1,
-        interface_time_scaling::Symbol=:leaf_equivalent)
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        periodic_x::Bool=false)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
         bank, F, src_id, dst_id, q, weight, kind, substep,
         route_packet_slot; alpha=alpha,
-        interface_time_scaling=interface_time_scaling)
+        interface_time_scaling=interface_time_scaling,
+        periodic_x=periodic_x)
 end
 
 @inline function _conservative_tree_child_slot_2d(ix::Int, iy::Int)
@@ -984,11 +994,13 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
         substep::Integer,
         route_packet_slot::Integer=0;
         alpha=1,
-        interface_time_scaling::Symbol=:leaf_equivalent)
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        periodic_x::Bool=false)
     return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
         bank, F, route.src, route.dst, route.q, route.weight, route.kind,
         substep, route_packet_slot; alpha=alpha,
-        interface_time_scaling=interface_time_scaling)
+        interface_time_scaling=interface_time_scaling,
+        periodic_x=periodic_x)
 end
 
 function conservative_tree_subcycle_sync_down_routes_F_2d!(
@@ -1022,13 +1034,15 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         F::AbstractMatrix,
         table::ConservativeTreeRouteTable2D;
         alpha=1,
-        interface_time_scaling::Symbol=:leaf_equivalent)
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        periodic_x::Bool=false)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     if length(bank.route_packet_slot_by_route) < length(table.routes)
-        prepare_conservative_tree_subcycle_route_packet_cache_2d!(bank, table)
+        prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+            bank, table; periodic_x=periodic_x)
     end
     child_level = parent_level + 1
 
@@ -1039,7 +1053,8 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
             bank, F, route.src, route.dst, route.q, route.weight, route.kind,
             substep, packet_slot; alpha=alpha,
-            interface_time_scaling=interface_time_scaling)
+            interface_time_scaling=interface_time_scaling,
+            periodic_x=periodic_x)
     end
     return bank
 end
@@ -1047,7 +1062,8 @@ end
 function _conservative_tree_inactive_parent_coalesce_route_spec_2d(
         spec::ConservativeTreeSpec2D,
         src_id::Int,
-        q::Int)
+        q::Int;
+        periodic_x::Bool=false)
     src = spec.cells[src_id]
     src.level > 0 || return 0, DIRECT
     src.active && return 0, DIRECT
@@ -1057,8 +1073,12 @@ function _conservative_tree_inactive_parent_coalesce_route_spec_2d(
     j_dst = src.j + d2q9_cy(q)
     nx_level = _conservative_tree_level_size_2d(spec.Nx, src.level)
     ny_level = _conservative_tree_level_size_2d(spec.Ny, src.level)
-    1 <= i_dst <= nx_level && 1 <= j_dst <= ny_level ||
+    if periodic_x
+        i_dst = mod1(i_dst, nx_level)
+    elseif !(1 <= i_dst <= nx_level)
         return 0, DIRECT
+    end
+    1 <= j_dst <= ny_level || return 0, DIRECT
 
     parent = spec.cells[src.parent]
     in_parent = (2 * parent.i - 1 <= i_dst <= 2 * parent.i) &&
@@ -1079,18 +1099,20 @@ end
 function _conservative_tree_inactive_parent_coalesce_dst_2d(
         spec::ConservativeTreeSpec2D,
         src_id::Int,
-        q::Int)
+        q::Int;
+        periodic_x::Bool=false)
     dst_id, _ = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
-        spec, src_id, q)
+        spec, src_id, q; periodic_x=periodic_x)
     return dst_id
 end
 
 function _conservative_tree_inactive_parent_coalesce_routes_2d(
         spec::ConservativeTreeSpec2D,
         src_id::Int,
-        q::Int)
+        q::Int;
+        periodic_x::Bool=false)
     dst_id, kind = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
-        spec, src_id, q)
+        spec, src_id, q; periodic_x=periodic_x)
     dst_id == 0 && return ConservativeTreeRoute2D[]
     return [ConservativeTreeRoute2D(src_id, dst_id, q, 1.0, kind)]
 end
@@ -1100,7 +1122,8 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
         event::ConservativeTreeSubcycleEvent2D,
         F::AbstractMatrix;
         alpha=1,
-        interface_time_scaling::Symbol=:leaf_equivalent)
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        periodic_x::Bool=false)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
     child_level = parent_level + 1
@@ -1114,12 +1137,13 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
             packet_slot = inactive_slots[local_idx, q]
             packet_slot == 0 && continue
             dst_id, kind = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
-                bank.spec, src_id, q)
+                bank.spec, src_id, q; periodic_x=periodic_x)
             dst_id == 0 && continue
             _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
                 bank, F, src_id, dst_id, q, 1.0, kind, substep,
                 packet_slot; alpha=alpha,
-                interface_time_scaling=interface_time_scaling)
+                interface_time_scaling=interface_time_scaling,
+                periodic_x=periodic_x)
         end
     end
     return bank
@@ -1409,6 +1433,7 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
         is_solid=nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
+    periodic_x = _conservative_tree_periodic_x_policy_2d(policy)
     is_solid === nothing ||
         validate_conservative_tree_solid_mask_resolved_2d(
             spec, table, is_solid)
@@ -1441,10 +1466,12 @@ function stream_conservative_tree_subcycled_routes_F_2d!(
                     Fstate, Fpending, spec, level)
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
                     bank, event, Fstate, table; alpha=alpha_f2c,
-                    interface_time_scaling=interface_time_scaling)
+                    interface_time_scaling=interface_time_scaling,
+                    periodic_x=periodic_x)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
                     bank, event, Fstate; alpha=alpha_f2c,
-                    interface_time_scaling=interface_time_scaling)
+                    interface_time_scaling=interface_time_scaling,
+                    periodic_x=periodic_x)
             end
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch, Fstate, spec, table, level, policy;
@@ -1527,6 +1554,7 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         is_solid=nothing)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
+    periodic_x = _conservative_tree_periodic_x_policy_2d(policy)
     _check_conservative_tree_coarse_to_fine_state_2d(coarse_to_fine_state)
     _check_conservative_tree_coarse_to_fine_predictor_weight_2d(
         coarse_to_fine_predictor_weight)
@@ -1568,7 +1596,7 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
     state_bank_run.schedule === schedule_run ||
         throw(ArgumentError("state_bank schedule must match schedule"))
     prepare_conservative_tree_subcycle_route_packet_cache_2d!(
-        route_bank_run, table)
+        route_bank_run, table; periodic_x=periodic_x)
     reset_conservative_tree_subcycle_spatial_bank_2d!(route_bank_run)
     reset_conservative_tree_subcycle_buffer_bank_2d!(state_bank_run)
     conservative_tree_subcycle_store_active_owned_2d!(state_bank_run, Fin)
@@ -1577,8 +1605,6 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
     Fscratch_run = Fscratch === nothing ? similar(Fout) : Fscratch
     _check_conservative_tree_F_2d(Fsource_run, spec)
     _check_conservative_tree_F_2d(Fscratch_run, spec)
-    periodic_x = _conservative_tree_periodic_x_policy_2d(policy)
-
     for event in schedule_run.events
         if event.phase == :sync_down
             reset_conservative_tree_subcycle_spatial_pair_2d!(
@@ -1638,10 +1664,12 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
                     route_bank_run, event, Fsource_run, table;
                     alpha=alpha_f2c,
-                    interface_time_scaling=interface_time_scaling)
+                    interface_time_scaling=interface_time_scaling,
+                    periodic_x=periodic_x)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
                     route_bank_run, event, Fsource_run; alpha=alpha_f2c,
-                    interface_time_scaling=interface_time_scaling)
+                    interface_time_scaling=interface_time_scaling,
+                    periodic_x=periodic_x)
             end
 
             fill!(Fscratch_run, zero(eltype(Fscratch_run)))
