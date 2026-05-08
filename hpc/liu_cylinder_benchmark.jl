@@ -3,9 +3,9 @@
 # Uses `run_conformation_cylinder_libb_2d`:
 #   - Fused TRT + Bouzidi LI-BB V2 for the solvent flow (curved cylinder)
 #   - Modular BCSpec: ZouHeVelocity(Poiseuille) inlet + ZouHePressure outlet
-#   - Post-source MEA drag by default, matching the coupled Liu/Yu force path.
-#     Explicit split remains available through KRAKEN_DRAG_MODE for audits.
-#   - TRT conformation LBM + selectable polymer wall BC + Hermite stress source
+#   - Explicit split drag by default. Post-source MEA remains available through
+#     KRAKEN_DRAG_MODE for audit-only Liu/Yu force-accounting comparisons.
+#   - Selectable conformation collision + polymer wall BC + Hermite stress source
 #
 # Liu setup (Table 3, CNEBB, Sc=10⁴):
 #   - Domain 30R × 4R, cylinder at (15R, 2R), B = 0.5
@@ -18,9 +18,9 @@
 #   Wi=0.5 → Cd ≈ 126.31
 #   Wi=1.0 → Cd ≈ 151.31
 #
-# By default this script keeps Liu's small polymer TRT magic parameter
-# (`Λp=1e-6`; the cylinder section also reports `2.5e-7`). The production
-# driver default is intentionally different and BGK-equivalent.
+# By default this script uses the direct-C regularized Liu Eq. 26 collision
+# window validated by the patch ladder: τp,+≈0.5 with Liu's small polymer TRT
+# magic parameter (`Λp=1e-6`; the cylinder section also reports `2.5e-7`).
 #
 # Usage:
 #   julia --project=. hpc/liu_cylinder_benchmark.jl
@@ -149,13 +149,13 @@ steps_low_wi = parse(Int, get(ENV, "KRAKEN_STEPS_LOW_WI", "100000"))
 steps = parse(Int, get(ENV, "KRAKEN_STEPS", "200000"))
 avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR", "5"))
 run_newtonian = get(ENV, "KRAKEN_RUN_NEWTONIAN", "1") == "1"
-drag_mode = Symbol(get(ENV, "KRAKEN_DRAG_MODE", "post_source_mea"))
+drag_mode = Symbol(get(ENV, "KRAKEN_DRAG_MODE", "explicit_split"))
 hermite_source_mode =
     Symbol(get(ENV, "KRAKEN_HERMITE_SOURCE_MODE", "liu_direct"))
 solvent_source_mode =
     Symbol(get(ENV, "KRAKEN_SOLVENT_SOURCE_MODE", "post_collision"))
 source_stress_reconstruction =
-    Symbol(get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION", "raw"))
+    Symbol(get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION", "interior"))
 source_stress_reconstruction_order =
     parse(Int, get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER", "2"))
 source_scale_dynamics =
@@ -167,13 +167,17 @@ solvent_source_on_cutlinks =
 conformation_magic =
     parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "1e-6"))
 tau_plus =
-    parse(Float64, get(ENV, "KRAKEN_TAU_PLUS", "1.0"))
+    parse(Float64, get(ENV, "KRAKEN_TAU_PLUS", "0.50001"))
 conformation_collision =
-    Symbol(get(ENV, "KRAKEN_CONFORMATION_COLLISION", "trt"))
+    Symbol(get(ENV, "KRAKEN_CONFORMATION_COLLISION", "liu_eq26"))
 conformation_divergence_mode =
     Symbol(get(ENV, "KRAKEN_CONFORMATION_DIVERGENCE_MODE", "trace_free"))
 conformation_initial_condition =
-    Symbol(get(ENV, "KRAKEN_CONFORMATION_INITIAL_CONDITION", "identity"))
+    Symbol(get(ENV, "KRAKEN_CONFORMATION_INITIAL_CONDITION", "inlet_profile"))
+allow_diagnostic_force_mode =
+    drag_mode in (:post_source_mea, :source_scaled_mea)
+allow_diagnostic_conformation_collision =
+    conformation_collision !== :trt || abs(tau_plus - 1.0) > 1e-12
 wall_geometry =
     Symbol(get(ENV, "KRAKEN_WALL_GEOMETRY", "cutlink"))
 diagnostic_interval =
@@ -183,6 +187,8 @@ println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
 println("VARIANTS=$(join((v.label for v in variants), ","))")
 println("MODELS=$(join(models, ","))")
 println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks tau_plus=$tau_plus conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
+allow_diagnostic_force_mode &&
+    println("WARNING: KRAKEN_DRAG_MODE=$drag_mode is audit-only; Cd_report is not the validation force path.")
 
 for R in R_values
     # Liu uses Re = U_avg · R / ν → solve for ν_total given u_mean, R, Re
@@ -249,9 +255,9 @@ for R in R_values
                 diagnostic_interval=diagnostic_interval,
                 allow_diagnostic_polymer_bc=!(variant.bc isa CNEBB ||
                                               variant.bc isa ExtrapEqWallBC),
-                allow_diagnostic_force_mode=drag_mode === :source_scaled_mea,
+                allow_diagnostic_force_mode=allow_diagnostic_force_mode,
                 allow_diagnostic_conformation_collision=
-                    conformation_collision !== :trt || abs(tau_plus - 1.0) > 1e-12,
+                    allow_diagnostic_conformation_collision,
                 allow_diagnostic_log_wall_bc=model_name === :logconf,
                 backend=backend, FT=FT)
         dt = time() - t0
