@@ -611,6 +611,27 @@ end
         @test all(isfinite, coupled_bfs.psixx)
         @test all(isfinite, coupled_bfs.fx_total)
 
+        hydro_bfs_newt = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
+            H_in=3, expansion_ratio=2, L_up=2, L_down=2,
+            nu_s=0.10, nu_p=0.0, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            hydro_steps=1, polymer_steps=0,
+            backend=backend, T=FT,
+        )
+        near_newt_bfs = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+            H_in=3, expansion_ratio=2, L_up=2, L_down=2,
+            nu_s=0.08, nu_p=0.02, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=1,
+            backend=backend, T=FT,
+        )
+        bfs_newt_fluid = .!near_newt_bfs.is_solid
+        @test near_newt_bfs.nu_lbm ≈ hydro_bfs_newt.nu_s atol=1e-7 rtol=1e-7
+        @test near_newt_bfs.min_c_eig > 0.9
+        @test maximum(abs.(near_newt_bfs.ux[bfs_newt_fluid] .- hydro_bfs_newt.ux[bfs_newt_fluid])) < 2e-3
+        @test all(isfinite, near_newt_bfs.psixx)
+        @test all(isfinite, near_newt_bfs.fx_total)
+
         low_beta_bfs = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
             H_in=3, expansion_ratio=2, L_up=2, L_down=2,
             nu_s=0.002, nu_p=0.098, lambda=50.0,

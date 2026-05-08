@@ -1631,4 +1631,34 @@ end
         @test all(isfinite, result.psixx)
         @test all(isfinite, result.fx_total)
     end
+
+    @testset "M8h BFS coupled near-Newtonian limit matches total-viscosity hydro" begin
+        hydro = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.10, nu_p=0.0, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            hydro_steps=30, polymer_steps=0,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        visco = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.08, nu_p=0.02, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=30,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fluid = .!visco.is_solid
+
+        @test visco.nu_lbm ≈ hydro.nu_s
+        @test visco.polymer_substeps == 50
+        @test !visco.subcycle_estimate.clamped
+        @test visco.min_c_eig > 0.98
+        @test visco.max_abs_psi < 0.03
+        @test maximum(abs.(visco.ux[fluid] .- hydro.ux[fluid])) < 2e-4
+        @test maximum(abs.(visco.uy[fluid] .- hydro.uy[fluid])) < 2e-4
+        @test maximum(abs.(visco.rho[fluid] .- hydro.rho[fluid])) < 3e-4
+        @test all(isfinite, visco.ux)
+        @test all(isfinite, visco.psixx)
+        @test all(isfinite, visco.fx_total)
+    end
 end
