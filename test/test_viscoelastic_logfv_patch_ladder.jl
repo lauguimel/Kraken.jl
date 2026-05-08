@@ -36,6 +36,10 @@ end
 
 _oldroydb_simple_shear_stationary(γ, λ) = (1 + 2 * (λ * γ)^2, λ * γ, 1.0)
 
+function _poiseuille_shear(y, height, umax)
+    return 4 * umax / height * (1 - 2y / height)
+end
+
 function _oldroydb_simple_shear_from_identity(γ, λ, t)
     e = exp(-t / λ)
     return (
@@ -310,6 +314,49 @@ end
                     atol=0.0, rtol=0.0,
                 )
             end
+        end
+    end
+
+    @testset "M4 local Poiseuille conformation and stress are analytical" begin
+        Nx, Ny = 5, 19
+        height = 1.0
+        umax = 0.08
+        λ = 6.0
+        prefactor = 0.14
+        psixx = zeros(Float64, Nx, Ny)
+        psixy = zeros(Float64, Nx, Ny)
+        psiyy = zeros(Float64, Nx, Ny)
+        expected_tau = Array{NTuple{3,Float64}}(undef, Nx, Ny)
+
+        for j in 1:Ny, i in 1:Nx
+            y = height * (j - 0.5) / Ny
+            γ = _poiseuille_shear(y, height, umax)
+            c = _oldroydb_simple_shear_stationary(γ, λ)
+            ψ = _sym2_log(c...)
+            psixx[i, j], psixy[i, j], psiyy[i, j] = ψ
+
+            source = _oldroydb_source_c(c..., 0.0, γ, 0.0, 0.0, λ)
+            _assert_sym2_close(source, (0.0, 0.0, 0.0); atol=4e-14, rtol=4e-14)
+
+            expected_tau[i, j] = (
+                prefactor * 2 * (λ * γ)^2,
+                prefactor * λ * γ,
+                0.0,
+            )
+        end
+
+        tauxx = similar(psixx)
+        tauxy = similar(psixy)
+        tauyy = similar(psiyy)
+        Kraken.logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            _assert_sym2_close(
+                (tauxx[i, j], tauxy[i, j], tauyy[i, j]),
+                expected_tau[i, j];
+                atol=3e-14, rtol=3e-14,
+            )
         end
     end
 end

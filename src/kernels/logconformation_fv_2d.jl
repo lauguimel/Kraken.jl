@@ -69,6 +69,15 @@ end
     )
 end
 
+@inline function logfv_stress_from_log_2d(psixx, psixy, psiyy, prefactor)
+    cxx, cxy, cyy = logfv_exp_sym2_2d(psixx, psixy, psiyy)
+    return (
+        prefactor * (cxx - one(cxx)),
+        prefactor * cxy,
+        prefactor * (cyy - one(cyy)),
+    )
+end
+
 @inline function logfv_upwind_scalar_advective_rhs_2d(phi, ux_face, uy_face, i, j)
     ue = ux_face[i + 1, j]
     uw = ux_face[i, j]
@@ -122,6 +131,41 @@ function logfv_relax_log_2d!(
     kernel!(
         psixx_out, psixy_out, psiyy_out,
         psixx, psixy, psiyy, lambda, dt, Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+@kernel function logfv_stress_from_log_2d_kernel!(
+    tauxx, tauxy, tauyy,
+    @Const(psixx), @Const(psixy), @Const(psiyy),
+    prefactor, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            sxx, sxy, syy = logfv_stress_from_log_2d(
+                psixx[i, j], psixy[i, j], psiyy[i, j], prefactor,
+            )
+            tauxx[i, j] = sxx
+            tauxy[i, j] = sxy
+            tauyy[i, j] = syy
+        end
+    end
+end
+
+function logfv_stress_from_log_2d!(
+    tauxx, tauxy, tauyy,
+    psixx, psixy, psiyy, prefactor;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(tauxx)
+    Nx, Ny = size(tauxx)
+    kernel! = logfv_stress_from_log_2d_kernel!(backend)
+    kernel!(
+        tauxx, tauxy, tauyy,
+        psixx, psixy, psiyy, prefactor, Nx, Ny;
         ndrange=(Nx, Ny),
     )
     sync && KernelAbstractions.synchronize(backend)
