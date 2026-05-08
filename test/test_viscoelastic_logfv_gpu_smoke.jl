@@ -503,6 +503,19 @@ end
         @test all(isfinite, Array(outxy))
         @test all(isfinite, Array(outyy))
 
+        couette = Kraken.run_viscoelastic_logfv_channel_2d(;
+            Nx=9, Ny=11, flow=:couette, height=FT(1), width=FT(1),
+            uwall=FT(0.07), lambda=FT(5), prefactor=FT(0.11),
+            bsd_fraction=FT(1), backend=backend, T=FT,
+        )
+        @test couette.flow === :couette
+        @test couette.min_c_eig > 0
+        @test couette.max_tau_error < 1e-5
+        @test couette.max_poly_force_error < 1e-5
+        @test couette.max_total_force_error < 1e-5
+        @test all(isfinite, couette.tauxx)
+        @test all(isfinite, couette.fx_total)
+
         coupled = Kraken.run_viscoelastic_logfv_poiseuille_coupled_2d(;
             Nx=6, Ny=12, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
             lambda=5.0, bsd_fraction=1.0, polymer_substeps=:auto,

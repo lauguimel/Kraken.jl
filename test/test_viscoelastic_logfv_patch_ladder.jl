@@ -122,6 +122,35 @@ function _assert_sym2_close(actual, expected; atol=LOGFV_ATOL, rtol=LOGFV_RTOL)
     @test actual[3] ≈ expected[3] atol=atol rtol=rtol
 end
 
+function _run_uniform_shear_log_source_kernel(γ, λ, dt, nsteps; Nx=4, Ny=5)
+    psixx = zeros(Float64, Nx, Ny)
+    psixy = zeros(Float64, Nx, Ny)
+    psiyy = zeros(Float64, Nx, Ny)
+    outxx = similar(psixx)
+    outxy = similar(psixy)
+    outyy = similar(psiyy)
+    dudx = zeros(Float64, Nx, Ny)
+    dudy = fill(Float64(γ), Nx, Ny)
+    dvdx = zeros(Float64, Nx, Ny)
+    dvdy = zeros(Float64, Nx, Ny)
+
+    for _ in 1:nsteps
+        Kraken.logfv_step_oldroydb_log_2d!(
+            outxx, outxy, outyy,
+            psixx, psixy, psiyy,
+            dudx, dudy, dvdx, dvdy,
+            Float64(λ), Float64(dt);
+            sync=false,
+        )
+        psixx, outxx = outxx, psixx
+        psixy, outxy = outxy, psixy
+        psiyy, outyy = outyy, psiyy
+    end
+    KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+    return Kraken.logfv_exp_sym2_2d(psixx[2, 2], psixy[2, 2], psiyy[2, 2])
+end
+
 @testset "Log-FV polymer patch ladder" begin
     @testset "M0 symmetric 2x2 exp/log algebra" begin
         _assert_sym2_close(_sym2_exp(0.0, 0.0, 0.0), (1.0, 0.0, 1.0))
@@ -917,6 +946,21 @@ end
         end
     end
 
+    @testset "M5a Couette log source increment matches analytical transient" begin
+        γ = 0.04
+        λ = 5.0
+        dt = 0.002
+        nsteps = 1
+        t = nsteps * dt
+
+        c_num = _run_uniform_shear_log_source_kernel(γ, λ, dt, nsteps)
+        c_exact = _oldroydb_simple_shear_from_identity(γ, λ, t)
+
+        @test _sym2_min_eig(c_num...) > 0
+        _assert_sym2_close(c_num, c_exact; atol=5e-8, rtol=5e-8)
+        @test c_num[3] ≈ 1.0 atol=2e-12 rtol=2e-12
+    end
+
     @testset "M5 macro channel driver exercises log-FV pipeline" begin
         for flow in (:poiseuille, :couette)
             result = Kraken.run_viscoelastic_logfv_channel_2d(;
@@ -1532,5 +1576,31 @@ end
             @test all(isfinite, result.fx_total)
             @test all(isfinite, result.fy_total)
         end
+    end
+
+    @testset "M8g BFS coupled low-beta duration ramp stays bounded" begin
+        result = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.002, nu_p=0.098, lambda=50.0,
+            u_mean=0.003, Fx_body=5e-8,
+            bsd_fraction=1.0, max_steps=80,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test result.nu_s / result.nu_total <= 0.02
+        @test result.nu_lbm ≈ result.nu_total
+        @test result.min_c_eig > 0.8
+        @test result.max_abs_psi < 0.3
+        @test result.max_abs_tau < 7e-4
+        @test result.max_abs_poly_force > 0
+        @test result.max_abs_total_force > 0
+        @test result.max_speed > 1e-4
+        @test result.max_speed < 0.02
+        @test result.rho_min > 0.995
+        @test result.rho_max < 1.01
+        @test all(isfinite, result.ux)
+        @test all(isfinite, result.uy)
+        @test all(isfinite, result.psixx)
+        @test all(isfinite, result.fx_total)
     end
 end
