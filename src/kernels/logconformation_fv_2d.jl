@@ -172,6 +172,42 @@ function logfv_stress_from_log_2d!(
     return nothing
 end
 
+@kernel function logfv_polymer_force_centered_2d_kernel!(
+    fx, fy,
+    @Const(tauxx), @Const(tauxy), @Const(tauyy),
+    inv_dx, inv_dy, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if i > 1 && i < Nx && j > 1 && j < Ny
+                fx[i, j] = (tauxx[i + 1, j] - tauxx[i - 1, j]) * inv_dx / 2 +
+                           (tauxy[i, j + 1] - tauxy[i, j - 1]) * inv_dy / 2
+                fy[i, j] = (tauxy[i + 1, j] - tauxy[i - 1, j]) * inv_dx / 2 +
+                           (tauyy[i, j + 1] - tauyy[i, j - 1]) * inv_dy / 2
+            else
+                fx[i, j] = zero(eltype(fx))
+                fy[i, j] = zero(eltype(fy))
+            end
+        end
+    end
+end
+
+function logfv_polymer_force_centered_2d!(
+    fx, fy, tauxx, tauxy, tauyy, dx, dy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(fx)
+    Nx, Ny = size(fx)
+    kernel! = logfv_polymer_force_centered_2d_kernel!(backend)
+    kernel!(
+        fx, fy, tauxx, tauxy, tauyy, inv(dx), inv(dy), Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_advect_upwind_2d_kernel!(
     psixx_out, psixy_out, psiyy_out,
     @Const(psixx), @Const(psixy), @Const(psiyy),

@@ -359,4 +359,44 @@ end
             )
         end
     end
+
+    @testset "M4 local Poiseuille polymer force is analytical" begin
+        Nx, Ny = 7, 21
+        height = 1.0
+        dx = 1.0
+        dy = height / Ny
+        umax = 0.06
+        λ = 5.0
+        prefactor = 0.11
+        psixx = zeros(Float64, Nx, Ny)
+        psixy = zeros(Float64, Nx, Ny)
+        psiyy = zeros(Float64, Nx, Ny)
+
+        for j in 1:Ny, i in 1:Nx
+            y = height * (j - 0.5) / Ny
+            γ = _poiseuille_shear(y, height, umax)
+            psixx[i, j], psixy[i, j], psiyy[i, j] = _sym2_log(_oldroydb_simple_shear_stationary(γ, λ)...)
+        end
+
+        tauxx = similar(psixx)
+        tauxy = similar(psixy)
+        tauyy = similar(psiyy)
+        fx = similar(psixx)
+        fy = similar(psixx)
+        Kraken.logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor)
+        Kraken.logfv_polymer_force_centered_2d!(fx, fy, tauxx, tauxy, tauyy, dx, dy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        expected_fx = prefactor * λ * (-8 * umax / height^2)
+        for j in 2:(Ny - 1), i in 2:(Nx - 1)
+            @test fx[i, j] ≈ expected_fx atol=8e-14 rtol=8e-14
+            @test fy[i, j] ≈ 0.0 atol=8e-14
+        end
+        for i in 1:Nx
+            @test fx[i, 1] == 0.0
+            @test fy[i, 1] == 0.0
+            @test fx[i, Ny] == 0.0
+            @test fy[i, Ny] == 0.0
+        end
+    end
 end
