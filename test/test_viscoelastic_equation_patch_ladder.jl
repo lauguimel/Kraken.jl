@@ -3411,6 +3411,66 @@ end
     end
 end
 
+function _coarse_cylinder_direct_highwi_spd_probe(; wall_geometry=:cutlink,
+                                                   steps=1_200)
+    R = 3
+    u_mean = 0.005
+    β = 0.59
+    ν_total = u_mean * R
+    ν_s = β * ν_total
+    ν_p = (1 - β) * ν_total
+    λ = R / u_mean
+    model = OldroydB(G=ν_p / λ, λ=λ)
+    result = run_conformation_cylinder_libb_2d(
+        ; Nx=30R, Ny=4R, radius=R, cx=15R, cy=(4R - 1) / 2,
+        u_mean, ν_s, polymer_model=model,
+        tau_plus=0.5 + 3 * ν_s / 1e4,
+        polymer_bc=CNEBB(),
+        conformation_collision=:liu_eq26,
+        conformation_magic=2.5e-7,
+        conformation_initial_condition=:inlet_profile,
+        solvent_magic=0.25,
+        solvent_source_mode=:integrated_collision,
+        drag_mode=:post_source_mea,
+        source_scale_dynamics=0.0,
+        wall_geometry,
+        max_steps=steps,
+        avg_window=100,
+        drag_stride=100,
+        backend=KernelAbstractions.CPU(),
+        FT=Float64,
+    )
+    fluid = .!result.is_solid
+    finite = all(isfinite, result.C_xx[fluid]) &&
+             all(isfinite, result.C_xy[fluid]) &&
+             all(isfinite, result.C_yy[fluid]) &&
+             all(isfinite, result.ux[fluid]) &&
+             all(isfinite, result.uy[fluid])
+    max_abs_C = maximum(maximum(abs, C[fluid])
+                        for C in (result.C_xx, result.C_xy, result.C_yy))
+    return (;
+        result,
+        finite,
+        min_eig=_min_eig_field(result.C_xx, result.C_xy, result.C_yy,
+                               result.is_solid),
+        max_abs_C,
+    )
+end
+
+@testset "P18b2c5d coarse cylinder direct-C Eq26 loses SPD with source frozen" begin
+    for wall_geometry in (:cutlink, :staircase)
+        probe = _coarse_cylinder_direct_highwi_spd_probe(; wall_geometry)
+
+        @test probe.result.conformation_collision === :liu_eq26
+        @test probe.result.conformation_magic ≈ 2.5e-7 atol=0.0 rtol=0.0
+        @test probe.result.source_scale_dynamics ≈ 0.0 atol=0.0 rtol=0.0
+        @test probe.result.wall_geometry === wall_geometry
+        @test probe.finite
+        @test probe.max_abs_C < 25.0
+        @test probe.min_eig < -0.10
+    end
+end
+
 @testset "P18b2c6 square log-conf is only weakly sensitive to TRT magic" begin
     for source_scale in (0.0, 1.0)
         small_magic = _square_formulation_spd_probe(
