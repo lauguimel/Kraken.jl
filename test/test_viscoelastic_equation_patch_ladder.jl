@@ -3332,27 +3332,30 @@ end
     ν_s = β * ν_total
     ν_p = (1 - β) * ν_total
     model = OldroydB(G=ν_p / λ, λ=λ)
-    result = run_conformation_step_libb_2d(
-        ; geometry=geom, u_ref_mean=u_ref, ν_s,
-        polymer_model=model, polymer_bc=CNEBB(),
-        hermite_source_mode=:liu_direct,
-        conformation_collision=:liu_eq26,
-        tau_plus=0.50001,
-        conformation_magic=1e-6,
-        conformation_divergence_mode=:trace_free,
-        source_scale_dynamics=0.0,
-        max_steps=1_200, avg_window=100,
-        backend=KernelAbstractions.CPU(), FT=Float64,
-    )
-    fluid = .!result.is_solid
+    for source_scale in (0.0, 1.0)
+        result = run_conformation_step_libb_2d(
+            ; geometry=geom, u_ref_mean=u_ref, ν_s,
+            polymer_model=model, polymer_bc=CNEBB(),
+            hermite_source_mode=:liu_direct,
+            conformation_collision=:liu_eq26,
+            tau_plus=0.50001,
+            conformation_magic=1e-6,
+            conformation_divergence_mode=:trace_free,
+            source_scale_dynamics=source_scale,
+            max_steps=1_200, avg_window=100,
+            backend=KernelAbstractions.CPU(), FT=Float64,
+        )
+        fluid = .!result.is_solid
 
-    @test result.conformation_collision === :liu_eq26
-    @test result.conformation_magic ≈ 1e-6 atol=0.0 rtol=0.0
-    @test all(isfinite, result.C_xx[fluid])
-    @test all(isfinite, result.C_xy[fluid])
-    @test all(isfinite, result.C_yy[fluid])
-    @test _min_eig_field(result.C_xx, result.C_xy, result.C_yy,
-                         result.is_solid) > 0.35
+        @test result.conformation_collision === :liu_eq26
+        @test result.conformation_magic ≈ 1e-6 atol=0.0 rtol=0.0
+        @test result.source_scale_dynamics ≈ source_scale atol=0.0 rtol=0.0
+        @test all(isfinite, result.C_xx[fluid])
+        @test all(isfinite, result.C_xy[fluid])
+        @test all(isfinite, result.C_yy[fluid])
+        @test _min_eig_field(result.C_xx, result.C_xy, result.C_yy,
+                             result.is_solid) > 0.35
+    end
 end
 
 @testset "P18b2c6 square log-conf is only weakly sensitive to TRT magic" begin
