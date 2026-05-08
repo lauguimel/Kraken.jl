@@ -220,7 +220,6 @@ for R in R_values
             Nx=Nx, Ny=Ny, radius=R, cx=cx, cy=cy,
             u_in=FT(1.5 * u_mean), ν=FT(ν_total), inlet=:parabolic,
             max_steps=max_steps_newt, avg_window=avg_window_newt,
-            drag_stride=drag_stride,
             backend=backend, T=FT,
         )
         dt = time() - t0
