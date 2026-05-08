@@ -167,10 +167,10 @@ solvent_source_on_cutlinks =
     get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_CUTLINKS", "1") == "1"
 conformation_magic =
     parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "1e-6"))
-tau_plus =
-    parse(Float64, get(ENV, "KRAKEN_TAU_PLUS", "0.50001"))
 conformation_collision =
     Symbol(get(ENV, "KRAKEN_CONFORMATION_COLLISION", "liu_eq26"))
+Sc = parse(Float64, get(ENV, "KRAKEN_SC", "1e4"))
+tau_plus_override = get(ENV, "KRAKEN_TAU_PLUS", "")
 conformation_divergence_mode =
     Symbol(get(ENV, "KRAKEN_CONFORMATION_DIVERGENCE_MODE", "trace_free"))
 conformation_initial_condition =
@@ -178,16 +178,22 @@ conformation_initial_condition =
 allow_diagnostic_force_mode =
     drag_mode in (:post_source_mea, :source_scaled_mea)
 allow_diagnostic_conformation_collision =
-    conformation_collision !== :trt || abs(tau_plus - 1.0) > 1e-12
+    get(ENV, "KRAKEN_ALLOW_DIAGNOSTIC_CONFORMATION_COLLISION", "0") == "1"
 wall_geometry =
     Symbol(get(ENV, "KRAKEN_WALL_GEOMETRY", "cutlink"))
 diagnostic_interval =
     parse(Int, get(ENV, "KRAKEN_DIAGNOSTIC_INTERVAL", "0"))
 
+function _tau_plus_for_collision(conformation_collision, ν_s, Sc, tau_plus_override)
+    !isempty(tau_plus_override) && return parse(Float64, tau_plus_override)
+    conformation_collision === :trt && return 1.0
+    return 0.5 + 3.0 * ν_s / Sc
+end
+
 println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
 println("VARIANTS=$(join((v.label for v in variants), ","))")
 println("MODELS=$(join(models, ","))")
-println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps avg_divisor=$avg_divisor drag_stride=$drag_stride run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks tau_plus=$tau_plus conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
+println("beta=$β u_mean=$u_mean Sc=$Sc steps_low_wi=$steps_low_wi steps=$steps avg_divisor=$avg_divisor drag_stride=$drag_stride run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks tau_plus_override=$(isempty(tau_plus_override) ? "none" : tau_plus_override) conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
 allow_diagnostic_force_mode &&
     println("WARNING: KRAKEN_DRAG_MODE=$drag_mode is audit-only; Cd_report is not the validation force path.")
 
@@ -198,12 +204,14 @@ for R in R_values
     ν_total = u_mean * R / Re_target
     ν_s = β * ν_total
     ν_p = (1 - β) * ν_total
+    tau_plus_R = _tau_plus_for_collision(
+        conformation_collision, ν_s, Sc, tau_plus_override)
     Nx = 30 * R
     Ny = 4 * R
     cx = 15 * R
     cy = (Ny - 1) / 2
 
-    println("\n>>> R = $R  (Nx=$Nx, Ny=$Ny, cx=$cx, cy=$cy, ν_s=$ν_s, ν_p=$ν_p)")
+    println("\n>>> R = $R  (Nx=$Nx, Ny=$Ny, cx=$cx, cy=$cy, ν_s=$ν_s, ν_p=$ν_p, tau_plus=$tau_plus_R)")
     if run_newtonian
         max_steps_newt = steps_low_wi
         avg_window_newt = max_steps_newt ÷ avg_divisor
@@ -236,7 +244,7 @@ for R in R_values
         r = run_conformation_cylinder_libb_2d(;
                 Nx=Nx, Ny=Ny, radius=R, cx=cx, cy=cy,
                 u_mean=FT(u_mean), ν_s=FT(ν_s),
-                polymer_model=polymer_model, tau_plus=FT(tau_plus),
+                polymer_model=polymer_model, tau_plus=FT(tau_plus_R),
                 inlet=:parabolic, ρ_out=one(FT),
                 max_steps=max_steps, avg_window=avg_window,
                 drag_stride=drag_stride,

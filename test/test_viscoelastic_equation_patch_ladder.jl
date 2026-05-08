@@ -1817,6 +1817,50 @@ end
     end
 end
 
+function _tau_plus_from_schmidt_2d(; u_mean, radius, beta, Sc)
+    ν_total = u_mean * radius
+    ν_s = beta * ν_total
+    return 0.5 + 3.0 * ν_s / Sc
+end
+
+@testset "P15c3 Liu cylinder Sc-derived tau_plus remains analytic" begin
+    λ = 2.0
+    γ = 0.03
+    liu_tau_values = (
+        _tau_plus_from_schmidt_2d(; u_mean=0.02, radius=20, beta=0.59, Sc=1e4),
+        _tau_plus_from_schmidt_2d(; u_mean=0.02, radius=30, beta=0.59, Sc=1e4),
+        _tau_plus_from_schmidt_2d(; u_mean=0.02, radius=40, beta=0.59, Sc=1e4),
+    )
+    @test liu_tau_values[1] ≈ 0.5000708 atol=5e-13
+    @test liu_tau_values[2] ≈ 0.5001062 atol=5e-13
+    @test liu_tau_values[3] ≈ 0.5001416 atol=5e-13
+
+    for collision in (:regularized, :liu_eq26),
+        tau_plus in liu_tau_values,
+        component in 1:3
+
+        fixed = _collision_patch_moments(
+            collision; tau_plus, λ, dudx=0.0, dudy=γ,
+            dvdx=0.0, dvdy=0.0,
+            cxx=1.0 + 2.0 * (λ * γ)^2, cxy=λ * γ, cyy=1.0,
+            component,
+        )
+        @test abs(fixed.mass) < 5e-13
+        @test abs(fixed.mom_x) < 5e-13
+        @test abs(fixed.mom_y) < 5e-13
+        @test fixed.max_pop_delta < 5e-13
+
+        source = _collision_patch_moments(
+            collision; tau_plus, λ, dudx=0.0, dudy=γ,
+            dvdx=0.0, dvdy=0.0, component=2,
+        )
+        coeff = 1.0 - 0.5 / tau_plus
+        @test source.mass ≈ γ atol=5e-13
+        @test source.mom_x ≈ coeff * γ * 0.02 atol=5e-13
+        @test source.mom_y ≈ coeff * γ * -0.01 atol=5e-13
+    end
+end
+
 function _bulk_direct_collision_reaction(; λ, dudx, dudy, dvdx, dvdy,
                                          tau_plus=1.0, magic=1e-6,
                                          steps=20_000)

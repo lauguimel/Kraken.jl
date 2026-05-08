@@ -219,11 +219,13 @@ function _assert_validation_conformation_collision_window(
         allow_diagnostic::Bool=false)
     allow_diagnostic && return nothing
     tau_p_f = Float64(tau_plus)
+    high_schmidt_regularized =
+        conformation_collision in (:regularized, :liu_eq26) &&
+        0.5 < tau_p_f <= 0.5002
     validated =
         (conformation_collision === :trt && abs(tau_p_f - 1.0) ≤ 1e-12) ||
-        (conformation_collision in (:regularized, :liu_eq26) &&
-         abs(tau_p_f - 0.50001) ≤ 1e-12)
-    validated || error("conformation_collision=$(conformation_collision) with tau_plus=$(tau_plus) is outside the analytic CDE patch-test validation windows; use (:trt, 1.0), (:regularized, 0.50001), (:liu_eq26, 0.50001), or pass allow_diagnostic_conformation_collision=true in audit code.")
+        high_schmidt_regularized
+    validated || error("conformation_collision=$(conformation_collision) with tau_plus=$(tau_plus) is outside the analytic CDE patch-test validation windows; use (:trt, 1.0), (:regularized/:liu_eq26, 0.5 < tau_plus ≤ 0.5002), or pass allow_diagnostic_conformation_collision=true in audit code.")
     return nothing
 end
 
