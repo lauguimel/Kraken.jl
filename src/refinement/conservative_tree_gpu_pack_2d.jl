@@ -4,6 +4,7 @@
 # arrays. CPU tests replay the pack directly; a later patch can transfer these
 # arrays to CUDA/Metal without changing the route contract.
 
+using Atomix
 using KernelAbstractions
 
 struct ConservativeTreeGPURoutePack2D{T}
@@ -1187,6 +1188,80 @@ function correct_conservative_tree_gpu_mass_2d!(
     kernel! = _correct_conservative_tree_gpu_mass_2d_kernel!(backend)
     kernel!(F, Int32(cell_id), drift; ndrange=1)
     sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
+@kernel function _sum_conservative_tree_gpu_mass_2d_kernel!(
+        mass_sum, @Const(F), nentries::Int32)
+    idx = @index(Global)
+    @inbounds if idx <= Int(nentries)
+        Atomix.@atomic mass_sum[1] += F[idx]
+    end
+end
+
+function sum_conservative_tree_gpu_mass_2d!(
+        mass_sum::AbstractVector,
+        F::AbstractMatrix;
+        sync::Bool=true)
+    length(mass_sum) == 1 ||
+        throw(ArgumentError("mass_sum must be a one-element backend array"))
+    fill!(mass_sum, zero(eltype(mass_sum)))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _sum_conservative_tree_gpu_mass_2d_kernel!(backend)
+    kernel!(mass_sum, F, Int32(length(F)); ndrange=length(F))
+    sync && KernelAbstractions.synchronize(backend)
+    return mass_sum
+end
+
+@kernel function _correct_conservative_tree_gpu_mass_from_sum_2d_kernel!(
+        F, @Const(mass_sum), max_raw_relative_mass_drift,
+        cell_id::Int32, target_mass, mass_denom)
+    idx = @index(Global)
+    @inbounds if idx == 1
+        T = eltype(F)
+        drift = T(mass_sum[1] - T(target_mass))
+        denom = T(mass_denom)
+        rel = abs(drift) / denom
+        if rel > max_raw_relative_mass_drift[1]
+            max_raw_relative_mass_drift[1] = rel
+        end
+        F[Int(cell_id), 1] -= drift
+    end
+end
+
+function correct_conservative_tree_gpu_mass_from_sum_2d!(
+        F::AbstractMatrix,
+        mass_sum::AbstractVector,
+        max_raw_relative_mass_drift::AbstractVector,
+        cell_id::Integer,
+        target_mass,
+        mass_denom;
+        sync::Bool=true)
+    length(mass_sum) == 1 ||
+        throw(ArgumentError("mass_sum must be a one-element backend array"))
+    length(max_raw_relative_mass_drift) == 1 ||
+        throw(ArgumentError("max_raw_relative_mass_drift must be a one-element backend array"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _correct_conservative_tree_gpu_mass_from_sum_2d_kernel!(backend)
+    kernel!(F, mass_sum, max_raw_relative_mass_drift, Int32(cell_id),
+            target_mass, mass_denom; ndrange=1)
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
+function enforce_conservative_tree_gpu_mass_2d!(
+        F::AbstractMatrix,
+        mass_sum::AbstractVector,
+        max_raw_relative_mass_drift::AbstractVector,
+        cell_id::Integer,
+        target_mass,
+        mass_denom;
+        sync::Bool=true)
+    sum_conservative_tree_gpu_mass_2d!(mass_sum, F; sync=false)
+    correct_conservative_tree_gpu_mass_from_sum_2d!(
+        F, mass_sum, max_raw_relative_mass_drift, cell_id,
+        target_mass, mass_denom; sync=false)
+    sync && KernelAbstractions.synchronize(KernelAbstractions.get_backend(F))
     return F
 end
 

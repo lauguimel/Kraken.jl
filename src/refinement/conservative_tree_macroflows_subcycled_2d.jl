@@ -571,6 +571,9 @@ function _run_conservative_tree_channel_subcycled_backend_2d(;
     max_raw_relative_mass_drift = 0.0
     mass_denom = max(abs(Float64(mass_initial)), eps(Float64))
     correction_cell = first(spec.active_cells)
+    mass_sumd = _allocate_conservative_tree_gpu_array_2d(backend, T, 1)
+    max_raw_relative_mass_driftd =
+        _allocate_conservative_tree_gpu_array_2d(backend, T, 1)
     for _ in 1:nsteps
         stream_conservative_tree_subcycled_buffered_routes_gpu_F_2d!(
             Ftmpd, Fd, spec, table, workspace; collision=collision,
@@ -578,18 +581,18 @@ function _run_conservative_tree_channel_subcycled_backend_2d(;
             coarse_to_fine_predictor_weight=T(c2f_predictor_weight),
             sync=false)
         if enforce_mass
-            KernelAbstractions.synchronize(backend)
-            mass_now = Float64(Base.invokelatest(sum, Ftmpd))
-            drift = mass_now - Float64(mass_initial)
-            rel = abs(drift) / mass_denom
-            max_raw_relative_mass_drift =
-                max(max_raw_relative_mass_drift, rel)
-            correct_conservative_tree_gpu_mass_2d!(
-                Ftmpd, correction_cell, T(drift); sync=true)
+            enforce_conservative_tree_gpu_mass_2d!(
+                Ftmpd, mass_sumd, max_raw_relative_mass_driftd,
+                correction_cell, T(mass_initial), T(mass_denom);
+                sync=false)
         end
         Fd, Ftmpd = Ftmpd, Fd
     end
     KernelAbstractions.synchronize(backend)
+    if enforce_mass
+        max_raw_relative_mass_drift =
+            Float64(Array(max_raw_relative_mass_driftd)[1])
+    end
 
     F_final = Array(Fd)
     profile = flow == :couette_subcycled ?

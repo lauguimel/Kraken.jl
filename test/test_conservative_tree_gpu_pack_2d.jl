@@ -527,6 +527,23 @@ using KernelAbstractions
         @test isapprox(cgpu.F, ccpu.F; atol=1e-9, rtol=1e-9)
     end
 
+    @testset "GPU device-side mass correction" begin
+        F = reshape(Float64.(1:36), 4, 9)
+        initial = sum(F)
+        target = initial - 3.25
+        mass_sum = zeros(Float64, 1)
+        max_raw = zeros(Float64, 1)
+
+        sum_conservative_tree_gpu_mass_2d!(mass_sum, F)
+        @test isapprox(mass_sum[1], initial; atol=0, rtol=0)
+
+        enforce_conservative_tree_gpu_mass_2d!(
+            F, mass_sum, max_raw, 2, target, abs(target))
+        @test isapprox(sum(F), target; atol=1e-12, rtol=0)
+        @test isapprox(max_raw[1], 3.25 / abs(target);
+                       atol=1e-15, rtol=0)
+    end
+
     if get(ENV, "KRAKEN_TEST_METAL", "0") == "1"
         @testset "Metal smoke for pull stream and active-level collision" begin
             @eval using Metal
@@ -669,6 +686,17 @@ using KernelAbstractions
                 apply_conservative_tree_gpu_sync_up_cache_F_2d!(
                     Foutd, cache_d, f2c_pack_d)
                 @test all(isfinite, Array(Foutd))
+
+                Fmass = reshape(Float32.(1:36), 4, 9)
+                Fmassd = Metal.MtlArray(Fmass)
+                mass_sumd = Metal.MtlArray(zeros(Float32, 1))
+                max_rawd = Metal.MtlArray(zeros(Float32, 1))
+                target = Float32(sum(Fmass) - 2.5f0)
+                enforce_conservative_tree_gpu_mass_2d!(
+                    Fmassd, mass_sumd, max_rawd, 2, target, abs(target))
+                @test isapprox(sum(Array(Fmassd)), target; atol=1e-3,
+                               rtol=0)
+                @test Array(max_rawd)[1] > 0
             end
         end
     end

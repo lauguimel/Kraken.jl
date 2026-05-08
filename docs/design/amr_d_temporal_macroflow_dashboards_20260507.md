@@ -47,8 +47,10 @@ The Metal path is currently wired for route-native nested channel AMR-D:
 Poiseuille with periodic-x wall-y boundaries and Couette with periodic-x
 moving-wall-y boundaries. It uses `Float32` by default, applies the same
 subcycle scheduler as the CPU reference, and performs a per-step global mass
-correction for local validation. Nested solid probes still run through the CPU
-AMR-D route path until the solid-interface GPU ledgers are validated.
+correction for local validation. The mass reduction and correction stay on the
+device during the time loop; only the final scalar diagnostic is copied back.
+Nested solid probes still run through the CPU AMR-D route path until the
+solid-interface GPU ledgers are validated.
 `KRK_AMR_D_TEMP_SINGLE_STEP=1` is recommended for local Metal runs because the
 default temporal sweep reruns each case from zero at every checkpoint
 (`max_steps`, `2*max_steps`, ...), which is useful for convergence traces but
