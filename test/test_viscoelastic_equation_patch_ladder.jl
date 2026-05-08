@@ -1653,6 +1653,95 @@ end
     end
 end
 
+function _trt_odd_residual_factor(; tau_plus=1.0, magic=1e-6)
+    tau_minus = magic / (tau_plus - 0.5) + 0.5
+    return abs(1.0 - 1.0 / tau_minus)
+end
+
+function _ghost_mode_residual_stats(; collision=:trt,
+                                    tau_plus=1.0,
+                                    magic=1e-6,
+                                    amplitude=1e-3)
+    C = ones(Float64, 1, 1)
+    Z = zeros(Float64, 1, 1)
+    ux = zeros(Float64, 1, 1)
+    uy = zeros(Float64, 1, 1)
+    is_solid = falses(1, 1)
+    ρ = ones(Float64, 1, 1)
+    g = zeros(Float64, 1, 1, 9)
+    init_conformation_field_2d!(g, C, ux, uy)
+    ghost = (0.0, 1.0, 0.0, -1.0, 0.0, -0.5, 0.5, 0.5, -0.5)
+    for q in 1:9
+        g[1, 1, q] += amplitude * ghost[q]
+    end
+    Fe = zeros(Float64, 1, 1, 9)
+    λ = 3.0
+
+    if collision === :trt
+        collide_conformation_2d!(
+            g, C, ux, uy, C, Z, C, is_solid, tau_plus, λ;
+            magic, component=1, divergence_mode=:trace_free,
+        )
+    elseif collision === :regularized
+        collide_conformation_regularized_2d!(
+            g, C, ux, uy, C, Z, C, is_solid, tau_plus, λ;
+            magic, component=1, divergence_mode=:trace_free,
+        )
+    elseif collision === :liu_eq26
+        collide_conformation_liu_eq26_2d!(
+            g, Fe, C, ux, uy, ρ, C, Z, C, is_solid, tau_plus, λ;
+            magic, component=1, divergence_mode=:trace_free,
+        )
+    else
+        error("unknown ghost-mode collision $(collision)")
+    end
+
+    residual = [
+        g[1, 1, q] - equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+        for q in 1:9
+    ]
+    return (;
+        max_abs=maximum(abs, residual),
+        mass=sum(residual),
+        mom_x=sum(D2Q9_CX[q] * residual[q] for q in 1:9),
+        mom_y=sum(D2Q9_CY[q] * residual[q] for q in 1:9),
+        second_xx=sum((D2Q9_CX[q]^2 - 1 / 3) * residual[q] for q in 1:9),
+        second_yy=sum((D2Q9_CY[q]^2 - 1 / 3) * residual[q] for q in 1:9),
+        second_xy=sum(D2Q9_CX[q] * D2Q9_CY[q] * residual[q] for q in 1:9),
+    )
+end
+
+@testset "P14c conformation raw TRT preserves ghost modes" begin
+    amplitude = 1e-3
+    raw_small = _ghost_mode_residual_stats(
+        ; collision=:trt, tau_plus=1.0, magic=1e-6, amplitude,
+    )
+    raw_damped = _ghost_mode_residual_stats(
+        ; collision=:trt, tau_plus=1.0, magic=0.01, amplitude,
+    )
+    regularized = _ghost_mode_residual_stats(
+        ; collision=:regularized, tau_plus=0.50001, magic=1e-6, amplitude,
+    )
+    liu_eq26 = _ghost_mode_residual_stats(
+        ; collision=:liu_eq26, tau_plus=0.50001, magic=1e-6, amplitude,
+    )
+
+    @test raw_small.max_abs ≈
+          amplitude * _trt_odd_residual_factor(tau_plus=1.0, magic=1e-6) atol=1e-14
+    @test raw_damped.max_abs ≈
+          amplitude * _trt_odd_residual_factor(tau_plus=1.0, magic=0.01) atol=1e-14
+    for raw in (raw_small, raw_damped)
+        @test abs(raw.mass) < P0_ATOL
+        @test abs(raw.mom_x) < P0_ATOL
+        @test abs(raw.mom_y) < P0_ATOL
+        @test abs(raw.second_xx) < P0_ATOL
+        @test abs(raw.second_yy) < P0_ATOL
+        @test abs(raw.second_xy) < P0_ATOL
+    end
+    @test regularized.max_abs < P0_ATOL
+    @test liu_eq26.max_abs < P0_ATOL
+end
+
 @testset "P15a conformation collisions: trace-free incompressible gradient projection" begin
     a = 0.01
     for collision in (:trt, :regularized, :liu_eq26),
@@ -2670,11 +2759,6 @@ function _collide_square_direct_phase!(
         error("unknown square direct-C phase collision $(collision)")
     end
     return nothing
-end
-
-function _trt_odd_residual_factor(; tau_plus=1.0, magic=1e-6)
-    tau_minus = magic / (tau_plus - 0.5) + 0.5
-    return abs(1.0 - 1.0 / tau_minus)
 end
 
 function _square_direct_cde_phase_timeline(; collision=:trt,
