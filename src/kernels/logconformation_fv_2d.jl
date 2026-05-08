@@ -449,6 +449,46 @@ function logfv_bsd_correct_force_centered_2d!(
     return nothing
 end
 
+@kernel function logfv_bsd_correct_force_solid_aware_2d_kernel!(
+    fx_out, fy_out,
+    @Const(fx_poly), @Const(fy_poly),
+    @Const(ux), @Const(uy), @Const(is_solid),
+    zeta_nu_p, inv_dx2, inv_dy2, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if is_solid[i, j]
+                fx_out[i, j] = zero(eltype(fx_out))
+                fy_out[i, j] = zero(eltype(fy_out))
+            else
+                lap_ux = _logfv_solid_aware_second_derivative_x_2d(ux, is_solid, i, j, Nx, inv_dx2) +
+                         _logfv_solid_aware_second_derivative_y_2d(ux, is_solid, i, j, Ny, inv_dy2)
+                lap_uy = _logfv_solid_aware_second_derivative_x_2d(uy, is_solid, i, j, Nx, inv_dx2) +
+                         _logfv_solid_aware_second_derivative_y_2d(uy, is_solid, i, j, Ny, inv_dy2)
+                fx_out[i, j] = fx_poly[i, j] - zeta_nu_p * lap_ux
+                fy_out[i, j] = fy_poly[i, j] - zeta_nu_p * lap_uy
+            end
+        end
+    end
+end
+
+function logfv_bsd_correct_force_solid_aware_2d!(
+    fx_out, fy_out, fx_poly, fy_poly, ux, uy, is_solid, zeta, nu_p, dx, dy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(fx_out)
+    Nx, Ny = size(fx_out)
+    kernel! = logfv_bsd_correct_force_solid_aware_2d_kernel!(backend)
+    kernel!(
+        fx_out, fy_out, fx_poly, fy_poly, ux, uy, is_solid,
+        zeta * nu_p, inv(dx * dx), inv(dy * dy), Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_velocity_gradient_centered_2d_kernel!(
     dudx, dudy, dvdx, dvdy,
     @Const(ux), @Const(uy),
@@ -571,6 +611,36 @@ end
         return down2 ?
                (T(3) * field[i, j] - T(4) * field[i, j - 1] + field[i, j - 2]) * inv_2dy :
                (field[i, j] - field[i, j - 1]) * inv_dy
+    else
+        return zero(T)
+    end
+end
+
+@inline function _logfv_solid_aware_second_derivative_x_2d(field, is_solid, i, j, Nx, inv_dx2)
+    T = eltype(field)
+    left = i > 1 && !is_solid[i - 1, j]
+    right = i < Nx && !is_solid[i + 1, j]
+    if left && right
+        return (field[i + 1, j] - T(2) * field[i, j] + field[i - 1, j]) * inv_dx2
+    elseif right && i + 2 <= Nx && !is_solid[i + 2, j]
+        return (field[i, j] - T(2) * field[i + 1, j] + field[i + 2, j]) * inv_dx2
+    elseif left && i - 2 >= 1 && !is_solid[i - 2, j]
+        return (field[i, j] - T(2) * field[i - 1, j] + field[i - 2, j]) * inv_dx2
+    else
+        return zero(T)
+    end
+end
+
+@inline function _logfv_solid_aware_second_derivative_y_2d(field, is_solid, i, j, Ny, inv_dy2)
+    T = eltype(field)
+    down = j > 1 && !is_solid[i, j - 1]
+    up = j < Ny && !is_solid[i, j + 1]
+    if down && up
+        return (field[i, j + 1] - T(2) * field[i, j] + field[i, j - 1]) * inv_dy2
+    elseif up && j + 2 <= Ny && !is_solid[i, j + 2]
+        return (field[i, j] - T(2) * field[i, j + 1] + field[i, j + 2]) * inv_dy2
+    elseif down && j - 2 >= 1 && !is_solid[i, j - 2]
+        return (field[i, j] - T(2) * field[i, j - 1] + field[i, j - 2]) * inv_dy2
     else
         return zero(T)
     end

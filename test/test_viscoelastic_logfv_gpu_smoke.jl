@@ -104,6 +104,48 @@ end
             end
         end
 
+        ux_quad_h = [FT(0.1) + FT(0.06) * ((FT(i) - FT(0.5)) * dx)^2 -
+                     FT(0.03) * ((FT(j) - FT(0.5)) * dy)^2
+                     for i in 1:Nx, j in 1:Ny]
+        uy_quad_h = [FT(-0.2) - FT(0.07) * ((FT(i) - FT(0.5)) * dx)^2 +
+                     FT(0.01) * ((FT(j) - FT(0.5)) * dy)^2
+                     for i in 1:Nx, j in 1:Ny]
+        fx_poly_h = [FT(0.03) + FT(0.01) * (FT(i) - FT(0.5)) * dx
+                     for i in 1:Nx, j in 1:Ny]
+        fy_poly_h = [FT(-0.02) + FT(0.02) * (FT(j) - FT(0.5)) * dy
+                     for i in 1:Nx, j in 1:Ny]
+        ux_quad = _copy_to_backend(backend, ux_quad_h)
+        uy_quad = _copy_to_backend(backend, uy_quad_h)
+        fx_poly_bsd = _copy_to_backend(backend, fx_poly_h)
+        fy_poly_bsd = _copy_to_backend(backend, fy_poly_h)
+        fx_bsd = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        fy_bsd = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        Kraken.logfv_bsd_correct_force_solid_aware_2d!(
+            fx_bsd, fy_bsd, fx_poly_bsd, fy_poly_bsd,
+            ux_quad, uy_quad, is_solid, FT(0.6), FT(0.17), dx, dy,
+        )
+        fx_bsd_h = Array(fx_bsd)
+        fy_bsd_h = Array(fy_bsd)
+        for j in 1:Ny, i in 1:Nx
+            if is_solid_h[i, j]
+                @test fx_bsd_h[i, j] == 0
+                @test fy_bsd_h[i, j] == 0
+            else
+                x_second =
+                    (i > 1 && !is_solid_h[i - 1, j] && i < Nx && !is_solid_h[i + 1, j]) ||
+                    (i + 2 <= Nx && !is_solid_h[i + 1, j] && !is_solid_h[i + 2, j]) ||
+                    (i - 2 >= 1 && !is_solid_h[i - 1, j] && !is_solid_h[i - 2, j])
+                y_second =
+                    (j > 1 && !is_solid_h[i, j - 1] && j < Ny && !is_solid_h[i, j + 1]) ||
+                    (j + 2 <= Ny && !is_solid_h[i, j + 1] && !is_solid_h[i, j + 2]) ||
+                    (j - 2 >= 1 && !is_solid_h[i, j - 1] && !is_solid_h[i, j - 2])
+                lap_ux = (x_second ? FT(0.12) : FT(0)) + (y_second ? FT(-0.06) : FT(0))
+                lap_uy = (x_second ? FT(-0.14) : FT(0)) + (y_second ? FT(0.02) : FT(0))
+                @test Float64(fx_bsd_h[i, j]) ≈ Float64(fx_poly_h[i, j] - FT(0.6) * FT(0.17) * lap_ux) atol=atol rtol=atol
+                @test Float64(fy_bsd_h[i, j]) ≈ Float64(fy_poly_h[i, j] - FT(0.6) * FT(0.17) * lap_uy) atol=atol rtol=atol
+            end
+        end
+
         ux_face = KernelAbstractions.zeros(backend, FT, Nx + 1, Ny)
         uy_face = KernelAbstractions.zeros(backend, FT, Nx, Ny + 1)
         Kraken.logfv_cell_velocity_to_faces_solid_aware_2d!(ux_face, uy_face, ux, uy, is_solid)
@@ -164,9 +206,10 @@ end
 
         square = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
             Nx=20, Ny=12, side=4, nu_s=0.08, nu_p=0.02, Fx_body=1e-6,
-            lambda=5.0, polymer_substeps=:auto, max_steps=30,
+            lambda=5.0, bsd_fraction=1.0, polymer_substeps=:auto, max_steps=30,
             backend=backend, T=FT,
         )
+        @test square.bsd_fraction == 1.0
         @test square.min_c_eig > 0
         @test square.max_speed > 0
         @test all(isfinite, square.ux)

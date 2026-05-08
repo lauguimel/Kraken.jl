@@ -763,6 +763,58 @@ end
         end
     end
 
+    @testset "M4b solid-aware BSD force correction is exact for quadratic patches" begin
+        Nx, Ny = 10, 9
+        dx, dy = 0.3, 0.2
+        axx, axy = 0.06, -0.04
+        bxx, bxy = -0.03, 0.05
+        ayx, ayy = 0.02, -0.07
+        byx, byy = 0.08, 0.01
+        zeta = 0.6
+        nu_p = 0.17
+
+        is_solid = fill(false, Nx, Ny)
+        is_solid[4:6, 4:6] .= true
+        ux = [0.1 + axx * ((i - 0.5) * dx)^2 + bxx * ((j - 0.5) * dy)^2 +
+              0.01 * (i - 0.5) * dx
+              for i in 1:Nx, j in 1:Ny]
+        uy = [-0.2 + ayy * ((i - 0.5) * dx)^2 + byy * ((j - 0.5) * dy)^2 +
+              0.02 * (j - 0.5) * dy
+              for i in 1:Nx, j in 1:Ny]
+        fx_poly = [0.03 + axy * (i - 0.5) * dx + bxy * (j - 0.5) * dy
+                   for i in 1:Nx, j in 1:Ny]
+        fy_poly = [-0.02 + ayx * (i - 0.5) * dx + byx * (j - 0.5) * dy
+                   for i in 1:Nx, j in 1:Ny]
+        fx_total = similar(fx_poly)
+        fy_total = similar(fy_poly)
+
+        Kraken.logfv_bsd_correct_force_solid_aware_2d!(
+            fx_total, fy_total, fx_poly, fy_poly, ux, uy, is_solid, zeta, nu_p, dx, dy,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test fx_total[i, j] == 0.0
+                @test fy_total[i, j] == 0.0
+                continue
+            end
+
+            x_second =
+                (i > 1 && !is_solid[i - 1, j] && i < Nx && !is_solid[i + 1, j]) ||
+                (i + 2 <= Nx && !is_solid[i + 1, j] && !is_solid[i + 2, j]) ||
+                (i - 2 >= 1 && !is_solid[i - 1, j] && !is_solid[i - 2, j])
+            y_second =
+                (j > 1 && !is_solid[i, j - 1] && j < Ny && !is_solid[i, j + 1]) ||
+                (j + 2 <= Ny && !is_solid[i, j + 1] && !is_solid[i, j + 2]) ||
+                (j - 2 >= 1 && !is_solid[i, j - 1] && !is_solid[i, j - 2])
+            expected_lap_ux = (x_second ? 2 * axx : 0.0) + (y_second ? 2 * bxx : 0.0)
+            expected_lap_uy = (x_second ? 2 * ayy : 0.0) + (y_second ? 2 * byy : 0.0)
+            @test fx_total[i, j] ≈ fx_poly[i, j] - zeta * nu_p * expected_lap_ux atol=5e-14 rtol=5e-14
+            @test fy_total[i, j] ≈ fy_poly[i, j] - zeta * nu_p * expected_lap_uy atol=5e-14 rtol=5e-14
+        end
+    end
+
     @testset "M4 force boundary fill copies nearest interior halo" begin
         Nx, Ny = 6, 5
         fx = [100i + j for i in 1:Nx, j in 1:Ny]
@@ -964,10 +1016,12 @@ end
         result = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
             Nx=28, Ny=14, side=4,
             nu_s=0.08, nu_p=0.02, Fx_body=1e-6,
-            lambda=5.0, polymer_substeps=:auto,
+            lambda=5.0, bsd_fraction=1.0, polymer_substeps=:auto,
             max_steps=150, backend=KernelAbstractions.CPU(), T=Float64,
         )
 
+        @test result.bsd_fraction == 1.0
+        @test result.nu_lbm ≈ 0.10
         @test result.polymer_substeps == 10
         @test result.subcycle_estimate.recommended == 10
         @test result.min_c_eig > 0.99

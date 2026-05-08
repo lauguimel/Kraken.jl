@@ -569,7 +569,8 @@ at `y`, and is driven by a uniform body force.
 This is a stability/coupling canary, not a drag benchmark. It exercises
 solid-aware velocity gradients, solid-aware `Psi` advection, local
 log-conformation source update, solid-aware polymer force, and Guo coupling.
-BSD is deliberately disabled until a solid-aware BSD Laplacian canary exists.
+BSD uses the same solid-aware compact stencil as the polymer force path, so
+low-beta checks exercise the operator used by the coarse obstacle flow.
 """
 function run_viscoelastic_logfv_square_periodic_2d(;
     Nx::Integer=48,
@@ -595,8 +596,7 @@ function run_viscoelastic_logfv_square_periodic_2d(;
     nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
     nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
     lambda > 0 || throw(ArgumentError("lambda must be positive"))
-    iszero(bsd_fraction) ||
-        throw(ArgumentError("square periodic canary requires bsd_fraction=0 until solid-aware BSD is added"))
+    0 <= bsd_fraction <= 1 || throw(ArgumentError("bsd_fraction must be in [0, 1]"))
 
     Nx_i = Int(Nx)
     Ny_i = Int(Ny)
@@ -608,9 +608,12 @@ function run_viscoelastic_logfv_square_periodic_2d(;
     nu_s_t = T(nu_s)
     nu_p_t = T(nu_p)
     nu_total_t = nu_s_t + nu_p_t
+    bsd_t = T(bsd_fraction)
     Fx_body_t = T(Fx_body)
     lambda_t = T(lambda)
     prefactor_t = nu_p_t / lambda_t
+    nu_lbm_t = nu_s_t + bsd_t * nu_p_t
+    nu_lbm_t > zero(T) || throw(ArgumentError("nu_s + bsd_fraction * nu_p must be positive"))
     dx = one(T)
     dy = one(T)
 
@@ -634,7 +637,7 @@ function run_viscoelastic_logfv_square_periodic_2d(;
     end
     dt_poly = one(T) / T(selected_polymer_substeps)
 
-    config = LBMConfig(D2Q9(); Nx=Nx_i, Ny=Ny_i, ν=Float64(nu_s_t), u_lid=0.0, max_steps=max_steps)
+    config = LBMConfig(D2Q9(); Nx=Nx_i, Ny=Ny_i, ν=Float64(nu_lbm_t), u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, T; backend=backend)
     f_in, f_out = state.f_in, state.f_out
     rho, ux, uy = state.ρ, state.ux, state.uy
@@ -693,8 +696,10 @@ function run_viscoelastic_logfv_square_periodic_2d(;
 
         logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor_t; sync=false)
         logfv_polymer_force_solid_aware_2d!(fx_poly, fy_poly, tauxx, tauxy, tauyy, is_solid, dx, dy; sync=false)
-        copyto!(fx_total, fx_poly)
-        copyto!(fy_total, fy_poly)
+        logfv_bsd_correct_force_solid_aware_2d!(
+            fx_total, fy_total, fx_poly, fy_poly, ux, uy, is_solid, bsd_t, nu_p_t, dx, dy;
+            sync=false,
+        )
         logfv_add_constant_force_2d!(fx_total, fy_total, Fx_body_t, zero(T); sync=false)
 
         stream_periodic_x_wall_y_2d!(f_out, f_in, Nx_i, Ny_i)
@@ -728,8 +733,11 @@ function run_viscoelastic_logfv_square_periodic_2d(;
         cy=cy_i,
         nu_s=Float64(nu_s_t),
         nu_p=Float64(nu_p_t),
+        nu_total=Float64(nu_total_t),
+        nu_lbm=Float64(nu_lbm_t),
         Fx_body=Float64(Fx_body_t),
         lambda=Float64(lambda_t),
+        bsd_fraction=Float64(bsd_t),
         polymer_substeps=selected_polymer_substeps,
         requested_polymer_substeps=polymer_substeps,
         subcycle_estimate,
