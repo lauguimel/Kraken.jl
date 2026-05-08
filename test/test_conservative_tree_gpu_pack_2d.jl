@@ -537,8 +537,14 @@ using KernelAbstractions
         sum_conservative_tree_gpu_mass_2d!(mass_sum, F)
         @test isapprox(mass_sum[1], initial; atol=0, rtol=0)
 
+        partial_sums = zeros(Float64, 3)
+        sum_conservative_tree_gpu_mass_reduced_2d!(
+            mass_sum, partial_sums, F; chunk_size=13)
+        @test isapprox(mass_sum[1], initial; atol=0, rtol=0)
+
         enforce_conservative_tree_gpu_mass_2d!(
-            F, mass_sum, max_raw, 2, target, abs(target))
+            F, mass_sum, max_raw, 2, target, abs(target);
+            partial_sums=partial_sums, chunk_size=13)
         @test isapprox(sum(F), target; atol=1e-12, rtol=0)
         @test isapprox(max_raw[1], 3.25 / abs(target);
                        atol=1e-15, rtol=0)
@@ -690,10 +696,16 @@ using KernelAbstractions
                 Fmass = reshape(Float32.(1:36), 4, 9)
                 Fmassd = Metal.MtlArray(Fmass)
                 mass_sumd = Metal.MtlArray(zeros(Float32, 1))
+                mass_partiald = Metal.MtlArray(zeros(Float32, 3))
                 max_rawd = Metal.MtlArray(zeros(Float32, 1))
                 target = Float32(sum(Fmass) - 2.5f0)
+                sum_conservative_tree_gpu_mass_reduced_2d!(
+                    mass_sumd, mass_partiald, Fmassd; chunk_size=13)
+                @test isapprox(Array(mass_sumd)[1], sum(Fmass);
+                               atol=1e-3, rtol=0)
                 enforce_conservative_tree_gpu_mass_2d!(
-                    Fmassd, mass_sumd, max_rawd, 2, target, abs(target))
+                    Fmassd, mass_sumd, max_rawd, 2, target, abs(target);
+                    partial_sums=mass_partiald, chunk_size=13)
                 @test isapprox(sum(Array(Fmassd)), target; atol=1e-3,
                                rtol=0)
                 @test Array(max_rawd)[1] > 0

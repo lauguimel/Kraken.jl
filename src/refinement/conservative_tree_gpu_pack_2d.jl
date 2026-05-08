@@ -1213,6 +1213,70 @@ function sum_conservative_tree_gpu_mass_2d!(
     return mass_sum
 end
 
+@inline function _conservative_tree_gpu_mass_chunk_count_2d(
+        nentries::Integer,
+        chunk_size::Integer)
+    n = Int(nentries)
+    c = Int(chunk_size)
+    n >= 0 || throw(ArgumentError("nentries must be nonnegative"))
+    c > 0 || throw(ArgumentError("chunk_size must be positive"))
+    return cld(n, c)
+end
+
+@kernel function _sum_conservative_tree_gpu_mass_chunks_2d_kernel!(
+        partial_sums, @Const(F), nentries::Int32, chunk_size::Int32,
+        nchunks::Int32)
+    chunk = @index(Global)
+    @inbounds if chunk <= Int(nchunks)
+        first_entry = (chunk - 1) * Int(chunk_size) + 1
+        last_entry = min(first_entry + Int(chunk_size) - 1, Int(nentries))
+        acc = zero(eltype(partial_sums))
+        for entry in first_entry:last_entry
+            acc += F[entry]
+        end
+        partial_sums[chunk] = acc
+    end
+end
+
+@kernel function _sum_conservative_tree_gpu_mass_partials_2d_kernel!(
+        mass_sum, @Const(partial_sums), nchunks::Int32)
+    idx = @index(Global)
+    @inbounds if idx == 1
+        acc = zero(eltype(mass_sum))
+        for chunk in 1:Int(nchunks)
+            acc += partial_sums[chunk]
+        end
+        mass_sum[1] = acc
+    end
+end
+
+function sum_conservative_tree_gpu_mass_reduced_2d!(
+        mass_sum::AbstractVector,
+        partial_sums::AbstractVector,
+        F::AbstractMatrix;
+        chunk_size::Integer=256,
+        sync::Bool=true)
+    length(mass_sum) == 1 ||
+        throw(ArgumentError("mass_sum must be a one-element backend array"))
+    nchunks = _conservative_tree_gpu_mass_chunk_count_2d(
+        length(F), chunk_size)
+    length(partial_sums) >= nchunks ||
+        throw(ArgumentError("partial_sums is too small for F and chunk_size"))
+    backend = KernelAbstractions.get_backend(F)
+    if nchunks == 0
+        fill!(mass_sum, zero(eltype(mass_sum)))
+        sync && KernelAbstractions.synchronize(backend)
+        return mass_sum
+    end
+    chunks! = _sum_conservative_tree_gpu_mass_chunks_2d_kernel!(backend)
+    partials! = _sum_conservative_tree_gpu_mass_partials_2d_kernel!(backend)
+    chunks!(partial_sums, F, Int32(length(F)), Int32(chunk_size),
+            Int32(nchunks); ndrange=nchunks)
+    partials!(mass_sum, partial_sums, Int32(nchunks); ndrange=1)
+    sync && KernelAbstractions.synchronize(backend)
+    return mass_sum
+end
+
 @kernel function _correct_conservative_tree_gpu_mass_from_sum_2d_kernel!(
         F, @Const(mass_sum), max_raw_relative_mass_drift,
         cell_id::Int32, target_mass, mass_denom)
@@ -1256,8 +1320,15 @@ function enforce_conservative_tree_gpu_mass_2d!(
         cell_id::Integer,
         target_mass,
         mass_denom;
+        partial_sums=nothing,
+        chunk_size::Integer=256,
         sync::Bool=true)
-    sum_conservative_tree_gpu_mass_2d!(mass_sum, F; sync=false)
+    if partial_sums === nothing
+        sum_conservative_tree_gpu_mass_2d!(mass_sum, F; sync=false)
+    else
+        sum_conservative_tree_gpu_mass_reduced_2d!(
+            mass_sum, partial_sums, F; chunk_size=chunk_size, sync=false)
+    end
     correct_conservative_tree_gpu_mass_from_sum_2d!(
         F, mass_sum, max_raw_relative_mass_drift, cell_id,
         target_mass, mass_denom; sync=false)
