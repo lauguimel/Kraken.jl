@@ -364,6 +364,32 @@ end
         end
     end
 
+    @testset "M2c channel velocity gradient is wall-exact for Poiseuille" begin
+        Nx, Ny = 8, 13
+        height = 1.0
+        width = 2.0
+        dx = width / Nx
+        dy = height / Ny
+        umax = 0.09
+        ux = [_poiseuille_ux((j - 0.5) * dy, height, umax) for i in 1:Nx, j in 1:Ny]
+        uy = zeros(Float64, Nx, Ny)
+        dudx = similar(ux)
+        dudy = similar(ux)
+        dvdx = similar(ux)
+        dvdy = similar(ux)
+
+        Kraken.logfv_velocity_gradient_periodicx_wally_2d!(dudx, dudy, dvdx, dvdy, ux, uy, dx, dy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            y = (j - 0.5) * dy
+            @test dudy[i, j] ≈ _poiseuille_shear(y, height, umax) atol=3e-15 rtol=3e-15
+            @test dudx[i, j] ≈ 0.0 atol=3e-15
+            @test dvdx[i, j] ≈ 0.0 atol=3e-15
+            @test dvdy[i, j] ≈ 0.0 atol=3e-15
+        end
+    end
+
     @testset "M3 divergence-corrected upwind preserves constant Psi" begin
         Nx, Ny = 9, 8
         ux_face = [0.17 + 0.021 * (i - 1) - 0.013 * (j - 1) for i in 1:(Nx + 1), j in 1:Ny]

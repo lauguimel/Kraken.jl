@@ -386,6 +386,51 @@ function logfv_velocity_gradient_centered_2d!(
     return nothing
 end
 
+@kernel function logfv_velocity_gradient_periodicx_wally_2d_kernel!(
+    dudx, dudy, dvdx, dvdy,
+    @Const(ux), @Const(uy),
+    inv_2dx, inv_2dy, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            im = ifelse(i > 1, i - 1, Nx)
+            ip = ifelse(i < Nx, i + 1, 1)
+            dudx[i, j] = (ux[ip, j] - ux[im, j]) * inv_2dx
+            dvdx[i, j] = (uy[ip, j] - uy[im, j]) * inv_2dx
+
+            if j == 1
+                dudy[i, j] = (-3 * ux[i, j] + 4 * ux[i, j + 1] - ux[i, j + 2]) * inv_2dy
+                dvdy[i, j] = (-3 * uy[i, j] + 4 * uy[i, j + 1] - uy[i, j + 2]) * inv_2dy
+            elseif j == Ny
+                dudy[i, j] = (3 * ux[i, j] - 4 * ux[i, j - 1] + ux[i, j - 2]) * inv_2dy
+                dvdy[i, j] = (3 * uy[i, j] - 4 * uy[i, j - 1] + uy[i, j - 2]) * inv_2dy
+            else
+                dudy[i, j] = (ux[i, j + 1] - ux[i, j - 1]) * inv_2dy
+                dvdy[i, j] = (uy[i, j + 1] - uy[i, j - 1]) * inv_2dy
+            end
+        end
+    end
+end
+
+function logfv_velocity_gradient_periodicx_wally_2d!(
+    dudx, dudy, dvdx, dvdy,
+    ux, uy, dx, dy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(ux)
+    Nx, Ny = size(ux)
+    Ny >= 3 || throw(ArgumentError("wall-y velocity gradient requires Ny >= 3"))
+    kernel! = logfv_velocity_gradient_periodicx_wally_2d_kernel!(backend)
+    kernel!(
+        dudx, dudy, dvdx, dvdy,
+        ux, uy, inv(2 * dx), inv(2 * dy), Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_fill_nearest_boundary_2d_kernel!(fx, fy, Nx, Ny)
     i, j = @index(Global, NTuple)
     @inbounds begin
