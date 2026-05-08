@@ -582,6 +582,23 @@ end
         @test all(isfinite, low_beta_square.ux)
         @test all(isfinite, low_beta_square.psixx)
 
+        hydro_square_newt = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
+            Nx=20, Ny=12, side=4, nu_s=0.10, nu_p=0.0, Fx_body=1e-6,
+            lambda=1.0, bsd_fraction=1.0, max_steps=2,
+            backend=backend, T=FT,
+        )
+        near_newt_square = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
+            Nx=20, Ny=12, side=4, nu_s=0.08, nu_p=0.02, Fx_body=1e-6,
+            lambda=1.0, bsd_fraction=1.0, max_steps=2,
+            backend=backend, T=FT,
+        )
+        square_newt_fluid = .!near_newt_square.is_solid
+        @test near_newt_square.nu_lbm ≈ hydro_square_newt.nu_s atol=1e-7 rtol=1e-7
+        @test near_newt_square.min_c_eig > 0.99
+        @test maximum(abs.(near_newt_square.ux[square_newt_fluid] .- hydro_square_newt.ux[square_newt_fluid])) < 1e-5
+        @test all(isfinite, near_newt_square.psixx)
+        @test all(isfinite, near_newt_square.fx_total)
+
         passive_bfs = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
             H_in=3, expansion_ratio=2, L_up=2, L_down=2,
             nu_s=0.08, nu_p=0.02, lambda=5.0,

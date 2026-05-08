@@ -1141,6 +1141,33 @@ end
         end
     end
 
+    @testset "M7b square periodic near-Newtonian limit matches total-viscosity hydro" begin
+        hydro = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
+            Nx=28, Ny=14, side=4,
+            nu_s=0.10, nu_p=0.0, Fx_body=1e-6,
+            lambda=1.0, bsd_fraction=1.0,
+            max_steps=80, backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        visco = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
+            Nx=28, Ny=14, side=4,
+            nu_s=0.08, nu_p=0.02, Fx_body=1e-6,
+            lambda=1.0, bsd_fraction=1.0,
+            max_steps=80, backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fluid = .!visco.is_solid
+
+        @test visco.nu_lbm ≈ hydro.nu_s
+        @test visco.polymer_substeps == 50
+        @test !visco.subcycle_estimate.clamped
+        @test visco.min_c_eig > 0.999
+        @test maximum(abs.(visco.ux[fluid] .- hydro.ux[fluid])) < 1e-6
+        @test maximum(abs.(visco.uy[fluid] .- hydro.uy[fluid])) < 1e-6
+        @test maximum(abs.(visco.rho[fluid] .- hydro.rho[fluid])) < 1e-6
+        @test all(isfinite, visco.ux)
+        @test all(isfinite, visco.psixx)
+        @test all(isfinite, visco.fx_total)
+    end
+
     @testset "M8-pre BFS mask solid-aware operators are analytical" begin
         geom = Kraken.backward_facing_step_geometry_2d(;
             H_in=4, expansion_ratio=2, L_up=2, L_down=3, FT=Float64,
