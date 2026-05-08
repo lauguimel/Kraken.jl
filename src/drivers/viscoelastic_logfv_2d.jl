@@ -370,6 +370,12 @@ or curved-wall complications:
 LBM u -> wall-exact channel grad(u) -> log-C Oldroyd-B source
       -> tau_p -> div(tau_p) + BSD -> Guo force -> LBM u
 ```
+
+`polymer_substeps` is a time-integration convergence control for the current
+Lie source split. It is not a physical parameter and must not be fitted to a
+benchmark. Use `:auto` to choose a global patch value from the source
+subcycling estimator; future Strang or local affine source solves should
+reduce this requirement.
 """
 function run_viscoelastic_logfv_poiseuille_coupled_2d(;
     Nx::Integer=6,
@@ -379,7 +385,10 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
     Fx_body::Real=1e-5,
     lambda::Real=5.0,
     bsd_fraction::Real=1.0,
-    polymer_substeps::Integer=1,
+    polymer_substeps=:auto,
+    subcycle_relative_tolerance::Real=0.01,
+    max_deformation_increment::Real=0.05,
+    max_polymer_substeps::Integer=64,
     force_boundary_fill::Symbol=:nearest,
     max_steps::Integer=10000,
     backend=KernelAbstractions.CPU(),
@@ -390,7 +399,6 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
     nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
     nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
     lambda > 0 || throw(ArgumentError("lambda must be positive"))
-    polymer_substeps >= 1 || throw(ArgumentError("polymer_substeps must be >= 1"))
     force_boundary_fill in (:nearest, :none) ||
         throw(ArgumentError("force_boundary_fill must be :nearest or :none"))
 
@@ -405,7 +413,25 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
     nu_lbm_t > zero(T) || throw(ArgumentError("nu_s + bsd_fraction * nu_p must be positive"))
     dx = one(T)
     dy = one(T)
-    dt_poly = one(T) / T(polymer_substeps)
+    max_grad_norm_estimate = abs(Fx_body_t) * T(Ny) / (T(2) * nu_total_t)
+    subcycle_estimate = logfv_oldroydb_subcycle_estimate(
+        Float64(max_grad_norm_estimate),
+        Float64(lambda_t),
+        1.0;
+        relative_tolerance=Float64(subcycle_relative_tolerance),
+        max_deformation_increment=Float64(max_deformation_increment),
+        min_substeps=1,
+        max_substeps=max_polymer_substeps,
+    )
+    selected_polymer_substeps = if polymer_substeps === :auto
+        subcycle_estimate.recommended
+    elseif polymer_substeps isa Integer
+        polymer_substeps >= 1 || throw(ArgumentError("polymer_substeps must be >= 1"))
+        polymer_substeps
+    else
+        throw(ArgumentError("polymer_substeps must be an integer or :auto"))
+    end
+    dt_poly = one(T) / T(selected_polymer_substeps)
 
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(nu_lbm_t), u_lid=0.0, max_steps=max_steps)
     state = initialize_2d(config, T; backend=backend)
@@ -434,7 +460,7 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
 
     for _ in 1:max_steps
         logfv_velocity_gradient_periodicx_wally_2d!(dudx, dudy, dvdx, dvdy, ux, uy, dx, dy; sync=false)
-        for _ in 1:polymer_substeps
+        for _ in 1:selected_polymer_substeps
             logfv_step_oldroydb_log_2d!(
                 psixx_next, psixy_next, psiyy_next,
                 psixx, psixy, psiyy,
@@ -493,7 +519,10 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
         Fx_body=Float64(Fx_body_t),
         lambda=Float64(lambda_t),
         bsd_fraction=Float64(bsd_t),
-        polymer_substeps,
+        polymer_substeps=selected_polymer_substeps,
+        requested_polymer_substeps=polymer_substeps,
+        subcycle_estimate,
+        max_grad_norm_estimate=Float64(max_grad_norm_estimate),
         force_boundary_fill,
         max_steps,
         rho=Array(rho),

@@ -320,6 +320,46 @@ end
         end
     end
 
+    @testset "M2b source subcycling estimator separates relaxation and deformation limits" begin
+        z01 = Kraken.logfv_oldroydb_split_relax_increment(0.01)
+        @test z01 > 0.019
+        @test z01 < 0.021
+
+        relax_limited = Kraken.logfv_oldroydb_subcycle_estimate(
+            0.0, 5.0, 1.0;
+            relative_tolerance=0.01,
+            max_deformation_increment=0.05,
+            max_substeps=64,
+        )
+        @test relax_limited.recommended == 10
+        @test relax_limited.relax_substeps == 10
+        @test relax_limited.deformation_substeps == 1
+        @test !relax_limited.clamped
+
+        deformation_limited = Kraken.logfv_oldroydb_subcycle_estimate(
+            0.23, 1e6, 1.0;
+            relative_tolerance=0.01,
+            max_deformation_increment=0.05,
+            max_substeps=64,
+        )
+        @test deformation_limited.recommended == 5
+        @test deformation_limited.relax_substeps == 1
+        @test deformation_limited.deformation_substeps == 5
+
+        clamped = Kraken.logfv_oldroydb_subcycle_estimate(
+            0.0, 0.01, 1.0;
+            relative_tolerance=0.01,
+            max_deformation_increment=0.05,
+            max_substeps=8,
+        )
+        @test clamped.recommended == 8
+        @test clamped.clamped
+
+        @test_throws ArgumentError Kraken.logfv_oldroydb_split_relax_increment(0.0)
+        @test_throws ArgumentError Kraken.logfv_oldroydb_subcycle_estimate(-1.0, 1.0, 1.0)
+        @test_throws ArgumentError Kraken.logfv_oldroydb_subcycle_estimate(0.0, -1.0, 1.0)
+    end
+
     @testset "M2c velocity gradient kernel is exact on affine and Poiseuille fields" begin
         Nx, Ny = 9, 11
         dx, dy = 0.4, 0.25
@@ -778,11 +818,14 @@ end
         )
         fine = Kraken.run_viscoelastic_logfv_poiseuille_coupled_2d(;
             Nx=6, Ny=16, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
-            lambda=5.0, bsd_fraction=0.0, polymer_substeps=10,
+            lambda=5.0, bsd_fraction=0.0, polymer_substeps=:auto,
             max_steps=4000, backend=KernelAbstractions.CPU(), T=Float64,
         )
 
         @test coarse.max_rel_error > 0.02
+        @test fine.polymer_substeps == 10
+        @test fine.subcycle_estimate.recommended == 10
+        @test fine.subcycle_estimate.relax_substeps == 10
         @test fine.max_rel_error < 0.01
         @test fine.max_rel_error < coarse.max_rel_error / 5
         @test fine.min_c_eig > 0
@@ -791,9 +834,10 @@ end
         for zeta in (0.5, 1.0)
             result = Kraken.run_viscoelastic_logfv_poiseuille_coupled_2d(;
                 Nx=6, Ny=16, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
-                lambda=5.0, bsd_fraction=zeta, polymer_substeps=10,
+                lambda=5.0, bsd_fraction=zeta, polymer_substeps=:auto,
                 max_steps=4000, backend=KernelAbstractions.CPU(), T=Float64,
             )
+            @test result.polymer_substeps == 10
             @test result.max_rel_error < 0.012
             @test result.min_c_eig > 0
             @test result.max_uy < 1e-12

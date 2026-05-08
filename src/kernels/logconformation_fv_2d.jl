@@ -116,6 +116,72 @@ end
     return logfv_log_spd_sym2_2d(rxx, rxy, ryy)
 end
 
+function logfv_oldroydb_split_relax_increment(relative_tolerance::Real)
+    0 < relative_tolerance < 1 ||
+        throw(ArgumentError("relative_tolerance must be in (0, 1)"))
+
+    split_error(z) = 1 - z / expm1(z)
+    lo = 0.0
+    hi = 1.0
+    while split_error(hi) <= relative_tolerance
+        lo = hi
+        hi *= 2
+    end
+    for _ in 1:80
+        mid = (lo + hi) / 2
+        if split_error(mid) <= relative_tolerance
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    return lo
+end
+
+function logfv_oldroydb_subcycle_estimate(
+    max_grad_norm::Real,
+    lambda::Real,
+    dt::Real=1;
+    relative_tolerance::Real=0.01,
+    max_deformation_increment::Real=0.05,
+    min_substeps::Integer=1,
+    max_substeps::Integer=64,
+)
+    max_grad_norm >= 0 || throw(ArgumentError("max_grad_norm must be non-negative"))
+    lambda > 0 || throw(ArgumentError("lambda must be positive"))
+    dt > 0 || throw(ArgumentError("dt must be positive"))
+    max_deformation_increment > 0 ||
+        throw(ArgumentError("max_deformation_increment must be positive"))
+    min_substeps >= 1 || throw(ArgumentError("min_substeps must be >= 1"))
+    max_substeps >= min_substeps ||
+        throw(ArgumentError("max_substeps must be >= min_substeps"))
+
+    relax_increment = dt / lambda
+    deformation_increment = dt * max_grad_norm
+    max_relax_increment = logfv_oldroydb_split_relax_increment(relative_tolerance)
+    relax_substeps = max(min_substeps, ceil(Int, relax_increment / max_relax_increment))
+    deformation_substeps = max(min_substeps, ceil(Int, deformation_increment / max_deformation_increment))
+    raw_substeps = max(relax_substeps, deformation_substeps)
+    recommended = min(raw_substeps, max_substeps)
+
+    return (;
+        recommended,
+        raw_substeps,
+        relax_substeps,
+        deformation_substeps,
+        clamped=raw_substeps > max_substeps,
+        relax_increment,
+        deformation_increment,
+        max_relax_increment,
+        max_deformation_increment,
+        relative_tolerance,
+    )
+end
+
+function logfv_recommended_oldroydb_substeps(args...; kwargs...)
+    return logfv_oldroydb_subcycle_estimate(args...; kwargs...).recommended
+end
+
 @inline function logfv_oldroydb_source_c_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, lambda)
     inv_lambda = inv(lambda)
     return (

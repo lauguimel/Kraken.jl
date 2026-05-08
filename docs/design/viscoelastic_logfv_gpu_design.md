@@ -127,6 +127,20 @@ dominant defect:
 half source -> advection -> half source
 ```
 
+Subcycling the polymer source is a numerical convergence control for this
+operator split, not a physical model parameter. It must never be tuned to
+match one benchmark. The result must converge when the number of polymer
+substeps is increased, and production runs must report the selected
+substeps or the estimator settings used to choose them.
+
+The current Lie split can require polymer substeps when `dt/lambda` is not
+small. This is expected: exact deformation followed by exact relaxation is
+still only first-order accurate as a combined source update. Longer term,
+this need should be reduced by a better source integrator, for example
+Strang splitting or a more exact local affine-gradient Oldroyd-B solve.
+Until that canary is green, subcycling is only a time-integration accuracy
+knob.
+
 ## 5. Log-conformation source update
 
 Two source kernels should be kept separate.
