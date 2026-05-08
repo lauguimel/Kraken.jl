@@ -346,6 +346,46 @@ function logfv_bsd_correct_force_centered_2d!(
     return nothing
 end
 
+@kernel function logfv_velocity_gradient_centered_2d_kernel!(
+    dudx, dudy, dvdx, dvdy,
+    @Const(ux), @Const(uy),
+    inv_2dx, inv_2dy, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if i > 1 && i < Nx && j > 1 && j < Ny
+                dudx[i, j] = (ux[i + 1, j] - ux[i - 1, j]) * inv_2dx
+                dudy[i, j] = (ux[i, j + 1] - ux[i, j - 1]) * inv_2dy
+                dvdx[i, j] = (uy[i + 1, j] - uy[i - 1, j]) * inv_2dx
+                dvdy[i, j] = (uy[i, j + 1] - uy[i, j - 1]) * inv_2dy
+            else
+                dudx[i, j] = zero(eltype(dudx))
+                dudy[i, j] = zero(eltype(dudy))
+                dvdx[i, j] = zero(eltype(dvdx))
+                dvdy[i, j] = zero(eltype(dvdy))
+            end
+        end
+    end
+end
+
+function logfv_velocity_gradient_centered_2d!(
+    dudx, dudy, dvdx, dvdy,
+    ux, uy, dx, dy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(ux)
+    Nx, Ny = size(ux)
+    kernel! = logfv_velocity_gradient_centered_2d_kernel!(backend)
+    kernel!(
+        dudx, dudy, dvdx, dvdy,
+        ux, uy, inv(2 * dx), inv(2 * dy), Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_fill_nearest_boundary_2d_kernel!(fx, fy, Nx, Ny)
     i, j = @index(Global, NTuple)
     @inbounds begin

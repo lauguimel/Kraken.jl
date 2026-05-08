@@ -320,6 +320,50 @@ end
         end
     end
 
+    @testset "M2c velocity gradient kernel is exact on affine and Poiseuille fields" begin
+        Nx, Ny = 9, 11
+        dx, dy = 0.4, 0.25
+        ax, ay = 0.03, -0.07
+        bx, by = -0.02, 0.05
+        ux = [0.2 + ax * ((i - 0.5) * dx) + ay * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        uy = [-0.1 + bx * ((i - 0.5) * dx) + by * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        dudx = similar(ux)
+        dudy = similar(ux)
+        dvdx = similar(ux)
+        dvdy = similar(ux)
+
+        Kraken.logfv_velocity_gradient_centered_2d!(dudx, dudy, dvdx, dvdy, ux, uy, dx, dy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if i > 1 && i < Nx && j > 1 && j < Ny
+                @test dudx[i, j] ≈ ax atol=2e-16 rtol=0.0
+                @test dudy[i, j] ≈ ay atol=2e-16 rtol=0.0
+                @test dvdx[i, j] ≈ bx atol=2e-16 rtol=0.0
+                @test dvdy[i, j] ≈ by atol=2e-16 rtol=0.0
+            else
+                @test dudx[i, j] == 0.0
+                @test dudy[i, j] == 0.0
+                @test dvdx[i, j] == 0.0
+                @test dvdy[i, j] == 0.0
+            end
+        end
+
+        height = 1.0
+        umax = 0.08
+        ux_p = [_poiseuille_ux((j - 0.5) * height / Ny, height, umax) for i in 1:Nx, j in 1:Ny]
+        uy_p = zeros(Float64, Nx, Ny)
+        Kraken.logfv_velocity_gradient_centered_2d!(dudx, dudy, dvdx, dvdy, ux_p, uy_p, 1.0, height / Ny)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+        for j in 2:(Ny - 1), i in 2:(Nx - 1)
+            y = (j - 0.5) * height / Ny
+            @test dudy[i, j] ≈ _poiseuille_shear(y, height, umax) atol=2e-15 rtol=2e-15
+            @test dudx[i, j] ≈ 0.0 atol=2e-15
+            @test dvdx[i, j] ≈ 0.0 atol=2e-15
+            @test dvdy[i, j] ≈ 0.0 atol=2e-15
+        end
+    end
+
     @testset "M3 divergence-corrected upwind preserves constant Psi" begin
         Nx, Ny = 9, 8
         ux_face = [0.17 + 0.021 * (i - 1) - 0.013 * (j - 1) for i in 1:(Nx + 1), j in 1:Ny]
