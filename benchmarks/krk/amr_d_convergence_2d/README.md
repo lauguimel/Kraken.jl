@@ -50,11 +50,10 @@ solid-mask plots only.
 Nested subcycled channel/solid cases accept two optional numeric A/B knobs:
 
 - `Define route_sampling = 0` selects the production nested AMR-D route
-  legacy leaf-equivalent route contract. `1` selects the level-native
-  subcycled route table, and `2` selects the hybrid route table. Nested
-  channel/solid KRK runs now default to `1` when the coarse-to-fine
-  prolongation is flat, because this is the closed wall-normal macro-flow
-  contract after the periodic-corner reflux fix.
+  contract. `1` selects the level-native subcycled route table, and `2`
+  selects the hybrid route table. Nested D defaults to `0`; use
+  `route_sampling = 1` explicitly for wall-normal band debug cases where the
+  periodic-corner reflux fix is required.
 - `Define c2f_prolongation = 0` keeps the production flat coarse-to-fine
   packet geometry. `1` enables the explicit experimental limited-linear
   prolongation. `poiseuille_yband_nested4_limited_debug.krk` is the reference
@@ -62,5 +61,5 @@ Nested subcycled channel/solid cases accept two optional numeric A/B knobs:
 - `Define coarse_to_fine_predictor_weight = 0.5` controls the conservative
   temporal predictor blend. Use `0` for committed parent state only and `1`
   for the local post-collision parent predictor. The default is `0.5` for the
-  legacy leaf-equivalent route contract and `1` for the level-native route
-  contract.
+  production leaf-equivalent route contract and `1` when `route_sampling = 1`
+  is requested explicitly.

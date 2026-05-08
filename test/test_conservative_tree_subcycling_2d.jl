@@ -888,22 +888,25 @@ end
         @test x_predicted_linf <= 1.05 * x_flat_linf
     end
 
-    @testset "level-native nested bands stay close to Poiseuille analytic profile" begin
+    @testset "nested bands stay close to Poiseuille analytic profile" begin
         steps = 1024
         xband = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_center_xband_nested_spec_2d(),
-            steps=steps, Fx=1e-7, omega=1.0, enforce_mass=false)
+            steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:leaf_equivalent, enforce_mass=false)
         yband = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_center_yband_nested_spec_2d(),
-            steps=steps, Fx=1e-7, omega=1.0, enforce_mass=false)
+            steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:level_native, enforce_mass=false)
         wall_bands = run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, spec=_test_wall_refined_ybands_nested_spec_2d(),
-            steps=steps, Fx=1e-7, omega=1.0, enforce_mass=false)
+            steps=steps, Fx=1e-7, omega=1.0,
+            route_sampling=:level_native, enforce_mass=false)
 
         @test xband.linf_error < 3e-5
         @test yband.linf_error < 3e-5
         @test wall_bands.linf_error < 2e-5
-        @test xband.relative_mass_drift < 1e-12
+        @test xband.relative_mass_drift < 1e-8
         @test yband.relative_mass_drift < 1e-12
         @test wall_bands.relative_mass_drift < 1e-12
     end

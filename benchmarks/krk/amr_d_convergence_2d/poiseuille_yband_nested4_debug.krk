@@ -8,6 +8,7 @@ Define Fx = 1e-7
 Define omega = 1.0
 Define rho0 = 1.0
 Define mass_guard_rtol = 1e-6
+Define route_sampling = 1
 
 Domain L = 16 x 12  N = 16 x 12
 Physics nu = 0.16666666666666666 Fx = 1e-7

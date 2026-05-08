@@ -218,7 +218,7 @@ end
 function _amr_d_route_sampling_2d(setup, c2f_prolongation::Symbol)
     route_key = _amr_d_has_var_2d(setup, :route_sampling)
     legacy_key = _amr_d_has_var_2d(setup, :amr_d_route_sampling)
-    default = c2f_prolongation == :limited_linear ? 0.0 : 1.0
+    default = 0.0
     raw = route_key ? getproperty(setup, :user_vars)[:route_sampling] :
           legacy_key ? getproperty(setup, :user_vars)[:amr_d_route_sampling] :
           default
