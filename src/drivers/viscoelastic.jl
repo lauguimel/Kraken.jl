@@ -790,15 +790,16 @@ function run_conformation_cylinder_libb_2d(;
     # At quiescent equilibrium C = I ⇒ Ψ = 0.
     use_logconf = uses_log_conformation(polymer_model)
 
-    # Analytical Oldroyd-B inlet C profile (Liu Eq 62):
-    #   C_xy(y) = λ · ∂u/∂y,  C_xx(y) = 1 + 2·(λ·∂u/∂y)²,  C_yy = 1
-    H_chan = FT(Ny)
+    # Oldroyd-B inlet C profile (Liu Eq 62):
+    #   C_xy(y) = λ · ∂u/∂y,  C_xx(y) = 1 + 2·(λ·∂u/∂y)²,  C_yy = 1.
+    # The derivative must use the same discrete profile imposed on f.
     C_xx_inlet_h = ones(FT, Ny)
     C_xy_inlet_h = zeros(FT, Ny)
     C_yy_inlet_h = ones(FT, Ny)
     for j in 1:Ny
-        y = FT(j) - FT(0.5)
-        dudy = u_max * FT(4) * (H_chan - FT(2)*y) / (H_chan * H_chan)
+        dudy = inlet === :parabolic ?
+            u_max * FT(4) * (FT(Ny + 1) - FT(2 * j)) / (FT(Ny - 1)^2) :
+            zero(FT)
         C_xy_inlet_h[j] = FT(λ_p) * dudy
         C_xx_inlet_h[j] = FT(1) + FT(2) * (FT(λ_p) * dudy)^2
     end

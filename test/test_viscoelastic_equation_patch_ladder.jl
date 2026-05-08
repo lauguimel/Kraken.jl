@@ -1967,20 +1967,28 @@ end
     u_mean = 0.005
     λ = 12.0
     u_max = 1.5 * u_mean
-    Cxx_ref = zeros(Float64, Ny)
-    Cxy_ref = zeros(Float64, Ny)
-    Cyy_ref = ones(Float64, Ny)
-    for j in 1:Ny
-        y = j - 0.5
-        dudy = u_max * 4.0 * (Ny - 2.0 * y) / (Ny * Ny)
-        Cxy_ref[j] = λ * dudy
-        Cxx_ref[j] = 1.0 + 2.0 * (λ * dudy)^2
-    end
 
-    for model in (OldroydB(G=0.01, λ=λ), LogConfOldroydB(G=0.01, λ=λ))
+    for inlet in (:parabolic, :uniform),
+        model in (OldroydB(G=0.01, λ=λ), LogConfOldroydB(G=0.01, λ=λ))
+
+        Cxx_ref = zeros(Float64, Ny)
+        Cxy_ref = zeros(Float64, Ny)
+        Cyy_ref = ones(Float64, Ny)
+        for j in 1:Ny
+            dudy = if inlet === :parabolic
+                # Must match the discrete inlet velocity actually imposed on f:
+                # u[j] = 4 u_max (j-1)(Ny-j)/(Ny-1)^2.
+                4.0 * u_max * (Ny + 1.0 - 2.0 * j) / (Ny - 1.0)^2
+            else
+                0.0
+            end
+            Cxy_ref[j] = λ * dudy
+            Cxx_ref[j] = 1.0 + 2.0 * (λ * dudy)^2
+        end
+
         result = run_conformation_cylinder_libb_2d(
             ; Nx=32, Ny, radius=3, cx=16, cy=(Ny - 1) / 2,
-            u_mean, ν_s=0.04, polymer_model=model,
+            u_mean, ν_s=0.04, polymer_model=model, inlet,
             max_steps=1, avg_window=1,
             polymer_bc=uses_log_conformation(model) ? LogFieldWallBC() : CNEBB(),
             hermite_source_mode=:liu_direct,
