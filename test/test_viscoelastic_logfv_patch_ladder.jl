@@ -1036,4 +1036,40 @@ end
         @test any(result.is_solid)
         @test !all(result.is_solid)
     end
+
+    @testset "M7 square periodic low-beta coarse sweep stays SPD and bounded" begin
+        cases = (
+            (nu_s=0.005, nu_p=0.095, Fx_body=5e-7, lambda=10.0),
+            (nu_s=0.002, nu_p=0.098, Fx_body=5e-6, lambda=50.0),
+            (nu_s=0.002, nu_p=0.098, Fx_body=5e-6, lambda=200.0),
+        )
+
+        for case in cases
+            result = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
+                Nx=28, Ny=14, side=4,
+                nu_s=case.nu_s, nu_p=case.nu_p, Fx_body=case.Fx_body,
+                lambda=case.lambda, bsd_fraction=1.0, polymer_substeps=:auto,
+                max_steps=120, backend=KernelAbstractions.CPU(), T=Float64,
+            )
+            beta = result.nu_s / result.nu_total
+
+            @test beta <= 0.05
+            @test result.bsd_fraction == 1.0
+            @test result.nu_lbm ≈ result.nu_total
+            @test result.polymer_substeps >= 1
+            @test !result.subcycle_estimate.clamped
+            @test result.min_c_eig > 0.9
+            @test result.max_speed > 1e-5
+            @test result.max_speed < 3e-3
+            @test result.rho_min > 0.995
+            @test result.rho_max < 1.005
+            @test all(isfinite, result.ux)
+            @test all(isfinite, result.uy)
+            @test all(isfinite, result.psixx)
+            @test all(isfinite, result.psixy)
+            @test all(isfinite, result.psiyy)
+            @test all(isfinite, result.fx_total)
+            @test all(isfinite, result.fy_total)
+        end
+    end
 end

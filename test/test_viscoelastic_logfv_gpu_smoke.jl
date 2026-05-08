@@ -215,6 +215,19 @@ end
         @test all(isfinite, square.ux)
         @test all(isfinite, square.psixx)
 
-        @info "Log-FV GPU smoke passed" backend=backend_name FT=FT substeps=coupled.polymer_substeps square_substeps=square.polymer_substeps
+        low_beta_square = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
+            Nx=20, Ny=12, side=4, nu_s=0.002, nu_p=0.098, Fx_body=5e-6,
+            lambda=50.0, bsd_fraction=1.0, polymer_substeps=:auto, max_steps=5,
+            backend=backend, T=FT,
+        )
+        @test low_beta_square.nu_lbm ≈ low_beta_square.nu_total
+        @test low_beta_square.min_c_eig > 0.9
+        @test low_beta_square.max_speed > 0
+        @test low_beta_square.rho_min > 0.99
+        @test low_beta_square.rho_max < 1.01
+        @test all(isfinite, low_beta_square.ux)
+        @test all(isfinite, low_beta_square.psixx)
+
+        @info "Log-FV GPU smoke passed" backend=backend_name FT=FT substeps=coupled.polymer_substeps square_substeps=square.polymer_substeps low_beta_square_substeps=low_beta_square.polymer_substeps
     end
 end
