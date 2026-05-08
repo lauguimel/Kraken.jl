@@ -31,7 +31,7 @@ To reuse completed case folders and only run missing cases:
 julia --project=. -e 'ENV["KRK_AMR_D_TEMP_OUTDIR"]="benchmarks/results/quicklook/amr_d_temporal_convergence_20260507"; ENV["KRK_AMR_D_TEMP_MAX_STEPS"]="2560"; ENV["KRK_AMR_D_TEMP_SKIP_EXISTING"]="1"; include("benchmarks/amr_d_macroflow_temporal_convergence_2d.jl"); main()'
 ```
 
-Local Metal debug runs use the same runner:
+Local Metal and Aqua/H100 CUDA debug runs use the same runner:
 
 ```bash
 KRK_AMR_D_TEMP_BACKEND=metal \
@@ -43,10 +43,13 @@ KRK_AMR_D_TEMP_OUTDIR=benchmarks/results/quicklook/amr_d_metal_nested_channels_l
 julia --project=. benchmarks/amr_d_macroflow_temporal_convergence_2d.jl
 ```
 
-The Metal path is currently wired for route-native nested channel AMR-D:
+Use `KRK_AMR_D_TEMP_BACKEND=cuda` on Aqua/H100, or
+`KRK_AMR_D_TEMP_BACKEND=auto` to select CUDA first, then Metal, then CPU.
+
+The GPU path is currently wired for route-native nested channel AMR-D:
 Poiseuille with periodic-x wall-y boundaries and Couette with periodic-x
-moving-wall-y boundaries. It uses `Float32` by default, applies the same
-subcycle scheduler as the CPU reference, and performs a per-step global mass
+moving-wall-y boundaries. It uses `Float32` by default on Metal/CUDA, applies
+the same subcycle scheduler as the CPU reference, and performs a per-step global mass
 correction for local validation. The mass reduction and correction stay on the
 device during the time loop; only the final scalar diagnostic is copied back.
 The runner has both an atomic scalar reduction and a chunked reduction. The

@@ -48,21 +48,47 @@ function _temp_load_metal_module()
         Base.UUID("dde4c033-4e86-420c-a63e-0dd931031962"), "Metal"))
 end
 
+function _temp_load_cuda_module()
+    return Base.require(Base.PkgId(
+        Base.UUID("052768ef-5323-5732-b1bb-66c8b64840ba"), "CUDA"))
+end
+
 function _temp_resolve_backend()
     raw = lowercase(strip(get(ENV, "KRK_AMR_D_TEMP_BACKEND", "cpu")))
     raw in ("", "cpu") && return nothing, "cpu"
+    if raw == "cuda"
+        cuda = _temp_load_cuda_module()
+        Base.invokelatest(cuda.functional) ||
+            error("KRK_AMR_D_TEMP_BACKEND=cuda requested but CUDA is not functional")
+        return Base.invokelatest(cuda.CUDABackend), "cuda"
+    end
     if raw == "metal"
         metal = _temp_load_metal_module()
         Base.invokelatest(metal.functional) ||
             error("KRK_AMR_D_TEMP_BACKEND=metal requested but Metal is not functional")
         return Base.invokelatest(metal.MetalBackend), "metal"
     end
-    throw(ArgumentError("KRK_AMR_D_TEMP_BACKEND must be cpu or metal"))
+    if raw == "auto"
+        try
+            cuda = _temp_load_cuda_module()
+            Base.invokelatest(cuda.functional) &&
+                return Base.invokelatest(cuda.CUDABackend), "cuda"
+        catch
+        end
+        try
+            metal = _temp_load_metal_module()
+            Base.invokelatest(metal.functional) &&
+                return Base.invokelatest(metal.MetalBackend), "metal"
+        catch
+        end
+        return nothing, "cpu"
+    end
+    throw(ArgumentError("KRK_AMR_D_TEMP_BACKEND must be cpu, metal, cuda, or auto"))
 end
 
 function _temp_float_type(backend_name::AbstractString)
     raw = lowercase(strip(get(ENV, "KRK_AMR_D_TEMP_T", "")))
-    isempty(raw) && return backend_name == "metal" ? Float32 : Float64
+    isempty(raw) && return backend_name in ("metal", "cuda") ? Float32 : Float64
     raw in ("float32", "f32") && return Float32
     raw in ("float64", "f64") && return Float64
     throw(ArgumentError("KRK_AMR_D_TEMP_T must be float32 or float64"))
