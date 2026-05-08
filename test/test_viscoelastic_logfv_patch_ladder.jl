@@ -1659,6 +1659,34 @@ end
         @test all(isfinite, result.fx_total)
     end
 
+    @testset "M8g2 BFS coupled low-beta long-relaxation ramp stays bounded" begin
+        result = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.002, nu_p=0.098, lambda=200.0,
+            u_mean=0.003, Fx_body=5e-8,
+            bsd_fraction=1.0, max_steps=60,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test result.nu_s / result.nu_total <= 0.02
+        @test result.nu_lbm ≈ result.nu_total
+        @test result.polymer_substeps == 1
+        @test !result.subcycle_estimate.clamped
+        @test result.min_c_eig > 0.75
+        @test result.max_abs_psi < 0.3
+        @test result.max_abs_tau < 2e-4
+        @test result.max_abs_poly_force > 0
+        @test result.max_abs_total_force > 0
+        @test result.max_speed > 1e-4
+        @test result.max_speed < 0.02
+        @test result.rho_min > 0.995
+        @test result.rho_max < 1.01
+        @test all(isfinite, result.ux)
+        @test all(isfinite, result.uy)
+        @test all(isfinite, result.psixx)
+        @test all(isfinite, result.fx_total)
+    end
+
     @testset "M8h BFS coupled near-Newtonian limit matches total-viscosity hydro" begin
         hydro = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
             H_in=4, expansion_ratio=2, L_up=2, L_down=4,
