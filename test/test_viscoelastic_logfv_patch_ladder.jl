@@ -553,6 +553,54 @@ end
         end
     end
 
+    @testset "M3 solid-aware upwind preserves constant Psi around square obstacle" begin
+        Nx, Ny = 12, 10
+        is_solid = falses(Nx, Ny)
+        is_solid[5:7, 4:6] .= true
+        ux = [0.08 + 0.01 * sin(i + j) for i in 1:Nx, j in 1:Ny]
+        uy = [0.02 * cos(i - 2j) for i in 1:Nx, j in 1:Ny]
+        ux[is_solid] .= 0.0
+        uy[is_solid] .= 0.0
+        ux_face = zeros(Float64, Nx + 1, Ny)
+        uy_face = zeros(Float64, Nx, Ny + 1)
+
+        Kraken.logfv_cell_velocity_to_faces_solid_aware_2d!(ux_face, uy_face, ux, uy, is_solid)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny
+            @test ux_face[1, j] == ux_face[Nx + 1, j]
+        end
+        for j in 4:6
+            @test ux_face[5, j] == 0.0
+            @test ux_face[8, j] == 0.0
+        end
+        for i in 5:7
+            @test uy_face[i, 4] == 0.0
+            @test uy_face[i, 7] == 0.0
+        end
+
+        psixx = fill(0.3, Nx, Ny)
+        psixy = fill(-0.04, Nx, Ny)
+        psiyy = fill(0.2, Nx, Ny)
+        outxx = similar(psixx)
+        outxy = similar(psixy)
+        outyy = similar(psiyy)
+
+        Kraken.logfv_advect_upwind_solid_aware_2d!(
+            outxx, outxy, outyy,
+            psixx, psixy, psiyy, ux_face, uy_face, is_solid, 0.2,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                _assert_sym2_close((outxx[i, j], outxy[i, j], outyy[i, j]), (0.0, 0.0, 0.0); atol=0.0, rtol=0.0)
+            else
+                _assert_sym2_close((outxx[i, j], outxy[i, j], outyy[i, j]), (0.3, -0.04, 0.2); atol=3e-16, rtol=0.0)
+            end
+        end
+    end
+
     @testset "M4 local Poiseuille conformation and stress are analytical" begin
         Nx, Ny = 5, 19
         height = 1.0

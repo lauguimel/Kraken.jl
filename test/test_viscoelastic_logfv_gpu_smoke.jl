@@ -104,6 +104,38 @@ end
             end
         end
 
+        ux_face = KernelAbstractions.zeros(backend, FT, Nx + 1, Ny)
+        uy_face = KernelAbstractions.zeros(backend, FT, Nx, Ny + 1)
+        Kraken.logfv_cell_velocity_to_faces_solid_aware_2d!(ux_face, uy_face, ux, uy, is_solid)
+        psixx_const_h = fill(FT(0.3), Nx, Ny)
+        psixy_const_h = fill(FT(-0.04), Nx, Ny)
+        psiyy_const_h = fill(FT(0.2), Nx, Ny)
+        psixx_const = _copy_to_backend(backend, psixx_const_h)
+        psixy_const = _copy_to_backend(backend, psixy_const_h)
+        psiyy_const = _copy_to_backend(backend, psiyy_const_h)
+        advxx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        advxy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        advyy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        Kraken.logfv_advect_upwind_solid_aware_2d!(
+            advxx, advxy, advyy,
+            psixx_const, psixy_const, psiyy_const,
+            ux_face, uy_face, is_solid, FT(0.2),
+        )
+        advxx_h = Array(advxx)
+        advxy_h = Array(advxy)
+        advyy_h = Array(advyy)
+        for j in 1:Ny, i in 1:Nx
+            if is_solid_h[i, j]
+                @test advxx_h[i, j] == 0
+                @test advxy_h[i, j] == 0
+                @test advyy_h[i, j] == 0
+            else
+                @test Float64(advxx_h[i, j]) ≈ 0.3 atol=atol rtol=atol
+                @test Float64(advxy_h[i, j]) ≈ -0.04 atol=atol rtol=atol
+                @test Float64(advyy_h[i, j]) ≈ 0.2 atol=atol rtol=atol
+            end
+        end
+
         psixx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psixy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psiyy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
