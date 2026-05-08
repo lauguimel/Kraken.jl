@@ -481,6 +481,85 @@ end
     return volume * (f - omega * (f - feq) + guo_pref * Sq)
 end
 
+@inline function _conservative_tree_gpu_bgk_integrated_q_2d(
+        ::Val{Q}, Fq, volume, omega, rho, ux, uy, usq) where Q
+    f = Fq / volume
+    feq = feq_2d(Val(Q), rho, ux, uy, usq)
+    return volume * (f - omega * (f - feq))
+end
+
+@kernel function _collide_BGK_conservative_tree_active_level_F_2d_kernel!(
+        F, @Const(active_cell_ids), @Const(cell_level), @Const(cell_volume),
+        n_active::Int32, level::UInt8, omega)
+    active_index = @index(Global)
+    @inbounds if active_index <= Int(n_active)
+        cell_id = Int(active_cell_ids[active_index])
+        if cell_level[cell_id] == level
+            T = eltype(F)
+            volume = cell_volume[cell_id]
+            f1 = F[cell_id, 1]; f2 = F[cell_id, 2]; f3 = F[cell_id, 3]
+            f4 = F[cell_id, 4]; f5 = F[cell_id, 5]; f6 = F[cell_id, 6]
+            f7 = F[cell_id, 7]; f8 = F[cell_id, 8]; f9 = F[cell_id, 9]
+            mass_before = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+            mx = f2 - f4 + f6 - f7 - f8 + f9
+            my = f3 - f5 + f6 + f7 - f8 - f9
+            rho = mass_before / volume
+            ux = mx / mass_before
+            uy = my / mass_before
+            usq = ux * ux + uy * uy
+            womega = T(omega)
+
+            g1 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(1), f1, volume, womega, rho, ux, uy, usq)
+            g2 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(2), f2, volume, womega, rho, ux, uy, usq)
+            g3 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(3), f3, volume, womega, rho, ux, uy, usq)
+            g4 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(4), f4, volume, womega, rho, ux, uy, usq)
+            g5 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(5), f5, volume, womega, rho, ux, uy, usq)
+            g6 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(6), f6, volume, womega, rho, ux, uy, usq)
+            g7 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(7), f7, volume, womega, rho, ux, uy, usq)
+            g8 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(8), f8, volume, womega, rho, ux, uy, usq)
+            g9 = _conservative_tree_gpu_bgk_integrated_q_2d(
+                Val(9), f9, volume, womega, rho, ux, uy, usq)
+            mass_after = g1 + g2 + g3 + g4 + g5 + g6 + g7 + g8 + g9
+
+            F[cell_id, 1] = g1 + mass_before - mass_after
+            F[cell_id, 2] = g2
+            F[cell_id, 3] = g3
+            F[cell_id, 4] = g4
+            F[cell_id, 5] = g5
+            F[cell_id, 6] = g6
+            F[cell_id, 7] = g7
+            F[cell_id, 8] = g8
+            F[cell_id, 9] = g9
+        end
+    end
+end
+
+function collide_BGK_conservative_tree_gpu_active_level_F_2d!(
+        F::AbstractMatrix,
+        pack::ConservativeTreeGPUCellPack2D,
+        level::Integer,
+        omega;
+        sync::Bool=true)
+    0 <= Int(level) <= typemax(UInt8) ||
+        throw(ArgumentError("level must fit in UInt8"))
+    size(F, 1) == Int(pack.n_cells) && size(F, 2) == 9 ||
+        throw(ArgumentError("F must match the conservative-tree cell pack"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _collide_BGK_conservative_tree_active_level_F_2d_kernel!(backend)
+    kernel!(F, pack.active_cell_ids, pack.cell_level, pack.cell_volume,
+            pack.n_active, UInt8(level), omega; ndrange=Int(pack.n_active))
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
 @kernel function _collide_Guo_conservative_tree_active_level_F_2d_kernel!(
         F, @Const(active_cell_ids), @Const(cell_level), @Const(cell_volume),
         n_active::Int32, level::UInt8, omega, Fx, Fy)
@@ -569,6 +648,38 @@ function collide_Guo_conservative_tree_gpu_active_level_F_2d!(
             ndrange=Int(pack.n_active))
     sync && KernelAbstractions.synchronize(backend)
     return F
+end
+
+function advance_conservative_tree_gpu_direct_level_BGK_F_2d!(
+        Fout::AbstractMatrix,
+        Fin::AbstractMatrix,
+        pull_pack::ConservativeTreeGPUPullRoutePack2D,
+        cell_pack::ConservativeTreeGPUCellPack2D,
+        level::Integer,
+        omega;
+        sync::Bool=true)
+    collide_BGK_conservative_tree_gpu_active_level_F_2d!(
+        Fin, cell_pack, level, omega; sync=false)
+    stream_conservative_tree_gpu_pull_routes_F_2d!(
+        Fout, Fin, pull_pack; sync=sync)
+    return Fout
+end
+
+function advance_conservative_tree_gpu_direct_level_Guo_F_2d!(
+        Fout::AbstractMatrix,
+        Fin::AbstractMatrix,
+        pull_pack::ConservativeTreeGPUPullRoutePack2D,
+        cell_pack::ConservativeTreeGPUCellPack2D,
+        level::Integer,
+        omega,
+        Fx,
+        Fy;
+        sync::Bool=true)
+    collide_Guo_conservative_tree_gpu_active_level_F_2d!(
+        Fin, cell_pack, level, omega, Fx, Fy; sync=false)
+    stream_conservative_tree_gpu_pull_routes_F_2d!(
+        Fout, Fin, pull_pack; sync=sync)
+    return Fout
 end
 
 @inline function _gpu_pack_fine_local_2d(patch::ConservativeTreePatch2D,

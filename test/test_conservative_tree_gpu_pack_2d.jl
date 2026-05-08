@@ -145,6 +145,27 @@ using KernelAbstractions
         @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
     end
 
+    @testset "active-level BGK collision kernel matches CPU reference" begin
+        spec = create_conservative_tree_spec_2d(7, 5, [
+            ConservativeTreeRefineBlock2D("L1", 2:5, 2:4),
+        ])
+        Fref = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fgpu = similar(Fref)
+        initialize_conservative_tree_equilibrium_F_2d!(
+            Fref, spec; rho=1.0, ux=-0.006, uy=0.004)
+        copyto!(Fgpu, Fref)
+
+        level = 1
+        omega = 1.05
+        Kraken._collide_BGK_conservative_tree_active_level_F_2d!(
+            Fref, spec, level, omega)
+        cell_pack = pack_conservative_tree_gpu_cells_2d(spec; T=Float64)
+        collide_BGK_conservative_tree_gpu_active_level_F_2d!(
+            Fgpu, cell_pack, level, omega)
+
+        @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+    end
+
     @testset "direct-level pull packs match scheduler route primitive" begin
         blocks = ConservativeTreeRefineBlock2D[
             ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
@@ -175,6 +196,48 @@ using KernelAbstractions
 
             @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
         end
+    end
+
+    @testset "direct-level advance wrappers match CPU collision plus stream" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ])
+        table = create_conservative_tree_route_table_2d(
+            spec; periodic_x=true, sampling=:leaf_equivalent)
+        cell_pack = pack_conservative_tree_gpu_cells_2d(spec; T=Float64)
+        level = 1
+        pull = pack_conservative_tree_gpu_direct_level_pull_routes_2d(
+            spec, table, level; boundary=:periodic_x_wall_y, T=Float64)
+
+        Fin_ref = allocate_conservative_tree_F_2d(spec; T=Float64)
+        initialize_conservative_tree_equilibrium_F_2d!(
+            Fin_ref, spec; rho=1.0, ux=0.002, uy=-0.001)
+        Fin_gpu = copy(Fin_ref)
+        Fout_ref = similar(Fin_ref)
+        Fout_gpu = similar(Fin_ref)
+        fill!(Fout_ref, 0)
+        Kraken._collide_Guo_conservative_tree_active_level_F_2d!(
+            Fin_ref, spec, level, 1.12, 2e-6, -1e-6)
+        Kraken._stream_conservative_tree_direct_level_routes_F_2d!(
+            Fout_ref, Fin_ref, spec, table, level, :periodic_x_wall_y;
+            periodic_x=true)
+        advance_conservative_tree_gpu_direct_level_Guo_F_2d!(
+            Fout_gpu, Fin_gpu, pull, cell_pack, level, 1.12, 2e-6, -1e-6)
+        @test isapprox(Fout_gpu, Fout_ref; atol=1e-14, rtol=0)
+
+        initialize_conservative_tree_equilibrium_F_2d!(
+            Fin_ref, spec; rho=1.0, ux=-0.003, uy=0.001)
+        copyto!(Fin_gpu, Fin_ref)
+        fill!(Fout_ref, 0)
+        Kraken._collide_BGK_conservative_tree_active_level_F_2d!(
+            Fin_ref, spec, level, 1.08)
+        Kraken._stream_conservative_tree_direct_level_routes_F_2d!(
+            Fout_ref, Fin_ref, spec, table, level, :periodic_x_wall_y;
+            periodic_x=true)
+        advance_conservative_tree_gpu_direct_level_BGK_F_2d!(
+            Fout_gpu, Fin_gpu, pull, cell_pack, level, 1.08)
+        @test isapprox(Fout_gpu, Fout_ref; atol=1e-14, rtol=0)
     end
 
     @testset "level row kernels match scheduler row utilities" begin
@@ -279,6 +342,10 @@ using KernelAbstractions
                     Fd, cell_pack_d, 1, Float32(1.1), Float32(1e-6),
                     Float32(0))
                 @test all(isfinite, Array(Fd))
+
+                advance_conservative_tree_gpu_direct_level_BGK_F_2d!(
+                    Foutd, Fd, level_pull_d, cell_pack_d, 1, Float32(1.05))
+                @test all(isfinite, Array(Foutd))
             end
         end
     end

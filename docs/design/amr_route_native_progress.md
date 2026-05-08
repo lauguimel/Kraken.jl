@@ -39,8 +39,10 @@ Implemented:
   coarse/fine traffic remains ledger-owned;
 - device-transferable active-cell metric pack;
 - GPU level-row copy/add-clear/zero kernels for scheduler buffer movement;
-- KernelAbstractions active-level Guo collision kernel, verified against the
-  CPU AMR-D reference;
+- KernelAbstractions active-level BGK/Guo collision kernels, verified against
+  the CPU AMR-D reference;
+- direct-level BGK/Guo advance wrappers matching CPU collision plus direct
+  route streaming;
 - local Metal smoke guarded by `KRAKEN_TEST_METAL=1`.
 
 Validation:
