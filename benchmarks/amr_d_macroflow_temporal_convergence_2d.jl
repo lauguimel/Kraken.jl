@@ -43,6 +43,31 @@ function _temp_env_bool(name::AbstractString, default=false)
     return raw in ("1", "true", "yes", "on")
 end
 
+function _temp_load_metal_module()
+    return Base.require(Base.PkgId(
+        Base.UUID("dde4c033-4e86-420c-a63e-0dd931031962"), "Metal"))
+end
+
+function _temp_resolve_backend()
+    raw = lowercase(strip(get(ENV, "KRK_AMR_D_TEMP_BACKEND", "cpu")))
+    raw in ("", "cpu") && return nothing, "cpu"
+    if raw == "metal"
+        metal = _temp_load_metal_module()
+        Base.invokelatest(metal.functional) ||
+            error("KRK_AMR_D_TEMP_BACKEND=metal requested but Metal is not functional")
+        return Base.invokelatest(metal.MetalBackend), "metal"
+    end
+    throw(ArgumentError("KRK_AMR_D_TEMP_BACKEND must be cpu or metal"))
+end
+
+function _temp_float_type(backend_name::AbstractString)
+    raw = lowercase(strip(get(ENV, "KRK_AMR_D_TEMP_T", "")))
+    isempty(raw) && return backend_name == "metal" ? Float32 : Float64
+    raw in ("float32", "f32") && return Float32
+    raw in ("float64", "f64") && return Float64
+    throw(ArgumentError("KRK_AMR_D_TEMP_T must be float32 or float64"))
+end
+
 function _temp_case_paths()
     raw = strip(get(ENV, "KRK_AMR_D_TEMP_CASES", ""))
     names = isempty(raw) ? TEMP_DEFAULT_CASES : split(raw, ",")
@@ -63,7 +88,8 @@ function _temp_reference_method(case)
     return nothing
 end
 
-function _temp_run_case(setup, case; steps::Int, method::Symbol, T=Float64)
+function _temp_run_case(setup, case; steps::Int, method::Symbol, T=Float64,
+                        backend=nothing)
     avg = _ql_avg_window(setup, steps)
     force = (force_x=0.0, force_y=0.0)
     if method == :cartesian_classic
@@ -73,7 +99,7 @@ function _temp_run_case(setup, case; steps::Int, method::Symbol, T=Float64)
     elseif method == :amr_d && case.runtime_status in
             (:subcycled_nested_channel, :subcycled_nested_solid)
         result = run_conservative_tree_amr_d_case_from_krk_2d(
-            setup; steps_override=steps, T=T)
+            setup; steps_override=steps, backend=backend, T=T)
         force = (force_x=_ql_body_force(setup, :Fx, 0.0),
                  force_y=_ql_body_force(setup, :Fy, 0.0))
     else
@@ -274,6 +300,8 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         ux_atol::Float64=_temp_env_float("KRK_AMR_D_TEMP_UX_ATOL", 2e-6),
         rho_atol::Float64=_temp_env_float("KRK_AMR_D_TEMP_RHO_ATOL", 2e-4),
         skip_existing::Bool=_temp_env_bool("KRK_AMR_D_TEMP_SKIP_EXISTING"),
+        single_step::Bool=_temp_env_bool("KRK_AMR_D_TEMP_SINGLE_STEP"),
+        backend=nothing,
         T::Type{<:AbstractFloat}=Float64)
     mkpath(outdir)
     summary_rows = NamedTuple[]
@@ -298,9 +326,9 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         println("running ", case.name)
         flush(stdout)
 
-        start_steps = max(1, Int(getproperty(setup, :max_steps)))
-        final_cap = max(start_steps, max_steps)
-        steps = start_steps
+        krk_start_steps = max(1, Int(getproperty(setup, :max_steps)))
+        final_cap = max(krk_start_steps, max_steps)
+        steps = single_step ? final_cap : krk_start_steps
         previous = nothing
         convergence_rows = NamedTuple[]
         amr = nothing
@@ -308,7 +336,7 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
 
         while true
             amr = _temp_run_case(setup, case; steps=steps,
-                                 method=:amr_d, T=T)
+                                 method=:amr_d, backend=backend, T=T)
             ux_linf = NaN
             ux_l2 = NaN
             rho_linf = NaN
@@ -392,7 +420,13 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
 end
 
 function main()
-    rows = run_amr_d_temporal_convergence_2d()
+    backend, backend_name = _temp_resolve_backend()
+    T = _temp_float_type(backend_name)
+    println("AMR-D temporal runner backend=", backend_name, " T=", T)
+    rows = backend === nothing ?
+        run_amr_d_temporal_convergence_2d(; backend=backend, T=T) :
+        Base.invokelatest(run_amr_d_temporal_convergence_2d;
+                          backend=backend, T=T)
     outdir = get(ENV, "KRK_AMR_D_TEMP_OUTDIR", TEMP_DEFAULT_OUTDIR)
     println("wrote ", joinpath(outdir, "summary.csv"))
     for row in rows

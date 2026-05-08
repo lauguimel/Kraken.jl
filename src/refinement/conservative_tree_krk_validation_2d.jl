@@ -276,6 +276,7 @@ end
 function run_conservative_tree_amr_d_case_from_krk_2d(source;
         steps_override=nothing,
         mass_guard_rtol=nothing,
+        backend=nothing,
         T::Type{<:AbstractFloat}=Float64)
     setup = _amr_d_setup_from_source_2d(source)
     case = conservative_tree_amr_d_case_from_krk_2d(setup)
@@ -412,7 +413,7 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
             coarse_to_fine_prolongation=c2f_prolongation,
             coarse_to_fine_predictor_weight=c2f_predictor_weight,
             route_sampling=route_sampling,
-            mass_guard_rtol=resolved_mass_guard_rtol, T=T)
+            mass_guard_rtol=resolved_mass_guard_rtol, backend=backend, T=T)
     elseif case.flow == :couette
         U = _amr_d_boundary_value_2d(
             setup, :north, :velocity, :ux, _amr_d_var_2d(setup, :U, 1e-3))
@@ -423,7 +424,7 @@ function run_conservative_tree_amr_d_case_from_krk_2d(source;
             coarse_to_fine_predictor_weight=c2f_predictor_weight,
             route_sampling=route_sampling,
             mass_guard_rtol=resolved_mass_guard_rtol,
-            T=T)
+            backend=backend, T=T)
     end
 
     throw(ArgumentError("AMR-D .krk runtime helper currently dispatches " *

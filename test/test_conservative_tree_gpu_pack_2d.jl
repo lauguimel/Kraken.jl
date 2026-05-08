@@ -118,8 +118,21 @@ using KernelAbstractions
         stream_conservative_tree_gpu_pull_routes_F_2d!(Fgpu, Fin, pull)
 
         @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
-        @test_throws ArgumentError pack_conservative_tree_gpu_pull_routes_2d(
-            spec, table; boundary=:periodic_x_moving_wall_y)
+
+        fill!(Fgpu, 0)
+        stream_conservative_tree_routes_F_2d!(
+            Fref, Fin, spec, table; boundary=:periodic_x_moving_wall_y,
+            u_south=0.0, u_north=0.02, rho_wall=1.0)
+        pull = pack_conservative_tree_gpu_pull_routes_2d(
+            spec, table; boundary=:periodic_x_moving_wall_y, T=Float64)
+        stream_conservative_tree_gpu_pull_routes_F_2d!(Fgpu, Fin, pull)
+        for level in 0:spec.max_level
+            corr = pack_conservative_tree_gpu_boundary_corrections_2d(
+                spec, table, level; boundary=:periodic_x_moving_wall_y,
+                u_south=0.0, u_north=0.02, rho_wall=1.0, T=Float64)
+            apply_conservative_tree_gpu_boundary_corrections_2d!(Fgpu, corr)
+        end
+        @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
     end
 
     @testset "active-level Guo collision kernel matches CPU reference" begin
@@ -485,6 +498,33 @@ using KernelAbstractions
                 Fgpu, restrict_gpu, cell_pack, level)
         end
         @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+    end
+
+    @testset "GPU subcycle scheduler matches CPU channel reference" begin
+        cpu = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, steps=4, omega=1.0, Fx=1e-7, T=Float64)
+        gpu = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=2, steps=4, omega=1.0, Fx=1e-7,
+            backend=KernelAbstractions.CPU(), T=Float64)
+        @test isapprox(gpu.F, cpu.F; atol=1e-10, rtol=1e-10)
+
+        ysetup = load_kraken(
+            "benchmarks/krk/amr_d_convergence_2d/poiseuille_yband_nested4_debug.krk")
+        ycpu = run_conservative_tree_amr_d_case_from_krk_2d(
+            ysetup; steps_override=2, T=Float64)
+        ygpu = run_conservative_tree_amr_d_case_from_krk_2d(
+            ysetup; steps_override=2, backend=KernelAbstractions.CPU(),
+            T=Float64)
+        @test isapprox(ygpu.F, ycpu.F; atol=1e-9, rtol=1e-9)
+
+        csetup = load_kraken(
+            "benchmarks/krk/amr_d_convergence_2d/couette_yband_nested4_debug.krk")
+        ccpu = run_conservative_tree_amr_d_case_from_krk_2d(
+            csetup; steps_override=2, T=Float64)
+        cgpu = run_conservative_tree_amr_d_case_from_krk_2d(
+            csetup; steps_override=2, backend=KernelAbstractions.CPU(),
+            T=Float64)
+        @test isapprox(cgpu.F, ccpu.F; atol=1e-9, rtol=1e-9)
     end
 
     if get(ENV, "KRAKEN_TEST_METAL", "0") == "1"

@@ -31,6 +31,29 @@ To reuse completed case folders and only run missing cases:
 julia --project=. -e 'ENV["KRK_AMR_D_TEMP_OUTDIR"]="benchmarks/results/quicklook/amr_d_temporal_convergence_20260507"; ENV["KRK_AMR_D_TEMP_MAX_STEPS"]="2560"; ENV["KRK_AMR_D_TEMP_SKIP_EXISTING"]="1"; include("benchmarks/amr_d_macroflow_temporal_convergence_2d.jl"); main()'
 ```
 
+Local Metal debug runs use the same runner:
+
+```bash
+KRK_AMR_D_TEMP_BACKEND=metal \
+KRK_AMR_D_TEMP_T=float32 \
+KRK_AMR_D_TEMP_CASES=poiseuille_xband_nested4_debug.krk,poiseuille_yband_nested4_debug.krk,poiseuille_wall_ybands_nested4_debug.krk,couette_yband_nested4_debug.krk \
+KRK_AMR_D_TEMP_MAX_STEPS=12800 \
+KRK_AMR_D_TEMP_SINGLE_STEP=1 \
+KRK_AMR_D_TEMP_OUTDIR=benchmarks/results/quicklook/amr_d_metal_nested_channels_long_20260508 \
+julia --project=. benchmarks/amr_d_macroflow_temporal_convergence_2d.jl
+```
+
+The Metal path is currently wired for route-native nested channel AMR-D:
+Poiseuille with periodic-x wall-y boundaries and Couette with periodic-x
+moving-wall-y boundaries. It uses `Float32` by default, applies the same
+subcycle scheduler as the CPU reference, and performs a per-step global mass
+correction for local validation. Nested solid probes still run through the CPU
+AMR-D route path until the solid-interface GPU ledgers are validated.
+`KRK_AMR_D_TEMP_SINGLE_STEP=1` is recommended for local Metal runs because the
+default temporal sweep reruns each case from zero at every checkpoint
+(`max_steps`, `2*max_steps`, ...), which is useful for convergence traces but
+too expensive for interactive GPU smoke tests.
+
 ## 2026-05-07 Local Results
 
 Output root:

@@ -181,7 +181,9 @@ end
 function _active_mass_conservative_tree_F_2d(F::AbstractMatrix,
                                              spec::ConservativeTreeSpec2D)
     _check_conservative_tree_F_2d(F, spec)
-    mass = zero(eltype(F))
+    AccT = eltype(F) <: AbstractFloat ?
+        promote_type(eltype(F), Float64) : eltype(F)
+    mass = zero(AccT)
     @inbounds for cell_id in spec.active_cells, q in 1:9
         mass += F[cell_id, q]
     end
@@ -194,7 +196,9 @@ function _active_fluid_mass_conservative_tree_F_2d(
         is_solid::AbstractArray{Bool,2})
     _check_conservative_tree_F_2d(F, spec)
     _check_conservative_tree_leaf_solid_mask_2d(spec, is_solid)
-    mass = zero(eltype(F))
+    AccT = eltype(F) <: AbstractFloat ?
+        promote_type(eltype(F), Float64) : eltype(F)
+    mass = zero(AccT)
     @inbounds for cell_id in spec.active_cells
         cell = spec.cells[cell_id]
         _conservative_tree_cell_is_solid_2d(spec, cell, is_solid) && continue
@@ -516,6 +520,91 @@ function run_cartesian_channel_mass_reference_2d(;
             mass_drift=drift, relative_mass_drift=rel)
 end
 
+function _run_conservative_tree_channel_subcycled_backend_2d(;
+        flow::Symbol,
+        max_level::Integer,
+        steps::Integer,
+        omega=1.2,
+        Fx=0,
+        Fy=0,
+        U=0,
+        rho0=1,
+        alpha_c2f=1,
+        alpha_f2c=1,
+        coarse_to_fine_prolongation::Symbol=:flat,
+        coarse_to_fine_state::Symbol=:owned,
+        c2f_predictor_weight=0,
+        route_sampling::Symbol=:leaf_equivalent,
+        enforce_mass::Bool=true,
+        mass_guard_rtol=nothing,
+        spec::ConservativeTreeSpec2D,
+        backend,
+        T::Type{<:AbstractFloat}=Float32)
+    alpha_c2f == 1 && alpha_f2c == 1 ||
+        throw(ArgumentError("GPU AMR-D subcycling currently requires alpha_c2f = alpha_f2c = 1"))
+    coarse_to_fine_prolongation == :flat ||
+        throw(ArgumentError("GPU AMR-D subcycling currently supports coarse_to_fine_prolongation=:flat"))
+    coarse_to_fine_state == :owned ||
+        throw(ArgumentError("GPU AMR-D subcycling currently supports coarse_to_fine_state=:owned"))
+
+    nsteps = Int(steps)
+    sampling = _check_conservative_tree_route_sampling_2d(route_sampling)
+    interface_time_scaling = sampling == :level_native ?
+        :level_native : :leaf_equivalent
+    table = create_conservative_tree_route_table_2d(
+        spec; periodic_x=true, sampling=sampling)
+    F = allocate_conservative_tree_F_2d(spec; T=T)
+    initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=T(rho0))
+    mass_initial = _active_mass_conservative_tree_F_2d(F, spec)
+    Fd = _copy_conservative_tree_gpu_array_2d(backend, F)
+    Ftmpd = _allocate_conservative_tree_backend_array_2d(
+        backend, T, size(F)...)
+    fill!(Ftmpd, zero(T))
+    boundary = flow == :couette_subcycled ?
+        :periodic_x_moving_wall_y : :periodic_x_wall_y
+    collision = flow == :couette_subcycled ? :bgk : :guo
+    workspace = create_conservative_tree_gpu_subcycle_workspace_2d(
+        spec, table, backend; boundary=boundary,
+        interface_time_scaling=interface_time_scaling, periodic_x=true,
+        u_south=zero(T), u_north=T(U), rho_wall=T(rho0), T=T)
+
+    max_raw_relative_mass_drift = 0.0
+    mass_denom = max(abs(Float64(mass_initial)), eps(Float64))
+    correction_cell = first(spec.active_cells)
+    for _ in 1:nsteps
+        stream_conservative_tree_subcycled_buffered_routes_gpu_F_2d!(
+            Ftmpd, Fd, spec, table, workspace; collision=collision,
+            omega=T(omega), Fx=T(Fx), Fy=T(Fy),
+            coarse_to_fine_predictor_weight=T(c2f_predictor_weight),
+            sync=false)
+        if enforce_mass
+            KernelAbstractions.synchronize(backend)
+            mass_now = Float64(Base.invokelatest(sum, Ftmpd))
+            drift = mass_now - Float64(mass_initial)
+            rel = abs(drift) / mass_denom
+            max_raw_relative_mass_drift =
+                max(max_raw_relative_mass_drift, rel)
+            correct_conservative_tree_gpu_mass_2d!(
+                Ftmpd, correction_cell, T(drift); sync=true)
+        end
+        Fd, Ftmpd = Ftmpd, Fd
+    end
+    KernelAbstractions.synchronize(backend)
+
+    F_final = Array(Fd)
+    profile = flow == :couette_subcycled ?
+        conservative_tree_leaf_mean_ux_profile_2d(F_final, spec) :
+        conservative_tree_leaf_mean_ux_profile_2d(
+            F_final, spec; force_x=Fx, level_scaled_force=true)
+    analytic = flow == :couette_subcycled ?
+        couette_analytic_profile_2d(length(profile), U) :
+        poiseuille_analytic_profile_2d(length(profile), Fx, omega; rho=rho0)
+    result = _subcycled_macroflow_result_2d(
+        flow, nsteps, spec, table, F_final, profile, analytic,
+        mass_initial, max_raw_relative_mass_drift)
+    return result
+end
+
 """
     run_conservative_tree_poiseuille_subcycled_2d(; max_level, steps=100,
                                                   omega=1.2, Fx=1e-6)
@@ -539,6 +628,7 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
+        backend=nothing,
         T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
@@ -551,6 +641,18 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         sampling, coarse_to_fine_prolongation)
     c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
         coarse_to_fine_predictor_weight, sampling)
+    if backend !== nothing
+        return _run_conservative_tree_channel_subcycled_backend_2d(
+            flow=:poiseuille_subcycled, max_level=max_level, steps=nsteps,
+            omega=omega, Fx=Fx, Fy=Fy, U=0, rho0=rho0,
+            alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
+            coarse_to_fine_prolongation=coarse_to_fine_prolongation,
+            coarse_to_fine_state=coarse_to_fine_state,
+            c2f_predictor_weight=c2f_predictor_weight,
+            route_sampling=sampling, enforce_mass=enforce_mass,
+            mass_guard_rtol=mass_guard_rtol, spec=spec_run,
+            backend=backend, T=T)
+    end
     interface_time_scaling = sampling == :level_native ?
         :level_native : :leaf_equivalent
     table = create_conservative_tree_route_table_2d(
@@ -633,6 +735,7 @@ function run_conservative_tree_couette_subcycled_2d(;
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
+        backend=nothing,
         T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
@@ -645,6 +748,18 @@ function run_conservative_tree_couette_subcycled_2d(;
         sampling, coarse_to_fine_prolongation)
     c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
         coarse_to_fine_predictor_weight, sampling)
+    if backend !== nothing
+        return _run_conservative_tree_channel_subcycled_backend_2d(
+            flow=:couette_subcycled, max_level=max_level, steps=nsteps,
+            omega=omega, Fx=0, Fy=0, U=U, rho0=rho0,
+            alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
+            coarse_to_fine_prolongation=coarse_to_fine_prolongation,
+            coarse_to_fine_state=coarse_to_fine_state,
+            c2f_predictor_weight=c2f_predictor_weight,
+            route_sampling=sampling, enforce_mass=enforce_mass,
+            mass_guard_rtol=mass_guard_rtol, spec=spec_run,
+            backend=backend, T=T)
+    end
     interface_time_scaling = sampling == :level_native ?
         :level_native : :leaf_equivalent
     table = create_conservative_tree_route_table_2d(

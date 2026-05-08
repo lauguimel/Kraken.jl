@@ -72,16 +72,52 @@ struct ConservativeTreeGPUF2CDepositPack2D{T,AFirst,ACount,ASrc,AQ,AW,ADst,AQCac
     cache_qs::AQCache
 end
 
+struct ConservativeTreeGPUBoundaryCorrectionPack2D{T,ADst,AQ,AValue}
+    nentries::Int32
+    dst::ADst
+    q::AQ
+    value::AValue
+end
+
+function _allocate_conservative_tree_backend_array_2d(
+        backend, ::Type{T}, dims::Integer...) where T
+    dims_tuple = Tuple(Int(d) for d in dims)
+    try
+        return KernelAbstractions.allocate(backend, T, dims_tuple...)
+    catch err
+        try
+            return KernelAbstractions.allocate(
+                backend, T, dims_tuple; unified=false)
+        catch
+            if occursin("Metal", string(typeof(backend)))
+                metal = Base.require(Base.PkgId(
+                    Base.UUID("dde4c033-4e86-420c-a63e-0dd931031962"),
+                    "Metal"))
+                return Base.invokelatest(
+                    getproperty(metal, :MtlArray), zeros(T, dims_tuple))
+            end
+            rethrow(err)
+        end
+    end
+end
+
 function _copy_conservative_tree_gpu_array_2d(backend, host::AbstractArray{T}) where T
-    dev = KernelAbstractions.allocate(backend, T, size(host)...)
+    if occursin("Metal", string(typeof(backend)))
+        metal = Base.require(Base.PkgId(
+            Base.UUID("dde4c033-4e86-420c-a63e-0dd931031962"),
+            "Metal"))
+        return Base.invokelatest(getproperty(metal, :MtlArray), host)
+    end
+    dev = _allocate_conservative_tree_backend_array_2d(backend, T, size(host)...)
     copyto!(dev, host)
     return dev
 end
 
 @inline function _conservative_tree_gpu_stream_boundary_policy_2d(
         boundary::Symbol)
-    boundary in (:skip, :bounceback, :periodic_x_wall_y) ||
-        throw(ArgumentError("GPU pull route pack currently supports boundary=:skip, :bounceback, or :periodic_x_wall_y"))
+    boundary in (:skip, :bounceback, :periodic_x_wall_y,
+                 :periodic_x_moving_wall_y) ||
+        throw(ArgumentError("GPU pull route pack currently supports boundary=:skip, :bounceback, :periodic_x_wall_y, or :periodic_x_moving_wall_y"))
     return boundary
 end
 
@@ -478,6 +514,7 @@ function pack_conservative_tree_gpu_fine_to_coarse_deposit_2d(
         child_level::Integer;
         include_inactive_parents::Bool=true,
         interface_time_scaling::Symbol=:leaf_equivalent,
+        periodic_x::Bool=false,
         T::Type{<:Real}=Float32)
     bank.spec === spec || throw(ArgumentError("bank must belong to spec"))
     _check_conservative_tree_subcycle_route_table_2d(table)
@@ -487,14 +524,44 @@ function pack_conservative_tree_gpu_fine_to_coarse_deposit_2d(
     parent_level = child - 1
     r = Int(bank.schedule.ratio)
     r >= 1 || throw(ArgumentError("subcycle ratio must be positive"))
-    interface_time_scaling == :leaf_equivalent ||
-        throw(ArgumentError("GPU fine-to-coarse deposit currently supports interface_time_scaling=:leaf_equivalent"))
-    prepare_conservative_tree_subcycle_route_packet_cache_2d!(bank, table)
+    mode = _check_conservative_tree_interface_time_scaling_2d(
+        interface_time_scaling)
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+        bank, table; periodic_x=periodic_x)
 
     cache = bank.route_packet_caches[parent_level + 1]
-    nslots = length(cache.dst_ids)
-    buckets = [Tuple{Int32,UInt8,T}[] for _ in 1:(nslots * r)]
-    time_factor = inv(T(r))
+    slot_by_key = Dict{Tuple{Int,Int},Int}()
+    cache_dst_ids = Int[]
+    cache_qs = Int[]
+    @inbounds for slot in eachindex(cache.dst_ids)
+        dst_id = Int(cache.dst_ids[slot])
+        qidx = Int(cache.qs[slot])
+        slot_by_key[(dst_id, qidx)] = slot
+        push!(cache_dst_ids, dst_id)
+        push!(cache_qs, qidx)
+    end
+
+    function ensure_slot(dst_id::Int, qidx::Int)
+        key = (dst_id, qidx)
+        existing = get(slot_by_key, key, 0)
+        existing != 0 && return existing
+        slot = length(cache_dst_ids) + 1
+        slot_by_key[key] = slot
+        push!(cache_dst_ids, dst_id)
+        push!(cache_qs, qidx)
+        return slot
+    end
+
+    buckets = Dict{Tuple{Int,Int},Vector{Tuple{Int32,UInt8,T}}}()
+    time_factor = mode == :leaf_equivalent ? inv(T(r)) : one(T)
+
+    function push_entry!(slot::Int, substep::Int, src_id::Int,
+                         qidx::Int, weight)
+        key = (slot, substep)
+        entries = get!(buckets, key, Tuple{Int32,UInt8,T}[])
+        push!(entries, (Int32(src_id), UInt8(qidx), T(weight)))
+        return nothing
+    end
 
     @inbounds for route_pos in table.coalesce_route_ranges_by_child_level[child + 1]
         route_id = table.interface_routes[route_pos]
@@ -502,41 +569,54 @@ function pack_conservative_tree_gpu_fine_to_coarse_deposit_2d(
         (route.kind == COALESCE_FACE || route.kind == COALESCE_CORNER) ||
             continue
         route.dst == 0 && continue
-        slot = bank.route_packet_slot_by_route[route_id]
-        _push_conservative_tree_gpu_f2c_deposit_route_2d!(
-            buckets, route, slot, r, time_factor; T=T)
+        for substep in 1:r
+            dst_id = route.dst
+            if mode == :level_native && route.kind == COALESCE_CORNER
+                dst_id = _conservative_tree_level_native_corner_reflux_dst_2d(
+                    spec, route.src, route.q, substep, r, dst_id;
+                    periodic_x=periodic_x)
+            end
+            dst_id == 0 && continue
+            slot = ensure_slot(Int(dst_id), Int(route.q))
+            push_entry!(slot, substep, route.src, route.q,
+                        T(route.weight) * time_factor)
+        end
     end
 
     if include_inactive_parents
         inactive_ids = bank.inactive_refined_ids_by_level[child + 1]
-        inactive_slots = bank.inactive_route_packet_slots_by_level[child + 1]
         @inbounds for (local_idx, src_id) in enumerate(inactive_ids)
             spec.cells[src_id].active && continue
             for qidx in 1:9
-                slot = inactive_slots[local_idx, qidx]
-                slot == 0 && continue
                 dst_id, kind =
                     _conservative_tree_inactive_parent_coalesce_route_spec_2d(
-                    spec, src_id, qidx)
+                    spec, src_id, qidx; periodic_x=periodic_x)
                 dst_id == 0 && continue
-                route = ConservativeTreeRoute2D(
-                    src_id, dst_id, qidx, 1.0, kind)
-                _push_conservative_tree_gpu_f2c_deposit_route_2d!(
-                    buckets, route, slot, r, time_factor; T=T)
+                for substep in 1:r
+                    native_dst = dst_id
+                    if mode == :level_native && kind == COALESCE_CORNER
+                        native_dst = _conservative_tree_level_native_corner_reflux_dst_2d(
+                            spec, src_id, qidx, substep, r, dst_id;
+                            periodic_x=periodic_x)
+                    end
+                    native_dst == 0 && continue
+                    slot = ensure_slot(Int(native_dst), qidx)
+                    push_entry!(slot, substep, src_id, qidx, time_factor)
+                end
             end
         end
     end
 
+    nslots = length(cache_dst_ids)
     slot_first = zeros(Int32, r, nslots)
     slot_count = zeros(Int32, r, nslots)
-    n_entries = sum(length, buckets)
+    n_entries = sum(length, values(buckets))
     src = Vector{Int32}(undef, n_entries)
     q = Vector{UInt8}(undef, n_entries)
     weight = Vector{T}(undef, n_entries)
     cursor = 1
     @inbounds for slot in 1:nslots, substep in 1:r
-        entries = buckets[_conservative_tree_gpu_f2c_bucket_2d(
-            substep, slot, r)]
+        entries = get(buckets, (slot, substep), Tuple{Int32,UInt8,T}[])
         if !isempty(entries)
             slot_first[substep, slot] = Int32(cursor)
             slot_count[substep, slot] = Int32(length(entries))
@@ -549,8 +629,8 @@ function pack_conservative_tree_gpu_fine_to_coarse_deposit_2d(
         end
     end
 
-    cache_dst_ids = Int32.(cache.dst_ids)
-    cache_qs = UInt8.(cache.qs)
+    cache_dst_ids = Int32.(cache_dst_ids)
+    cache_qs = UInt8.(cache_qs)
     return ConservativeTreeGPUF2CDepositPack2D{T,typeof(slot_first),
         typeof(slot_count),typeof(src),typeof(q),typeof(weight),
         typeof(cache_dst_ids),typeof(cache_qs)}(
@@ -909,6 +989,49 @@ function deposit_conservative_tree_gpu_fine_to_coarse_cache_F_2d!(
     return cache_packets
 end
 
+@kernel function _deposit_conservative_tree_gpu_fine_to_coarse_cache_substep_F_2d_kernel!(
+        cache_packets, @Const(F), @Const(slot_first), @Const(slot_count),
+        @Const(src), @Const(qsrc), @Const(weight), substep::Int32,
+        ratio::Int32, nslots::Int32)
+    slot = @index(Global)
+    @inbounds if slot <= Int(nslots)
+        step = Int(substep)
+        first_entry = Int(slot_first[step, slot])
+        count = Int(slot_count[step, slot])
+        packet = zero(eltype(cache_packets))
+        for offset in 0:(count - 1)
+            entry = first_entry + offset
+            packet += weight[entry] * F[Int(src[entry]), Int(qsrc[entry])]
+        end
+        if packet != zero(packet)
+            cache_packets[(slot - 1) * Int(ratio) + step] += packet
+        end
+    end
+end
+
+function deposit_conservative_tree_gpu_fine_to_coarse_cache_substep_F_2d!(
+        cache_packets::AbstractVector,
+        F::AbstractMatrix,
+        pack::ConservativeTreeGPUF2CDepositPack2D,
+        substep::Integer;
+        sync::Bool=true)
+    step = Int(substep)
+    1 <= step <= Int(pack.ratio) ||
+        throw(ArgumentError("substep is outside the fine-to-coarse pack ratio"))
+    size(F, 2) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations"))
+    length(cache_packets) == Int(pack.nslots) * Int(pack.ratio) ||
+        throw(ArgumentError("cache_packets length must match pack"))
+    Int(pack.nslots) == 0 && return cache_packets
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _deposit_conservative_tree_gpu_fine_to_coarse_cache_substep_F_2d_kernel!(
+        backend)
+    kernel!(cache_packets, F, pack.slot_first, pack.slot_count, pack.src,
+            pack.q, pack.weight, Int32(step), pack.ratio, pack.nslots;
+            ndrange=Int(pack.nslots))
+    sync && KernelAbstractions.synchronize(backend)
+    return cache_packets
+end
+
 @kernel function _apply_conservative_tree_gpu_sync_up_cache_F_2d_kernel!(
         F, @Const(cache_packets), @Const(dst_ids), @Const(qs),
         ratio::Int32, nslots::Int32)
@@ -939,6 +1062,410 @@ function apply_conservative_tree_gpu_sync_up_cache_F_2d!(
             pack.nslots; ndrange=Int(pack.nslots))
     sync && KernelAbstractions.synchronize(backend)
     return F
+end
+
+function pack_conservative_tree_gpu_boundary_corrections_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D,
+        level::Integer;
+        boundary::Symbol=:periodic_x_wall_y,
+        u_south=0,
+        u_north=0,
+        rho_wall=1,
+        T::Type{<:Real}=Float32)
+    policy = _conservative_tree_gpu_stream_boundary_policy_2d(boundary)
+    corrections = Dict{Tuple{Int,Int},T}()
+    if policy == :periodic_x_moving_wall_y
+        l = Int(level)
+        @inbounds for route_pos in table.boundary_route_ranges_by_level[l + 1]
+            route_id = table.boundary_routes[route_pos]
+            route = table.routes[route_id]
+            cy = d2q9_cy(route.q)
+            cy != 0 ||
+                throw(ArgumentError("periodic-x moving-wall GPU correction received an x-boundary route; rebuild the route table with periodic_x=true"))
+            qdst = d2q9_opposite(route.q)
+            wall_u = cy < 0 ? u_south : u_north
+            volume = spec.cells[route.src].metrics.volume
+            value = T(route.weight) *
+                T(_moving_wall_delta(volume, rho_wall, wall_u, qdst))
+            key = (route.src, qdst)
+            corrections[key] = get(corrections, key, zero(T)) + value
+        end
+    end
+
+    dst = Vector{Int32}(undef, length(corrections))
+    q = Vector{UInt8}(undef, length(corrections))
+    value = Vector{T}(undef, length(corrections))
+    idx = 1
+    for ((dst_id, qidx), v) in corrections
+        dst[idx] = Int32(dst_id)
+        q[idx] = UInt8(qidx)
+        value[idx] = v
+        idx += 1
+    end
+    return ConservativeTreeGPUBoundaryCorrectionPack2D{T,typeof(dst),
+        typeof(q),typeof(value)}(Int32(length(dst)), dst, q, value)
+end
+
+function transfer_conservative_tree_gpu_boundary_correction_pack_2d(
+        pack::ConservativeTreeGPUBoundaryCorrectionPack2D{T},
+        backend) where T
+    dst = _copy_conservative_tree_gpu_array_2d(backend, pack.dst)
+    q = _copy_conservative_tree_gpu_array_2d(backend, pack.q)
+    value = _copy_conservative_tree_gpu_array_2d(backend, pack.value)
+    return ConservativeTreeGPUBoundaryCorrectionPack2D{T,typeof(dst),
+        typeof(q),typeof(value)}(pack.nentries, dst, q, value)
+end
+
+@kernel function _apply_conservative_tree_gpu_boundary_corrections_2d_kernel!(
+        F, @Const(dst), @Const(q), @Const(value), nentries::Int32)
+    entry = @index(Global)
+    @inbounds if entry <= Int(nentries)
+        F[Int(dst[entry]), Int(q[entry])] += value[entry]
+    end
+end
+
+function apply_conservative_tree_gpu_boundary_corrections_2d!(
+        F::AbstractMatrix,
+        pack::ConservativeTreeGPUBoundaryCorrectionPack2D;
+        sync::Bool=true)
+    Int(pack.nentries) == 0 && return F
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _apply_conservative_tree_gpu_boundary_corrections_2d_kernel!(
+        backend)
+    kernel!(F, pack.dst, pack.q, pack.value, pack.nentries;
+            ndrange=Int(pack.nentries))
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
+@kernel function _blend_conservative_tree_gpu_level_rows_2d_kernel!(
+        Fdst, @Const(Fa), @Const(Fb), @Const(cell_level), n_cells::Int32,
+        level::UInt8, weight)
+    linear = @index(Global)
+    total = Int(n_cells) * 9
+    @inbounds if linear <= total
+        cell = (linear - 1) ÷ 9 + 1
+        if cell_level[cell] == level
+            q = (linear - 1) % 9 + 1
+            w = eltype(Fdst)(weight)
+            Fdst[cell, q] = (one(w) - w) * Fa[cell, q] + w * Fb[cell, q]
+        end
+    end
+end
+
+function blend_conservative_tree_gpu_level_rows_2d!(
+        Fdst::AbstractMatrix,
+        Fa::AbstractMatrix,
+        Fb::AbstractMatrix,
+        pack::ConservativeTreeGPUCellPack2D,
+        level::Integer,
+        weight;
+        sync::Bool=true)
+    backend = KernelAbstractions.get_backend(Fdst)
+    kernel! = _blend_conservative_tree_gpu_level_rows_2d_kernel!(backend)
+    kernel!(Fdst, Fa, Fb, pack.cell_level, pack.n_cells, UInt8(level),
+            weight; ndrange=Int(pack.n_cells) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return Fdst
+end
+
+@kernel function _correct_conservative_tree_gpu_mass_2d_kernel!(
+        F, cell_id::Int32, drift)
+    idx = @index(Global)
+    @inbounds if idx == 1
+        F[Int(cell_id), 1] -= eltype(F)(drift)
+    end
+end
+
+function correct_conservative_tree_gpu_mass_2d!(
+        F::AbstractMatrix,
+        cell_id::Integer,
+        drift;
+        sync::Bool=true)
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _correct_conservative_tree_gpu_mass_2d_kernel!(backend)
+    kernel!(F, Int32(cell_id), drift; ndrange=1)
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
+function _allocate_conservative_tree_gpu_matrix_2d(backend,
+                                                   ::Type{T},
+                                                   n_cells::Integer) where T
+    F = _allocate_conservative_tree_backend_array_2d(
+        backend, T, Int(n_cells), 9)
+    fill!(F, zero(T))
+    return F
+end
+
+function _allocate_conservative_tree_gpu_array_2d(backend,
+                                                  ::Type{T},
+                                                  dims::Integer...) where T
+    A = _allocate_conservative_tree_backend_array_2d(
+        backend, T, Int.(dims)...)
+    fill!(A, zero(T))
+    return A
+end
+
+function create_conservative_tree_gpu_subcycle_workspace_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D,
+        backend;
+        boundary::Symbol=:periodic_x_wall_y,
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        periodic_x::Bool=false,
+        u_south=0,
+        u_north=0,
+        rho_wall=1,
+        T::Type{<:Real}=Float32)
+    boundary_policy = _conservative_tree_gpu_stream_boundary_policy_2d(
+        boundary)
+    interface_mode = _check_conservative_tree_interface_time_scaling_2d(
+        interface_time_scaling)
+    schedule = create_conservative_tree_subcycle_schedule_2d(spec.max_level)
+    route_bank = create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+        spec; schedule=schedule, T=T)
+    prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+        route_bank, table; periodic_x=periodic_x)
+
+    n_cells = length(spec.cells)
+    cell_pack = transfer_conservative_tree_gpu_cell_pack_2d(
+        pack_conservative_tree_gpu_cells_2d(spec; T=T), backend)
+    direct_pulls = [
+        transfer_conservative_tree_gpu_pull_pack_2d(
+            pack_conservative_tree_gpu_direct_level_pull_routes_2d(
+                spec, table, level; boundary=boundary_policy, T=T),
+            backend)
+        for level in 0:spec.max_level
+    ]
+    boundary_corrections = [
+        transfer_conservative_tree_gpu_boundary_correction_pack_2d(
+            pack_conservative_tree_gpu_boundary_corrections_2d(
+                spec, table, level; boundary=boundary_policy,
+                u_south=u_south, u_north=u_north, rho_wall=rho_wall, T=T),
+            backend)
+        for level in 0:spec.max_level
+    ]
+
+    parent_packs = ConservativeTreeGPUParentChildPack2D[]
+    c2f_packs = ConservativeTreeGPUC2FDepositPack2D[]
+    f2c_packs = ConservativeTreeGPUF2CDepositPack2D[]
+    c2f_ledgers = Any[]
+    f2c_caches = Any[]
+    for parent_level in 0:(spec.max_level - 1)
+        parent_host = pack_conservative_tree_gpu_parent_children_2d(
+            spec, parent_level)
+        push!(parent_packs,
+              transfer_conservative_tree_gpu_parent_child_pack_2d(
+                  parent_host, backend))
+        c2f_host = pack_conservative_tree_gpu_coarse_to_fine_deposit_2d(
+            spec, table, parent_host, parent_level; ratio=schedule.ratio,
+            interface_time_scaling=interface_mode, T=T)
+        push!(c2f_packs,
+              transfer_conservative_tree_gpu_c2f_deposit_pack_2d(
+                  c2f_host, backend))
+        f2c_host = pack_conservative_tree_gpu_fine_to_coarse_deposit_2d(
+            spec, table, route_bank, parent_level + 1;
+            interface_time_scaling=interface_mode, periodic_x=periodic_x,
+            T=T)
+        push!(f2c_packs,
+              transfer_conservative_tree_gpu_f2c_deposit_pack_2d(
+                  f2c_host, backend))
+        push!(c2f_ledgers,
+              _allocate_conservative_tree_gpu_array_2d(
+                  backend, T, 2, 2, 9, schedule.ratio,
+                  Int(parent_host.nparents)))
+        push!(f2c_caches,
+              _allocate_conservative_tree_gpu_array_2d(
+                  backend, T, Int(f2c_host.nslots) * schedule.ratio))
+    end
+
+    restricts = [
+        _allocate_conservative_tree_gpu_matrix_2d(backend, T, n_cells)
+        for _ in 0:spec.max_level
+    ]
+    return (;
+        backend, schedule, boundary=boundary_policy,
+        interface_time_scaling=interface_mode,
+        cell_pack, direct_pulls, boundary_corrections, parent_packs,
+        c2f_packs, f2c_packs, c2f_ledgers, f2c_caches,
+        owned=_allocate_conservative_tree_gpu_matrix_2d(backend, T, n_cells),
+        reflux=_allocate_conservative_tree_gpu_matrix_2d(backend, T, n_cells),
+        restricts,
+        Fsource=_allocate_conservative_tree_gpu_matrix_2d(backend, T, n_cells),
+        Fscratch=_allocate_conservative_tree_gpu_matrix_2d(backend, T, n_cells))
+end
+
+function _conservative_tree_gpu_restrict_all_levels_2d!(workspace)
+    for parent_level in (workspace.schedule.max_level - 1):-1:0
+        fill!(workspace.restricts[parent_level + 1],
+              zero(eltype(workspace.restricts[parent_level + 1])))
+        restrict_conservative_tree_gpu_level_2d!(
+            workspace.restricts[parent_level + 1], workspace.owned,
+            workspace.restricts[parent_level + 2],
+            workspace.parent_packs[parent_level + 1], workspace.cell_pack;
+            sync=false)
+    end
+    return workspace
+end
+
+function _conservative_tree_gpu_level_source_2d!(
+        Fdst,
+        workspace,
+        level::Integer)
+    fill!(Fdst, zero(eltype(Fdst)))
+    copy_conservative_tree_gpu_level_rows_2d!(
+        Fdst, workspace.owned, workspace.cell_pack, level; sync=false)
+    apply_conservative_tree_gpu_restriction_to_inactive_level_F_2d!(
+        Fdst, workspace.restricts[Int(level) + 1], workspace.cell_pack,
+        level; sync=false)
+    return Fdst
+end
+
+function _conservative_tree_gpu_collide_level_2d!(
+        F,
+        workspace,
+        spec::ConservativeTreeSpec2D,
+        level::Integer;
+        collision::Symbol,
+        omega,
+        Fx=0,
+        Fy=0)
+    l = Int(level)
+    if collision == :guo
+        return collide_Guo_conservative_tree_gpu_active_level_F_2d!(
+            F, workspace.cell_pack, l,
+            conservative_tree_leaf_equivalent_omega_2d(omega, spec, l),
+            conservative_tree_leaf_equivalent_force_2d(Fx, spec, l),
+            conservative_tree_leaf_equivalent_force_2d(Fy, spec, l);
+            sync=false)
+    elseif collision == :bgk
+        return collide_BGK_conservative_tree_gpu_active_level_F_2d!(
+            F, workspace.cell_pack, l,
+            conservative_tree_leaf_equivalent_omega_2d(omega, spec, l);
+            sync=false)
+    end
+    throw(ArgumentError("GPU subcycle collision must be :guo or :bgk"))
+end
+
+function stream_conservative_tree_subcycled_buffered_routes_gpu_F_2d!(
+        Fout::AbstractMatrix,
+        Fin::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D,
+        workspace;
+        collision::Symbol=:guo,
+        omega=1,
+        Fx=0,
+        Fy=0,
+        coarse_to_fine_predictor_weight=0,
+        sync::Bool=true)
+    size(Fin, 1) == length(spec.cells) && size(Fout, 1) == length(spec.cells) ||
+        throw(ArgumentError("F matrices must match the conservative-tree spec"))
+    size(Fin, 2) == 9 && size(Fout, 2) == 9 ||
+        throw(ArgumentError("F matrices must have 9 D2Q9 populations"))
+    schedule = workspace.schedule
+    fill!(workspace.owned, zero(eltype(workspace.owned)))
+    fill!(workspace.reflux, zero(eltype(workspace.reflux)))
+    for rbuf in workspace.restricts
+        fill!(rbuf, zero(eltype(rbuf)))
+    end
+    for level in 0:spec.max_level
+        copy_conservative_tree_gpu_level_rows_2d!(
+            workspace.owned, Fin, workspace.cell_pack, level;
+            active_only=true, sync=false)
+    end
+    _conservative_tree_gpu_restrict_all_levels_2d!(workspace)
+
+    for event in schedule.events
+        if event.phase == :sync_down
+            parent_level = event.src_level
+            fill!(workspace.c2f_ledgers[parent_level + 1],
+                  zero(eltype(workspace.c2f_ledgers[parent_level + 1])))
+            fill!(workspace.f2c_caches[parent_level + 1],
+                  zero(eltype(workspace.f2c_caches[parent_level + 1])))
+
+            predictor_weight = eltype(workspace.Fsource)(
+                coarse_to_fine_predictor_weight)
+            _conservative_tree_gpu_level_source_2d!(
+                workspace.Fsource, workspace, parent_level)
+            if predictor_weight > zero(predictor_weight)
+                _conservative_tree_gpu_level_source_2d!(
+                    workspace.Fscratch, workspace, parent_level)
+                _conservative_tree_gpu_collide_level_2d!(
+                    workspace.Fscratch, workspace, spec, parent_level;
+                    collision=collision, omega=omega, Fx=Fx, Fy=Fy)
+                blend_conservative_tree_gpu_level_rows_2d!(
+                    workspace.Fsource, workspace.Fsource,
+                    workspace.Fscratch, workspace.cell_pack, parent_level,
+                    predictor_weight; sync=false)
+            end
+            deposit_conservative_tree_gpu_coarse_to_fine_routes_F_2d!(
+                workspace.c2f_ledgers[parent_level + 1],
+                workspace.Fsource,
+                workspace.c2f_packs[parent_level + 1]; sync=false)
+        elseif event.phase == :advance
+            level = event.src_level
+            _conservative_tree_gpu_level_source_2d!(
+                workspace.Fsource, workspace, level)
+            _conservative_tree_gpu_collide_level_2d!(
+                workspace.Fsource, workspace, spec, level;
+                collision=collision, omega=omega, Fx=Fx, Fy=Fy)
+
+            if level > 0
+                substep = conservative_tree_subcycle_local_substep_2d(
+                    schedule, level - 1, event.tick)
+                deposit_conservative_tree_gpu_fine_to_coarse_cache_substep_F_2d!(
+                    workspace.f2c_caches[level], workspace.Fsource,
+                    workspace.f2c_packs[level], substep; sync=false)
+            end
+
+            fill!(workspace.Fscratch, zero(eltype(workspace.Fscratch)))
+            stream_conservative_tree_gpu_pull_routes_F_2d!(
+                workspace.Fscratch, workspace.Fsource,
+                workspace.direct_pulls[level + 1]; sync=false)
+            apply_conservative_tree_gpu_boundary_corrections_2d!(
+                workspace.Fscratch,
+                workspace.boundary_corrections[level + 1]; sync=false)
+            if level > 0
+                substep = conservative_tree_subcycle_local_substep_2d(
+                    schedule, level - 1, event.tick)
+                apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d!(
+                    workspace.Fscratch, workspace.c2f_ledgers[level],
+                    workspace.parent_packs[level], substep; sync=false)
+            end
+            add_and_clear_conservative_tree_gpu_level_rows_2d!(
+                workspace.Fscratch, workspace.reflux, workspace.cell_pack,
+                level; active_only=true, sync=false)
+            copy_conservative_tree_gpu_level_rows_2d!(
+                workspace.owned, workspace.Fscratch, workspace.cell_pack,
+                level; active_only=true, sync=false)
+        elseif event.phase == :sync_up
+            parent_level = event.dst_level
+            fill!(workspace.restricts[parent_level + 1],
+                  zero(eltype(workspace.restricts[parent_level + 1])))
+            restrict_conservative_tree_gpu_level_2d!(
+                workspace.restricts[parent_level + 1], workspace.owned,
+                workspace.restricts[parent_level + 2],
+                workspace.parent_packs[parent_level + 1],
+                workspace.cell_pack; sync=false)
+            apply_conservative_tree_gpu_sync_up_cache_F_2d!(
+                workspace.reflux, workspace.f2c_caches[parent_level + 1],
+                workspace.f2c_packs[parent_level + 1]; sync=false)
+        else
+            throw(ArgumentError("unknown GPU subcycle event phase $(event.phase)"))
+        end
+    end
+
+    fill!(Fout, zero(eltype(Fout)))
+    for level in 0:spec.max_level
+        copy_conservative_tree_gpu_level_rows_2d!(
+            Fout, workspace.owned, workspace.cell_pack, level;
+            active_only=true, sync=false)
+    end
+    sync && KernelAbstractions.synchronize(workspace.backend)
+    return Fout
 end
 
 @kernel function _stream_conservative_tree_pull_routes_F_2d_kernel!(
