@@ -53,8 +53,9 @@ the same subcycle scheduler as the CPU reference, and performs a per-step global
 correction for local validation. The mass reduction and correction stay on the
 device during the time loop; only the final scalar diagnostic is copied back.
 The runner has both an atomic scalar reduction and a chunked reduction. The
-chunked path is intended for production GPU backends, while local Metal keeps
-the simpler atomic path when it is faster for small debug cases.
+runner uses the chunked path for macro-flow validation because the simpler
+atomic Float32 reduction is faster on some local Metal debug cases but can
+leave a visible mass residual.
 Nested solid probes still run through the CPU AMR-D route path until the
 solid-interface GPU ledgers are validated.
 `KRK_AMR_D_TEMP_SINGLE_STEP=1` is recommended for local Metal runs because the

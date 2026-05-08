@@ -573,16 +573,10 @@ function _run_conservative_tree_channel_subcycled_backend_2d(;
     correction_cell = first(spec.active_cells)
     mass_sumd = _allocate_conservative_tree_gpu_array_2d(backend, T, 1)
     mass_chunk_size = 256
-    use_chunked_mass_reduction =
-        !occursin("Metal", string(typeof(backend)))
-    mass_partiald = if use_chunked_mass_reduction
-        mass_partial_count = _conservative_tree_gpu_mass_chunk_count_2d(
-            length(F), mass_chunk_size)
-        _allocate_conservative_tree_gpu_array_2d(
-            backend, T, mass_partial_count)
-    else
-        nothing
-    end
+    mass_partial_count = _conservative_tree_gpu_mass_chunk_count_2d(
+        length(F), mass_chunk_size)
+    mass_partiald = _allocate_conservative_tree_gpu_array_2d(
+        backend, T, mass_partial_count)
     max_raw_relative_mass_driftd =
         _allocate_conservative_tree_gpu_array_2d(backend, T, 1)
     for _ in 1:nsteps
