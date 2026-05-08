@@ -76,6 +76,30 @@ end
 
 _periodic(i, n) = mod1(i, n)
 
+function _fluid_x_neighbor(is_solid, i, j)
+    Nx, _ = size(is_solid)
+    return (i > 1 && !is_solid[i - 1, j]) || (i < Nx && !is_solid[i + 1, j])
+end
+
+function _fluid_y_neighbor(is_solid, i, j)
+    _, Ny = size(is_solid)
+    return (j > 1 && !is_solid[i, j - 1]) || (j < Ny && !is_solid[i, j + 1])
+end
+
+function _fluid_x_second(is_solid, i, j)
+    Nx, _ = size(is_solid)
+    return (i > 1 && !is_solid[i - 1, j] && i < Nx && !is_solid[i + 1, j]) ||
+           (i + 2 <= Nx && !is_solid[i + 1, j] && !is_solid[i + 2, j]) ||
+           (i - 2 >= 1 && !is_solid[i - 1, j] && !is_solid[i - 2, j])
+end
+
+function _fluid_y_second(is_solid, i, j)
+    _, Ny = size(is_solid)
+    return (j > 1 && !is_solid[i, j - 1] && j < Ny && !is_solid[i, j + 1]) ||
+           (j + 2 <= Ny && !is_solid[i, j + 1] && !is_solid[i, j + 2]) ||
+           (j - 2 >= 1 && !is_solid[i, j - 1] && !is_solid[i, j - 2])
+end
+
 function _periodic_upwind_scalar_step(φ, u, v, dt)
     Nx, Ny = size(φ)
     out = similar(φ)
@@ -1070,6 +1094,100 @@ end
             @test all(isfinite, result.psiyy)
             @test all(isfinite, result.fx_total)
             @test all(isfinite, result.fy_total)
+        end
+    end
+
+    @testset "M8-pre BFS mask solid-aware operators are analytical" begin
+        geom = Kraken.backward_facing_step_geometry_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=3, FT=Float64,
+        )
+        is_solid = geom.is_solid
+        Nx, Ny = geom.Nx, geom.Ny
+        dx, dy = 0.4, 0.25
+        ax, ay = 0.03, -0.02
+        bx, by = -0.04, 0.05
+        ux = [0.12 + ax * (i - 0.5) * dx + ay * (j - 0.5) * dy
+              for i in 1:Nx, j in 1:Ny]
+        uy = [-0.08 + bx * (i - 0.5) * dx + by * (j - 0.5) * dy
+              for i in 1:Nx, j in 1:Ny]
+        dudx = similar(ux)
+        dudy = similar(ux)
+        dvdx = similar(ux)
+        dvdy = similar(ux)
+
+        Kraken.logfv_velocity_gradient_solid_aware_2d!(dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test dudx[i, j] == 0.0
+                @test dudy[i, j] == 0.0
+                @test dvdx[i, j] == 0.0
+                @test dvdy[i, j] == 0.0
+            else
+                @test dudx[i, j] ≈ (_fluid_x_neighbor(is_solid, i, j) ? ax : 0.0) atol=2e-14 rtol=2e-14
+                @test dvdx[i, j] ≈ (_fluid_x_neighbor(is_solid, i, j) ? bx : 0.0) atol=2e-14 rtol=2e-14
+                @test dudy[i, j] ≈ (_fluid_y_neighbor(is_solid, i, j) ? ay : 0.0) atol=2e-14 rtol=2e-14
+                @test dvdy[i, j] ≈ (_fluid_y_neighbor(is_solid, i, j) ? by : 0.0) atol=2e-14 rtol=2e-14
+            end
+        end
+
+        ux_face = zeros(Float64, Nx + 1, Ny)
+        uy_face = zeros(Float64, Nx, Ny + 1)
+        psixx = fill(0.25, Nx, Ny)
+        psixy = fill(-0.03, Nx, Ny)
+        psiyy = fill(0.11, Nx, Ny)
+        advxx = similar(psixx)
+        advxy = similar(psixy)
+        advyy = similar(psiyy)
+        Kraken.logfv_cell_velocity_to_faces_solid_aware_2d!(ux_face, uy_face, ux, uy, is_solid)
+        Kraken.logfv_advect_upwind_solid_aware_2d!(
+            advxx, advxy, advyy, psixx, psixy, psiyy, ux_face, uy_face, is_solid, 0.2,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test advxx[i, j] == 0.0
+                @test advxy[i, j] == 0.0
+                @test advyy[i, j] == 0.0
+            else
+                @test advxx[i, j] ≈ 0.25 atol=2e-14 rtol=2e-14
+                @test advxy[i, j] ≈ -0.03 atol=2e-14 rtol=2e-14
+                @test advyy[i, j] ≈ 0.11 atol=2e-14 rtol=2e-14
+            end
+        end
+
+        qxx, qxy = 0.04, -0.01
+        qyx, qyy = -0.06, 0.03
+        ux_quad = [0.1 + qxx * ((i - 0.5) * dx)^2 + qxy * ((j - 0.5) * dy)^2
+                   for i in 1:Nx, j in 1:Ny]
+        uy_quad = [-0.2 + qyx * ((i - 0.5) * dx)^2 + qyy * ((j - 0.5) * dy)^2
+                   for i in 1:Nx, j in 1:Ny]
+        fx_poly = [0.02 + 0.01 * (i - 0.5) * dx for i in 1:Nx, j in 1:Ny]
+        fy_poly = [-0.03 + 0.02 * (j - 0.5) * dy for i in 1:Nx, j in 1:Ny]
+        fx_total = similar(fx_poly)
+        fy_total = similar(fy_poly)
+        zeta = 0.75
+        nu_p = 0.09
+
+        Kraken.logfv_bsd_correct_force_solid_aware_2d!(
+            fx_total, fy_total, fx_poly, fy_poly, ux_quad, uy_quad, is_solid, zeta, nu_p, dx, dy,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test fx_total[i, j] == 0.0
+                @test fy_total[i, j] == 0.0
+            else
+                lap_ux = (_fluid_x_second(is_solid, i, j) ? 2 * qxx : 0.0) +
+                         (_fluid_y_second(is_solid, i, j) ? 2 * qxy : 0.0)
+                lap_uy = (_fluid_x_second(is_solid, i, j) ? 2 * qyx : 0.0) +
+                         (_fluid_y_second(is_solid, i, j) ? 2 * qyy : 0.0)
+                @test fx_total[i, j] ≈ fx_poly[i, j] - zeta * nu_p * lap_ux atol=5e-14 rtol=5e-14
+                @test fy_total[i, j] ≈ fy_poly[i, j] - zeta * nu_p * lap_uy atol=5e-14 rtol=5e-14
+            end
         end
     end
 end

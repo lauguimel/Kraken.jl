@@ -31,6 +31,30 @@ function _copy_to_backend(backend, A::AbstractArray{T}) where {T}
     return B
 end
 
+function _gpu_fluid_x_neighbor(is_solid, i, j)
+    Nx, _ = size(is_solid)
+    return (i > 1 && !is_solid[i - 1, j]) || (i < Nx && !is_solid[i + 1, j])
+end
+
+function _gpu_fluid_y_neighbor(is_solid, i, j)
+    _, Ny = size(is_solid)
+    return (j > 1 && !is_solid[i, j - 1]) || (j < Ny && !is_solid[i, j + 1])
+end
+
+function _gpu_fluid_x_second(is_solid, i, j)
+    Nx, _ = size(is_solid)
+    return (i > 1 && !is_solid[i - 1, j] && i < Nx && !is_solid[i + 1, j]) ||
+           (i + 2 <= Nx && !is_solid[i + 1, j] && !is_solid[i + 2, j]) ||
+           (i - 2 >= 1 && !is_solid[i - 1, j] && !is_solid[i - 2, j])
+end
+
+function _gpu_fluid_y_second(is_solid, i, j)
+    _, Ny = size(is_solid)
+    return (j > 1 && !is_solid[i, j - 1] && j < Ny && !is_solid[i, j + 1]) ||
+           (j + 2 <= Ny && !is_solid[i, j + 1] && !is_solid[i, j + 2]) ||
+           (j - 2 >= 1 && !is_solid[i, j - 1] && !is_solid[i, j - 2])
+end
+
 @testset "Log-FV GPU smoke" begin
     backend_name, backend, FT = _logfv_gpu_backend()
     if backend === nothing
@@ -175,6 +199,113 @@ end
                 @test Float64(advxx_h[i, j]) ≈ 0.3 atol=atol rtol=atol
                 @test Float64(advxy_h[i, j]) ≈ -0.04 atol=atol rtol=atol
                 @test Float64(advyy_h[i, j]) ≈ 0.2 atol=atol rtol=atol
+            end
+        end
+
+        bfs = Kraken.backward_facing_step_geometry_2d(;
+            H_in=3, expansion_ratio=2, L_up=2, L_down=2, FT=FT,
+        )
+        bNx, bNy = bfs.Nx, bfs.Ny
+        bdx, bdy = FT(0.4), FT(0.25)
+        bax, bay = FT(0.03), FT(-0.02)
+        bbx, bby = FT(-0.04), FT(0.05)
+        bfs_solid_h = bfs.is_solid
+        bux_h = [FT(0.12) + bax * (FT(i) - FT(0.5)) * bdx + bay * (FT(j) - FT(0.5)) * bdy
+                 for i in 1:bNx, j in 1:bNy]
+        buy_h = [FT(-0.08) + bbx * (FT(i) - FT(0.5)) * bdx + bby * (FT(j) - FT(0.5)) * bdy
+                 for i in 1:bNx, j in 1:bNy]
+        bfs_solid = _copy_to_backend(backend, bfs_solid_h)
+        bux = _copy_to_backend(backend, bux_h)
+        buy = _copy_to_backend(backend, buy_h)
+        bdudx = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bdudy = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bdvdx = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bdvdy = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        Kraken.logfv_velocity_gradient_solid_aware_2d!(
+            bdudx, bdudy, bdvdx, bdvdy, bux, buy, bfs_solid, bdx, bdy,
+        )
+        bdudx_h = Array(bdudx)
+        bdudy_h = Array(bdudy)
+        bdvdx_h = Array(bdvdx)
+        bdvdy_h = Array(bdvdy)
+        for j in 1:bNy, i in 1:bNx
+            if bfs_solid_h[i, j]
+                @test bdudx_h[i, j] == 0
+                @test bdudy_h[i, j] == 0
+                @test bdvdx_h[i, j] == 0
+                @test bdvdy_h[i, j] == 0
+            else
+                @test Float64(bdudx_h[i, j]) ≈ Float64(_gpu_fluid_x_neighbor(bfs_solid_h, i, j) ? bax : FT(0)) atol=atol rtol=atol
+                @test Float64(bdvdx_h[i, j]) ≈ Float64(_gpu_fluid_x_neighbor(bfs_solid_h, i, j) ? bbx : FT(0)) atol=atol rtol=atol
+                @test Float64(bdudy_h[i, j]) ≈ Float64(_gpu_fluid_y_neighbor(bfs_solid_h, i, j) ? bay : FT(0)) atol=atol rtol=atol
+                @test Float64(bdvdy_h[i, j]) ≈ Float64(_gpu_fluid_y_neighbor(bfs_solid_h, i, j) ? bby : FT(0)) atol=atol rtol=atol
+            end
+        end
+
+        bux_face = KernelAbstractions.zeros(backend, FT, bNx + 1, bNy)
+        buy_face = KernelAbstractions.zeros(backend, FT, bNx, bNy + 1)
+        Kraken.logfv_cell_velocity_to_faces_solid_aware_2d!(bux_face, buy_face, bux, buy, bfs_solid)
+        bpsixx_const = _copy_to_backend(backend, fill(FT(0.25), bNx, bNy))
+        bpsixy_const = _copy_to_backend(backend, fill(FT(-0.03), bNx, bNy))
+        bpsiyy_const = _copy_to_backend(backend, fill(FT(0.11), bNx, bNy))
+        badvxx = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        badvxy = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        badvyy = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        Kraken.logfv_advect_upwind_solid_aware_2d!(
+            badvxx, badvxy, badvyy,
+            bpsixx_const, bpsixy_const, bpsiyy_const,
+            bux_face, buy_face, bfs_solid, FT(0.2),
+        )
+        badvxx_h = Array(badvxx)
+        badvxy_h = Array(badvxy)
+        badvyy_h = Array(badvyy)
+        for j in 1:bNy, i in 1:bNx
+            if bfs_solid_h[i, j]
+                @test badvxx_h[i, j] == 0
+                @test badvxy_h[i, j] == 0
+                @test badvyy_h[i, j] == 0
+            else
+                @test Float64(badvxx_h[i, j]) ≈ 0.25 atol=atol rtol=atol
+                @test Float64(badvxy_h[i, j]) ≈ -0.03 atol=atol rtol=atol
+                @test Float64(badvyy_h[i, j]) ≈ 0.11 atol=atol rtol=atol
+            end
+        end
+
+        bqxx, bqxy = FT(0.04), FT(-0.01)
+        bqyx, bqyy = FT(-0.06), FT(0.03)
+        bux_quad_h = [FT(0.1) + bqxx * ((FT(i) - FT(0.5)) * bdx)^2 +
+                      bqxy * ((FT(j) - FT(0.5)) * bdy)^2
+                      for i in 1:bNx, j in 1:bNy]
+        buy_quad_h = [FT(-0.2) + bqyx * ((FT(i) - FT(0.5)) * bdx)^2 +
+                      bqyy * ((FT(j) - FT(0.5)) * bdy)^2
+                      for i in 1:bNx, j in 1:bNy]
+        bfx_poly_h = [FT(0.02) + FT(0.01) * (FT(i) - FT(0.5)) * bdx
+                      for i in 1:bNx, j in 1:bNy]
+        bfy_poly_h = [FT(-0.03) + FT(0.02) * (FT(j) - FT(0.5)) * bdy
+                      for i in 1:bNx, j in 1:bNy]
+        bux_quad = _copy_to_backend(backend, bux_quad_h)
+        buy_quad = _copy_to_backend(backend, buy_quad_h)
+        bfx_poly = _copy_to_backend(backend, bfx_poly_h)
+        bfy_poly = _copy_to_backend(backend, bfy_poly_h)
+        bfx_total = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfy_total = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        Kraken.logfv_bsd_correct_force_solid_aware_2d!(
+            bfx_total, bfy_total, bfx_poly, bfy_poly,
+            bux_quad, buy_quad, bfs_solid, FT(0.75), FT(0.09), bdx, bdy,
+        )
+        bfx_total_h = Array(bfx_total)
+        bfy_total_h = Array(bfy_total)
+        for j in 1:bNy, i in 1:bNx
+            if bfs_solid_h[i, j]
+                @test bfx_total_h[i, j] == 0
+                @test bfy_total_h[i, j] == 0
+            else
+                blap_ux = (_gpu_fluid_x_second(bfs_solid_h, i, j) ? FT(2) * bqxx : FT(0)) +
+                          (_gpu_fluid_y_second(bfs_solid_h, i, j) ? FT(2) * bqxy : FT(0))
+                blap_uy = (_gpu_fluid_x_second(bfs_solid_h, i, j) ? FT(2) * bqyx : FT(0)) +
+                          (_gpu_fluid_y_second(bfs_solid_h, i, j) ? FT(2) * bqyy : FT(0))
+                @test Float64(bfx_total_h[i, j]) ≈ Float64(bfx_poly_h[i, j] - FT(0.75) * FT(0.09) * blap_ux) atol=atol rtol=atol
+                @test Float64(bfy_total_h[i, j]) ≈ Float64(bfy_poly_h[i, j] - FT(0.75) * FT(0.09) * blap_uy) atol=atol rtol=atol
             end
         end
 
