@@ -248,6 +248,46 @@ function logfv_bsd_correct_force_centered_2d!(
     return nothing
 end
 
+@kernel function logfv_compute_macroscopic_forced_field_2d_kernel!(
+    rho, ux, uy,
+    @Const(f), @Const(fx), @Const(fy),
+    Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            T = eltype(f)
+            f1 = f[i, j, 1]
+            f2 = f[i, j, 2]
+            f3 = f[i, j, 3]
+            f4 = f[i, j, 4]
+            f5 = f[i, j, 5]
+            f6 = f[i, j, 6]
+            f7 = f[i, j, 7]
+            f8 = f[i, j, 8]
+            f9 = f[i, j, 9]
+
+            rho_local = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+            inv_rho = one(T) / rho_local
+            rho[i, j] = rho_local
+            ux[i, j] = (f2 - f4 + f6 - f7 - f8 + f9 + fx[i, j] / T(2)) * inv_rho
+            uy[i, j] = (f3 - f5 + f6 + f7 - f8 - f9 + fy[i, j] / T(2)) * inv_rho
+        end
+    end
+end
+
+function logfv_compute_macroscopic_forced_field_2d!(
+    rho, ux, uy, f, fx, fy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(f)
+    Nx, Ny = size(rho)
+    kernel! = logfv_compute_macroscopic_forced_field_2d_kernel!(backend)
+    kernel!(rho, ux, uy, f, fx, fy, Nx, Ny; ndrange=(Nx, Ny))
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_advect_upwind_2d_kernel!(
     psixx_out, psixy_out, psiyy_out,
     @Const(psixx), @Const(psixy), @Const(psiyy),

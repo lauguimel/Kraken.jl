@@ -218,3 +218,152 @@ function run_viscoelastic_logfv_channel_2d(;
         errors...,
     )
 end
+
+function _logfv_lbm_poiseuille_reference(Fx_body, nu_total, Ny)
+    return [Fx_body / (2 * nu_total) * (j - 0.5) * (Ny + 0.5 - j) for j in 1:Ny]
+end
+
+"""
+    run_viscoelastic_logfv_poiseuille_frozen_force_2d(; kwargs...)
+
+Run the first coupled LBM/log-FV macro canary on a periodic channel.
+
+The polymer field is frozen at the analytical Oldroyd-B Poiseuille solution,
+then the production log-FV kernels reconstruct `tau_p`, `div(tau_p)`, and the
+BSD-corrected force. The solvent LBM is advanced with that force field. This
+isolates the momentum-coupling contract:
+
+```text
+body force + log-FV polymer force + BSD correction -> total-viscosity profile
+```
+
+It does not validate polymer advection or near-wall polymer boundary
+conditions. Those stay in lower canaries before square/obstacle flows.
+"""
+function run_viscoelastic_logfv_poiseuille_frozen_force_2d(;
+    Nx::Integer=4,
+    Ny::Integer=32,
+    nu_s::Real=0.04,
+    nu_p::Real=0.06,
+    Fx_body::Real=1e-5,
+    lambda::Real=5.0,
+    bsd_fraction::Real=0.0,
+    force_boundary_fill::Symbol=:nearest,
+    max_steps::Integer=12000,
+    backend=KernelAbstractions.CPU(),
+    T=Float64,
+)
+    Nx >= 3 || throw(ArgumentError("Nx must be >= 3"))
+    Ny >= 5 || throw(ArgumentError("Ny must be >= 5"))
+    nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
+    nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
+    lambda > 0 || throw(ArgumentError("lambda must be positive"))
+
+    nu_s_t = T(nu_s)
+    nu_p_t = T(nu_p)
+    nu_total_t = nu_s_t + nu_p_t
+    bsd_t = T(bsd_fraction)
+    Fx_body_t = T(Fx_body)
+    lambda_t = T(lambda)
+
+    nu_lbm_t = nu_s_t + bsd_t * nu_p_t
+    nu_lbm_t > zero(T) || throw(ArgumentError("nu_s + bsd_fraction * nu_p must be positive"))
+    force_boundary_fill in (:nearest, :none) ||
+        throw(ArgumentError("force_boundary_fill must be :nearest or :none"))
+
+    height_t = T(Ny)
+    width_t = T(Nx)
+    umax_t = Fx_body_t * height_t * height_t / (T(8) * nu_total_t)
+    prefactor_t = iszero(lambda_t) ? zero(T) : nu_p_t / lambda_t
+
+    channel = run_viscoelastic_logfv_channel_2d(;
+        Nx=Nx,
+        Ny=Ny,
+        flow=:poiseuille,
+        height=height_t,
+        width=width_t,
+        umax=umax_t,
+        uwall=zero(T),
+        lambda=lambda_t,
+        prefactor=prefactor_t,
+        bsd_fraction=bsd_t,
+        backend=backend,
+        T=T,
+    )
+
+    fx_total_h = T.(channel.fx_total)
+    fy_total_h = T.(channel.fy_total)
+    for j in 1:Ny, i in 1:Nx
+        fx_total_h[i, j] += Fx_body_t
+    end
+    if force_boundary_fill === :nearest
+        for j in 1:Ny
+            fx_total_h[1, j] = fx_total_h[2, j]
+            fy_total_h[1, j] = fy_total_h[2, j]
+            fx_total_h[Nx, j] = fx_total_h[Nx - 1, j]
+            fy_total_h[Nx, j] = fy_total_h[Nx - 1, j]
+        end
+        for i in 1:Nx
+            fx_total_h[i, 1] = fx_total_h[i, 2]
+            fy_total_h[i, 1] = fy_total_h[i, 2]
+            fx_total_h[i, Ny] = fx_total_h[i, Ny - 1]
+            fy_total_h[i, Ny] = fy_total_h[i, Ny - 1]
+        end
+    end
+
+    fx_total = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    fy_total = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    copyto!(fx_total, fx_total_h)
+    copyto!(fy_total, fy_total_h)
+
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(nu_lbm_t), u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, T; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    rho, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    omega_t = T(omega(config))
+
+    for _ in 1:max_steps
+        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+        collide_guo_field_2d!(f_out, is_solid, fx_total, fy_total, omega_t)
+        logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_out, fx_total, fy_total; sync=false)
+        f_in, f_out = f_out, f_in
+    end
+    KernelAbstractions.synchronize(backend)
+
+    ux_cpu = Array(ux)
+    uy_cpu = Array(uy)
+    rho_cpu = Array(rho)
+    reference_u = _logfv_lbm_poiseuille_reference(Float64(Fx_body_t), Float64(nu_total_t), Ny)
+    mean_ux = [sum(@view ux_cpu[:, j]) / Nx for j in 1:Ny]
+    interior = 3:(Ny - 2)
+    max_abs_error = maximum(abs.(mean_ux[interior] .- reference_u[interior]))
+    max_ref = maximum(abs.(reference_u[interior]))
+    max_rel_error = max_abs_error / max(max_ref, eps(Float64))
+    max_uy = maximum(abs, uy_cpu[:, interior])
+
+    return (;
+        Nx,
+        Ny,
+        nu_s=Float64(nu_s_t),
+        nu_p=Float64(nu_p_t),
+        nu_total=Float64(nu_total_t),
+        nu_lbm=Float64(nu_lbm_t),
+        Fx_body=Float64(Fx_body_t),
+        lambda=Float64(lambda_t),
+        bsd_fraction=Float64(bsd_t),
+        force_boundary_fill,
+        max_steps,
+        rho=rho_cpu,
+        ux=ux_cpu,
+        uy=uy_cpu,
+        ux_mean=mean_ux,
+        reference_ux=reference_u,
+        fx_total=Array(fx_total),
+        fy_total=Array(fy_total),
+        polymer_channel=channel,
+        max_abs_error,
+        max_rel_error,
+        max_uy,
+    )
+end

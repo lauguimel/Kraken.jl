@@ -534,4 +534,64 @@ end
             @test all(isfinite, result.tauxx)
         end
     end
+
+    @testset "M5b forced-field macroscopic velocity uses local Guo correction" begin
+        Nx, Ny = 5, 4
+        f = zeros(Float64, Nx, Ny, 9)
+        for q in 1:9
+            f[:, :, q] .= Kraken.equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+        end
+        fx = [1e-4 * (i - 0.25j) for i in 1:Nx, j in 1:Ny]
+        fy = [-7e-5 * (j + 0.1i) for i in 1:Nx, j in 1:Ny]
+        rho = similar(fx)
+        ux = similar(fx)
+        uy = similar(fx)
+
+        Kraken.logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f, fx, fy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            @test rho[i, j] ≈ 1.0 atol=5e-16 rtol=0.0
+            @test ux[i, j] ≈ 0.5 * fx[i, j] atol=2e-16 rtol=0.0
+            @test uy[i, j] ≈ 0.5 * fy[i, j] atol=2e-16 rtol=0.0
+        end
+    end
+
+    @testset "M5c frozen-force coupled Poiseuille recovers total viscosity" begin
+        Nx, Ny = 6, 20
+        nu_s = 0.04
+        nu_p = 0.06
+        Fx_body = 1e-5
+        lambda = 5.0
+
+        for zeta in (0.0, 0.5, 1.0)
+            result = Kraken.run_viscoelastic_logfv_poiseuille_frozen_force_2d(;
+                Nx=Nx, Ny=Ny, nu_s=nu_s, nu_p=nu_p, Fx_body=Fx_body,
+                lambda=lambda, bsd_fraction=zeta, force_boundary_fill=:nearest,
+                max_steps=8000, backend=KernelAbstractions.CPU(), T=Float64,
+            )
+            expected_force = Fx_body * (nu_s + zeta * nu_p) / (nu_s + nu_p)
+
+            @test result.nu_lbm ≈ nu_s + zeta * nu_p
+            @test result.polymer_channel.min_c_eig > 0
+            @test result.polymer_channel.max_total_force_error < 5e-13
+            @test result.max_rel_error < 5e-3
+            @test result.max_uy < 1e-12
+            @test all(isfinite, result.ux)
+            @test all(isfinite, result.fx_total)
+            for j in 1:Ny, i in 1:Nx
+                @test result.fx_total[i, j] ≈ expected_force atol=2e-13 rtol=2e-13
+                @test result.fy_total[i, j] ≈ 0.0 atol=2e-13
+            end
+        end
+    end
+
+    @testset "M5c missing force boundary fill is a visible split-mode defect" begin
+        result = Kraken.run_viscoelastic_logfv_poiseuille_frozen_force_2d(;
+            Nx=6, Ny=16, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
+            lambda=5.0, bsd_fraction=0.0, force_boundary_fill=:none,
+            max_steps=4000, backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        @test result.max_rel_error > 0.1
+    end
 end
