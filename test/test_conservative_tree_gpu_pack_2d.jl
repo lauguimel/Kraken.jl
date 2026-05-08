@@ -315,6 +315,75 @@ using KernelAbstractions
         end
     end
 
+    @testset "fine-to-coarse deposit pack matches CPU route cache" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ])
+        table = create_conservative_tree_route_table_2d(
+            spec; periodic_x=true, sampling=:leaf_equivalent)
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(
+            spec.max_level)
+        F = allocate_conservative_tree_F_2d(spec; T=Float64)
+        for (cell_id, cell) in pairs(spec.cells), q in 1:9
+            F[cell_id, q] =
+                0.05 + 0.001 * q + 0.0001 * cell.level +
+                0.00001 * cell.i + 0.000001 * cell.j
+        end
+
+        for child_level in 1:spec.max_level
+            parent_level = child_level - 1
+            bank_ref = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+                spec; schedule=schedule, T=Float64)
+            bank_pack = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+                spec; schedule=schedule, T=Float64)
+            Kraken.prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+                bank_ref, table)
+            Kraken.prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+                bank_pack, table)
+            Kraken.reset_conservative_tree_subcycle_spatial_pair_2d!(
+                bank_ref, parent_level)
+            Kraken.reset_conservative_tree_subcycle_spatial_pair_2d!(
+                bank_pack, parent_level)
+
+            events = [event for event in schedule.events
+                      if event.phase == :advance &&
+                         event.src_level == child_level]
+            for event in events[1:schedule.ratio]
+                Kraken.conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
+                    bank_ref, event, F, table;
+                    interface_time_scaling=:leaf_equivalent)
+                Kraken.conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
+                    bank_ref, event, F;
+                    interface_time_scaling=:leaf_equivalent)
+            end
+            cache_ref = bank_ref.route_packet_caches[parent_level + 1]
+
+            pack = pack_conservative_tree_gpu_fine_to_coarse_deposit_2d(
+                spec, table, bank_pack, child_level;
+                interface_time_scaling=:leaf_equivalent, T=Float64)
+            cache_gpu = zeros(Float64, length(cache_ref.packets))
+            deposit_conservative_tree_gpu_fine_to_coarse_cache_F_2d!(
+                cache_gpu, F, pack)
+
+            @test isapprox(cache_gpu, cache_ref.packets; atol=1e-14, rtol=0)
+
+            Fref = allocate_conservative_tree_F_2d(spec; T=Float64)
+            Fgpu = similar(Fref)
+            fill!(Fref, 0)
+            fill!(Fgpu, 0)
+            sync_event = first(event for event in schedule.events
+                               if event.phase == :sync_up &&
+                                  event.src_level == child_level &&
+                                  event.dst_level == parent_level)
+            Kraken.conservative_tree_subcycle_apply_sync_up_F_2d!(
+                Fref, bank_ref, sync_event; boundary=:periodic_x_wall_y)
+            apply_conservative_tree_gpu_sync_up_cache_F_2d!(
+                Fgpu, cache_gpu, pack)
+            @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+        end
+    end
+
     @testset "level row kernels match scheduler row utilities" begin
         spec = create_conservative_tree_spec_2d(8, 6, [
             ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
@@ -450,6 +519,42 @@ using KernelAbstractions
                 deposit_conservative_tree_gpu_coarse_to_fine_routes_F_2d!(
                     ledger_d, Fd, dep_pack_d)
                 @test all(isfinite, Array(ledger_d))
+
+                bank_ref = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+                    spec; schedule=schedule, T=Float32)
+                Kraken.prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+                    bank_ref, table)
+                Kraken.reset_conservative_tree_subcycle_spatial_pair_2d!(
+                    bank_ref, 0)
+                for event in schedule.events
+                    event.phase == :advance && event.src_level == 1 || continue
+                    Kraken.conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
+                        bank_ref, event, Fin, table;
+                        interface_time_scaling=:leaf_equivalent)
+                    Kraken.conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
+                        bank_ref, event, Fin;
+                        interface_time_scaling=:leaf_equivalent)
+                end
+                f2c_pack = pack_conservative_tree_gpu_fine_to_coarse_deposit_2d(
+                    spec, table,
+                    Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+                        spec; schedule=schedule, T=Float32),
+                    1; T=Float32)
+                f2c_pack_d = transfer_conservative_tree_gpu_f2c_deposit_pack_2d(
+                    f2c_pack, backend)
+                cache_d = KernelAbstractions.allocate(
+                    backend, Float32, length(bank_ref.route_packet_caches[1].packets))
+                fill!(cache_d, Float32(0))
+                copyto!(Fd, Fin)
+                deposit_conservative_tree_gpu_fine_to_coarse_cache_F_2d!(
+                    cache_d, Fd, f2c_pack_d)
+                @test isapprox(Array(cache_d),
+                               bank_ref.route_packet_caches[1].packets;
+                               atol=2e-6, rtol=2e-6)
+                fill!(Foutd, Float32(0))
+                apply_conservative_tree_gpu_sync_up_cache_F_2d!(
+                    Foutd, cache_d, f2c_pack_d)
+                @test all(isfinite, Array(Foutd))
             end
         end
     end
