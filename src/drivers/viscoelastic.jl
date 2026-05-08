@@ -673,10 +673,6 @@ function run_conformation_cylinder_libb_2d(;
     end
     _assert_validation_log_wall_bc(polymer_model, polymer_bc;
         allow_diagnostic=allow_diagnostic_log_wall_bc)
-    if conformation_gradient_mode !== :wall_aware &&
-       (!uses_log_conformation(polymer_model) && conformation_collision !== :trt)
-        error("conformation_gradient_mode=$(conformation_gradient_mode) is currently implemented only for TRT direct-C/log-conformation collisions")
-    end
     λ_p = polymer_relaxation_time(polymer_model)
     ν_p_eff = polymer_modulus(polymer_model) * λ_p   # G·λ = ν_p (Oldroyd-B)
 
@@ -1039,13 +1035,49 @@ function run_conformation_cylinder_libb_2d(;
             # Reconstruct C = exp(Ψ) before computing τ_p
             psi_to_C_2d!(C_xx, C_xy, C_yy, Ψ_xx, Ψ_xy, Ψ_yy)
         elseif conformation_collision === :regularized
-            collide_conformation_regularized_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
-            collide_conformation_regularized_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
-            collide_conformation_regularized_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
+            if conformation_gradient_stencils !== nothing
+                collide_conformation_regularized_2d_with_gradient_stencils!(
+                    g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
+                    uw_x, uw_y, conformation_gradient_stencils,
+                    tau_plus, λ_p; magic=magic_p, component=1,
+                    divergence_mode=conformation_divergence_mode)
+                collide_conformation_regularized_2d_with_gradient_stencils!(
+                    g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
+                    uw_x, uw_y, conformation_gradient_stencils,
+                    tau_plus, λ_p; magic=magic_p, component=2,
+                    divergence_mode=conformation_divergence_mode)
+                collide_conformation_regularized_2d_with_gradient_stencils!(
+                    g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,
+                    uw_x, uw_y, conformation_gradient_stencils,
+                    tau_plus, λ_p; magic=magic_p, component=3,
+                    divergence_mode=conformation_divergence_mode)
+            else
+                collide_conformation_regularized_2d!(g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
+                collide_conformation_regularized_2d!(g_xy, Ψ_xy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
+                collide_conformation_regularized_2d!(g_yy, Ψ_yy, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
+            end
         elseif conformation_collision === :liu_eq26
-            collide_conformation_liu_eq26_2d!(g_xx, Fe_xx_prev, Ψ_xx, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
-            collide_conformation_liu_eq26_2d!(g_xy, Fe_xy_prev, Ψ_xy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
-            collide_conformation_liu_eq26_2d!(g_yy, Fe_yy_prev, Ψ_yy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
+            if conformation_gradient_stencils !== nothing
+                collide_conformation_liu_eq26_2d_with_gradient_stencils!(
+                    g_xx, Fe_xx_prev, Ψ_xx, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy,
+                    is_solid, uw_x, uw_y, conformation_gradient_stencils,
+                    tau_plus, λ_p; magic=magic_p, component=1,
+                    divergence_mode=conformation_divergence_mode)
+                collide_conformation_liu_eq26_2d_with_gradient_stencils!(
+                    g_xy, Fe_xy_prev, Ψ_xy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy,
+                    is_solid, uw_x, uw_y, conformation_gradient_stencils,
+                    tau_plus, λ_p; magic=magic_p, component=2,
+                    divergence_mode=conformation_divergence_mode)
+                collide_conformation_liu_eq26_2d_with_gradient_stencils!(
+                    g_yy, Fe_yy_prev, Ψ_yy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy,
+                    is_solid, uw_x, uw_y, conformation_gradient_stencils,
+                    tau_plus, λ_p; magic=magic_p, component=3,
+                    divergence_mode=conformation_divergence_mode)
+            else
+                collide_conformation_liu_eq26_2d!(g_xx, Fe_xx_prev, Ψ_xx, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=1, divergence_mode=conformation_divergence_mode)
+                collide_conformation_liu_eq26_2d!(g_xy, Fe_xy_prev, Ψ_xy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=2, divergence_mode=conformation_divergence_mode)
+                collide_conformation_liu_eq26_2d!(g_yy, Fe_yy_prev, Ψ_yy, ux, uy, ρ, Ψ_xx, Ψ_xy, Ψ_yy, is_solid, tau_plus, λ_p; magic=magic_p, component=3, divergence_mode=conformation_divergence_mode)
+            end
         elseif conformation_gradient_stencils !== nothing
             collide_conformation_2d_with_gradient_stencils!(
                 g_xx, Ψ_xx, ux, uy, Ψ_xx, Ψ_xy, Ψ_yy, is_solid,

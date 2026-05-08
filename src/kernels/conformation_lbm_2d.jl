@@ -844,6 +844,133 @@ function collide_conformation_regularized_2d!(g, C_field, ux, uy, C_xx, C_xy, C_
     KernelAbstractions.synchronize(backend)
 end
 
+@kernel function collide_conformation_regularized_2d_gradient_stencils_kernel!(
+        g, @Const(C_field), @Const(ux), @Const(uy),
+        @Const(C_xx_f), @Const(C_xy_f), @Const(C_yy_f), @Const(is_solid),
+        @Const(uwx), @Const(uwy),
+        @Const(grad_coeff), @Const(grad_di), @Const(grad_dj),
+        @Const(grad_wall_i), @Const(grad_wall_j), @Const(grad_wall_q),
+        @Const(grad_is_wall), @Const(grad_count),
+        tau_plus, tau_minus, lambda, component, divergence_mode, Nx, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds if !is_solid[i, j]
+        T = eltype(g)
+        φ = C_field[i, j]
+        u = ux[i, j]
+        v = uy[i, j]
+        usq = u*u + v*v
+
+        dudx = _conformation_gradient_from_stencil_arrays_2d(
+            ux, uwx, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 1, T,
+        )
+        dudy = _conformation_gradient_from_stencil_arrays_2d(
+            ux, uwx, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 2, T,
+        )
+        dvdx = _conformation_gradient_from_stencil_arrays_2d(
+            uy, uwy, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 1, T,
+        )
+        dvdy = _conformation_gradient_from_stencil_arrays_2d(
+            uy, uwy, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 2, T,
+        )
+        raw_dudx = dudx
+        raw_dvdy = dvdy
+        dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
+            dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
+
+        cxx = C_xx_f[i, j]; cxy = C_xy_f[i, j]; cyy = C_yy_f[i, j]
+        S = conformation_source_with_divergence_2d(
+            cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
+
+        g1 = g[i,j,1]; g2 = g[i,j,2]; g3 = g[i,j,3]; g4 = g[i,j,4]; g5 = g[i,j,5]
+        g6 = g[i,j,6]; g7 = g[i,j,7]; g8 = g[i,j,8]; g9 = g[i,j,9]
+
+        ge1 = feq_2d(Val(1), φ, u, v, usq)
+        ge2 = feq_2d(Val(2), φ, u, v, usq)
+        ge3 = feq_2d(Val(3), φ, u, v, usq)
+        ge4 = feq_2d(Val(4), φ, u, v, usq)
+        ge5 = feq_2d(Val(5), φ, u, v, usq)
+        ge6 = feq_2d(Val(6), φ, u, v, usq)
+        ge7 = feq_2d(Val(7), φ, u, v, usq)
+        ge8 = feq_2d(Val(8), φ, u, v, usq)
+        ge9 = feq_2d(Val(9), φ, u, v, usq)
+
+        d1 = g1 - ge1; d2 = g2 - ge2; d3 = g3 - ge3
+        d4 = g4 - ge4; d5 = g5 - ge5; d6 = g6 - ge6
+        d7 = g7 - ge7; d8 = g8 - ge8; d9 = g9 - ge9
+
+        B0 = d1 + d2 + d3 + d4 + d5 + d6 + d7 + d8 + d9
+        Bx = d2 - d4 + d6 - d7 - d8 + d9
+        By = d3 - d5 + d6 + d7 - d8 - d9
+        cs2 = T(1/3)
+        H0 = -cs2
+        H1 = one(T) - cs2
+        Bxx = H0*(d1 + d3 + d5) + H1*(d2 + d4 + d6 + d7 + d8 + d9)
+        Byy = H0*(d1 + d2 + d4) + H1*(d3 + d5 + d6 + d7 + d8 + d9)
+        Bxy = d6 - d7 + d8 - d9
+
+        ωp = one(T) / T(tau_plus)
+        ωm = one(T) / T(tau_minus)
+        r1 = one(T) - ωp
+        r2 = one(T) - ωm
+        wr = T(4/9); wa = T(1/9); we = T(1/36)
+        hpre = T(9/2)
+        source_linear = (one(T) - ωp * T(0.5)) * T(3) * S
+
+        R1 = r1 * B0 + r2 * hpre * (H0*Bxx + H0*Byy)
+        R2 = r1 * (B0 + T(3)*Bx) + r2 * hpre * (H1*Bxx + H0*Byy)
+        R3 = r1 * (B0 + T(3)*By) + r2 * hpre * (H0*Bxx + H1*Byy)
+        R4 = r1 * (B0 - T(3)*Bx) + r2 * hpre * (H1*Bxx + H0*Byy)
+        R5 = r1 * (B0 - T(3)*By) + r2 * hpre * (H0*Bxx + H1*Byy)
+        R6 = r1 * (B0 + T(3)*(Bx + By)) + r2 * hpre * (H1*Bxx + T(2)*Bxy + H1*Byy)
+        R7 = r1 * (B0 + T(3)*(-Bx + By)) + r2 * hpre * (H1*Bxx - T(2)*Bxy + H1*Byy)
+        R8 = r1 * (B0 - T(3)*(Bx + By)) + r2 * hpre * (H1*Bxx + T(2)*Bxy + H1*Byy)
+        R9 = r1 * (B0 + T(3)*(Bx - By)) + r2 * hpre * (H1*Bxx - T(2)*Bxy + H1*Byy)
+
+        g[i,j,1] = ge1 + wr*R1 + wr*S
+        g[i,j,2] = ge2 + wa*R2 + wa*(S + source_linear*u)
+        g[i,j,3] = ge3 + wa*R3 + wa*(S + source_linear*v)
+        g[i,j,4] = ge4 + wa*R4 + wa*(S - source_linear*u)
+        g[i,j,5] = ge5 + wa*R5 + wa*(S - source_linear*v)
+        g[i,j,6] = ge6 + we*R6 + we*(S + source_linear*(u + v))
+        g[i,j,7] = ge7 + we*R7 + we*(S + source_linear*(-u + v))
+        g[i,j,8] = ge8 + we*R8 + we*(S - source_linear*(u + v))
+        g[i,j,9] = ge9 + we*R9 + we*(S + source_linear*(u - v))
+    end
+end
+
+function collide_conformation_regularized_2d_with_gradient_stencils!(
+        g, C_field, ux, uy, C_xx, C_xy, C_yy, is_solid,
+        uwx, uwy, stencils::ConformationGradientStencils2D,
+        tau_plus, lambda; magic=0.25, component=1,
+        divergence_mode::Symbol=:numerical)
+    backend = KernelAbstractions.get_backend(g)
+    Nx, Ny = size(C_field)
+    T = eltype(g)
+    tau_minus = magic / (tau_plus - 0.5) + 0.5
+    kernel! = collide_conformation_regularized_2d_gradient_stencils_kernel!(backend)
+    kernel!(g, C_field, ux, uy, C_xx, C_xy, C_yy, is_solid,
+            uwx, uwy,
+            stencils.coeff, stencils.di, stencils.dj,
+            stencils.wall_i, stencils.wall_j, stencils.wall_q,
+            stencils.is_wall, stencils.count,
+            T(tau_plus), T(tau_minus), T(lambda),
+            Int(component), _conformation_divergence_mode_code(divergence_mode),
+            Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
 # =====================================================================
 # Liu Eq. (26) diagnostic collision.
 #
@@ -1000,6 +1127,182 @@ function collide_conformation_liu_eq26_2d!(g, Fe_prev, C_field, ux, uy, ρ,
     tau_minus = magic / (tau_plus - 0.5) + 0.5
     kernel! = collide_conformation_liu_eq26_2d_kernel!(backend)
     kernel!(g, Fe_prev, C_field, ux, uy, ρ, C_xx, C_xy, C_yy, is_solid,
+            T(tau_plus), T(tau_minus), T(lambda),
+            T(bneq_source_scale), T(bneq_mass_scale),
+            bneq_second_moment_raw ? 1 : 0,
+            Int(component), _conformation_divergence_mode_code(divergence_mode),
+            Nx, Ny; ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+end
+
+@kernel function collide_conformation_liu_eq26_2d_gradient_stencils_kernel!(
+        g, Fe_prev, @Const(C_field), @Const(ux), @Const(uy),
+        @Const(ρ), @Const(C_xx_f), @Const(C_xy_f), @Const(C_yy_f),
+        @Const(is_solid), @Const(uwx), @Const(uwy),
+        @Const(grad_coeff), @Const(grad_di), @Const(grad_dj),
+        @Const(grad_wall_i), @Const(grad_wall_j), @Const(grad_wall_q),
+        @Const(grad_is_wall), @Const(grad_count),
+        tau_plus, tau_minus, lambda, bneq_source_scale,
+        bneq_mass_scale, bneq_second_moment_raw,
+        component, divergence_mode, Nx, Ny)
+    i, j = @index(Global, NTuple)
+
+    @inbounds if !is_solid[i, j]
+        T = eltype(g)
+        φ = C_field[i, j]
+        u = ux[i, j]
+        v = uy[i, j]
+        usq = u*u + v*v
+
+        dudx = _conformation_gradient_from_stencil_arrays_2d(
+            ux, uwx, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 1, T,
+        )
+        dudy = _conformation_gradient_from_stencil_arrays_2d(
+            ux, uwx, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 2, T,
+        )
+        dvdx = _conformation_gradient_from_stencil_arrays_2d(
+            uy, uwy, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 1, T,
+        )
+        dvdy = _conformation_gradient_from_stencil_arrays_2d(
+            uy, uwy, grad_coeff, grad_di, grad_dj,
+            grad_wall_i, grad_wall_j, grad_wall_q,
+            grad_is_wall, grad_count, i, j, 2, T,
+        )
+        raw_dudx = dudx
+        raw_dvdy = dvdy
+        dudx, dudy, dvdx, dvdy = _apply_conformation_divergence_mode_2d(
+            dudx, dudy, dvdx, dvdy, divergence_mode)
+        advective_divu = _conformation_advective_divergence_2d(
+            raw_dudx, raw_dvdy, dudx, dvdy, divergence_mode)
+
+        cxx = C_xx_f[i, j]; cxy = C_xy_f[i, j]; cyy = C_yy_f[i, j]
+        S = conformation_source_with_divergence_2d(
+            cxx, cxy, cyy, dudx, dudy, dvdx, dvdy,
+            advective_divu, T(lambda), component)
+
+        ωp = one(T) / T(tau_plus)
+        ωm = one(T) / T(tau_minus)
+        r1 = one(T) - ωp
+        r2 = one(T) - ωm
+        coeff = one(T) - ωp * T(0.5)
+        wr = T(4/9); wa = T(1/9); we = T(1/36)
+        hpre = T(9/2)
+        source_linear = coeff * T(3) * S
+
+        F1 = wr * S
+        F2 = wa * (S + source_linear * u)
+        F3 = wa * (S + source_linear * v)
+        F4 = wa * (S - source_linear * u)
+        F5 = wa * (S - source_linear * v)
+        F6 = we * (S + source_linear * (u + v))
+        F7 = we * (S + source_linear * (-u + v))
+        F8 = we * (S - source_linear * (u + v))
+        F9 = we * (S + source_linear * (u - v))
+
+        ge1 = feq_2d(Val(1), φ, u, v, usq)
+        ge2 = feq_2d(Val(2), φ, u, v, usq)
+        ge3 = feq_2d(Val(3), φ, u, v, usq)
+        ge4 = feq_2d(Val(4), φ, u, v, usq)
+        ge5 = feq_2d(Val(5), φ, u, v, usq)
+        ge6 = feq_2d(Val(6), φ, u, v, usq)
+        ge7 = feq_2d(Val(7), φ, u, v, usq)
+        ge8 = feq_2d(Val(8), φ, u, v, usq)
+        ge9 = feq_2d(Val(9), φ, u, v, usq)
+
+        bscale = T(bneq_source_scale)
+        d1 = g[i,j,1] - ge1 + bscale * F1
+        d2 = g[i,j,2] - ge2 + bscale * F2
+        d3 = g[i,j,3] - ge3 + bscale * F3
+        d4 = g[i,j,4] - ge4 + bscale * F4
+        d5 = g[i,j,5] - ge5 + bscale * F5
+        d6 = g[i,j,6] - ge6 + bscale * F6
+        d7 = g[i,j,7] - ge7 + bscale * F7
+        d8 = g[i,j,8] - ge8 + bscale * F8
+        d9 = g[i,j,9] - ge9 + bscale * F9
+
+        B0 = T(bneq_mass_scale) * (d1 + d2 + d3 + d4 + d5 + d6 + d7 + d8 + d9)
+        Bx = d2 - d4 + d6 - d7 - d8 + d9
+        By = d3 - d5 + d6 + d7 - d8 - d9
+        cs2 = T(1/3)
+        H0 = -cs2
+        H1 = one(T) - cs2
+        Bxx_h = H0*(d1 + d3 + d5) + H1*(d2 + d4 + d6 + d7 + d8 + d9)
+        Byy_h = H0*(d1 + d2 + d4) + H1*(d3 + d5 + d6 + d7 + d8 + d9)
+        Bxx_r = d2 + d4 + d6 + d7 + d8 + d9
+        Byy_r = d3 + d5 + d6 + d7 + d8 + d9
+        Bxx = bneq_second_moment_raw == 1 ? Bxx_r : Bxx_h
+        Byy = bneq_second_moment_raw == 1 ? Byy_r : Byy_h
+        Bxy = d6 - d7 + d8 - d9
+
+        R1 = r1 * B0 + r2 * hpre * (H0*Bxx + H0*Byy)
+        R2 = r1 * (B0 + T(3)*Bx) + r2 * hpre * (H1*Bxx + H0*Byy)
+        R3 = r1 * (B0 + T(3)*By) + r2 * hpre * (H0*Bxx + H1*Byy)
+        R4 = r1 * (B0 - T(3)*Bx) + r2 * hpre * (H1*Bxx + H0*Byy)
+        R5 = r1 * (B0 - T(3)*By) + r2 * hpre * (H0*Bxx + H1*Byy)
+        R6 = r1 * (B0 + T(3)*(Bx + By)) + r2 * hpre * (H1*Bxx + T(2)*Bxy + H1*Byy)
+        R7 = r1 * (B0 + T(3)*(-Bx + By)) + r2 * hpre * (H1*Bxx - T(2)*Bxy + H1*Byy)
+        R8 = r1 * (B0 - T(3)*(Bx + By)) + r2 * hpre * (H1*Bxx + T(2)*Bxy + H1*Byy)
+        R9 = r1 * (B0 + T(3)*(Bx - By)) + r2 * hpre * (H1*Bxx - T(2)*Bxy + H1*Byy)
+
+        drhodx = _wall_aware_dx_2d(ρ, is_solid, i, j, Nx, T)
+        drhody = _wall_aware_dy_2d(ρ, is_solid, i, j, Ny, T)
+        invρ = one(T) / max(ρ[i, j], eps(T))
+        ge_coeff = -coeff * φ * invρ
+        G1 = zero(T)
+        G2 = wa * ge_coeff * drhodx
+        G3 = wa * ge_coeff * drhody
+        G4 = -wa * ge_coeff * drhodx
+        G5 = -wa * ge_coeff * drhody
+        G6 = we * ge_coeff * (drhodx + drhody)
+        G7 = we * ge_coeff * (-drhodx + drhody)
+        G8 = -we * ge_coeff * (drhodx + drhody)
+        G9 = we * ge_coeff * (drhodx - drhody)
+
+        oldF1 = Fe_prev[i,j,1]; oldF2 = Fe_prev[i,j,2]; oldF3 = Fe_prev[i,j,3]
+        oldF4 = Fe_prev[i,j,4]; oldF5 = Fe_prev[i,j,5]; oldF6 = Fe_prev[i,j,6]
+        oldF7 = Fe_prev[i,j,7]; oldF8 = Fe_prev[i,j,8]; oldF9 = Fe_prev[i,j,9]
+
+        g[i,j,1] = ge1 + wr*R1 + G1 + F1 + T(0.5)*(F1 - oldF1)
+        g[i,j,2] = ge2 + wa*R2 + G2 + F2 + T(0.5)*(F2 - oldF2)
+        g[i,j,3] = ge3 + wa*R3 + G3 + F3 + T(0.5)*(F3 - oldF3)
+        g[i,j,4] = ge4 + wa*R4 + G4 + F4 + T(0.5)*(F4 - oldF4)
+        g[i,j,5] = ge5 + wa*R5 + G5 + F5 + T(0.5)*(F5 - oldF5)
+        g[i,j,6] = ge6 + we*R6 + G6 + F6 + T(0.5)*(F6 - oldF6)
+        g[i,j,7] = ge7 + we*R7 + G7 + F7 + T(0.5)*(F7 - oldF7)
+        g[i,j,8] = ge8 + we*R8 + G8 + F8 + T(0.5)*(F8 - oldF8)
+        g[i,j,9] = ge9 + we*R9 + G9 + F9 + T(0.5)*(F9 - oldF9)
+
+        Fe_prev[i,j,1] = F1; Fe_prev[i,j,2] = F2; Fe_prev[i,j,3] = F3
+        Fe_prev[i,j,4] = F4; Fe_prev[i,j,5] = F5; Fe_prev[i,j,6] = F6
+        Fe_prev[i,j,7] = F7; Fe_prev[i,j,8] = F8; Fe_prev[i,j,9] = F9
+    end
+end
+
+function collide_conformation_liu_eq26_2d_with_gradient_stencils!(
+        g, Fe_prev, C_field, ux, uy, ρ, C_xx, C_xy, C_yy, is_solid,
+        uwx, uwy, stencils::ConformationGradientStencils2D,
+        tau_plus, lambda; magic=0.25,
+        bneq_source_scale=0.0,
+        bneq_mass_scale=1.0,
+        bneq_second_moment_raw=false,
+        component=1,
+        divergence_mode::Symbol=:numerical)
+    backend = KernelAbstractions.get_backend(g)
+    Nx, Ny = size(C_field)
+    T = eltype(g)
+    tau_minus = magic / (tau_plus - 0.5) + 0.5
+    kernel! = collide_conformation_liu_eq26_2d_gradient_stencils_kernel!(backend)
+    kernel!(g, Fe_prev, C_field, ux, uy, ρ, C_xx, C_xy, C_yy, is_solid,
+            uwx, uwy,
+            stencils.coeff, stencils.di, stencils.dj,
+            stencils.wall_i, stencils.wall_j, stencils.wall_q,
+            stencils.is_wall, stencils.count,
             T(tau_plus), T(tau_minus), T(lambda),
             T(bneq_source_scale), T(bneq_mass_scale),
             bneq_second_moment_raw ? 1 : 0,

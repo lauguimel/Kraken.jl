@@ -6528,6 +6528,115 @@ function _collide_direct_cde_state_prod_gradient!(
     return nothing
 end
 
+function _collide_direct_cde_state_highsc_prod_gradient!(
+        collision, gxx, gxy, gyy, Cxx, Cxy, Cyy, ux, uy, is_solid, λ,
+        stencils, uwx, uwy; tau_plus=0.50001, magic=2.5e-7)
+    ρ = ones(Float64, size(Cxx))
+    if collision === :regularized
+        Kraken.collide_conformation_regularized_2d_with_gradient_stencils!(
+            gxx, Cxx, ux, uy, Cxx, Cxy, Cyy, is_solid,
+            uwx, uwy, stencils, tau_plus, λ; magic,
+            component=1, divergence_mode=:trace_free,
+        )
+        Kraken.collide_conformation_regularized_2d_with_gradient_stencils!(
+            gxy, Cxy, ux, uy, Cxx, Cxy, Cyy, is_solid,
+            uwx, uwy, stencils, tau_plus, λ; magic,
+            component=2, divergence_mode=:trace_free,
+        )
+        Kraken.collide_conformation_regularized_2d_with_gradient_stencils!(
+            gyy, Cyy, ux, uy, Cxx, Cxy, Cyy, is_solid,
+            uwx, uwy, stencils, tau_plus, λ; magic,
+            component=3, divergence_mode=:trace_free,
+        )
+    elseif collision === :liu_eq26
+        Fe_xx = zeros(Float64, size(gxx))
+        Fe_xy = similar(Fe_xx)
+        Fe_yy = similar(Fe_xx)
+        for pass in 1:2
+            pass == 2 && begin
+                init_conformation_field_2d!(gxx, Cxx, ux, uy)
+                init_conformation_field_2d!(gxy, Cxy, ux, uy)
+                init_conformation_field_2d!(gyy, Cyy, ux, uy)
+            end
+            Kraken.collide_conformation_liu_eq26_2d_with_gradient_stencils!(
+                gxx, Fe_xx, Cxx, ux, uy, ρ, Cxx, Cxy, Cyy, is_solid,
+                uwx, uwy, stencils, tau_plus, λ; magic,
+                component=1, divergence_mode=:trace_free,
+            )
+            Kraken.collide_conformation_liu_eq26_2d_with_gradient_stencils!(
+                gxy, Fe_xy, Cxy, ux, uy, ρ, Cxx, Cxy, Cyy, is_solid,
+                uwx, uwy, stencils, tau_plus, λ; magic,
+                component=2, divergence_mode=:trace_free,
+            )
+            Kraken.collide_conformation_liu_eq26_2d_with_gradient_stencils!(
+                gyy, Fe_yy, Cyy, ux, uy, ρ, Cxx, Cxy, Cyy, is_solid,
+                uwx, uwy, stencils, tau_plus, λ; magic,
+                component=3, divergence_mode=:trace_free,
+            )
+        end
+    else
+        error("unknown high-Schmidt direct-C collision $(collision)")
+    end
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    return nothing
+end
+
+function _curved_couette_highsc_collision_only_stats(
+        collision; gradient_mode::Symbol=:wall_aware)
+    p = _curved_couette_oldroydb_patch()
+    gxx = zeros(Float64, p.Nx, p.Ny, 9)
+    gxy = zeros(Float64, p.Nx, p.Ny, 9)
+    gyy = zeros(Float64, p.Nx, p.Ny, 9)
+    Cxx = copy(p.Cxx)
+    Cxy = copy(p.Cxy)
+    Cyy = copy(p.Cyy)
+    init_conformation_field_2d!(gxx, Cxx, p.ux, p.uy)
+    init_conformation_field_2d!(gxy, Cxy, p.ux, p.uy)
+    init_conformation_field_2d!(gyy, Cyy, p.ux, p.uy)
+    if gradient_mode === :wall_aware
+        Fe_xx = zeros(Float64, p.Nx, p.Ny, 9)
+        Fe_xy = similar(Fe_xx)
+        Fe_yy = similar(Fe_xx)
+        _collide_square_direct_phase!(
+            collision, gxx, gxy, gyy, Fe_xx, Fe_xy, Fe_yy,
+            Cxx, Cxy, Cyy, p.ux, p.uy, ones(Float64, p.Nx, p.Ny),
+            p.is_solid, 0.50001, p.λ, 2.5e-7,
+        )
+        collision === :liu_eq26 && begin
+            init_conformation_field_2d!(gxx, p.Cxx, p.ux, p.uy)
+            init_conformation_field_2d!(gxy, p.Cxy, p.ux, p.uy)
+            init_conformation_field_2d!(gyy, p.Cyy, p.ux, p.uy)
+            Cxx .= p.Cxx
+            Cxy .= p.Cxy
+            Cyy .= p.Cyy
+            _collide_square_direct_phase!(
+                collision, gxx, gxy, gyy, Fe_xx, Fe_xy, Fe_yy,
+                Cxx, Cxy, Cyy, p.ux, p.uy, ones(Float64, p.Nx, p.Ny),
+                p.is_solid, 0.50001, p.λ, 2.5e-7,
+            )
+        end
+    elseif gradient_mode in (:embedded_axis, :wallfit4)
+        stencils = Kraken.precompute_conformation_gradient_stencils_2d(
+            p.is_solid, p.q_wall; mode=gradient_mode,
+            max_terms=gradient_mode === :embedded_axis ? 4 : 64,
+            FT=Float64,
+        )
+        uwx, uwy = _curved_couette_wall_velocity_arrays(p)
+        _collide_direct_cde_state_highsc_prod_gradient!(
+            collision, gxx, gxy, gyy, Cxx, Cxy, Cyy, p.ux, p.uy,
+            p.is_solid, p.λ, stencils, uwx, uwy,
+        )
+    else
+        error("unknown gradient_mode $(gradient_mode)")
+    end
+    compute_conformation_macro_2d!(Cxx, gxx)
+    compute_conformation_macro_2d!(Cxy, gxy)
+    compute_conformation_macro_2d!(Cyy, gyy)
+    return _curved_couette_error_stats(p, Cxx, Cxy, Cyy)
+end
+
 function _curved_couette_oldroydb_patch(; Nx=72, Ny=72, Ri=12.0,
                                         Ro=28.0, Ω=0.006, λ=4.0)
     cx = (Nx - 1) / 2
@@ -7320,6 +7429,26 @@ end
     end
 end
 
+@testset "P18l prototype extrap-eq BC: M10b high-Schmidt direct-C collisions use stencil gradients" begin
+    for collision in (:regularized, :liu_eq26)
+        wall = _curved_couette_highsc_collision_only_stats(
+            collision; gradient_mode=:wall_aware,
+        )
+        embedded = _curved_couette_highsc_collision_only_stats(
+            collision; gradient_mode=:embedded_axis,
+        )
+        wallfit = _curved_couette_highsc_collision_only_stats(
+            collision; gradient_mode=:wallfit4,
+        )
+
+        @test wall.max_cut > 1e-5
+        @test embedded.max_cut < 1e-4
+        @test embedded.max_cut < wall.max_cut
+        @test wallfit.max_cut < 5e-5
+        @test wallfit.max_cut < 0.5 * embedded.max_cut
+    end
+end
+
 function _cartesian_affine_velocity_patch(geom;
         dudx=0.002, dudy=0.003, dvdx=-0.001, dvdy=-0.002,
         u0=0.015, v0=-0.01,
@@ -7724,6 +7853,25 @@ end
             backend=KernelAbstractions.CPU(), FT=Float64,
         )
         fluid = .!r.is_solid
+        @test r.conformation_gradient_mode === mode
+        @test r.conformation_gradient_stats.mode === mode
+        @test r.first_nonfinite_step == 0
+        @test all(isfinite, r.C_xx[fluid])
+        @test all(isfinite, r.C_xy[fluid])
+        @test all(isfinite, r.C_yy[fluid])
+    end
+
+    for collision in (:regularized, :liu_eq26), mode in (:embedded_axis, :wallfit4)
+        r = run_conformation_cylinder_libb_2d(
+            ; Nx=32, Ny=16, radius=3, cx=8.0, cy=7.5,
+            u_mean=0.005, ν_s=0.06, polymer_model=model,
+            polymer_bc=ExtrapEqWallBC(), max_steps=1, avg_window=1,
+            tau_plus=0.50001, conformation_collision=collision,
+            conformation_gradient_mode=mode,
+            backend=KernelAbstractions.CPU(), FT=Float64,
+        )
+        fluid = .!r.is_solid
+        @test r.conformation_collision === collision
         @test r.conformation_gradient_mode === mode
         @test r.conformation_gradient_stats.mode === mode
         @test r.first_nonfinite_step == 0

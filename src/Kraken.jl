@@ -325,7 +325,10 @@ export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
 
 # Conformation TRT-LBM (Liu et al. 2025)
 export collide_conformation_2d!, collide_conformation_regularized_2d!,
-       collide_conformation_liu_eq26_2d!, init_conformation_field_2d!,
+       collide_conformation_regularized_2d_with_gradient_stencils!,
+       collide_conformation_liu_eq26_2d!,
+       collide_conformation_liu_eq26_2d_with_gradient_stencils!,
+       init_conformation_field_2d!,
        conformation_source_2d
 export compute_conformation_macro_2d!, apply_cnebb_conformation_2d!,
        apply_ylw_a_conformation_2d!, apply_ylw_b_conformation_2d!,
