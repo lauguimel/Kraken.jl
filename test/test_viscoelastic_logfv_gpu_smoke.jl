@@ -399,6 +399,93 @@ end
         @test maximum(brho_h[bfs_fluid]) < 1.05
         @test maximum(abs, bux_h[bfs_fluid]) > 1e-5
 
+        ox_Nx, ox_Ny = 6, 5
+        ox_dt = FT(0.25)
+        ox_u = FT(0.2)
+        ox_solid_h = fill(false, ox_Nx, ox_Ny)
+        ox_solid = _copy_to_backend(backend, ox_solid_h)
+        ox_ux = _copy_to_backend(backend, fill(ox_u, ox_Nx, ox_Ny))
+        ox_uy = _copy_to_backend(backend, fill(FT(0), ox_Nx, ox_Ny))
+        ox_west_u = _copy_to_backend(backend, fill(ox_u, ox_Ny))
+        ox_east_u = _copy_to_backend(backend, fill(ox_u, ox_Ny))
+        ox_ux_face = KernelAbstractions.zeros(backend, FT, ox_Nx + 1, ox_Ny)
+        ox_uy_face = KernelAbstractions.zeros(backend, FT, ox_Nx, ox_Ny + 1)
+        Kraken.logfv_cell_velocity_to_faces_openx_solid_aware_2d!(
+            ox_ux_face, ox_uy_face, ox_ux, ox_uy, ox_solid, ox_west_u, ox_east_u,
+        )
+        ox_axx, ox_axy, ox_ayy = FT(0.03), FT(-0.02), FT(0.01)
+        ox_psixx_h = [FT(0.2) + ox_axx * FT(i) for i in 1:ox_Nx, j in 1:ox_Ny]
+        ox_psixy_h = [FT(-0.1) + ox_axy * FT(i) for i in 1:ox_Nx, j in 1:ox_Ny]
+        ox_psiyy_h = [FT(0.05) + ox_ayy * FT(i) for i in 1:ox_Nx, j in 1:ox_Ny]
+        ox_psixx = _copy_to_backend(backend, ox_psixx_h)
+        ox_psixy = _copy_to_backend(backend, ox_psixy_h)
+        ox_psiyy = _copy_to_backend(backend, ox_psiyy_h)
+        ox_outxx = KernelAbstractions.zeros(backend, FT, ox_Nx, ox_Ny)
+        ox_outxy = KernelAbstractions.zeros(backend, FT, ox_Nx, ox_Ny)
+        ox_outyy = KernelAbstractions.zeros(backend, FT, ox_Nx, ox_Ny)
+        Kraken.logfv_advect_upwind_openx_solid_aware_2d!(
+            ox_outxx, ox_outxy, ox_outyy,
+            ox_psixx, ox_psixy, ox_psiyy,
+            _copy_to_backend(backend, fill(FT(0.2), ox_Ny)),
+            _copy_to_backend(backend, fill(FT(-0.1), ox_Ny)),
+            _copy_to_backend(backend, fill(FT(0.05), ox_Ny)),
+            _copy_to_backend(backend, fill(FT(0.2) + ox_axx * FT(ox_Nx + 1), ox_Ny)),
+            _copy_to_backend(backend, fill(FT(-0.1) + ox_axy * FT(ox_Nx + 1), ox_Ny)),
+            _copy_to_backend(backend, fill(FT(0.05) + ox_ayy * FT(ox_Nx + 1), ox_Ny)),
+            ox_ux_face, ox_uy_face, ox_solid, ox_dt,
+        )
+        ox_outxx_h = Array(ox_outxx)
+        ox_outxy_h = Array(ox_outxy)
+        ox_outyy_h = Array(ox_outyy)
+        for j in 2:(ox_Ny - 1), i in 1:ox_Nx
+            @test Float64(ox_outxx_h[i, j]) ≈ Float64(ox_psixx_h[i, j] - ox_dt * ox_u * ox_axx) atol=atol rtol=atol
+            @test Float64(ox_outxy_h[i, j]) ≈ Float64(ox_psixy_h[i, j] - ox_dt * ox_u * ox_axy) atol=atol rtol=atol
+            @test Float64(ox_outyy_h[i, j]) ≈ Float64(ox_psiyy_h[i, j] - ox_dt * ox_u * ox_ayy) atol=atol rtol=atol
+        end
+
+        bfs_ux_open_h = [bfs_solid_h[i, j] ? FT(0) : FT(0.015) for i in 1:bNx, j in 1:bNy]
+        bfs_ux_open = _copy_to_backend(backend, bfs_ux_open_h)
+        bfs_uy_open = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfs_ux_face = KernelAbstractions.zeros(backend, FT, bNx + 1, bNy)
+        bfs_uy_face = KernelAbstractions.zeros(backend, FT, bNx, bNy + 1)
+        Kraken.logfv_cell_velocity_to_faces_openx_solid_aware_2d!(
+            bfs_ux_face, bfs_uy_face, bfs_ux_open, bfs_uy_open, bfs_solid,
+            _copy_to_backend(backend, fill(FT(0.015), bNy)),
+            _copy_to_backend(backend, fill(FT(0.015), bNy)),
+        )
+        bfs_cxx, bfs_cxy, bfs_cyy = FT(0.25), FT(-0.03), FT(0.11)
+        bfs_psixx = _copy_to_backend(backend, fill(bfs_cxx, bNx, bNy))
+        bfs_psixy = _copy_to_backend(backend, fill(bfs_cxy, bNx, bNy))
+        bfs_psiyy = _copy_to_backend(backend, fill(bfs_cyy, bNx, bNy))
+        bfs_outxx = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfs_outxy = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfs_outyy = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        Kraken.logfv_advect_upwind_openx_solid_aware_2d!(
+            bfs_outxx, bfs_outxy, bfs_outyy,
+            bfs_psixx, bfs_psixy, bfs_psiyy,
+            _copy_to_backend(backend, fill(bfs_cxx, bNy)),
+            _copy_to_backend(backend, fill(bfs_cxy, bNy)),
+            _copy_to_backend(backend, fill(bfs_cyy, bNy)),
+            _copy_to_backend(backend, fill(bfs_cxx, bNy)),
+            _copy_to_backend(backend, fill(bfs_cxy, bNy)),
+            _copy_to_backend(backend, fill(bfs_cyy, bNy)),
+            bfs_ux_face, bfs_uy_face, bfs_solid, FT(0.2),
+        )
+        bfs_outxx_h = Array(bfs_outxx)
+        bfs_outxy_h = Array(bfs_outxy)
+        bfs_outyy_h = Array(bfs_outyy)
+        for j in 1:bNy, i in 1:bNx
+            if bfs_solid_h[i, j]
+                @test bfs_outxx_h[i, j] == 0
+                @test bfs_outxy_h[i, j] == 0
+                @test bfs_outyy_h[i, j] == 0
+            else
+                @test Float64(bfs_outxx_h[i, j]) ≈ Float64(bfs_cxx) atol=atol rtol=atol
+                @test Float64(bfs_outxy_h[i, j]) ≈ Float64(bfs_cxy) atol=atol rtol=atol
+                @test Float64(bfs_outyy_h[i, j]) ≈ Float64(bfs_cyy) atol=atol rtol=atol
+            end
+        end
+
         psixx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psixy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psiyy = KernelAbstractions.zeros(backend, FT, Nx, Ny)

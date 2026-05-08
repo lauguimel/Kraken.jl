@@ -1311,4 +1311,95 @@ end
         outlet_probe = ux[Nx - 2, geom.outlet_open]
         @test sum(outlet_probe) / length(outlet_probe) > 1e-4
     end
+
+    @testset "M8c open-x solid-aware Psi advection is analytical" begin
+        Nx, Ny = 8, 6
+        dt = 0.25
+        u0 = 0.2
+        ux = fill(u0, Nx, Ny)
+        uy = zeros(Float64, Nx, Ny)
+        is_solid = fill(false, Nx, Ny)
+        ux_west = fill(u0, Ny)
+        ux_east = fill(u0, Ny)
+        ux_face = zeros(Float64, Nx + 1, Ny)
+        uy_face = zeros(Float64, Nx, Ny + 1)
+
+        Kraken.logfv_cell_velocity_to_faces_openx_solid_aware_2d!(
+            ux_face, uy_face, ux, uy, is_solid, ux_west, ux_east,
+        )
+        @test all(ux_face .≈ u0)
+        @test all(uy_face .≈ 0.0)
+
+        axx, axy, ayy = 0.03, -0.02, 0.01
+        bxx, bxy, byy = 0.2, -0.1, 0.05
+        psixx = [bxx + axx * i for i in 1:Nx, j in 1:Ny]
+        psixy = [bxy + axy * i for i in 1:Nx, j in 1:Ny]
+        psiyy = [byy + ayy * i for i in 1:Nx, j in 1:Ny]
+        west_xx = fill(bxx, Ny)
+        west_xy = fill(bxy, Ny)
+        west_yy = fill(byy, Ny)
+        east_xx = fill(bxx + axx * (Nx + 1), Ny)
+        east_xy = fill(bxy + axy * (Nx + 1), Ny)
+        east_yy = fill(byy + ayy * (Nx + 1), Ny)
+        outxx = similar(psixx)
+        outxy = similar(psixy)
+        outyy = similar(psiyy)
+
+        Kraken.logfv_advect_upwind_openx_solid_aware_2d!(
+            outxx, outxy, outyy,
+            psixx, psixy, psiyy,
+            west_xx, west_xy, west_yy,
+            east_xx, east_xy, east_yy,
+            ux_face, uy_face, is_solid, dt,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 2:(Ny - 1), i in 1:Nx
+            @test outxx[i, j] ≈ psixx[i, j] - dt * u0 * axx atol=2e-14 rtol=2e-14
+            @test outxy[i, j] ≈ psixy[i, j] - dt * u0 * axy atol=2e-14 rtol=2e-14
+            @test outyy[i, j] ≈ psiyy[i, j] - dt * u0 * ayy atol=2e-14 rtol=2e-14
+        end
+
+        geom = Kraken.backward_facing_step_geometry_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=3, FT=Float64,
+        )
+        Nx2, Ny2 = geom.Nx, geom.Ny
+        ux2 = [geom.is_solid[i, j] ? 0.0 : 0.015 for i in 1:Nx2, j in 1:Ny2]
+        uy2 = zeros(Float64, Nx2, Ny2)
+        ux_west2 = fill(0.015, Ny2)
+        ux_east2 = fill(0.015, Ny2)
+        ux_face2 = zeros(Float64, Nx2 + 1, Ny2)
+        uy_face2 = zeros(Float64, Nx2, Ny2 + 1)
+        Kraken.logfv_cell_velocity_to_faces_openx_solid_aware_2d!(
+            ux_face2, uy_face2, ux2, uy2, geom.is_solid, ux_west2, ux_east2,
+        )
+
+        cxx, cxy, cyy = 0.25, -0.03, 0.11
+        psixx2 = fill(cxx, Nx2, Ny2)
+        psixy2 = fill(cxy, Nx2, Ny2)
+        psiyy2 = fill(cyy, Nx2, Ny2)
+        outxx2 = similar(psixx2)
+        outxy2 = similar(psixy2)
+        outyy2 = similar(psiyy2)
+        Kraken.logfv_advect_upwind_openx_solid_aware_2d!(
+            outxx2, outxy2, outyy2,
+            psixx2, psixy2, psiyy2,
+            fill(cxx, Ny2), fill(cxy, Ny2), fill(cyy, Ny2),
+            fill(cxx, Ny2), fill(cxy, Ny2), fill(cyy, Ny2),
+            ux_face2, uy_face2, geom.is_solid, 0.2,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny2, i in 1:Nx2
+            if geom.is_solid[i, j]
+                @test outxx2[i, j] == 0.0
+                @test outxy2[i, j] == 0.0
+                @test outyy2[i, j] == 0.0
+            else
+                @test outxx2[i, j] ≈ cxx atol=2e-14 rtol=2e-14
+                @test outxy2[i, j] ≈ cxy atol=2e-14 rtol=2e-14
+                @test outyy2[i, j] ≈ cyy atol=2e-14 rtol=2e-14
+            end
+        end
+    end
 end

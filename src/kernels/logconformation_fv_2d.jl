@@ -856,6 +856,60 @@ function logfv_cell_velocity_to_faces_solid_aware_2d!(
     return nothing
 end
 
+@kernel function logfv_cell_velocity_to_faces_openx_solid_aware_2d_kernel!(
+    ux_face, uy_face,
+    @Const(ux), @Const(uy), @Const(is_solid),
+    @Const(ux_west), @Const(ux_east),
+    Nx, Ny,
+)
+    I, J = @index(Global, NTuple)
+    @inbounds begin
+        if I <= Nx + 1 && J <= Ny
+            if I == 1
+                ux_face[I, J] = is_solid[1, J] ? zero(eltype(ux_face)) : ux_west[J]
+            elseif I == Nx + 1
+                ux_face[I, J] = is_solid[Nx, J] ? zero(eltype(ux_face)) : ux_east[J]
+            else
+                i_left = I - 1
+                i_right = I
+                if is_solid[i_left, J] || is_solid[i_right, J]
+                    ux_face[I, J] = zero(eltype(ux_face))
+                else
+                    ux_face[I, J] = (ux[i_left, J] + ux[i_right, J]) / 2
+                end
+            end
+        end
+        if I <= Nx && J <= Ny + 1
+            if J == 1 || J == Ny + 1
+                uy_face[I, J] = zero(eltype(uy_face))
+            else
+                j_down = J - 1
+                j_up = J
+                if is_solid[I, j_down] || is_solid[I, j_up]
+                    uy_face[I, J] = zero(eltype(uy_face))
+                else
+                    uy_face[I, J] = (uy[I, j_down] + uy[I, j_up]) / 2
+                end
+            end
+        end
+    end
+end
+
+function logfv_cell_velocity_to_faces_openx_solid_aware_2d!(
+    ux_face, uy_face, ux, uy, is_solid, ux_west, ux_east;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(ux)
+    Nx, Ny = size(ux)
+    kernel! = logfv_cell_velocity_to_faces_openx_solid_aware_2d_kernel!(backend)
+    kernel!(
+        ux_face, uy_face, ux, uy, is_solid, ux_west, ux_east, Nx, Ny;
+        ndrange=(Nx + 1, Ny + 1),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @inline function _logfv_upwind_scalar_advective_rhs_periodicx_wally_2d(phi, ux_face, uy_face, i, j, Nx)
     im = ifelse(i > 1, i - 1, Nx)
     ip = ifelse(i < Nx, i + 1, 1)
@@ -866,6 +920,34 @@ end
 
     phie = ifelse(ue >= 0, phi[i, j], phi[ip, j])
     phiw = ifelse(uw >= 0, phi[im, j], phi[i, j])
+    phin = ifelse(vn >= 0, phi[i, j], phi[i, j + 1])
+    phis = ifelse(vs >= 0, phi[i, j - 1], phi[i, j])
+
+    flux_div = ue * phie - uw * phiw + vn * phin - vs * phis
+    divu = ue - uw + vn - vs
+    return -(flux_div - phi[i, j] * divu)
+end
+
+@inline function _logfv_upwind_scalar_advective_rhs_openx_wally_2d(
+    phi, west_phi, east_phi, ux_face, uy_face, i, j, Nx,
+)
+    ue = ux_face[i + 1, j]
+    uw = ux_face[i, j]
+    vn = uy_face[i, j + 1]
+    vs = uy_face[i, j]
+
+    phie = if ue >= 0
+        phi[i, j]
+    elseif i < Nx
+        phi[i + 1, j]
+    else
+        east_phi[j]
+    end
+    phiw = if uw >= 0
+        i > 1 ? phi[i - 1, j] : west_phi[j]
+    else
+        phi[i, j]
+    end
     phin = ifelse(vn >= 0, phi[i, j], phi[i, j + 1])
     phis = ifelse(vs >= 0, phi[i, j - 1], phi[i, j])
 
@@ -914,6 +996,66 @@ function logfv_advect_upwind_solid_aware_2d!(
     kernel!(
         psixx_out, psixy_out, psiyy_out,
         psixx, psixy, psiyy,
+        ux_face, uy_face, is_solid, dt, Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+@kernel function logfv_advect_upwind_openx_solid_aware_2d_kernel!(
+    psixx_out, psixy_out, psiyy_out,
+    @Const(psixx), @Const(psixy), @Const(psiyy),
+    @Const(west_xx), @Const(west_xy), @Const(west_yy),
+    @Const(east_xx), @Const(east_xy), @Const(east_yy),
+    @Const(ux_face), @Const(uy_face), @Const(is_solid),
+    dt, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if is_solid[i, j]
+                psixx_out[i, j] = zero(eltype(psixx_out))
+                psixy_out[i, j] = zero(eltype(psixy_out))
+                psiyy_out[i, j] = zero(eltype(psiyy_out))
+            elseif j == 1 || j == Ny
+                psixx_out[i, j] = psixx[i, j]
+                psixy_out[i, j] = psixy[i, j]
+                psiyy_out[i, j] = psiyy[i, j]
+            else
+                rhs_xx = _logfv_upwind_scalar_advective_rhs_openx_wally_2d(
+                    psixx, west_xx, east_xx, ux_face, uy_face, i, j, Nx,
+                )
+                rhs_xy = _logfv_upwind_scalar_advective_rhs_openx_wally_2d(
+                    psixy, west_xy, east_xy, ux_face, uy_face, i, j, Nx,
+                )
+                rhs_yy = _logfv_upwind_scalar_advective_rhs_openx_wally_2d(
+                    psiyy, west_yy, east_yy, ux_face, uy_face, i, j, Nx,
+                )
+                psixx_out[i, j] = psixx[i, j] + dt * rhs_xx
+                psixy_out[i, j] = psixy[i, j] + dt * rhs_xy
+                psiyy_out[i, j] = psiyy[i, j] + dt * rhs_yy
+            end
+        end
+    end
+end
+
+function logfv_advect_upwind_openx_solid_aware_2d!(
+    psixx_out, psixy_out, psiyy_out,
+    psixx, psixy, psiyy,
+    west_xx, west_xy, west_yy,
+    east_xx, east_xy, east_yy,
+    ux_face, uy_face, is_solid, dt;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(psixx_out)
+    Nx, Ny = size(psixx_out)
+    kernel! = logfv_advect_upwind_openx_solid_aware_2d_kernel!(backend)
+    kernel!(
+        psixx_out, psixy_out, psiyy_out,
+        psixx, psixy, psiyy,
+        west_xx, west_xy, west_yy,
+        east_xx, east_xy, east_yy,
         ux_face, uy_face, is_solid, dt, Nx, Ny;
         ndrange=(Nx, Ny),
     )
