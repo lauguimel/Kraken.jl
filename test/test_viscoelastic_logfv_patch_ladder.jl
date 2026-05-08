@@ -60,6 +60,26 @@ function _oldroydb_relax_log(ψxx, ψxy, ψyy, λ, dt)
     return _sym2_log(rxx, rxy, ryy)
 end
 
+function _oldroydb_source_c(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, λ)
+    invλ = inv(λ)
+    return (
+        2 * (cxx * dudx + cxy * dudy) - invλ * (cxx - 1),
+        cxx * dvdx + cyy * dudy + cxy * (dudx + dvdy) - invλ * cxy,
+        2 * (cxy * dvdx + cyy * dvdy) - invλ * (cyy - 1),
+    )
+end
+
+_oldroydb_simple_shear_stationary(γ, λ) = (1 + 2 * (λ * γ)^2, λ * γ, 1.0)
+
+function _oldroydb_simple_shear_from_identity(γ, λ, t)
+    e = exp(-t / λ)
+    return (
+        1 + 2 * λ^2 * γ^2 * (1 - e) - 2 * λ * γ^2 * t * e,
+        λ * γ * (1 - e),
+        1.0,
+    )
+end
+
 function _assert_sym2_close(actual, expected; atol=LOGFV_ATOL, rtol=LOGFV_RTOL)
     @test actual[1] ≈ expected[1] atol=atol rtol=rtol
     @test actual[2] ≈ expected[2] atol=atol rtol=rtol
@@ -146,5 +166,51 @@ end
         c_many = _sym2_exp(ψ...)
         c_once = _oldroydb_relax_c(c0..., λ, nsteps * dt)
         _assert_sym2_close(c_many, c_once; atol=2e-12, rtol=2e-12)
+    end
+
+    @testset "M2 homogeneous simple shear source convention" begin
+        γ_cases = (-0.03, -1e-4, 1e-4, 0.02)
+        λ_cases = (0.5, 3.0, 600.0)
+
+        for γ in γ_cases, λ in λ_cases
+            source_i = _oldroydb_source_c(1.0, 0.0, 1.0, 0.0, γ, 0.0, 0.0, λ)
+            _assert_sym2_close(source_i, (0.0, γ, 0.0))
+
+            csteady = _oldroydb_simple_shear_stationary(γ, λ)
+            source_steady = _oldroydb_source_c(csteady..., 0.0, γ, 0.0, 0.0, λ)
+            _assert_sym2_close(source_steady, (0.0, 0.0, 0.0); atol=5e-12, rtol=5e-12)
+            @test _sym2_min_eig(csteady...) > 0
+        end
+    end
+
+    @testset "M2 homogeneous simple shear exact trajectory from identity" begin
+        γ = 0.015
+        λ = 8.0
+        times = (0.0, 0.1, 1.0, 12.0, 80.0)
+
+        previous_cxy = -Inf
+        for t in times
+            c = _oldroydb_simple_shear_from_identity(γ, λ, t)
+            @test _sym2_min_eig(c...) > 0
+            @test c[2] >= previous_cxy
+            previous_cxy = c[2]
+
+            if t > 0
+                h = max(1e-7, 1e-7 * t)
+                c_plus = _oldroydb_simple_shear_from_identity(γ, λ, t + h)
+                c_minus = _oldroydb_simple_shear_from_identity(γ, λ, t - h)
+                numeric_dt = (
+                    (c_plus[1] - c_minus[1]) / (2h),
+                    (c_plus[2] - c_minus[2]) / (2h),
+                    (c_plus[3] - c_minus[3]) / (2h),
+                )
+                source = _oldroydb_source_c(c..., 0.0, γ, 0.0, 0.0, λ)
+                _assert_sym2_close(numeric_dt, source; atol=2e-8, rtol=2e-8)
+            end
+        end
+
+        c_long = _oldroydb_simple_shear_from_identity(γ, λ, 400λ)
+        csteady = _oldroydb_simple_shear_stationary(γ, λ)
+        _assert_sym2_close(c_long, csteady; atol=1e-12, rtol=1e-12)
     end
 end
