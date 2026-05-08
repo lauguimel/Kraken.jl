@@ -1202,6 +1202,34 @@ end
             end
         end
 
+        tx_xx, ty_xx = 0.07, -0.01
+        tx_xy, ty_xy = -0.03, 0.02
+        tx_yy, ty_yy = 0.04, 0.05
+        tauxx = [0.1 + tx_xx * (i - 0.5) * dx + ty_xx * (j - 0.5) * dy for i in 1:Nx, j in 1:Ny]
+        tauxy = [-0.2 + tx_xy * (i - 0.5) * dx + ty_xy * (j - 0.5) * dy for i in 1:Nx, j in 1:Ny]
+        tauyy = [0.3 + tx_yy * (i - 0.5) * dx + ty_yy * (j - 0.5) * dy for i in 1:Nx, j in 1:Ny]
+        fx_stress = similar(tauxx)
+        fy_stress = similar(tauxx)
+
+        Kraken.logfv_polymer_force_solid_aware_2d!(
+            fx_stress, fy_stress, tauxx, tauxy, tauyy, is_solid, dx, dy,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test fx_stress[i, j] == 0.0
+                @test fy_stress[i, j] == 0.0
+            else
+                expected_fx = (_fluid_x_neighbor(is_solid, i, j) ? tx_xx : 0.0) +
+                              (_fluid_y_neighbor(is_solid, i, j) ? ty_xy : 0.0)
+                expected_fy = (_fluid_x_neighbor(is_solid, i, j) ? tx_xy : 0.0) +
+                              (_fluid_y_neighbor(is_solid, i, j) ? ty_yy : 0.0)
+                @test fx_stress[i, j] ≈ expected_fx atol=5e-14 rtol=5e-14
+                @test fy_stress[i, j] ≈ expected_fy atol=5e-14 rtol=5e-14
+            end
+        end
+
         qxx, qxy = 0.04, -0.01
         qyx, qyy = -0.06, 0.03
         ux_quad = [0.1 + qxx * ((i - 0.5) * dx)^2 + qxy * ((j - 0.5) * dy)^2

@@ -271,6 +271,39 @@ end
             end
         end
 
+        btx_xx, bty_xx = FT(0.07), FT(-0.01)
+        btx_xy, bty_xy = FT(-0.03), FT(0.02)
+        btx_yy, bty_yy = FT(0.04), FT(0.05)
+        btauxx_h = [FT(0.1) + btx_xx * (FT(i) - FT(0.5)) * bdx + bty_xx * (FT(j) - FT(0.5)) * bdy
+                    for i in 1:bNx, j in 1:bNy]
+        btauxy_h = [FT(-0.2) + btx_xy * (FT(i) - FT(0.5)) * bdx + bty_xy * (FT(j) - FT(0.5)) * bdy
+                    for i in 1:bNx, j in 1:bNy]
+        btauyy_h = [FT(0.3) + btx_yy * (FT(i) - FT(0.5)) * bdx + bty_yy * (FT(j) - FT(0.5)) * bdy
+                    for i in 1:bNx, j in 1:bNy]
+        btauxx = _copy_to_backend(backend, btauxx_h)
+        btauxy = _copy_to_backend(backend, btauxy_h)
+        btauyy = _copy_to_backend(backend, btauyy_h)
+        bfx_stress = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfy_stress = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        Kraken.logfv_polymer_force_solid_aware_2d!(
+            bfx_stress, bfy_stress, btauxx, btauxy, btauyy, bfs_solid, bdx, bdy,
+        )
+        bfx_stress_h = Array(bfx_stress)
+        bfy_stress_h = Array(bfy_stress)
+        for j in 1:bNy, i in 1:bNx
+            if bfs_solid_h[i, j]
+                @test bfx_stress_h[i, j] == 0
+                @test bfy_stress_h[i, j] == 0
+            else
+                expected_fx = (_gpu_fluid_x_neighbor(bfs_solid_h, i, j) ? btx_xx : FT(0)) +
+                              (_gpu_fluid_y_neighbor(bfs_solid_h, i, j) ? bty_xy : FT(0))
+                expected_fy = (_gpu_fluid_x_neighbor(bfs_solid_h, i, j) ? btx_xy : FT(0)) +
+                              (_gpu_fluid_y_neighbor(bfs_solid_h, i, j) ? bty_yy : FT(0))
+                @test Float64(bfx_stress_h[i, j]) ≈ Float64(expected_fx) atol=atol rtol=atol
+                @test Float64(bfy_stress_h[i, j]) ≈ Float64(expected_fy) atol=atol rtol=atol
+            end
+        end
+
         bqxx, bqxy = FT(0.04), FT(-0.01)
         bqyx, bqyy = FT(-0.06), FT(0.03)
         bux_quad_h = [FT(0.1) + bqxx * ((FT(i) - FT(0.5)) * bdx)^2 +
