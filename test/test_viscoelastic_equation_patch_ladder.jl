@@ -3590,14 +3590,26 @@ end
         common..., drag_mode=:post_source_mea, allow_diagnostic_force_mode=true,
     )
     split = run_conformation_cylinder_libb_2d(; common..., drag_mode=:explicit_split)
+    integrated_auto = run_conformation_cylinder_libb_2d(;
+        common..., solvent_source_mode=:integrated_collision,
+    )
+    integrated_post = run_conformation_cylinder_libb_2d(;
+        common..., solvent_source_mode=:integrated_collision,
+        drag_mode=:post_source_mea,
+    )
 
     @test auto.drag_mode === :explicit_split
     @test auto.solvent_source_on_cutlinks === true
     @test post.drag_mode === :post_source_mea
     @test split.drag_mode === :explicit_split
+    @test integrated_auto.drag_mode === :post_source_mea
+    @test integrated_post.drag_mode === :post_source_mea
     @test auto.Cd ≈ auto.Cd_split_explicit atol=P0_ATOL
     @test post.Cd ≈ post.Cd_mea_post_source atol=P0_ATOL
     @test split.Cd ≈ split.Cd_split_explicit atol=P0_ATOL
+    @test integrated_auto.Cd ≈ integrated_auto.Cd_mea_post_source atol=P0_ATOL
+    @test integrated_post.Cd ≈ integrated_auto.Cd atol=P0_ATOL
+    @test isnan(integrated_auto.Cd_split_explicit)
     @test post.Cd_mea_post_source ≈ split.Cd_mea_post_source atol=P0_ATOL
     @test post.Cd_split_explicit ≈ split.Cd_split_explicit atol=P0_ATOL
     @test abs(post.Cd_mea_post_source - post.Cd_split_explicit) > 1e-3

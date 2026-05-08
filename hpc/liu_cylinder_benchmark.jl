@@ -3,8 +3,9 @@
 # Uses `run_conformation_cylinder_libb_2d`:
 #   - Fused TRT + Bouzidi LI-BB V2 for the solvent flow (curved cylinder)
 #   - Modular BCSpec: ZouHeVelocity(Poiseuille) inlet + ZouHePressure outlet
-#   - Explicit split drag by default. Post-source MEA remains available through
-#     KRAKEN_DRAG_MODE for audit-only Liu/Yu force-accounting comparisons.
+#   - Liu-style integrated source + post-source MEA drag by default. The
+#     standalone post-collision source + explicit split remains available
+#     through KRAKEN_SOLVENT_SOURCE_MODE/KRAKEN_DRAG_MODE for audits.
 #   - Selectable conformation collision + polymer wall BC + Hermite stress source
 #
 # Liu setup (Table 3, CNEBB, Sc=10⁴):
@@ -151,11 +152,13 @@ steps = parse(Int, get(ENV, "KRAKEN_STEPS", "200000"))
 avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR", "5"))
 drag_stride = parse(Int, get(ENV, "KRAKEN_DRAG_STRIDE", "200"))
 run_newtonian = get(ENV, "KRAKEN_RUN_NEWTONIAN", "1") == "1"
-drag_mode = Symbol(get(ENV, "KRAKEN_DRAG_MODE", "explicit_split"))
 hermite_source_mode =
     Symbol(get(ENV, "KRAKEN_HERMITE_SOURCE_MODE", "liu_direct"))
 solvent_source_mode =
-    Symbol(get(ENV, "KRAKEN_SOLVENT_SOURCE_MODE", "post_collision"))
+    Symbol(get(ENV, "KRAKEN_SOLVENT_SOURCE_MODE", "integrated_collision"))
+drag_mode = Symbol(get(ENV, "KRAKEN_DRAG_MODE",
+                       solvent_source_mode === :integrated_collision ?
+                       "post_source_mea" : "explicit_split"))
 source_stress_reconstruction =
     Symbol(get(ENV, "KRAKEN_SOURCE_STRESS_RECONSTRUCTION", "interior"))
 source_stress_reconstruction_order =
@@ -179,7 +182,9 @@ conformation_divergence_mode =
 conformation_initial_condition =
     Symbol(get(ENV, "KRAKEN_CONFORMATION_INITIAL_CONDITION", "inlet_profile"))
 allow_diagnostic_force_mode =
-    drag_mode in (:post_source_mea, :source_scaled_mea)
+    drag_mode === :source_scaled_mea ||
+    (drag_mode === :post_source_mea &&
+     solvent_source_mode === :post_collision)
 allow_diagnostic_conformation_collision =
     get(ENV, "KRAKEN_ALLOW_DIAGNOSTIC_CONFORMATION_COLLISION", "0") == "1"
 wall_geometry =

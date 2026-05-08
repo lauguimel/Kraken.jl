@@ -531,13 +531,17 @@ Confined-cylinder Oldroyd-B benchmark using:
 - `:uniform` inlet:   u_mean = u_in  (plug flow)
 
 `drag_mode` controls the reported `Cd`:
-- `:auto` (default): uses `:explicit_split`.
-- `:post_source_mea`: raw MEA after source injection. It is audit-only for
-  viscoelastic wall validation because the Hermite population source is not a
-  physical surface-traction quadrature, even when applied on cut-link cells.
+- `:auto` (default): uses `:explicit_split` for the standalone post-collision
+  source path and `:post_source_mea` when the Hermite source is fused into the
+  solvent collision.
+- `:post_source_mea`: MEA after source injection. It is audit-only for the
+  standalone post-collision source path because the Hermite population source
+  is not a physical surface-traction quadrature, even when applied on cut-link
+  cells. For `solvent_source_mode=:integrated_collision`, this is the total
+  Liu/Yu-style force path.
 - `:explicit_split`: `Cd = Cd_s + Cd_p`, combining solvent MEA before source
   with the explicit polymer surface-traction integral. This is the validation
-  force path.
+  force path for the standalone post-collision source path.
 - `:source_scaled_mea`: diagnostic cancellation path retained for audits only;
   callers must pass `allow_diagnostic_force_mode=true`.
 
@@ -651,7 +655,8 @@ function run_conformation_cylinder_libb_2d(;
     _assert_validation_polymer_wall_bc(polymer_bc;
                                        allow_diagnostic=allow_diagnostic_polymer_bc)
     if drag_mode === :auto
-        drag_mode = :explicit_split
+        drag_mode = solvent_source_mode === :integrated_collision ?
+            :post_source_mea : :explicit_split
     end
     if drag_mode === :source_scaled_mea && !allow_diagnostic_force_mode
         error("drag_mode=:source_scaled_mea is a diagnostic cancellation path, not a validation force law; use :explicit_split or pass allow_diagnostic_force_mode=true in audit code.")
