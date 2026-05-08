@@ -59,6 +59,7 @@ include("kernels/viscoelastic_2d.jl")
 include("kernels/conformation_lbm_2d.jl")
 include("kernels/conformation_lbm_3d.jl")
 include("kernels/logconformation_lbm_2d.jl")
+include("kernels/logconformation_fv_2d.jl")
 include("kernels/collide_viscoelastic_source_2d.jl")
 include("kernels/collide_viscoelastic_guo_2d.jl")
 # `kernels/viscoelastic_3d.jl` dispatches `update_polymer_stress_3d!` on

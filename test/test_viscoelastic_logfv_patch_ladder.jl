@@ -1,5 +1,6 @@
 using Test
 using LinearAlgebra
+using Kraken
 
 const LOGFV_ATOL = 1e-12
 const LOGFV_RTOL = 1e-12
@@ -7,66 +8,29 @@ const LOGFV_RTOL = 1e-12
 _sym2_mat(a, b, d) = [a b; b d]
 
 function _sym2_min_eig(a, b, d)
-    m = 0.5 * (a + d)
-    h = 0.5 * (a - d)
-    return m - hypot(h, b)
+    return Kraken.logfv_min_eig_sym2_2d(a, b, d)
 end
 
 function _sym2_exp(a, b, d)
-    m = 0.5 * (a + d)
-    h = 0.5 * (a - d)
-    δ = hypot(h, b)
-    em = exp(m)
-    scale = ifelse(δ < sqrt(eps(typeof(δ))), one(δ) + δ^2 / 6, sinh(δ) / δ)
-    ch = cosh(δ)
-    return (
-        em * (ch + scale * h),
-        em * scale * b,
-        em * (ch - scale * h),
-    )
+    return Kraken.logfv_exp_sym2_2d(a, b, d)
 end
 
 function _sym2_log(a, b, d)
     λmin = _sym2_min_eig(a, b, d)
     λmin > 0 || throw(DomainError(λmin, "symmetric 2x2 log requires SPD input"))
-    m = 0.5 * (a + d)
-    h = 0.5 * (a - d)
-    δ = hypot(h, b)
-    α = 0.5 * (log(m + δ) + log(m - δ))
-    β = if δ < sqrt(eps(typeof(δ))) * max(one(m), abs(m))
-        inv(m) + δ^2 / (3 * m^3)
-    else
-        0.5 * (log(m + δ) - log(m - δ)) / δ
-    end
-    return (
-        α + β * h,
-        β * b,
-        α - β * h,
-    )
+    return Kraken.logfv_log_spd_sym2_2d(a, b, d)
 end
 
 function _oldroydb_relax_c(cxx, cxy, cyy, λ, dt)
-    decay = exp(-dt / λ)
-    return (
-        1 + (cxx - 1) * decay,
-        cxy * decay,
-        1 + (cyy - 1) * decay,
-    )
+    return Kraken.logfv_oldroydb_relax_c_2d(cxx, cxy, cyy, λ, dt)
 end
 
 function _oldroydb_relax_log(ψxx, ψxy, ψyy, λ, dt)
-    cxx, cxy, cyy = _sym2_exp(ψxx, ψxy, ψyy)
-    rxx, rxy, ryy = _oldroydb_relax_c(cxx, cxy, cyy, λ, dt)
-    return _sym2_log(rxx, rxy, ryy)
+    return Kraken.logfv_oldroydb_relax_log_2d(ψxx, ψxy, ψyy, λ, dt)
 end
 
 function _oldroydb_source_c(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, λ)
-    invλ = inv(λ)
-    return (
-        2 * (cxx * dudx + cxy * dudy) - invλ * (cxx - 1),
-        cxx * dvdx + cyy * dudy + cxy * (dudx + dvdy) - invλ * cxy,
-        2 * (cxy * dvdx + cyy * dvdy) - invλ * (cyy - 1),
-    )
+    return Kraken.logfv_oldroydb_source_c_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, λ)
 end
 
 _oldroydb_simple_shear_stationary(γ, λ) = (1 + 2 * (λ * γ)^2, λ * γ, 1.0)
@@ -81,27 +45,11 @@ function _oldroydb_simple_shear_from_identity(γ, λ, t)
 end
 
 function _upwind_scalar_advective_rhs(φ, ux_face, uy_face, i, j)
-    ue = ux_face[i + 1, j]
-    uw = ux_face[i, j]
-    vn = uy_face[i, j + 1]
-    vs = uy_face[i, j]
-
-    φe = ifelse(ue >= 0, φ[i, j], φ[i + 1, j])
-    φw = ifelse(uw >= 0, φ[i - 1, j], φ[i, j])
-    φn = ifelse(vn >= 0, φ[i, j], φ[i, j + 1])
-    φs = ifelse(vs >= 0, φ[i, j - 1], φ[i, j])
-
-    flux_div = ue * φe - uw * φw + vn * φn - vs * φs
-    divu = ue - uw + vn - vs
-    return -(flux_div - φ[i, j] * divu)
+    return Kraken.logfv_upwind_scalar_advective_rhs_2d(φ, ux_face, uy_face, i, j)
 end
 
 function _upwind_tensor_advective_rhs(ψxx, ψxy, ψyy, ux_face, uy_face, i, j)
-    return (
-        _upwind_scalar_advective_rhs(ψxx, ux_face, uy_face, i, j),
-        _upwind_scalar_advective_rhs(ψxy, ux_face, uy_face, i, j),
-        _upwind_scalar_advective_rhs(ψyy, ux_face, uy_face, i, j),
-    )
+    return Kraken.logfv_upwind_tensor_advective_rhs_2d(ψxx, ψxy, ψyy, ux_face, uy_face, i, j)
 end
 
 _periodic(i, n) = mod1(i, n)
