@@ -144,7 +144,7 @@ variants = [_liu_variant(name) for name in
 models = _parse_symbol_list(get(ENV, "KRAKEN_MODELS",
                                 get(ENV, "KRAKEN_FORMULATIONS", "direct")))
 β = parse(Float64, get(ENV, "KRAKEN_BETA", "0.59"))
-u_mean = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.02"))
+u_mean = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.005"))
 steps_low_wi = parse(Int, get(ENV, "KRAKEN_STEPS_LOW_WI", "100000"))
 steps = parse(Int, get(ENV, "KRAKEN_STEPS", "200000"))
 avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR", "5"))
