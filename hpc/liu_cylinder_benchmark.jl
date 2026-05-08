@@ -12,6 +12,7 @@
 #   - Re = 1, β = 0.59
 #   - Re = U_avg · R / ν_total (L_c = R, NOT D)
 #   - Cd = Fx / (0.5 ρ U_avg² D)   — Liu Eq 64
+#   - Λs = 1/4, Λp = 2.5e-7 for the cylinder section
 #
 # Reference values (R=30, CNEBB, Sc=10⁴):
 #   Wi=0.1 → Cd ≈ 130.36
@@ -20,7 +21,7 @@
 #
 # By default this script uses the direct-C regularized Liu Eq. 26 collision
 # window validated by the patch ladder: τp,+≈0.5 with Liu's small polymer TRT
-# magic parameter (`Λp=1e-6`; the cylinder section also reports `2.5e-7`).
+# magic parameter.
 #
 # Usage:
 #   julia --project=. hpc/liu_cylinder_benchmark.jl
@@ -165,8 +166,10 @@ solvent_source_on_domain_walls =
     get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_DOMAIN_WALLS", "0") == "1"
 solvent_source_on_cutlinks =
     get(ENV, "KRAKEN_SOLVENT_SOURCE_ON_CUTLINKS", "1") == "1"
+solvent_magic =
+    parse(Float64, get(ENV, "KRAKEN_SOLVENT_MAGIC", "0.25"))
 conformation_magic =
-    parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "1e-6"))
+    parse(Float64, get(ENV, "KRAKEN_CONFORMATION_MAGIC", "2.5e-7"))
 conformation_collision =
     Symbol(get(ENV, "KRAKEN_CONFORMATION_COLLISION", "liu_eq26"))
 Sc = parse(Float64, get(ENV, "KRAKEN_SC", "1e4"))
@@ -193,7 +196,7 @@ end
 println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
 println("VARIANTS=$(join((v.label for v in variants), ","))")
 println("MODELS=$(join(models, ","))")
-println("beta=$β u_mean=$u_mean Sc=$Sc steps_low_wi=$steps_low_wi steps=$steps avg_divisor=$avg_divisor drag_stride=$drag_stride run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks tau_plus_override=$(isempty(tau_plus_override) ? "none" : tau_plus_override) conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
+println("beta=$β u_mean=$u_mean Sc=$Sc steps_low_wi=$steps_low_wi steps=$steps avg_divisor=$avg_divisor drag_stride=$drag_stride run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks solvent_magic=$solvent_magic tau_plus_override=$(isempty(tau_plus_override) ? "none" : tau_plus_override) conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
 allow_diagnostic_force_mode &&
     println("WARNING: KRAKEN_DRAG_MODE=$drag_mode is audit-only; Cd_report is not the validation force path.")
 
@@ -221,6 +224,7 @@ for R in R_values
             u_in=FT(1.5 * u_mean), ν=FT(ν_total), inlet=:parabolic,
             max_steps=max_steps_newt, avg_window=avg_window_newt,
             drag_stride=drag_stride,
+            solvent_magic=solvent_magic,
             backend=backend, T=FT,
         )
         dt = time() - t0
@@ -259,6 +263,7 @@ for R in R_values
                 drag_mode=drag_mode,
                 hermite_source_mode=hermite_source_mode,
                 solvent_source_mode=solvent_source_mode,
+                solvent_magic=solvent_magic,
                 source_stress_reconstruction=source_stress_reconstruction,
                 source_stress_reconstruction_order=source_stress_reconstruction_order,
                 source_scale_dynamics=source_scale_dynamics,

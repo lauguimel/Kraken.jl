@@ -1836,6 +1836,7 @@ end
     @test liu_tau_values[3] ≈ 0.5001416 atol=5e-13
 
     for collision in (:regularized, :liu_eq26),
+        magic in (1e-6, 2.5e-7),
         tau_plus in liu_tau_values,
         component in 1:3
 
@@ -1843,7 +1844,7 @@ end
             collision; tau_plus, λ, dudx=0.0, dudy=γ,
             dvdx=0.0, dvdy=0.0,
             cxx=1.0 + 2.0 * (λ * γ)^2, cxy=λ * γ, cyy=1.0,
-            component,
+            magic, component,
         )
         @test abs(fixed.mass) < 5e-13
         @test abs(fixed.mom_x) < 5e-13
@@ -1852,7 +1853,7 @@ end
 
         source = _collision_patch_moments(
             collision; tau_plus, λ, dudx=0.0, dudy=γ,
-            dvdx=0.0, dvdy=0.0, component=2,
+            dvdx=0.0, dvdy=0.0, magic, component=2,
         )
         coeff = 1.0 - 0.5 / tau_plus
         @test source.mass ≈ γ atol=5e-13
