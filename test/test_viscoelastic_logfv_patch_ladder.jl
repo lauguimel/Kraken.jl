@@ -430,6 +430,41 @@ end
         end
     end
 
+    @testset "M2c solid-aware velocity gradient does not read through obstacles" begin
+        Nx, Ny = 10, 9
+        dx, dy = 0.3, 0.2
+        ax, ay = 0.04, -0.03
+        bx, by = -0.02, 0.05
+        ux = [0.12 + ax * ((i - 0.5) * dx) + ay * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        uy = [-0.08 + bx * ((i - 0.5) * dx) + by * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        is_solid = falses(Nx, Ny)
+        is_solid[4:6, 4:6] .= true
+        dudx = similar(ux)
+        dudy = similar(ux)
+        dvdx = similar(ux)
+        dvdy = similar(ux)
+
+        Kraken.logfv_velocity_gradient_solid_aware_2d!(dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test dudx[i, j] == 0.0
+                @test dudy[i, j] == 0.0
+                @test dvdx[i, j] == 0.0
+                @test dvdy[i, j] == 0.0
+                continue
+            end
+
+            x_has_neighbor = (i > 1 && !is_solid[i - 1, j]) || (i < Nx && !is_solid[i + 1, j])
+            y_has_neighbor = (j > 1 && !is_solid[i, j - 1]) || (j < Ny && !is_solid[i, j + 1])
+            @test dudx[i, j] ≈ (x_has_neighbor ? ax : 0.0) atol=3e-15 rtol=3e-15
+            @test dvdx[i, j] ≈ (x_has_neighbor ? bx : 0.0) atol=3e-15 rtol=3e-15
+            @test dudy[i, j] ≈ (y_has_neighbor ? ay : 0.0) atol=3e-15 rtol=3e-15
+            @test dvdy[i, j] ≈ (y_has_neighbor ? by : 0.0) atol=3e-15 rtol=3e-15
+        end
+    end
+
     @testset "M3 divergence-corrected upwind preserves constant Psi" begin
         Nx, Ny = 9, 8
         ux_face = [0.17 + 0.021 * (i - 1) - 0.013 * (j - 1) for i in 1:(Nx + 1), j in 1:Ny]

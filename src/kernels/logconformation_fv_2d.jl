@@ -497,6 +497,88 @@ function logfv_velocity_gradient_periodicx_wally_2d!(
     return nothing
 end
 
+@inline function _logfv_solid_aware_derivative_x_2d(field, is_solid, i, j, Nx, inv_dx, inv_2dx)
+    T = eltype(field)
+    left = i > 1 && !is_solid[i - 1, j]
+    right = i < Nx && !is_solid[i + 1, j]
+    if left && right
+        return (field[i + 1, j] - field[i - 1, j]) * inv_2dx
+    elseif right
+        right2 = i + 2 <= Nx && !is_solid[i + 2, j]
+        return right2 ?
+               (-T(3) * field[i, j] + T(4) * field[i + 1, j] - field[i + 2, j]) * inv_2dx :
+               (field[i + 1, j] - field[i, j]) * inv_dx
+    elseif left
+        left2 = i - 2 >= 1 && !is_solid[i - 2, j]
+        return left2 ?
+               (T(3) * field[i, j] - T(4) * field[i - 1, j] + field[i - 2, j]) * inv_2dx :
+               (field[i, j] - field[i - 1, j]) * inv_dx
+    else
+        return zero(T)
+    end
+end
+
+@inline function _logfv_solid_aware_derivative_y_2d(field, is_solid, i, j, Ny, inv_dy, inv_2dy)
+    T = eltype(field)
+    down = j > 1 && !is_solid[i, j - 1]
+    up = j < Ny && !is_solid[i, j + 1]
+    if down && up
+        return (field[i, j + 1] - field[i, j - 1]) * inv_2dy
+    elseif up
+        up2 = j + 2 <= Ny && !is_solid[i, j + 2]
+        return up2 ?
+               (-T(3) * field[i, j] + T(4) * field[i, j + 1] - field[i, j + 2]) * inv_2dy :
+               (field[i, j + 1] - field[i, j]) * inv_dy
+    elseif down
+        down2 = j - 2 >= 1 && !is_solid[i, j - 2]
+        return down2 ?
+               (T(3) * field[i, j] - T(4) * field[i, j - 1] + field[i, j - 2]) * inv_2dy :
+               (field[i, j] - field[i, j - 1]) * inv_dy
+    else
+        return zero(T)
+    end
+end
+
+@kernel function logfv_velocity_gradient_solid_aware_2d_kernel!(
+    dudx, dudy, dvdx, dvdy,
+    @Const(ux), @Const(uy), @Const(is_solid),
+    inv_dx, inv_dy, inv_2dx, inv_2dy, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if is_solid[i, j]
+                dudx[i, j] = zero(eltype(dudx))
+                dudy[i, j] = zero(eltype(dudy))
+                dvdx[i, j] = zero(eltype(dvdx))
+                dvdy[i, j] = zero(eltype(dvdy))
+            else
+                dudx[i, j] = _logfv_solid_aware_derivative_x_2d(ux, is_solid, i, j, Nx, inv_dx, inv_2dx)
+                dudy[i, j] = _logfv_solid_aware_derivative_y_2d(ux, is_solid, i, j, Ny, inv_dy, inv_2dy)
+                dvdx[i, j] = _logfv_solid_aware_derivative_x_2d(uy, is_solid, i, j, Nx, inv_dx, inv_2dx)
+                dvdy[i, j] = _logfv_solid_aware_derivative_y_2d(uy, is_solid, i, j, Ny, inv_dy, inv_2dy)
+            end
+        end
+    end
+end
+
+function logfv_velocity_gradient_solid_aware_2d!(
+    dudx, dudy, dvdx, dvdy,
+    ux, uy, is_solid, dx, dy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(ux)
+    Nx, Ny = size(ux)
+    kernel! = logfv_velocity_gradient_solid_aware_2d_kernel!(backend)
+    kernel!(
+        dudx, dudy, dvdx, dvdy,
+        ux, uy, is_solid, inv(dx), inv(dy), inv(2 * dx), inv(2 * dy), Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_fill_nearest_boundary_2d_kernel!(fx, fy, Nx, Ny)
     i, j = @index(Global, NTuple)
     @inbounds begin
