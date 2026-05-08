@@ -565,6 +565,20 @@ end
         @test all(isfinite, coupled_bfs.psixx)
         @test all(isfinite, coupled_bfs.fx_total)
 
+        low_beta_bfs = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+            H_in=3, expansion_ratio=2, L_up=2, L_down=2,
+            nu_s=0.002, nu_p=0.098, lambda=50.0,
+            u_mean=0.003, Fx_body=5e-8,
+            bsd_fraction=1.0, max_steps=1,
+            backend=backend, T=FT,
+        )
+        @test low_beta_bfs.nu_lbm ≈ low_beta_bfs.nu_total
+        @test low_beta_bfs.min_c_eig > 0.8
+        @test low_beta_bfs.rho_min > 0.95
+        @test low_beta_bfs.rho_max < 1.05
+        @test all(isfinite, low_beta_bfs.psixx)
+        @test all(isfinite, low_beta_bfs.fx_total)
+
         @info "Log-FV GPU smoke passed" backend=backend_name FT=FT substeps=coupled.polymer_substeps square_substeps=square.polymer_substeps low_beta_square_substeps=low_beta_square.polymer_substeps
     end
 end

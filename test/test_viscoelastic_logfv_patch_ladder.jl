@@ -1494,4 +1494,43 @@ end
         @test all(isfinite, coupled.tauxx)
         @test all(isfinite, coupled.fx_total)
     end
+
+    @testset "M8f BFS coupled low-beta sweep stays SPD and bounded" begin
+        cases = (
+            (nu_s=0.005, nu_p=0.095, lambda=10.0, u_mean=0.005, Fx_body=1e-7),
+            (nu_s=0.002, nu_p=0.098, lambda=50.0, u_mean=0.005, Fx_body=1e-7),
+            (nu_s=0.002, nu_p=0.098, lambda=200.0, u_mean=0.003, Fx_body=5e-8),
+        )
+
+        for case in cases
+            result = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+                H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+                nu_s=case.nu_s, nu_p=case.nu_p, lambda=case.lambda,
+                u_mean=case.u_mean, Fx_body=case.Fx_body,
+                bsd_fraction=1.0, max_steps=30,
+                backend=KernelAbstractions.CPU(), T=Float64,
+            )
+            beta = result.nu_s / result.nu_total
+
+            @test beta <= 0.05
+            @test result.bsd_fraction == 1.0
+            @test result.nu_lbm ≈ result.nu_total
+            @test result.polymer_substeps >= 1
+            @test !result.subcycle_estimate.clamped
+            @test result.min_c_eig > 0.8
+            @test result.max_abs_psi < 0.25
+            @test result.max_abs_tau < 1.5e-3
+            @test result.max_speed > 1e-4
+            @test result.max_speed < 0.02
+            @test result.rho_min > 0.995
+            @test result.rho_max < 1.01
+            @test all(isfinite, result.ux)
+            @test all(isfinite, result.uy)
+            @test all(isfinite, result.psixx)
+            @test all(isfinite, result.psixy)
+            @test all(isfinite, result.psiyy)
+            @test all(isfinite, result.fx_total)
+            @test all(isfinite, result.fy_total)
+        end
+    end
 end
