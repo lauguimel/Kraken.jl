@@ -43,6 +43,13 @@ struct ConservativeTreeGPUCellPack2D{T,AId,ALevel,AActive,AVolume}
     cell_volume::AVolume
 end
 
+struct ConservativeTreeGPUParentChildPack2D{AParent,AChild}
+    parent_level::Int32
+    nparents::Int32
+    parent_ids::AParent
+    child_ids::AChild
+end
+
 function _copy_conservative_tree_gpu_array_2d(backend, host::AbstractArray{T}) where T
     dev = KernelAbstractions.allocate(backend, T, size(host)...)
     copyto!(dev, host)
@@ -286,6 +293,40 @@ function transfer_conservative_tree_gpu_cell_pack_2d(
             cell_active, cell_volume)
 end
 
+function pack_conservative_tree_gpu_parent_children_2d(
+        spec::ConservativeTreeSpec2D,
+        parent_level::Integer)
+    l = Int(parent_level)
+    0 <= l < spec.max_level ||
+        throw(ArgumentError("parent_level must identify an adjacent level pair"))
+    parent_ids = Int32[]
+    @inbounds for (cell_id, cell) in pairs(spec.cells)
+        cell.level == l || continue
+        spec.children[cell_id] == (0, 0, 0, 0) && continue
+        push!(parent_ids, Int32(cell_id))
+    end
+    child_ids = zeros(Int32, 4, length(parent_ids))
+    @inbounds for (slot, parent_id) in pairs(parent_ids)
+        children = spec.children[Int(parent_id)]
+        for child_slot in 1:4
+            child_ids[child_slot, slot] = Int32(children[child_slot])
+        end
+    end
+    return ConservativeTreeGPUParentChildPack2D{typeof(parent_ids),
+        typeof(child_ids)}(Int32(l), Int32(length(parent_ids)), parent_ids,
+                           child_ids)
+end
+
+function transfer_conservative_tree_gpu_parent_child_pack_2d(
+        pack::ConservativeTreeGPUParentChildPack2D,
+        backend)
+    parent_ids = _copy_conservative_tree_gpu_array_2d(backend, pack.parent_ids)
+    child_ids = _copy_conservative_tree_gpu_array_2d(backend, pack.child_ids)
+    return ConservativeTreeGPUParentChildPack2D{typeof(parent_ids),
+        typeof(child_ids)}(pack.parent_level, pack.nparents, parent_ids,
+                           child_ids)
+end
+
 @inline function _conservative_tree_gpu_level_row_selected_2d(
         cell_level, cell_active, cell::Int, level::UInt8, active_only::Bool)
     cell_level[cell] == level || return false
@@ -396,6 +437,49 @@ function zero_conservative_tree_gpu_level_rows_2d!(
     kernel! = _zero_conservative_tree_gpu_level_rows_2d_kernel!(backend)
     kernel!(F, pack.cell_level, pack.cell_active, pack.n_cells,
             UInt8(level), active_only; ndrange=Int(pack.n_cells) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
+@kernel function _apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d_kernel!(
+        F, @Const(coarse_to_fine), @Const(child_ids), nparents::Int32,
+        substep::Int32)
+    linear = @index(Global)
+    total = Int(nparents) * 4 * 9
+    @inbounds if linear <= total
+        slot = (linear - 1) ÷ 36 + 1
+        rem = (linear - 1) % 36
+        child_slot = rem ÷ 9 + 1
+        q = rem % 9 + 1
+        child_id = Int(child_ids[child_slot, slot])
+        if child_id != 0
+            ix = (child_slot - 1) % 2 + 1
+            iy = (child_slot - 1) ÷ 2 + 1
+            F[child_id, q] += coarse_to_fine[ix, iy, q, Int(substep), slot]
+        end
+    end
+end
+
+function apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d!(
+        F::AbstractMatrix,
+        coarse_to_fine::AbstractArray,
+        pack::ConservativeTreeGPUParentChildPack2D,
+        substep::Integer;
+        sync::Bool=true)
+    step = Int(substep)
+    step >= 1 || throw(ArgumentError("substep must be positive"))
+    size(F, 2) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations"))
+    size(coarse_to_fine, 1) == 2 && size(coarse_to_fine, 2) == 2 &&
+        size(coarse_to_fine, 3) == 9 ||
+        throw(ArgumentError("coarse_to_fine must have dimensions 2 x 2 x 9 x ratio x nparents"))
+    step <= size(coarse_to_fine, 4) ||
+        throw(ArgumentError("substep is outside the coarse_to_fine ledger"))
+    size(coarse_to_fine, 5) == Int(pack.nparents) ||
+        throw(ArgumentError("coarse_to_fine parent count must match pack"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d_kernel!(backend)
+    kernel!(F, coarse_to_fine, pack.child_ids, pack.nparents, Int32(step);
+            ndrange=Int(pack.nparents) * 4 * 9)
     sync && KernelAbstractions.synchronize(backend)
     return F
 end

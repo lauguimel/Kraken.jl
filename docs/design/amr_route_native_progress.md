@@ -43,6 +43,8 @@ Implemented:
   the CPU AMR-D reference;
 - direct-level BGK/Guo advance wrappers matching CPU collision plus direct
   route streaming;
+- GPU parent/child packs and coarse-to-fine ledger apply kernel for
+  `ghost_from_coarse` injection;
 - local Metal smoke guarded by `KRAKEN_TEST_METAL=1`.
 
 Validation:

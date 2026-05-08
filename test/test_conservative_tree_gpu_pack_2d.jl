@@ -240,6 +240,40 @@ using KernelAbstractions
         @test isapprox(Fout_gpu, Fout_ref; atol=1e-14, rtol=0)
     end
 
+    @testset "coarse-to-fine ledger apply kernel matches CPU ledger apply" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ])
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(
+            spec.max_level)
+        bank = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+            spec; schedule=schedule, T=Float64)
+        parent_level = 1
+        pair = bank.ledger_pairs[parent_level + 1]
+        for slot in axes(pair.coarse_to_fine, 5),
+            substep in axes(pair.coarse_to_fine, 4),
+            q in 1:9, iy in 1:2, ix in 1:2
+            pair.coarse_to_fine[ix, iy, q, substep, slot] =
+                0.001 * ix + 0.002 * iy + 0.0001 * q +
+                0.00001 * substep + 0.000001 * slot
+        end
+        Fref = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fgpu = similar(Fref)
+        fill!(Fref, 0.0)
+        fill!(Fgpu, 0.0)
+
+        substep = 2
+        Kraken.conservative_tree_subcycle_apply_coarse_to_fine_pair_F_2d!(
+            Fref, bank, parent_level, substep)
+        pc_pack = pack_conservative_tree_gpu_parent_children_2d(
+            spec, parent_level)
+        apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d!(
+            Fgpu, pair.coarse_to_fine, pc_pack, substep)
+
+        @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+    end
+
     @testset "level row kernels match scheduler row utilities" begin
         spec = create_conservative_tree_spec_2d(8, 6, [
             ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
@@ -345,6 +379,23 @@ using KernelAbstractions
 
                 advance_conservative_tree_gpu_direct_level_BGK_F_2d!(
                     Foutd, Fd, level_pull_d, cell_pack_d, 1, Float32(1.05))
+                @test all(isfinite, Array(Foutd))
+
+                schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(
+                    spec.max_level)
+                bank = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+                    spec; schedule=schedule, T=Float32)
+                pair = bank.ledger_pairs[1]
+                fill!(pair.coarse_to_fine, Float32(1e-4))
+                ledger_d = KernelAbstractions.allocate(
+                    backend, Float32, size(pair.coarse_to_fine)...)
+                copyto!(ledger_d, pair.coarse_to_fine)
+                pc_pack_d = transfer_conservative_tree_gpu_parent_child_pack_2d(
+                    pack_conservative_tree_gpu_parent_children_2d(spec, 0),
+                    backend)
+                fill!(Foutd, Float32(0))
+                apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d!(
+                    Foutd, ledger_d, pc_pack_d, 1)
                 @test all(isfinite, Array(Foutd))
             end
         end
