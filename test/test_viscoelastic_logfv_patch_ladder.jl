@@ -769,4 +769,36 @@ end
         )
         @test result.max_rel_error > 0.1
     end
+
+    @testset "M5d coupled Poiseuille source-force loop recovers total viscosity" begin
+        coarse = Kraken.run_viscoelastic_logfv_poiseuille_coupled_2d(;
+            Nx=6, Ny=16, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
+            lambda=5.0, bsd_fraction=0.0, polymer_substeps=1,
+            max_steps=4000, backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fine = Kraken.run_viscoelastic_logfv_poiseuille_coupled_2d(;
+            Nx=6, Ny=16, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
+            lambda=5.0, bsd_fraction=0.0, polymer_substeps=10,
+            max_steps=4000, backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test coarse.max_rel_error > 0.02
+        @test fine.max_rel_error < 0.01
+        @test fine.max_rel_error < coarse.max_rel_error / 5
+        @test fine.min_c_eig > 0
+        @test fine.max_uy < 1e-12
+
+        for zeta in (0.5, 1.0)
+            result = Kraken.run_viscoelastic_logfv_poiseuille_coupled_2d(;
+                Nx=6, Ny=16, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
+                lambda=5.0, bsd_fraction=zeta, polymer_substeps=10,
+                max_steps=4000, backend=KernelAbstractions.CPU(), T=Float64,
+            )
+            @test result.max_rel_error < 0.012
+            @test result.min_c_eig > 0
+            @test result.max_uy < 1e-12
+            @test all(isfinite, result.ux)
+            @test all(isfinite, result.psixx)
+        end
+    end
 end

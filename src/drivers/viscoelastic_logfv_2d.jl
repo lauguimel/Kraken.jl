@@ -356,3 +356,159 @@ function run_viscoelastic_logfv_poiseuille_frozen_force_2d(;
         max_uy,
     )
 end
+
+"""
+    run_viscoelastic_logfv_poiseuille_coupled_2d(; kwargs...)
+
+Run a coarse coupled channel canary with dynamic log-FV polymer stress.
+
+This keeps the flow fully developed and periodic in `x`, so polymer advection is
+identically zero. The canary exercises the local coupled loop without obstacle
+or curved-wall complications:
+
+```text
+LBM u -> wall-exact channel grad(u) -> log-C Oldroyd-B source
+      -> tau_p -> div(tau_p) + BSD -> Guo force -> LBM u
+```
+"""
+function run_viscoelastic_logfv_poiseuille_coupled_2d(;
+    Nx::Integer=6,
+    Ny::Integer=20,
+    nu_s::Real=0.04,
+    nu_p::Real=0.06,
+    Fx_body::Real=1e-5,
+    lambda::Real=5.0,
+    bsd_fraction::Real=1.0,
+    polymer_substeps::Integer=1,
+    force_boundary_fill::Symbol=:nearest,
+    max_steps::Integer=10000,
+    backend=KernelAbstractions.CPU(),
+    T=Float64,
+)
+    Nx >= 3 || throw(ArgumentError("Nx must be >= 3"))
+    Ny >= 5 || throw(ArgumentError("Ny must be >= 5"))
+    nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
+    nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
+    lambda > 0 || throw(ArgumentError("lambda must be positive"))
+    polymer_substeps >= 1 || throw(ArgumentError("polymer_substeps must be >= 1"))
+    force_boundary_fill in (:nearest, :none) ||
+        throw(ArgumentError("force_boundary_fill must be :nearest or :none"))
+
+    nu_s_t = T(nu_s)
+    nu_p_t = T(nu_p)
+    nu_total_t = nu_s_t + nu_p_t
+    bsd_t = T(bsd_fraction)
+    Fx_body_t = T(Fx_body)
+    lambda_t = T(lambda)
+    prefactor_t = nu_p_t / lambda_t
+    nu_lbm_t = nu_s_t + bsd_t * nu_p_t
+    nu_lbm_t > zero(T) || throw(ArgumentError("nu_s + bsd_fraction * nu_p must be positive"))
+    dx = one(T)
+    dy = one(T)
+    dt_poly = one(T) / T(polymer_substeps)
+
+    config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=Float64(nu_lbm_t), u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, T; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    rho, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    omega_t = T(omega(config))
+
+    psixx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psiyy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixx_next = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psixy_next = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    psiyy_next = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    dudx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    dudy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    dvdx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    dvdy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    tauxx = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    tauxy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    tauyy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    fx_poly = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    fy_poly = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    fx_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    fy_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
+
+    for _ in 1:max_steps
+        logfv_velocity_gradient_periodicx_wally_2d!(dudx, dudy, dvdx, dvdy, ux, uy, dx, dy; sync=false)
+        for _ in 1:polymer_substeps
+            logfv_step_oldroydb_log_2d!(
+                psixx_next, psixy_next, psiyy_next,
+                psixx, psixy, psiyy,
+                dudx, dudy, dvdx, dvdy,
+                lambda_t, dt_poly;
+                sync=false,
+            )
+            psixx, psixx_next = psixx_next, psixx
+            psixy, psixy_next = psixy_next, psixy
+            psiyy, psiyy_next = psiyy_next, psiyy
+        end
+        logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor_t; sync=false)
+        logfv_polymer_force_centered_2d!(fx_poly, fy_poly, tauxx, tauxy, tauyy, dx, dy; sync=false)
+        logfv_bsd_correct_force_centered_2d!(
+            fx_total, fy_total, fx_poly, fy_poly, ux, uy, bsd_t, nu_p_t, dx, dy;
+            sync=false,
+        )
+        if force_boundary_fill === :nearest
+            logfv_fill_nearest_boundary_2d!(fx_total, fy_total; sync=false)
+        end
+        logfv_add_constant_force_2d!(fx_total, fy_total, Fx_body_t, zero(T); sync=false)
+
+        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+        collide_guo_field_2d!(f_out, is_solid, fx_total, fy_total, omega_t)
+        logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_out, fx_total, fy_total; sync=false)
+        f_in, f_out = f_out, f_in
+    end
+    KernelAbstractions.synchronize(backend)
+
+    ux_cpu = Array(ux)
+    uy_cpu = Array(uy)
+    reference_u = _logfv_lbm_poiseuille_reference(Float64(Fx_body_t), Float64(nu_total_t), Ny)
+    mean_ux = [sum(@view ux_cpu[:, j]) / Nx for j in 1:Ny]
+    interior = 3:(Ny - 2)
+    max_abs_error = maximum(abs.(mean_ux[interior] .- reference_u[interior]))
+    max_ref = maximum(abs.(reference_u[interior]))
+    max_rel_error = max_abs_error / max(max_ref, eps(Float64))
+    max_uy = maximum(abs, uy_cpu[:, interior])
+
+    psixx_cpu = Array(psixx)
+    psixy_cpu = Array(psixy)
+    psiyy_cpu = Array(psiyy)
+    min_c_eig = Inf
+    for j in 1:Ny, i in 1:Nx
+        cxx, cxy, cyy = logfv_exp_sym2_2d(psixx_cpu[i, j], psixy_cpu[i, j], psiyy_cpu[i, j])
+        min_c_eig = min(min_c_eig, logfv_min_eig_sym2_2d(cxx, cxy, cyy))
+    end
+
+    return (;
+        Nx,
+        Ny,
+        nu_s=Float64(nu_s_t),
+        nu_p=Float64(nu_p_t),
+        nu_total=Float64(nu_total_t),
+        nu_lbm=Float64(nu_lbm_t),
+        Fx_body=Float64(Fx_body_t),
+        lambda=Float64(lambda_t),
+        bsd_fraction=Float64(bsd_t),
+        polymer_substeps,
+        force_boundary_fill,
+        max_steps,
+        rho=Array(rho),
+        ux=ux_cpu,
+        uy=uy_cpu,
+        ux_mean=mean_ux,
+        reference_ux=reference_u,
+        psixx=psixx_cpu,
+        psixy=psixy_cpu,
+        psiyy=psiyy_cpu,
+        fx_total=Array(fx_total),
+        fy_total=Array(fy_total),
+        min_c_eig,
+        max_abs_error,
+        max_rel_error,
+        max_uy,
+    )
+end

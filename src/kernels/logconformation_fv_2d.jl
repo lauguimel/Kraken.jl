@@ -455,6 +455,26 @@ function logfv_fill_nearest_boundary_2d!(fx, fy; sync::Bool=true)
     return nothing
 end
 
+@kernel function logfv_add_constant_force_2d_kernel!(fx, fy, Fx, Fy, Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            T = eltype(fx)
+            fx[i, j] += T(Fx)
+            fy[i, j] += T(Fy)
+        end
+    end
+end
+
+function logfv_add_constant_force_2d!(fx, fy, Fx, Fy; sync::Bool=true)
+    backend = KernelAbstractions.get_backend(fx)
+    Nx, Ny = size(fx)
+    kernel! = logfv_add_constant_force_2d_kernel!(backend)
+    kernel!(fx, fy, Fx, Fy, Nx, Ny; ndrange=(Nx, Ny))
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_compute_macroscopic_forced_field_2d_kernel!(
     rho, ux, uy,
     @Const(f), @Const(fx), @Const(fy),
