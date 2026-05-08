@@ -3412,6 +3412,7 @@ end
 end
 
 function _coarse_cylinder_direct_highwi_spd_probe(; wall_geometry=:cutlink,
+                                                   magic=2.5e-7,
                                                    steps=1_200)
     R = 3
     u_mean = 0.005
@@ -3427,7 +3428,7 @@ function _coarse_cylinder_direct_highwi_spd_probe(; wall_geometry=:cutlink,
         tau_plus=0.5 + 3 * ν_s / 1e4,
         polymer_bc=CNEBB(),
         conformation_collision=:liu_eq26,
-        conformation_magic=2.5e-7,
+        conformation_magic=magic,
         conformation_initial_condition=:inlet_profile,
         solvent_magic=0.25,
         solvent_source_mode=:integrated_collision,
@@ -3469,6 +3470,14 @@ end
         @test probe.max_abs_C < 25.0
         @test probe.min_eig < -0.10
     end
+
+    damped = _coarse_cylinder_direct_highwi_spd_probe(
+        ; wall_geometry=:cutlink, magic=1e-8,
+    )
+    @test damped.result.conformation_magic ≈ 1e-8 atol=0.0 rtol=0.0
+    @test damped.finite
+    @test damped.max_abs_C < 13.0
+    @test damped.min_eig > 0.04
 end
 
 @testset "P18b2c6 square log-conf is only weakly sensitive to TRT magic" begin
