@@ -11,6 +11,7 @@
 - Production path: LBM solvent coupled to a cell-centered log-conformation FV/FD polymer CDE solver.
 - Benchmark-only path: direct-conformation population LBM, including Liu Eq26 variants.
 - Diagnostic path: direct-C regularized/TRT, log-conformation population LBM, and frozen-flow CDE probes.
+- AMR/SLBM-paper compatibility: keep the log-FV polymer backend patch-local and refinement-ready. Do not bake in irreversible single-level Cartesian assumptions beyond early canaries.
 
 ## Allowed Edit Zones
 
@@ -67,6 +68,7 @@ julia --project=. test/test_viscoelastic_equation_patch_ladder.jl
 - Use A100/H100 for long Float64 validation.
 - Use SoA arrays and fixed compact stencils.
 - Precompute near-wall/cut-cell coefficients CPU-side.
+- Keep `dx`, `dy`, patch extents, and halo/ghost ownership explicit so the backend can later couple to the AMR work developed on `SLBM-paper`.
 - Report memory footprint and cells/sec before making performance claims.
 
 ## Commit Rules
@@ -82,3 +84,4 @@ julia --project=. test/test_viscoelastic_equation_patch_ladder.jl
 - Log-conformation preserves SPD algebraically but can still blow up through advection/source/coupling errors.
 - Low beta requires momentum stabilization such as BSD/iBSD/DEVSS-like terms; log-conformation alone is not enough.
 - The existing 3D conformation path is not a robust high-Wi production backend.
+- A uniform-grid macro driver is allowed as a first canary, but production interfaces must remain patch-local and AMR-compatible.

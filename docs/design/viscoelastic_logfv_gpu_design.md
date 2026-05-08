@@ -332,6 +332,46 @@ Kernel rules:
 - explicit Float32/Float64 behavior;
 - backend compatible with CUDA first, then Metal smoke tests.
 
+## 9.1 AMR and SLBM-paper compatibility
+
+The first macro driver may run on a single uniform Cartesian grid, but
+the backend must not be designed as a single-grid dead end. The
+`SLBM-paper` branch is developing AMR-like infrastructure, so the
+log-FV polymer path must stay patch-local.
+
+Required constraints:
+
+```text
+all kernels operate on one rectangular patch at a time
+dx, dy are explicit kernel arguments
+interior update excludes halo/ghost cells unless a kernel says otherwise
+boundary, halo, prolongation, and restriction are separate operators
+no hidden global Nx/Ny assumptions in polymer state structs
+no dependence on LBM population storage for polymer state
+```
+
+For early uniform-grid canaries, this means:
+
+```text
+uniform grid = one patch with no refinement
+physical boundaries = patch boundary operators
+future AMR interfaces = patch exchange/prolong/restrict wrappers
+```
+
+Refinement-sensitive quantities:
+
+- `Psi` must be prolongated/restricted in log space, not by silently
+  reconstructing/clipping `C`.
+- `tau_p` and `Fp = div(tau_p)` should be recomputed from `Psi` on each
+  level after exchange when possible.
+- Flux-form advection must eventually use conservative coarse/fine flux
+  correction.
+- BSD `laplacian(u)` must use level-local spacing and corrected coarse/fine
+  boundary values.
+
+Do not implement AMR in the first log-FV pass. Keep the interfaces shaped
+so AMR can be added without rewriting the polymer kernels.
+
 ## 10. Kernel decomposition
 
 Start with clear kernels before fusion:
