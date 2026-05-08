@@ -25,6 +25,42 @@ end
     )
 end
 
+@inline function logfv_exp_mat2_2d(a, b, c, d)
+    T = typeof(a + b + c + d)
+    m = (a + d) / T(2)
+    h = (a - d) / T(2)
+    disc = h * h + b * c
+    em = exp(m)
+    small = abs(disc) < eps(T)
+
+    ch = if small
+        one(T) + disc / T(2)
+    elseif disc > zero(T)
+        delta = sqrt(disc)
+        cosh(delta)
+    else
+        theta = sqrt(-disc)
+        cos(theta)
+    end
+
+    scale = if small
+        one(T) + disc / T(6)
+    elseif disc > zero(T)
+        delta = sqrt(disc)
+        sinh(delta) / delta
+    else
+        theta = sqrt(-disc)
+        sin(theta) / theta
+    end
+
+    return (
+        em * (ch + scale * h),
+        em * scale * b,
+        em * scale * c,
+        em * (ch - scale * h),
+    )
+end
+
 @inline function logfv_log_spd_sym2_2d(a, b, d)
     T = typeof(a + b + d)
     m = (a + d) / T(2)
@@ -57,6 +93,26 @@ end
 @inline function logfv_oldroydb_relax_log_2d(psixx, psixy, psiyy, lambda, dt)
     cxx, cxy, cyy = logfv_exp_sym2_2d(psixx, psixy, psiyy)
     rxx, rxy, ryy = logfv_oldroydb_relax_c_2d(cxx, cxy, cyy, lambda, dt)
+    return logfv_log_spd_sym2_2d(rxx, rxy, ryy)
+end
+
+@inline function logfv_oldroydb_step_log_2d(
+    psixx, psixy, psiyy,
+    dudx, dudy, dvdx, dvdy,
+    lambda, dt,
+)
+    cxx, cxy, cyy = logfv_exp_sym2_2d(psixx, psixy, psiyy)
+    a, b, c, d = logfv_exp_mat2_2d(dt * dudx, dt * dudy, dt * dvdx, dt * dvdy)
+
+    ac_xx = a * cxx + b * cxy
+    ac_xy = a * cxy + b * cyy
+    ac_yx = c * cxx + d * cxy
+    ac_yy = c * cxy + d * cyy
+
+    dxx = ac_xx * a + ac_xy * b
+    dxy = ac_xx * c + ac_xy * d
+    dyy = ac_yx * c + ac_yy * d
+    rxx, rxy, ryy = logfv_oldroydb_relax_c_2d(dxx, dxy, dyy, lambda, dt)
     return logfv_log_spd_sym2_2d(rxx, rxy, ryy)
 end
 
@@ -131,6 +187,48 @@ function logfv_relax_log_2d!(
     kernel!(
         psixx_out, psixy_out, psiyy_out,
         psixx, psixy, psiyy, lambda, dt, Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+@kernel function logfv_step_oldroydb_log_2d_kernel!(
+    psixx_out, psixy_out, psiyy_out,
+    @Const(psixx), @Const(psixy), @Const(psiyy),
+    @Const(dudx), @Const(dudy), @Const(dvdx), @Const(dvdy),
+    lambda, dt, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            rxx, rxy, ryy = logfv_oldroydb_step_log_2d(
+                psixx[i, j], psixy[i, j], psiyy[i, j],
+                dudx[i, j], dudy[i, j], dvdx[i, j], dvdy[i, j],
+                lambda, dt,
+            )
+            psixx_out[i, j] = rxx
+            psixy_out[i, j] = rxy
+            psiyy_out[i, j] = ryy
+        end
+    end
+end
+
+function logfv_step_oldroydb_log_2d!(
+    psixx_out, psixy_out, psiyy_out,
+    psixx, psixy, psiyy,
+    dudx, dudy, dvdx, dvdy,
+    lambda, dt;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(psixx_out)
+    Nx, Ny = size(psixx_out)
+    kernel! = logfv_step_oldroydb_log_2d_kernel!(backend)
+    kernel!(
+        psixx_out, psixy_out, psiyy_out,
+        psixx, psixy, psiyy,
+        dudx, dudy, dvdx, dvdy,
+        lambda, dt, Nx, Ny;
         ndrange=(Nx, Ny),
     )
     sync && KernelAbstractions.synchronize(backend)

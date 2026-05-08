@@ -16,6 +16,10 @@ function _sym2_exp(a, b, d)
     return Kraken.logfv_exp_sym2_2d(a, b, d)
 end
 
+function _mat2_exp(a, b, c, d)
+    return Kraken.logfv_exp_mat2_2d(a, b, c, d)
+end
+
 function _sym2_log(a, b, d)
     λmin = _sym2_min_eig(a, b, d)
     λmin > 0 || throw(DomainError(λmin, "symmetric 2x2 log requires SPD input"))
@@ -28,6 +32,10 @@ end
 
 function _oldroydb_relax_log(ψxx, ψxy, ψyy, λ, dt)
     return Kraken.logfv_oldroydb_relax_log_2d(ψxx, ψxy, ψyy, λ, dt)
+end
+
+function _oldroydb_step_log(ψxx, ψxy, ψyy, dudx, dudy, dvdx, dvdy, λ, dt)
+    return Kraken.logfv_oldroydb_step_log_2d(ψxx, ψxy, ψyy, dudx, dudy, dvdx, dvdy, λ, dt)
 end
 
 function _oldroydb_source_c(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, λ)
@@ -120,6 +128,21 @@ end
 
             c_ref = exp(_sym2_mat(ψ...))
             _assert_sym2_close(c, (c_ref[1, 1], c_ref[1, 2], c_ref[2, 2]); atol=2e-12, rtol=2e-12)
+        end
+
+        mat_cases = (
+            (0.0, 0.4, 0.0, 0.0),
+            (0.1, -0.3, 0.2, -0.05),
+            (0.0, -0.7, 0.7, 0.0),
+            (1e-12, 2e-12, -3e-12, -1e-12),
+        )
+        for m in mat_cases
+            e = _mat2_exp(m...)
+            e_ref = exp([m[1] m[2]; m[3] m[4]])
+            @test e[1] ≈ e_ref[1, 1] atol=2e-12 rtol=2e-12
+            @test e[2] ≈ e_ref[1, 2] atol=2e-12 rtol=2e-12
+            @test e[3] ≈ e_ref[2, 1] atol=2e-12 rtol=2e-12
+            @test e[4] ≈ e_ref[2, 2] atol=2e-12 rtol=2e-12
         end
 
         c_cases = (
@@ -236,6 +259,65 @@ end
         c_long = _oldroydb_simple_shear_from_identity(γ, λ, 400λ)
         csteady = _oldroydb_simple_shear_stationary(γ, λ)
         _assert_sym2_close(c_long, csteady; atol=1e-12, rtol=1e-12)
+    end
+
+    @testset "M2b log source split gives exact pure deformation and preserves SPD" begin
+        γ = 3.0
+        dt = 0.4
+        λ_huge = 1e30
+        ψ1 = _oldroydb_step_log(0.0, 0.0, 0.0, 0.0, γ, 0.0, 0.0, λ_huge, dt)
+        c1 = _sym2_exp(ψ1...)
+        _assert_sym2_close(c1, (1 + (γ * dt)^2, γ * dt, 1.0); atol=2e-12, rtol=2e-12)
+
+        λ = 2.0
+        for Wi in (1.0, 5.0, 10.0, 30.0)
+            γwi = Wi / λ
+            ψ = (0.0, 0.0, 0.0)
+            for _ in 1:400
+                ψ = _oldroydb_step_log(ψ..., 0.0, γwi, 0.0, 0.0, λ, 0.01)
+                c = _sym2_exp(ψ...)
+                @test _sym2_min_eig(c...) > 0
+                @test all(isfinite, c)
+            end
+            c = _sym2_exp(ψ...)
+            @test c[1] > 1.0
+            @test sign(c[2]) == sign(γwi)
+            @test c[3] ≈ 1.0 atol=2e-12 rtol=2e-12
+        end
+    end
+
+    @testset "M2b KA log source step matches local split operator" begin
+        Nx, Ny = 5, 6
+        λ = 3.0
+        dt = 0.07
+        psixx = [0.03i - 0.02j for i in 1:Nx, j in 1:Ny]
+        psixy = [0.004 * (i + j) for i in 1:Nx, j in 1:Ny]
+        psiyy = [-0.01i + 0.015j for i in 1:Nx, j in 1:Ny]
+        dudx = [0.01 * (i - 2) for i in 1:Nx, j in 1:Ny]
+        dudy = [0.03 - 0.002j for i in 1:Nx, j in 1:Ny]
+        dvdx = [-0.02 + 0.001i for i in 1:Nx, j in 1:Ny]
+        dvdy = [-dudx[i, j] for i in 1:Nx, j in 1:Ny]
+        outxx = similar(psixx)
+        outxy = similar(psixy)
+        outyy = similar(psiyy)
+
+        Kraken.logfv_step_oldroydb_log_2d!(
+            outxx, outxy, outyy,
+            psixx, psixy, psiyy,
+            dudx, dudy, dvdx, dvdy,
+            λ, dt,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            expected = _oldroydb_step_log(
+                psixx[i, j], psixy[i, j], psiyy[i, j],
+                dudx[i, j], dudy[i, j], dvdx[i, j], dvdy[i, j],
+                λ, dt,
+            )
+            _assert_sym2_close((outxx[i, j], outxy[i, j], outyy[i, j]), expected; atol=2e-14, rtol=2e-14)
+            @test _sym2_min_eig(_sym2_exp(outxx[i, j], outxy[i, j], outyy[i, j])...) > 0
+        end
     end
 
     @testset "M3 divergence-corrected upwind preserves constant Psi" begin
