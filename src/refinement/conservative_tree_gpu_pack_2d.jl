@@ -1864,6 +1864,309 @@ function collide_Guo_conservative_tree_gpu_active_level_F_2d!(
     return F
 end
 
+@kernel function _collide_cartesian_channel_gpu_Guo_integrated_D2Q9_kernel!(
+        F, volume, omega, Fx, Fy)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(F)
+        v = T(volume)
+        womega = T(omega)
+        fx = T(Fx)
+        fy = T(Fy)
+        f1 = F[i, j, 1]; f2 = F[i, j, 2]; f3 = F[i, j, 3]
+        f4 = F[i, j, 4]; f5 = F[i, j, 5]; f6 = F[i, j, 6]
+        f7 = F[i, j, 7]; f8 = F[i, j, 8]; f9 = F[i, j, 9]
+        mass = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+        mx = f2 - f4 + f6 - f7 - f8 + f9
+        my = f3 - f5 + f6 + f7 - f8 - f9
+        rho = mass / v
+        ux = (mx / v + fx / T(2)) / rho
+        uy = (my / v + fy / T(2)) / rho
+        usq = ux * ux + uy * uy
+        guo_pref = one(T) - womega / T(2)
+
+        F[i, j, 1] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(1), f1, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 2] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(2), f2, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 3] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(3), f3, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 4] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(4), f4, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 5] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(5), f5, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 6] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(6), f6, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 7] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(7), f7, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 8] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(8), f8, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+        F[i, j, 9] = _conservative_tree_gpu_guo_integrated_q_2d(
+            Val(9), f9, v, womega, rho, ux, uy, fx, fy, usq, guo_pref)
+    end
+end
+
+function collide_cartesian_channel_gpu_Guo_integrated_D2Q9!(
+        F::AbstractArray,
+        volume,
+        omega,
+        Fx,
+        Fy;
+        sync::Bool=true)
+    size(F, 3) == 9 ||
+        throw(ArgumentError("F must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _collide_cartesian_channel_gpu_Guo_integrated_D2Q9_kernel!(
+        backend)
+    kernel!(F, volume, omega, Fx, Fy; ndrange=(size(F, 1), size(F, 2)))
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
+@kernel function _collide_cartesian_channel_gpu_BGK_integrated_D2Q9_kernel!(
+        F, volume, omega)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(F)
+        v = T(volume)
+        womega = T(omega)
+        f1 = F[i, j, 1]; f2 = F[i, j, 2]; f3 = F[i, j, 3]
+        f4 = F[i, j, 4]; f5 = F[i, j, 5]; f6 = F[i, j, 6]
+        f7 = F[i, j, 7]; f8 = F[i, j, 8]; f9 = F[i, j, 9]
+        mass = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+        mx = f2 - f4 + f6 - f7 - f8 + f9
+        my = f3 - f5 + f6 + f7 - f8 - f9
+        rho = mass / v
+        ux = mx / mass
+        uy = my / mass
+        usq = ux * ux + uy * uy
+
+        F[i, j, 1] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(1), f1, v, womega, rho, ux, uy, usq)
+        F[i, j, 2] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(2), f2, v, womega, rho, ux, uy, usq)
+        F[i, j, 3] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(3), f3, v, womega, rho, ux, uy, usq)
+        F[i, j, 4] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(4), f4, v, womega, rho, ux, uy, usq)
+        F[i, j, 5] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(5), f5, v, womega, rho, ux, uy, usq)
+        F[i, j, 6] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(6), f6, v, womega, rho, ux, uy, usq)
+        F[i, j, 7] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(7), f7, v, womega, rho, ux, uy, usq)
+        F[i, j, 8] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(8), f8, v, womega, rho, ux, uy, usq)
+        F[i, j, 9] = _conservative_tree_gpu_bgk_integrated_q_2d(
+            Val(9), f9, v, womega, rho, ux, uy, usq)
+    end
+end
+
+function collide_cartesian_channel_gpu_BGK_integrated_D2Q9!(
+        F::AbstractArray,
+        volume,
+        omega;
+        sync::Bool=true)
+    size(F, 3) == 9 ||
+        throw(ArgumentError("F must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _collide_cartesian_channel_gpu_BGK_integrated_D2Q9_kernel!(
+        backend)
+    kernel!(F, volume, omega; ndrange=(size(F, 1), size(F, 2)))
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
+@inline function _cartesian_channel_gpu_moving_wall_delta_2d(
+        ::Val{Q}, volume, rho_wall, wall_u) where Q
+    T = typeof(volume + rho_wall + wall_u)
+    return T(volume) * T(1) / T(6) * T(rho_wall) *
+           T(_conservative_tree_gpu_cx_2d(Q)) * T(wall_u)
+end
+
+@kernel function _stream_cartesian_channel_gpu_periodic_x_wall_y_F_2d_kernel!(
+        Fout, @Const(Fin), nx::Int32, ny::Int32)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        im = i > 1 ? i - 1 : Int(nx)
+        ip = i < Int(nx) ? i + 1 : 1
+
+        Fout[i, j, 1] = Fin[i, j, 1]
+        Fout[i, j, 2] = Fin[im, j, 2]
+        Fout[i, j, 4] = Fin[ip, j, 4]
+
+        if j == 1
+            Fout[i, j, 3] = Fin[i, j, 5]
+            Fout[i, j, 5] = Int(ny) == 1 ? Fin[i, j, 3] : Fin[i, j + 1, 5]
+            Fout[i, j, 6] = Fin[i, j, 8]
+            Fout[i, j, 7] = Fin[i, j, 9]
+            Fout[i, j, 8] = Int(ny) == 1 ? Fin[i, j, 6] : Fin[ip, j + 1, 8]
+            Fout[i, j, 9] = Int(ny) == 1 ? Fin[i, j, 7] : Fin[im, j + 1, 9]
+        elseif j == Int(ny)
+            Fout[i, j, 3] = Fin[i, j - 1, 3]
+            Fout[i, j, 5] = Fin[i, j, 3]
+            Fout[i, j, 6] = Fin[im, j - 1, 6]
+            Fout[i, j, 7] = Fin[ip, j - 1, 7]
+            Fout[i, j, 8] = Fin[i, j, 6]
+            Fout[i, j, 9] = Fin[i, j, 7]
+        else
+            Fout[i, j, 3] = Fin[i, j - 1, 3]
+            Fout[i, j, 5] = Fin[i, j + 1, 5]
+            Fout[i, j, 6] = Fin[im, j - 1, 6]
+            Fout[i, j, 7] = Fin[ip, j - 1, 7]
+            Fout[i, j, 8] = Fin[ip, j + 1, 8]
+            Fout[i, j, 9] = Fin[im, j + 1, 9]
+        end
+    end
+end
+
+function stream_cartesian_channel_gpu_periodic_x_wall_y_F_2d!(
+        Fout::AbstractArray,
+        Fin::AbstractArray;
+        sync::Bool=true)
+    size(Fout) == size(Fin) ||
+        throw(ArgumentError("Fout and Fin must have the same size"))
+    size(Fin, 3) == 9 ||
+        throw(ArgumentError("Fin must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(Fin)
+    kernel! = _stream_cartesian_channel_gpu_periodic_x_wall_y_F_2d_kernel!(
+        backend)
+    kernel!(Fout, Fin, Int32(size(Fin, 1)), Int32(size(Fin, 2));
+            ndrange=(size(Fin, 1), size(Fin, 2)))
+    sync && KernelAbstractions.synchronize(backend)
+    return Fout
+end
+
+@kernel function _stream_cartesian_channel_gpu_periodic_x_moving_wall_y_F_2d_kernel!(
+        Fout, @Const(Fin), nx::Int32, ny::Int32, volume, rho_wall, u_south,
+        u_north)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(Fout)
+        im = i > 1 ? i - 1 : Int(nx)
+        ip = i < Int(nx) ? i + 1 : 1
+        v = T(volume)
+        rho = T(rho_wall)
+        us = T(u_south)
+        un = T(u_north)
+
+        Fout[i, j, 1] = Fin[i, j, 1]
+        Fout[i, j, 2] = Fin[im, j, 2]
+        Fout[i, j, 4] = Fin[ip, j, 4]
+
+        if j == 1
+            Fout[i, j, 3] = Fin[i, j, 5]
+            Fout[i, j, 5] = Int(ny) == 1 ? Fin[i, j, 3] : Fin[i, j + 1, 5]
+            Fout[i, j, 6] = Fin[i, j, 8] +
+                _cartesian_channel_gpu_moving_wall_delta_2d(
+                    Val(6), v, rho, us)
+            Fout[i, j, 7] = Fin[i, j, 9] +
+                _cartesian_channel_gpu_moving_wall_delta_2d(
+                    Val(7), v, rho, us)
+            Fout[i, j, 8] = Int(ny) == 1 ? Fin[i, j, 6] : Fin[ip, j + 1, 8]
+            Fout[i, j, 9] = Int(ny) == 1 ? Fin[i, j, 7] : Fin[im, j + 1, 9]
+        elseif j == Int(ny)
+            Fout[i, j, 3] = Fin[i, j - 1, 3]
+            Fout[i, j, 5] = Fin[i, j, 3]
+            Fout[i, j, 6] = Fin[im, j - 1, 6]
+            Fout[i, j, 7] = Fin[ip, j - 1, 7]
+            Fout[i, j, 8] = Fin[i, j, 6] +
+                _cartesian_channel_gpu_moving_wall_delta_2d(
+                    Val(8), v, rho, un)
+            Fout[i, j, 9] = Fin[i, j, 7] +
+                _cartesian_channel_gpu_moving_wall_delta_2d(
+                    Val(9), v, rho, un)
+        else
+            Fout[i, j, 3] = Fin[i, j - 1, 3]
+            Fout[i, j, 5] = Fin[i, j + 1, 5]
+            Fout[i, j, 6] = Fin[im, j - 1, 6]
+            Fout[i, j, 7] = Fin[ip, j - 1, 7]
+            Fout[i, j, 8] = Fin[ip, j + 1, 8]
+            Fout[i, j, 9] = Fin[im, j + 1, 9]
+        end
+    end
+end
+
+function stream_cartesian_channel_gpu_periodic_x_moving_wall_y_F_2d!(
+        Fout::AbstractArray,
+        Fin::AbstractArray;
+        u_south=0,
+        u_north=0,
+        rho_wall=1,
+        volume=1,
+        sync::Bool=true)
+    size(Fout) == size(Fin) ||
+        throw(ArgumentError("Fout and Fin must have the same size"))
+    size(Fin, 3) == 9 ||
+        throw(ArgumentError("Fin must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(Fin)
+    kernel! = _stream_cartesian_channel_gpu_periodic_x_moving_wall_y_F_2d_kernel!(
+        backend)
+    kernel!(Fout, Fin, Int32(size(Fin, 1)), Int32(size(Fin, 2)), volume,
+            rho_wall, u_south, u_north;
+            ndrange=(size(Fin, 1), size(Fin, 2)))
+    sync && KernelAbstractions.synchronize(backend)
+    return Fout
+end
+
+function run_cartesian_channel_gpu_reference_2d(;
+        flow::Symbol,
+        nx::Integer,
+        ny::Integer,
+        steps::Integer,
+        volume,
+        omega=1,
+        Fx=0,
+        Fy=0,
+        U=0,
+        rho0=1,
+        backend,
+        T::Type{<:AbstractFloat}=Float32)
+    nx_i = Int(nx)
+    ny_i = Int(ny)
+    nsteps = Int(steps)
+    nx_i > 0 && ny_i > 0 || throw(ArgumentError("nx and ny must be positive"))
+    nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
+    flow in (:poiseuille, :poiseuille_subcycled, :couette,
+             :couette_subcycled) ||
+        throw(ArgumentError("flow must be :poiseuille or :couette"))
+
+    F0 = zeros(T, nx_i, ny_i, 9)
+    _initialize_cartesian_channel_equilibrium_F_2d!(
+        F0, T(volume); rho=T(rho0))
+    mass_initial = sum(F0)
+    Fd = _copy_conservative_tree_gpu_array_2d(backend, F0)
+    Ftmpd = _allocate_conservative_tree_backend_array_2d(
+        backend, T, nx_i, ny_i, 9)
+    fill!(Ftmpd, zero(T))
+
+    if flow in (:poiseuille, :poiseuille_subcycled)
+        for _ in 1:nsteps
+            collide_cartesian_channel_gpu_Guo_integrated_D2Q9!(
+                Fd, T(volume), T(omega), T(Fx), T(Fy); sync=false)
+            stream_cartesian_channel_gpu_periodic_x_wall_y_F_2d!(
+                Ftmpd, Fd; sync=false)
+            Fd, Ftmpd = Ftmpd, Fd
+        end
+    else
+        for _ in 1:nsteps
+            collide_cartesian_channel_gpu_BGK_integrated_D2Q9!(
+                Fd, T(volume), T(omega); sync=false)
+            stream_cartesian_channel_gpu_periodic_x_moving_wall_y_F_2d!(
+                Ftmpd, Fd; u_south=zero(T), u_north=T(U),
+                rho_wall=T(rho0), volume=T(volume), sync=false)
+            Fd, Ftmpd = Ftmpd, Fd
+        end
+    end
+
+    KernelAbstractions.synchronize(backend)
+    F_final = Array(Fd)
+    mass_final = sum(F_final)
+    return (; flow, F=F_final, mass_initial, mass_final,
+            mass_drift=mass_final - mass_initial, steps=nsteps,
+            volume=T(volume))
+end
+
 function advance_conservative_tree_gpu_direct_level_BGK_F_2d!(
         Fout::AbstractMatrix,
         Fin::AbstractMatrix,

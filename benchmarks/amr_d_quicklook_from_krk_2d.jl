@@ -1081,7 +1081,8 @@ function _ql_plot_debug_dashboard(path, amr_result, amr_state,
     return path
 end
 
-function _ql_run_cartesian_classic_channel(setup, case; steps, T)
+function _ql_run_cartesian_classic_channel(setup, case; steps, T,
+                                           backend=nothing)
     domain = getproperty(setup, :domain)
     ml = case.max_level
     scale = 1 << ml
@@ -1091,30 +1092,45 @@ function _ql_run_cartesian_classic_channel(setup, case; steps, T)
     volume = one(T) / T(scale * scale)
     rho0 = T(_ql_var(setup, :rho0, 1.0))
     omega = T(_ql_var(setup, :omega, 1.0))
-    F = zeros(T, nx, ny, 9)
-    Ftmp = similar(F)
-    fill_equilibrium_integrated_D2Q9!(F, volume, rho0, zero(T), zero(T))
-    mass_initial = sum(F)
     force_x = zero(T)
     force_y = zero(T)
+    if backend !== nothing
+        Fx = T(_ql_body_force(setup, :Fx, _ql_var(setup, :Fx, 1e-6)))
+        U = T(_ql_boundary_value(
+            setup, :north, :velocity, :ux, _ql_var(setup, :U, 1e-3)))
+        force_x = case.flow == :poiseuille ? Fx : zero(T)
+        result = Kraken.run_cartesian_channel_gpu_reference_2d(
+            flow=case.flow, nx=nx, ny=ny, steps=reference_steps,
+            volume=volume, omega=omega, Fx=Fx, Fy=zero(T), U=U,
+            rho0=rho0, backend=backend, T=T)
+        F = result.F
+        mass_initial = result.mass_initial
+        mass_final = result.mass_final
+    else
+        F = zeros(T, nx, ny, 9)
+        Ftmp = similar(F)
+        fill_equilibrium_integrated_D2Q9!(F, volume, rho0, zero(T), zero(T))
+        mass_initial = sum(F)
 
-    for _ in 1:reference_steps
-        if case.flow == :poiseuille
-            Fx = T(_ql_body_force(setup, :Fx, _ql_var(setup, :Fx, 1e-6)))
-            force_x = Fx
-            collide_Guo_integrated_D2Q9!(F, volume, omega, Fx, zero(T))
-            stream_periodic_x_wall_y_F_2d!(Ftmp, F)
-        elseif case.flow == :couette
-            U = T(_ql_boundary_value(
-                setup, :north, :velocity, :ux, _ql_var(setup, :U, 1e-3)))
-            collide_BGK_integrated_D2Q9!(F, volume, omega)
-            stream_periodic_x_moving_wall_y_F_2d!(
-                Ftmp, F; u_south=zero(T), u_north=U,
-                rho_wall=rho0, volume=volume)
-        else
-            throw(ArgumentError("classic Cartesian reference supports nested channels only"))
+        for _ in 1:reference_steps
+            if case.flow == :poiseuille
+                Fx = T(_ql_body_force(setup, :Fx, _ql_var(setup, :Fx, 1e-6)))
+                force_x = Fx
+                collide_Guo_integrated_D2Q9!(F, volume, omega, Fx, zero(T))
+                stream_periodic_x_wall_y_F_2d!(Ftmp, F)
+            elseif case.flow == :couette
+                U = T(_ql_boundary_value(
+                    setup, :north, :velocity, :ux, _ql_var(setup, :U, 1e-3)))
+                collide_BGK_integrated_D2Q9!(F, volume, omega)
+                stream_periodic_x_moving_wall_y_F_2d!(
+                    Ftmp, F; u_south=zero(T), u_north=U,
+                    rho_wall=rho0, volume=volume)
+            else
+                throw(ArgumentError("classic Cartesian reference supports nested channels only"))
+            end
+            F, Ftmp = Ftmp, F
         end
-        F, Ftmp = Ftmp, F
+        mass_final = sum(F)
     end
 
     fields = _ql_leaf_fields(F, falses(nx, ny); volume=volume,
@@ -1128,7 +1144,6 @@ function _ql_run_cartesian_classic_channel(setup, case; steps, T)
             ny, _ql_boundary_value(setup, :north, :velocity, :ux,
                                    _ql_var(setup, :U, 1e-3))))
     l2, linf = _ql_profile_errors(profile, analytic)
-    mass_final = sum(F)
     return AMRDCartesianChannelQuicklook2D{T}(
         case.flow, F, profile, analytic, T(l2), T(linf), mass_initial,
         mass_final, mass_final - mass_initial, reference_steps, volume,

@@ -527,6 +527,41 @@ using KernelAbstractions
         @test isapprox(cgpu.F, ccpu.F; atol=1e-9, rtol=1e-9)
     end
 
+    @testset "Cartesian channel GPU reference matches dense CPU reference" begin
+        for flow in (:poiseuille, :couette)
+            nx, ny = 8, 6
+            steps = 5
+            volume = 1 / 16
+            omega = 1.0
+            Fx = 1e-7
+            U = 0.02
+            Fref = zeros(Float64, nx, ny, 9)
+            Ftmp = similar(Fref)
+            fill_equilibrium_integrated_D2Q9!(
+                Fref, volume, 1.0, 0.0, 0.0)
+            for _ in 1:steps
+                if flow == :poiseuille
+                    collide_Guo_integrated_D2Q9!(
+                        Fref, volume, omega, Fx, 0.0)
+                    stream_periodic_x_wall_y_F_2d!(Ftmp, Fref)
+                else
+                    collide_BGK_integrated_D2Q9!(Fref, volume, omega)
+                    stream_periodic_x_moving_wall_y_F_2d!(
+                        Ftmp, Fref; u_south=0.0, u_north=U,
+                        rho_wall=1.0, volume=volume)
+                end
+                Fref, Ftmp = Ftmp, Fref
+            end
+
+            gpu = Kraken.run_cartesian_channel_gpu_reference_2d(
+                flow=flow, nx=nx, ny=ny, steps=steps, volume=volume,
+                omega=omega, Fx=Fx, U=U, rho0=1.0,
+                backend=KernelAbstractions.CPU(), T=Float64)
+            @test isapprox(gpu.F, Fref; atol=1e-14, rtol=0)
+            @test isapprox(gpu.mass_final, sum(Fref); atol=1e-14, rtol=0)
+        end
+    end
+
     @testset "GPU device-side mass correction" begin
         F = reshape(Float64.(1:36), 4, 9)
         initial = sum(F)
@@ -709,6 +744,15 @@ using KernelAbstractions
                 @test isapprox(sum(Array(Fmassd)), target; atol=1e-3,
                                rtol=0)
                 @test Array(max_rawd)[1] > 0
+
+                cart = Kraken.run_cartesian_channel_gpu_reference_2d(
+                    flow=:poiseuille, nx=6, ny=5, steps=3,
+                    volume=Float32(1 / 16), omega=Float32(1),
+                    Fx=Float32(1e-7), rho0=Float32(1),
+                    backend=backend, T=Float32)
+                @test all(isfinite, cart.F)
+                @test isapprox(cart.mass_final, sum(cart.F);
+                               atol=1e-5, rtol=0)
             end
         end
     end

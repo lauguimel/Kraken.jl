@@ -134,7 +134,8 @@ function _temp_run_case(setup, case; steps::Int, method::Symbol, T=Float64,
     avg = _ql_avg_window(setup, steps)
     force = (force_x=0.0, force_y=0.0)
     if method == :cartesian_classic
-        result = _ql_run_cartesian_classic_channel(setup, case; steps=steps, T=T)
+        result = _ql_run_cartesian_classic_channel(
+            setup, case; steps=steps, T=T, backend=backend)
         force = (force_x=getproperty(result, :force_x),
                  force_y=getproperty(result, :force_y))
     elseif method == :amr_d && case.runtime_status in
@@ -451,7 +452,9 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         reference = nothing
         if reference_method !== nothing
             reference_backend = reference_method == :cartesian_classic ?
-                "cpu_classic_dense" : "cpu_leaf_oracle"
+                (backend === nothing ? "cpu_classic_dense" :
+                 string(backend_name, "_classic_dense")) :
+                "cpu_leaf_oracle"
             reference_method == :cartesian_classic && backend !== nothing &&
                 println("running ", case.name,
                         " reference=cartesian_classic backend=",
@@ -468,7 +471,9 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
                 steps=getproperty(reference.result, :steps),
                 elapsed_s=ref_elapsed_s,
                 notes=reference_method == :cartesian_classic ?
-                    "classic dense Cartesian reference; CPU until Cartesian GPU reference is wired" :
+                    (backend === nothing ?
+                     "classic dense Cartesian reference on CPU" :
+                     "classic dense Cartesian reference on resolved backend") :
                     "leaf-oracle reference"))
         else
             println("skipping ", case.name,
