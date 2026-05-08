@@ -541,3 +541,211 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
         max_uy,
     )
 end
+
+function _logfv_square_obstacle_mask(Nx::Int, Ny::Int, side::Int, cx::Int, cy::Int)
+    side >= 2 || throw(ArgumentError("side must be >= 2"))
+    3 <= cx <= Nx - 2 || throw(ArgumentError("cx must leave fluid columns around the square"))
+    3 <= cy <= Ny - 2 || throw(ArgumentError("cy must leave fluid rows around the square"))
+    half_lo = (side - 1) ÷ 2
+    half_hi = side ÷ 2
+    i1 = cx - half_lo
+    i2 = cx + half_hi
+    j1 = cy - half_lo
+    j2 = cy + half_hi
+    2 <= i1 <= i2 <= Nx - 1 || throw(ArgumentError("square obstacle must leave one fluid column on each side"))
+    2 <= j1 <= j2 <= Ny - 1 || throw(ArgumentError("square obstacle must leave one fluid row on each side"))
+    is_solid = fill(false, Nx, Ny)
+    is_solid[i1:i2, j1:j2] .= true
+    return is_solid
+end
+
+"""
+    run_viscoelastic_logfv_square_periodic_2d(; kwargs...)
+
+Run the first coarse macro-flow canary for the log-FV backend around an
+axis-aligned square obstacle. The domain is periodic in `x`, has halfway walls
+at `y`, and is driven by a uniform body force.
+
+This is a stability/coupling canary, not a drag benchmark. It exercises
+solid-aware velocity gradients, solid-aware `Psi` advection, local
+log-conformation source update, solid-aware polymer force, and Guo coupling.
+BSD is deliberately disabled until a solid-aware BSD Laplacian canary exists.
+"""
+function run_viscoelastic_logfv_square_periodic_2d(;
+    Nx::Integer=48,
+    Ny::Integer=24,
+    side::Integer=6,
+    cx::Integer=Nx ÷ 3,
+    cy::Integer=Ny ÷ 2,
+    nu_s::Real=0.08,
+    nu_p::Real=0.02,
+    Fx_body::Real=1e-6,
+    lambda::Real=2.0,
+    bsd_fraction::Real=0.0,
+    polymer_substeps=:auto,
+    subcycle_relative_tolerance::Real=0.01,
+    max_deformation_increment::Real=0.05,
+    max_polymer_substeps::Integer=64,
+    max_steps::Integer=500,
+    backend=KernelAbstractions.CPU(),
+    T=Float64,
+)
+    Nx >= 8 || throw(ArgumentError("Nx must be >= 8"))
+    Ny >= 8 || throw(ArgumentError("Ny must be >= 8"))
+    nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
+    nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
+    lambda > 0 || throw(ArgumentError("lambda must be positive"))
+    iszero(bsd_fraction) ||
+        throw(ArgumentError("square periodic canary requires bsd_fraction=0 until solid-aware BSD is added"))
+
+    Nx_i = Int(Nx)
+    Ny_i = Int(Ny)
+    side_i = Int(side)
+    cx_i = Int(cx)
+    cy_i = Int(cy)
+    is_solid_h = _logfv_square_obstacle_mask(Nx_i, Ny_i, side_i, cx_i, cy_i)
+
+    nu_s_t = T(nu_s)
+    nu_p_t = T(nu_p)
+    nu_total_t = nu_s_t + nu_p_t
+    Fx_body_t = T(Fx_body)
+    lambda_t = T(lambda)
+    prefactor_t = nu_p_t / lambda_t
+    dx = one(T)
+    dy = one(T)
+
+    max_grad_norm_estimate = abs(Fx_body_t) * T(Ny_i) / (T(2) * max(nu_total_t, eps(T)))
+    subcycle_estimate = logfv_oldroydb_subcycle_estimate(
+        Float64(max_grad_norm_estimate),
+        Float64(lambda_t),
+        1.0;
+        relative_tolerance=Float64(subcycle_relative_tolerance),
+        max_deformation_increment=Float64(max_deformation_increment),
+        min_substeps=1,
+        max_substeps=max_polymer_substeps,
+    )
+    selected_polymer_substeps = if polymer_substeps === :auto
+        subcycle_estimate.recommended
+    elseif polymer_substeps isa Integer
+        polymer_substeps >= 1 || throw(ArgumentError("polymer_substeps must be >= 1"))
+        polymer_substeps
+    else
+        throw(ArgumentError("polymer_substeps must be an integer or :auto"))
+    end
+    dt_poly = one(T) / T(selected_polymer_substeps)
+
+    config = LBMConfig(D2Q9(); Nx=Nx_i, Ny=Ny_i, ν=Float64(nu_s_t), u_lid=0.0, max_steps=max_steps)
+    state = initialize_2d(config, T; backend=backend)
+    f_in, f_out = state.f_in, state.f_out
+    rho, ux, uy = state.ρ, state.ux, state.uy
+    is_solid = state.is_solid
+    copyto!(is_solid, is_solid_h)
+    omega_t = T(omega(config))
+
+    psixx = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psixy = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psiyy = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psixx_adv = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psixy_adv = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psiyy_adv = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psixx_next = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psixy_next = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    psiyy_next = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    dudx = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    dudy = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    dvdx = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    dvdy = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    ux_face = KernelAbstractions.zeros(backend, T, Nx_i + 1, Ny_i)
+    uy_face = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i + 1)
+    tauxx = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    tauxy = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    tauyy = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    fx_poly = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    fy_poly = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    fx_total = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    fy_total = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+
+    for _ in 1:max_steps
+        logfv_cell_velocity_to_faces_solid_aware_2d!(ux_face, uy_face, ux, uy, is_solid; sync=false)
+        logfv_advect_upwind_solid_aware_2d!(
+            psixx_adv, psixy_adv, psiyy_adv,
+            psixx, psixy, psiyy, ux_face, uy_face, is_solid, one(T);
+            sync=false,
+        )
+        logfv_velocity_gradient_solid_aware_2d!(dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy; sync=false)
+
+        psixx_work, psixy_work, psiyy_work = psixx_adv, psixy_adv, psiyy_adv
+        for _ in 1:selected_polymer_substeps
+            logfv_step_oldroydb_log_2d!(
+                psixx_next, psixy_next, psiyy_next,
+                psixx_work, psixy_work, psiyy_work,
+                dudx, dudy, dvdx, dvdy,
+                lambda_t, dt_poly;
+                sync=false,
+            )
+            psixx_work, psixx_next = psixx_next, psixx_work
+            psixy_work, psixy_next = psixy_next, psixy_work
+            psiyy_work, psiyy_next = psiyy_next, psiyy_work
+        end
+        psixx, psixx_adv = psixx_work, psixx
+        psixy, psixy_adv = psixy_work, psixy
+        psiyy, psiyy_adv = psiyy_work, psiyy
+
+        logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor_t; sync=false)
+        logfv_polymer_force_solid_aware_2d!(fx_poly, fy_poly, tauxx, tauxy, tauyy, is_solid, dx, dy; sync=false)
+        copyto!(fx_total, fx_poly)
+        copyto!(fy_total, fy_poly)
+        logfv_add_constant_force_2d!(fx_total, fy_total, Fx_body_t, zero(T); sync=false)
+
+        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx_i, Ny_i)
+        collide_guo_field_2d!(f_out, is_solid, fx_total, fy_total, omega_t)
+        logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_out, fx_total, fy_total; sync=false)
+        f_in, f_out = f_out, f_in
+    end
+    KernelAbstractions.synchronize(backend)
+
+    ux_cpu = Array(ux)
+    uy_cpu = Array(uy)
+    rho_cpu = Array(rho)
+    psixx_cpu = Array(psixx)
+    psixy_cpu = Array(psixy)
+    psiyy_cpu = Array(psiyy)
+    min_c_eig = Inf
+    max_speed = 0.0
+    for j in 1:Ny_i, i in 1:Nx_i
+        if !is_solid_h[i, j]
+            cxx, cxy, cyy = logfv_exp_sym2_2d(psixx_cpu[i, j], psixy_cpu[i, j], psiyy_cpu[i, j])
+            min_c_eig = min(min_c_eig, logfv_min_eig_sym2_2d(cxx, cxy, cyy))
+            max_speed = max(max_speed, hypot(Float64(ux_cpu[i, j]), Float64(uy_cpu[i, j])))
+        end
+    end
+
+    return (;
+        Nx=Nx_i,
+        Ny=Ny_i,
+        side=side_i,
+        cx=cx_i,
+        cy=cy_i,
+        nu_s=Float64(nu_s_t),
+        nu_p=Float64(nu_p_t),
+        Fx_body=Float64(Fx_body_t),
+        lambda=Float64(lambda_t),
+        polymer_substeps=selected_polymer_substeps,
+        requested_polymer_substeps=polymer_substeps,
+        subcycle_estimate,
+        max_steps,
+        rho=rho_cpu,
+        ux=ux_cpu,
+        uy=uy_cpu,
+        psixx=psixx_cpu,
+        psixy=psixy_cpu,
+        psiyy=psiyy_cpu,
+        fx_total=Array(fx_total),
+        fy_total=Array(fy_total),
+        is_solid=is_solid_h,
+        min_c_eig,
+        max_speed,
+        rho_min=minimum(rho_cpu),
+        rho_max=maximum(rho_cpu),
+    )
+end

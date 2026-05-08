@@ -959,4 +959,27 @@ end
             @test all(isfinite, result.psixx)
         end
     end
+
+    @testset "M6 square periodic coarse macroflow stays SPD and bounded" begin
+        result = Kraken.run_viscoelastic_logfv_square_periodic_2d(;
+            Nx=28, Ny=14, side=4,
+            nu_s=0.08, nu_p=0.02, Fx_body=1e-6,
+            lambda=5.0, polymer_substeps=:auto,
+            max_steps=150, backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test result.polymer_substeps == 10
+        @test result.subcycle_estimate.recommended == 10
+        @test result.min_c_eig > 0.99
+        @test result.max_speed > 1e-6
+        @test result.max_speed < 1e-3
+        @test result.rho_min > 0.99
+        @test result.rho_max < 1.01
+        @test all(isfinite, result.ux)
+        @test all(isfinite, result.uy)
+        @test all(isfinite, result.psixx)
+        @test all(isfinite, result.fx_total)
+        @test any(result.is_solid)
+        @test !all(result.is_solid)
+    end
 end
