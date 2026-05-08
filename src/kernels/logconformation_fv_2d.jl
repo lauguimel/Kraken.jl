@@ -372,6 +372,43 @@ function logfv_polymer_force_centered_2d!(
     return nothing
 end
 
+@kernel function logfv_polymer_force_solid_aware_2d_kernel!(
+    fx, fy,
+    @Const(tauxx), @Const(tauxy), @Const(tauyy), @Const(is_solid),
+    inv_dx, inv_dy, inv_2dx, inv_2dy, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if is_solid[i, j]
+                fx[i, j] = zero(eltype(fx))
+                fy[i, j] = zero(eltype(fy))
+            else
+                fx[i, j] = _logfv_solid_aware_derivative_x_2d(tauxx, is_solid, i, j, Nx, inv_dx, inv_2dx) +
+                           _logfv_solid_aware_derivative_y_2d(tauxy, is_solid, i, j, Ny, inv_dy, inv_2dy)
+                fy[i, j] = _logfv_solid_aware_derivative_x_2d(tauxy, is_solid, i, j, Nx, inv_dx, inv_2dx) +
+                           _logfv_solid_aware_derivative_y_2d(tauyy, is_solid, i, j, Ny, inv_dy, inv_2dy)
+            end
+        end
+    end
+end
+
+function logfv_polymer_force_solid_aware_2d!(
+    fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(fx)
+    Nx, Ny = size(fx)
+    kernel! = logfv_polymer_force_solid_aware_2d_kernel!(backend)
+    kernel!(
+        fx, fy, tauxx, tauxy, tauyy, is_solid,
+        inv(dx), inv(dy), inv(2 * dx), inv(2 * dy), Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_bsd_correct_force_centered_2d_kernel!(
     fx_out, fy_out,
     @Const(fx_poly), @Const(fy_poly),

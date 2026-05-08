@@ -636,6 +636,37 @@ end
         end
     end
 
+    @testset "M4 solid-aware polymer force does not read through obstacles" begin
+        Nx, Ny = 10, 9
+        dx, dy = 0.3, 0.2
+        axx, axy = 0.07, -0.03
+        bxy, byy = 0.02, 0.05
+        tauxx = [0.1 + axx * ((i - 0.5) * dx) - 0.01 * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        tauxy = [-0.2 + axy * ((i - 0.5) * dx) + bxy * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        tauyy = [0.3 + 0.04 * ((i - 0.5) * dx) + byy * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        is_solid = falses(Nx, Ny)
+        is_solid[4:6, 4:6] .= true
+        fx = similar(tauxx)
+        fy = similar(tauxx)
+
+        Kraken.logfv_polymer_force_solid_aware_2d!(fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test fx[i, j] == 0.0
+                @test fy[i, j] == 0.0
+                continue
+            end
+            x_has_neighbor = (i > 1 && !is_solid[i - 1, j]) || (i < Nx && !is_solid[i + 1, j])
+            y_has_neighbor = (j > 1 && !is_solid[i, j - 1]) || (j < Ny && !is_solid[i, j + 1])
+            expected_fx = (x_has_neighbor ? axx : 0.0) + (y_has_neighbor ? bxy : 0.0)
+            expected_fy = (x_has_neighbor ? axy : 0.0) + (y_has_neighbor ? byy : 0.0)
+            @test fx[i, j] ≈ expected_fx atol=3e-15 rtol=3e-15
+            @test fy[i, j] ≈ expected_fy atol=3e-15 rtol=3e-15
+        end
+    end
+
     @testset "M4 BSD force correction preserves continuum balance" begin
         Nx, Ny = 7, 21
         height = 1.0

@@ -78,6 +78,32 @@ end
             end
         end
 
+        tauxx_h = [FT(0.1) + FT(0.07) * (FT(i) - FT(0.5)) * dx - FT(0.01) * (FT(j) - FT(0.5)) * dy
+                   for i in 1:Nx, j in 1:Ny]
+        tauxy_h = [FT(-0.2) - FT(0.03) * (FT(i) - FT(0.5)) * dx + FT(0.02) * (FT(j) - FT(0.5)) * dy
+                   for i in 1:Nx, j in 1:Ny]
+        tauyy_h = [FT(0.3) + FT(0.04) * (FT(i) - FT(0.5)) * dx + FT(0.05) * (FT(j) - FT(0.5)) * dy
+                   for i in 1:Nx, j in 1:Ny]
+        tauxx = _copy_to_backend(backend, tauxx_h)
+        tauxy = _copy_to_backend(backend, tauxy_h)
+        tauyy = _copy_to_backend(backend, tauyy_h)
+        fx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        fy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+        Kraken.logfv_polymer_force_solid_aware_2d!(fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy)
+        fx_h = Array(fx)
+        fy_h = Array(fy)
+        for j in 1:Ny, i in 1:Nx
+            if is_solid_h[i, j]
+                @test fx_h[i, j] == 0
+                @test fy_h[i, j] == 0
+            else
+                x_has_neighbor = (i > 1 && !is_solid_h[i - 1, j]) || (i < Nx && !is_solid_h[i + 1, j])
+                y_has_neighbor = (j > 1 && !is_solid_h[i, j - 1]) || (j < Ny && !is_solid_h[i, j + 1])
+                @test Float64(fx_h[i, j]) ≈ Float64((x_has_neighbor ? FT(0.07) : FT(0)) + (y_has_neighbor ? FT(0.02) : FT(0))) atol=atol rtol=atol
+                @test Float64(fy_h[i, j]) ≈ Float64((x_has_neighbor ? FT(-0.03) : FT(0)) + (y_has_neighbor ? FT(0.05) : FT(0))) atol=atol rtol=atol
+            end
+        end
+
         psixx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psixy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psiyy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
