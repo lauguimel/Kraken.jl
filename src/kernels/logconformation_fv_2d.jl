@@ -730,6 +730,47 @@ function logfv_add_constant_force_2d!(fx, fy, Fx, Fy; sync::Bool=true)
     return nothing
 end
 
+@kernel function logfv_add_constant_force_fluid_2d_kernel!(
+    fx, fy, @Const(is_solid), Fx, Fy, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny && !is_solid[i, j]
+            T = eltype(fx)
+            fx[i, j] += T(Fx)
+            fy[i, j] += T(Fy)
+        end
+    end
+end
+
+function logfv_add_constant_force_fluid_2d!(fx, fy, is_solid, Fx, Fy; sync::Bool=true)
+    backend = KernelAbstractions.get_backend(fx)
+    Nx, Ny = size(fx)
+    kernel! = logfv_add_constant_force_fluid_2d_kernel!(backend)
+    kernel!(fx, fy, is_solid, Fx, Fy, Nx, Ny; ndrange=(Nx, Ny))
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+@kernel function logfv_copy_column_profile_2d_kernel!(profile, @Const(field), column, Nx, Ny)
+    j = @index(Global)
+    @inbounds begin
+        if j <= Ny
+            i = min(max(column, 1), Nx)
+            profile[j] = field[i, j]
+        end
+    end
+end
+
+function logfv_copy_column_profile_2d!(profile, field, column; sync::Bool=true)
+    backend = KernelAbstractions.get_backend(field)
+    Nx, Ny = size(field)
+    kernel! = logfv_copy_column_profile_2d_kernel!(backend)
+    kernel!(profile, field, column, Nx, Ny; ndrange=Ny)
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
 @kernel function logfv_compute_macroscopic_forced_field_2d_kernel!(
     rho, ux, uy,
     @Const(f), @Const(fx), @Const(fy),

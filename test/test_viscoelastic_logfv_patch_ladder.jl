@@ -1189,6 +1189,24 @@ end
                 @test fy_total[i, j] ≈ fy_poly[i, j] - zeta * nu_p * lap_uy atol=5e-14 rtol=5e-14
             end
         end
+
+        field = [10i + j for i in 1:Nx, j in 1:Ny]
+        profile = zeros(Float64, Ny)
+        Kraken.logfv_copy_column_profile_2d!(profile, field, 3)
+        @test profile == field[3, :]
+
+        fx_fluid = zeros(Float64, Nx, Ny)
+        fy_fluid = zeros(Float64, Nx, Ny)
+        Kraken.logfv_add_constant_force_fluid_2d!(fx_fluid, fy_fluid, is_solid, 0.7, -0.2)
+        for j in 1:Ny, i in 1:Nx
+            if is_solid[i, j]
+                @test fx_fluid[i, j] == 0.0
+                @test fy_fluid[i, j] == 0.0
+            else
+                @test fx_fluid[i, j] == 0.7
+                @test fy_fluid[i, j] == -0.2
+            end
+        end
     end
 
     @testset "M8a modular LI-BB V2 Guo field canaries" begin
@@ -1426,5 +1444,54 @@ end
         @test all(isfinite, result.tauxx)
         @test all(isfinite, result.tauxy)
         @test all(isfinite, result.tauyy)
+    end
+
+    @testset "M8e BFS coupled log-FV feedback is hydro-consistent and bounded" begin
+        hydro = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.08, nu_p=0.0, lambda=5.0,
+            u_mean=0.01, Fx_body=2e-7,
+            hydro_steps=40, polymer_steps=0,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        zero_poly = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.08, nu_p=0.0, lambda=5.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=40,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fluid = .!zero_poly.is_solid
+        @test zero_poly.nu_lbm ≈ zero_poly.nu_s
+        @test zero_poly.max_abs_tau == 0.0
+        @test maximum(abs.(zero_poly.ux[fluid] .- hydro.ux[fluid])) < 1e-12
+        @test maximum(abs.(zero_poly.uy[fluid] .- hydro.uy[fluid])) < 1e-12
+        @test maximum(abs.(zero_poly.rho[fluid] .- hydro.rho[fluid])) < 1e-12
+
+        coupled = Kraken.run_viscoelastic_logfv_bfs_coupled_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4,
+            nu_s=0.08, nu_p=0.02, lambda=5.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=40,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test coupled.bsd_fraction == 1.0
+        @test coupled.nu_lbm ≈ 0.10
+        @test coupled.max_abs_tau > 0
+        @test coupled.max_abs_poly_force > 0
+        @test coupled.max_abs_total_force > 0
+        @test coupled.min_c_eig > 0.9
+        @test coupled.max_abs_psi < 0.2
+        @test coupled.max_abs_tau < 2e-3
+        @test coupled.max_speed > 1e-4
+        @test coupled.max_speed < 0.05
+        @test coupled.rho_min > 0.98
+        @test coupled.rho_max < 1.02
+        @test all(isfinite, coupled.ux)
+        @test all(isfinite, coupled.uy)
+        @test all(isfinite, coupled.psixx)
+        @test all(isfinite, coupled.tauxx)
+        @test all(isfinite, coupled.fx_total)
     end
 end
