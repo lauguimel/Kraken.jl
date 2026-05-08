@@ -94,6 +94,7 @@ include("drivers/viscoelastic_spec.jl")
 include("drivers/viscoelastic_diagnostics.jl")
 include("kernels/viscoelastic_3d.jl")
 include("drivers/viscoelastic.jl")
+include("drivers/viscoelastic_logfv_2d.jl")
 include("drivers/step_geometry_2d.jl")
 include("drivers/contraction_libb.jl")
 include("drivers/viscoelastic_3d.jl")
@@ -302,6 +303,7 @@ export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 export run_viscoelastic_cylinder_2d, run_conformation_cylinder_2d
 export run_conformation_cylinder_libb_2d
+export run_viscoelastic_logfv_channel_2d
 export conformation_field_diagnostics_2d
 export StepChannelGeometry2D, step_channel_geometry_2d
 export contraction_step_geometry_2d, backward_facing_step_geometry_2d,

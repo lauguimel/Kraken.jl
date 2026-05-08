@@ -511,4 +511,27 @@ end
             @test fy_total[i, j] ≈ 0.0 atol=2e-14
         end
     end
+
+    @testset "M5 macro channel driver exercises log-FV pipeline" begin
+        for flow in (:poiseuille, :couette)
+            result = Kraken.run_viscoelastic_logfv_channel_2d(;
+                Nx=13, Ny=17, flow=flow, height=1.0, width=2.0,
+                umax=0.06, uwall=0.07, lambda=5.0, prefactor=0.11,
+                bsd_fraction=flow === :poiseuille ? 1.0 : 0.5,
+                backend=KernelAbstractions.CPU(), T=Float64,
+            )
+            @test result.flow === flow
+            @test result.Nx == 13
+            @test result.Ny == 17
+            @test result.dx ≈ 2.0 / 13
+            @test result.dy ≈ 1.0 / 17
+            @test result.min_c_eig > 0
+            @test result.max_tau_error < 5e-14
+            @test result.max_poly_force_error < 5e-13
+            @test result.max_total_force_error < 5e-13
+            @test result.max_transverse_force < 5e-13
+            @test all(isfinite, result.fx_total)
+            @test all(isfinite, result.tauxx)
+        end
+    end
 end
