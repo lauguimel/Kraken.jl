@@ -358,6 +358,47 @@ end
         @test all(isfinite, Array(bux_driven))
         @test maximum(abs, Array(bf_driven) .- Array(bf_ref)) > 0
 
+        bgeom = Kraken.transfer_step_geometry_2d(bfs, backend)
+        bprofile_h = Kraken.parabolic_face_profile_2d(bfs; face=:west, mean_velocity=FT(0.01), FT=FT)
+        bprofile = _copy_to_backend(backend, bprofile_h)
+        bbcspec = Kraken.default_step_bcspec_2d(bgeom, bprofile, FT(1))
+        bhydro_in_h = zeros(FT, bNx, bNy, 9)
+        for j in 1:bNy, i in 1:bNx, q in 1:9
+            ux0 = bfs_solid_h[i, j] ? FT(0) : bprofile_h[j]
+            bhydro_in_h[i, j, q] = Kraken.equilibrium(D2Q9(), FT(1), ux0, FT(0), q)
+        end
+        bhydro_in = _copy_to_backend(backend, bhydro_in_h)
+        bhydro_out = KernelAbstractions.zeros(backend, FT, bNx, bNy, 9)
+        brho_hydro = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bux_hydro = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        buy_hydro = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfx_hydro_h = [bfs_solid_h[i, j] ? FT(0) : FT(2e-7) for i in 1:bNx, j in 1:bNy]
+        bfy_hydro_h = fill(FT(0), bNx, bNy)
+        bfx_hydro = _copy_to_backend(backend, bfx_hydro_h)
+        bfy_hydro = _copy_to_backend(backend, bfy_hydro_h)
+        for _ in 1:5
+            Kraken.fused_trt_libb_v2_guo_field_step!(
+                bhydro_out, bhydro_in, brho_hydro, bux_hydro, buy_hydro,
+                bgeom.is_solid, bgeom.q_wall, buw_x, buw_y,
+                bfx_hydro, bfy_hydro, bNx, bNy, FT(0.08),
+            )
+            Kraken.apply_bc_rebuild_2d!(bhydro_out, bhydro_in, bbcspec, FT(0.08), bNx, bNy)
+            bhydro_in, bhydro_out = bhydro_out, bhydro_in
+        end
+        Kraken.logfv_compute_macroscopic_forced_field_2d!(
+            brho_hydro, bux_hydro, buy_hydro, bhydro_in, bfx_hydro, bfy_hydro,
+        )
+        brho_h = Array(brho_hydro)
+        bux_h = Array(bux_hydro)
+        buy_h = Array(buy_hydro)
+        bfs_fluid = .!bfs_solid_h
+        @test all(isfinite, brho_h[bfs_fluid])
+        @test all(isfinite, bux_h[bfs_fluid])
+        @test all(isfinite, buy_h[bfs_fluid])
+        @test minimum(brho_h[bfs_fluid]) > 0.95
+        @test maximum(brho_h[bfs_fluid]) < 1.05
+        @test maximum(abs, bux_h[bfs_fluid]) > 1e-5
+
         psixx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psixy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psiyy = KernelAbstractions.zeros(backend, FT, Nx, Ny)

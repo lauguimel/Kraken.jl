@@ -1263,4 +1263,52 @@ end
         @test all(isfinite, ux)
         @test all(isfinite, uy)
     end
+
+    @testset "M8b BFS hydrodynamic Guo-field pipeline is bounded" begin
+        geom = Kraken.backward_facing_step_geometry_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=4, FT=Float64,
+        )
+        Nx, Ny = geom.Nx, geom.Ny
+        ν = 0.08
+        u_mean = 0.01
+        u_profile = Kraken.parabolic_face_profile_2d(geom; face=:west, mean_velocity=u_mean, FT=Float64)
+        bcspec = Kraken.default_step_bcspec_2d(geom, u_profile, 1.0)
+
+        f_in = zeros(Float64, Nx, Ny, 9)
+        f_out = similar(f_in)
+        for j in 1:Ny, i in 1:Nx, q in 1:9
+            ux0 = geom.is_solid[i, j] ? 0.0 : u_profile[j]
+            f_in[i, j, q] = Kraken.equilibrium(D2Q9(), 1.0, ux0, 0.0, q)
+        end
+        rho = ones(Float64, Nx, Ny)
+        ux = zeros(Float64, Nx, Ny)
+        uy = zeros(Float64, Nx, Ny)
+        uwx = zeros(Float64, Nx, Ny, 9)
+        uwy = zeros(Float64, Nx, Ny, 9)
+        fx = [geom.is_solid[i, j] ? 0.0 : 2e-7 for i in 1:Nx, j in 1:Ny]
+        fy = zeros(Float64, Nx, Ny)
+
+        for _ in 1:60
+            Kraken.fused_trt_libb_v2_guo_field_step!(
+                f_out, f_in, rho, ux, uy, geom.is_solid, geom.q_wall,
+                uwx, uwy, fx, fy, Nx, Ny, ν,
+            )
+            Kraken.apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν, Nx, Ny)
+            f_in, f_out = f_out, f_in
+        end
+        Kraken.logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_in, fx, fy)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        fluid = .!geom.is_solid
+        @test all(isfinite, rho[fluid])
+        @test all(isfinite, ux[fluid])
+        @test all(isfinite, uy[fluid])
+        @test minimum(rho[fluid]) > 0.98
+        @test maximum(rho[fluid]) < 1.02
+        @test maximum(abs, ux[fluid]) > 1e-4
+        @test maximum(abs, ux[fluid]) < 0.05
+        @test maximum(abs, uy[fluid]) < 0.02
+        outlet_probe = ux[Nx - 2, geom.outlet_open]
+        @test sum(outlet_probe) / length(outlet_probe) > 1e-4
+    end
 end
