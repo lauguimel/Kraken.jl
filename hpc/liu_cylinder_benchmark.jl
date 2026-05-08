@@ -148,6 +148,7 @@ u_mean = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.02"))
 steps_low_wi = parse(Int, get(ENV, "KRAKEN_STEPS_LOW_WI", "100000"))
 steps = parse(Int, get(ENV, "KRAKEN_STEPS", "200000"))
 avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR", "5"))
+drag_stride = parse(Int, get(ENV, "KRAKEN_DRAG_STRIDE", "200"))
 run_newtonian = get(ENV, "KRAKEN_RUN_NEWTONIAN", "1") == "1"
 drag_mode = Symbol(get(ENV, "KRAKEN_DRAG_MODE", "explicit_split"))
 hermite_source_mode =
@@ -186,7 +187,7 @@ diagnostic_interval =
 println("R_LIST=$(join(R_values, ",")) WI_LIST=$(join(Wi_values, ","))")
 println("VARIANTS=$(join((v.label for v in variants), ","))")
 println("MODELS=$(join(models, ","))")
-println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks tau_plus=$tau_plus conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
+println("beta=$β u_mean=$u_mean steps_low_wi=$steps_low_wi steps=$steps avg_divisor=$avg_divisor drag_stride=$drag_stride run_newtonian=$run_newtonian drag_mode=$drag_mode hermite_source_mode=$hermite_source_mode solvent_source_mode=$solvent_source_mode source_reconstruction=$source_stress_reconstruction source_order=$source_stress_reconstruction_order source_scale=$source_scale_dynamics source_on_domain_walls=$solvent_source_on_domain_walls source_on_cutlinks=$solvent_source_on_cutlinks tau_plus=$tau_plus conformation_magic=$conformation_magic conformation_collision=$conformation_collision divergence_mode=$conformation_divergence_mode initial_condition=$conformation_initial_condition wall_geometry=$wall_geometry diagnostic_interval=$diagnostic_interval")
 allow_diagnostic_force_mode &&
     println("WARNING: KRAKEN_DRAG_MODE=$drag_mode is audit-only; Cd_report is not the validation force path.")
 
@@ -211,6 +212,7 @@ for R in R_values
             Nx=Nx, Ny=Ny, radius=R, cx=cx, cy=cy,
             u_in=FT(1.5 * u_mean), ν=FT(ν_total), inlet=:parabolic,
             max_steps=max_steps_newt, avg_window=avg_window_newt,
+            drag_stride=drag_stride,
             backend=backend, T=FT,
         )
         dt = time() - t0
@@ -237,6 +239,7 @@ for R in R_values
                 polymer_model=polymer_model, tau_plus=FT(tau_plus),
                 inlet=:parabolic, ρ_out=one(FT),
                 max_steps=max_steps, avg_window=avg_window,
+                drag_stride=drag_stride,
                 polymer_bc=variant.bc,
                 conformation_gradient_mode=variant.gradient,
                 conformation_magic=conformation_magic,
