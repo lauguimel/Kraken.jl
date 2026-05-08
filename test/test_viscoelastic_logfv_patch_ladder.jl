@@ -80,6 +80,48 @@ function _oldroydb_simple_shear_from_identity(γ, λ, t)
     )
 end
 
+function _upwind_scalar_advective_rhs(φ, ux_face, uy_face, i, j)
+    ue = ux_face[i + 1, j]
+    uw = ux_face[i, j]
+    vn = uy_face[i, j + 1]
+    vs = uy_face[i, j]
+
+    φe = ifelse(ue >= 0, φ[i, j], φ[i + 1, j])
+    φw = ifelse(uw >= 0, φ[i - 1, j], φ[i, j])
+    φn = ifelse(vn >= 0, φ[i, j], φ[i, j + 1])
+    φs = ifelse(vs >= 0, φ[i, j - 1], φ[i, j])
+
+    flux_div = ue * φe - uw * φw + vn * φn - vs * φs
+    divu = ue - uw + vn - vs
+    return -(flux_div - φ[i, j] * divu)
+end
+
+function _upwind_tensor_advective_rhs(ψxx, ψxy, ψyy, ux_face, uy_face, i, j)
+    return (
+        _upwind_scalar_advective_rhs(ψxx, ux_face, uy_face, i, j),
+        _upwind_scalar_advective_rhs(ψxy, ux_face, uy_face, i, j),
+        _upwind_scalar_advective_rhs(ψyy, ux_face, uy_face, i, j),
+    )
+end
+
+_periodic(i, n) = mod1(i, n)
+
+function _periodic_upwind_scalar_step(φ, u, v, dt)
+    Nx, Ny = size(φ)
+    out = similar(φ)
+    for j in 1:Ny, i in 1:Nx
+        im = _periodic(i - 1, Nx)
+        ip = _periodic(i + 1, Nx)
+        jm = _periodic(j - 1, Ny)
+        jp = _periodic(j + 1, Ny)
+
+        dφdx = ifelse(u >= 0, φ[i, j] - φ[im, j], φ[ip, j] - φ[i, j])
+        dφdy = ifelse(v >= 0, φ[i, j] - φ[i, jm], φ[i, jp] - φ[i, j])
+        out[i, j] = φ[i, j] - dt * (u * dφdx + v * dφdy)
+    end
+    return out
+end
+
 function _assert_sym2_close(actual, expected; atol=LOGFV_ATOL, rtol=LOGFV_RTOL)
     @test actual[1] ≈ expected[1] atol=atol rtol=rtol
     @test actual[2] ≈ expected[2] atol=atol rtol=rtol
@@ -212,5 +254,59 @@ end
         c_long = _oldroydb_simple_shear_from_identity(γ, λ, 400λ)
         csteady = _oldroydb_simple_shear_stationary(γ, λ)
         _assert_sym2_close(c_long, csteady; atol=1e-12, rtol=1e-12)
+    end
+
+    @testset "M3 divergence-corrected upwind preserves constant Psi" begin
+        Nx, Ny = 9, 8
+        ux_face = [0.17 + 0.021 * (i - 1) - 0.013 * (j - 1) for i in 1:(Nx + 1), j in 1:Ny]
+        uy_face = [-0.08 + 0.009 * (i - 1) + 0.017 * (j - 1) for i in 1:Nx, j in 1:(Ny + 1)]
+        ψxx = fill(0.4, Nx, Ny)
+        ψxy = fill(-0.07, Nx, Ny)
+        ψyy = fill(0.2, Nx, Ny)
+
+        for j in 2:(Ny - 1), i in 2:(Nx - 1)
+            rhs = _upwind_tensor_advective_rhs(ψxx, ψxy, ψyy, ux_face, uy_face, i, j)
+            _assert_sym2_close(rhs, (0.0, 0.0, 0.0); atol=2e-16, rtol=0.0)
+        end
+    end
+
+    @testset "M3 constant velocity advects affine Psi exactly" begin
+        Nx, Ny = 10, 11
+        x(i) = i - 1
+        y(j) = j - 1
+        fields = (
+            [0.3 + 0.04 * x(i) - 0.02 * y(j) for i in 1:Nx, j in 1:Ny],
+            [-0.1 - 0.03 * x(i) + 0.05 * y(j) for i in 1:Nx, j in 1:Ny],
+            [0.2 + 0.01 * x(i) + 0.07 * y(j) for i in 1:Nx, j in 1:Ny],
+        )
+        slopes = ((0.04, -0.02), (-0.03, 0.05), (0.01, 0.07))
+        velocity_cases = ((0.13, -0.09), (-0.11, 0.21), (0.18, 0.06), (-0.05, -0.08))
+
+        for (u, v) in velocity_cases
+            ux_face = fill(u, Nx + 1, Ny)
+            uy_face = fill(v, Nx, Ny + 1)
+            for j in 2:(Ny - 1), i in 2:(Nx - 1)
+                rhs = _upwind_tensor_advective_rhs(fields..., ux_face, uy_face, i, j)
+                expected = ntuple(k -> -(u * slopes[k][1] + v * slopes[k][2]), 3)
+                _assert_sym2_close(rhs, expected; atol=2e-16, rtol=0.0)
+            end
+        end
+    end
+
+    @testset "M3 CFL-one periodic upwind direction" begin
+        Nx, Ny = 7, 6
+        φ = [10i + j for i in 1:Nx, j in 1:Ny]
+
+        step_east = _periodic_upwind_scalar_step(φ, 1.0, 0.0, 1.0)
+        step_west = _periodic_upwind_scalar_step(φ, -1.0, 0.0, 1.0)
+        step_north = _periodic_upwind_scalar_step(φ, 0.0, 1.0, 1.0)
+        step_south = _periodic_upwind_scalar_step(φ, 0.0, -1.0, 1.0)
+
+        for j in 1:Ny, i in 1:Nx
+            @test step_east[i, j] == φ[_periodic(i - 1, Nx), j]
+            @test step_west[i, j] == φ[_periodic(i + 1, Nx), j]
+            @test step_north[i, j] == φ[i, _periodic(j - 1, Ny)]
+            @test step_south[i, j] == φ[i, _periodic(j + 1, Ny)]
+        end
     end
 end
