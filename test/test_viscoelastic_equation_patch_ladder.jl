@@ -2555,6 +2555,322 @@ function _square_formulation_spd_probe(; formulation=:direct,
     return (; result, finite, min_eig, min_i, min_j, max_abs_C, max_abs_u)
 end
 
+function _square_spd_phase_near_wall(is_solid, i, j)
+    Nx, Ny = size(is_solid)
+    for q in 2:9
+        ni = i + Int(D2Q9_CX[q])
+        nj = j + Int(D2Q9_CY[q])
+        if !(1 <= ni <= Nx && 1 <= nj <= Ny) || is_solid[ni, nj]
+            return true
+        end
+    end
+    return false
+end
+
+function _square_spd_phase_cut_cell(q_wall, i, j)
+    return any(q -> q_wall[i, j, q] > 0.0, 2:9)
+end
+
+function _square_spd_phase_region(is_solid, q_wall, west_mask, east_mask, i, j)
+    Nx, _ = size(is_solid)
+    west = ndims(west_mask) == 1 ? (i == 1 && west_mask[j]) : west_mask[i, j]
+    east = ndims(east_mask) == 1 ? (i == Nx && east_mask[j]) : east_mask[i, j]
+    west && return :inlet
+    east && return :outlet
+    _square_spd_phase_cut_cell(q_wall, i, j) && return :cut
+    _square_spd_phase_near_wall(is_solid, i, j) && return :near
+    return :bulk
+end
+
+function _square_spd_phase_min(Cxx, Cxy, Cyy, is_solid, q_wall,
+                               west_mask, east_mask)
+    min_eig = Inf
+    min_i = 0
+    min_j = 0
+    for j in axes(Cxx, 2), i in axes(Cxx, 1)
+        is_solid[i, j] && continue
+        eig = _min_eig_spd_2x2(Cxx[i, j], Cxy[i, j], Cyy[i, j])
+        if eig < min_eig
+            min_eig = eig
+            min_i = i
+            min_j = j
+        end
+    end
+    return (;
+        eig=min_eig,
+        i=min_i,
+        j=min_j,
+        region=_square_spd_phase_region(
+            is_solid, q_wall, west_mask, east_mask, min_i, min_j,
+        ),
+        cxx=Cxx[min_i, min_j],
+        cxy=Cxy[min_i, min_j],
+        cyy=Cyy[min_i, min_j],
+    )
+end
+
+function _observe_square_spd_phase!(mins, first_negative, phase, step,
+                                    Cxx, Cxy, Cyy, is_solid, q_wall,
+                                    west_mask, east_mask)
+    loc = _square_spd_phase_min(
+        Cxx, Cxy, Cyy, is_solid, q_wall, west_mask, east_mask,
+    )
+    if loc.eig < mins[phase].eig
+        mins[phase] = (; loc..., step)
+    end
+    if first_negative[phase] == 0 && loc.eig < 0.0
+        first_negative[phase] = step
+    end
+    return nothing
+end
+
+function _collide_square_direct_phase!(
+        collision, gxx, gxy, gyy, Fe_xx, Fe_xy, Fe_yy, Cxx, Cxy, Cyy,
+        ux, uy, ρ, is_solid, tau_plus, λ, magic)
+    if collision === :trt
+        collide_conformation_2d!(gxx, Cxx, ux, uy, Cxx, Cxy, Cyy,
+                                 is_solid, tau_plus, λ;
+                                 magic, component=1,
+                                 divergence_mode=:trace_free)
+        collide_conformation_2d!(gxy, Cxy, ux, uy, Cxx, Cxy, Cyy,
+                                 is_solid, tau_plus, λ;
+                                 magic, component=2,
+                                 divergence_mode=:trace_free)
+        collide_conformation_2d!(gyy, Cyy, ux, uy, Cxx, Cxy, Cyy,
+                                 is_solid, tau_plus, λ;
+                                 magic, component=3,
+                                 divergence_mode=:trace_free)
+    elseif collision === :regularized
+        collide_conformation_regularized_2d!(gxx, Cxx, ux, uy, Cxx, Cxy, Cyy,
+                                             is_solid, tau_plus, λ;
+                                             magic, component=1,
+                                             divergence_mode=:trace_free)
+        collide_conformation_regularized_2d!(gxy, Cxy, ux, uy, Cxx, Cxy, Cyy,
+                                             is_solid, tau_plus, λ;
+                                             magic, component=2,
+                                             divergence_mode=:trace_free)
+        collide_conformation_regularized_2d!(gyy, Cyy, ux, uy, Cxx, Cxy, Cyy,
+                                             is_solid, tau_plus, λ;
+                                             magic, component=3,
+                                             divergence_mode=:trace_free)
+    elseif collision === :liu_eq26
+        collide_conformation_liu_eq26_2d!(gxx, Fe_xx, Cxx, ux, uy, ρ,
+                                          Cxx, Cxy, Cyy, is_solid, tau_plus, λ;
+                                          magic, component=1,
+                                          divergence_mode=:trace_free)
+        collide_conformation_liu_eq26_2d!(gxy, Fe_xy, Cxy, ux, uy, ρ,
+                                          Cxx, Cxy, Cyy, is_solid, tau_plus, λ;
+                                          magic, component=2,
+                                          divergence_mode=:trace_free)
+        collide_conformation_liu_eq26_2d!(gyy, Fe_yy, Cyy, ux, uy, ρ,
+                                          Cxx, Cxy, Cyy, is_solid, tau_plus, λ;
+                                          magic, component=3,
+                                          divergence_mode=:trace_free)
+    else
+        error("unknown square direct-C phase collision $(collision)")
+    end
+    return nothing
+end
+
+function _trt_odd_residual_factor(; tau_plus=1.0, magic=1e-6)
+    tau_minus = magic / (tau_plus - 0.5) + 0.5
+    return abs(1.0 - 1.0 / tau_minus)
+end
+
+function _square_direct_cde_phase_timeline(; collision=:trt,
+                                           tau_plus=1.0,
+                                           magic=1e-6,
+                                           bc=CNEBB(),
+                                           steps=1_200)
+    geom_h = square_obstacle_channel_geometry_2d(; H=12, side=4, L_up=2, L_down=3)
+    u_ref = 0.005
+    β = 0.59
+    Re = 1.0
+    Wi = 1.0
+    ν_total = u_ref * geom_h.H_ref / Re
+    λ = Wi * (geom_h.H_ref / 2) / u_ref
+    ν_s = β * ν_total
+    ν_p = (1 - β) * ν_total
+    model = OldroydB(G=ν_p / λ, λ=λ)
+    backend = KernelAbstractions.CPU()
+    FT = Float64
+    geom = transfer_step_geometry_2d(geom_h, backend)
+    Nx, Ny = geom_h.Nx, geom_h.Ny
+    u_in_mean = FT(u_ref) * FT(geom_h.H_out) / FT(geom_h.H_in)
+    u_profile_h = parabolic_face_profile_2d(
+        geom_h; face=:west, mean_velocity=u_in_mean, FT,
+    )
+    Cxx_in_h, Cxy_in_h, Cyy_in_h =
+        oldroydb_inlet_conformation_profile_2d(
+            geom_h; face=:west, mean_velocity=u_in_mean,
+            λ, log_formulation=false, FT,
+        )
+
+    q_wall = geom.q_wall
+    is_solid = geom.is_solid
+    uwx = zeros(FT, Nx, Ny, 9)
+    uwy = zeros(FT, Nx, Ny, 9)
+    f_in = zeros(FT, Nx, Ny, 9)
+    f_out = similar(f_in)
+    ρ = ones(FT, Nx, Ny)
+    ux = zeros(FT, Nx, Ny)
+    uy = zeros(FT, Nx, Ny)
+    u_profile = copy(u_profile_h)
+    Cxx_in = copy(Cxx_in_h)
+    Cxy_in = copy(Cxy_in_h)
+    Cyy_in = copy(Cyy_in_h)
+    bcspec = default_step_bcspec_2d(geom, u_profile, FT(1.0))
+
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        u0 = geom_h.is_solid[i, j] ? zero(FT) : u_profile_h[j]
+        f_in[i, j, q] = equilibrium(D2Q9(), one(FT), u0, zero(FT), q)
+    end
+
+    Cxx = ones(FT, Nx, Ny)
+    Cxy = zeros(FT, Nx, Ny)
+    Cyy = ones(FT, Nx, Ny)
+    gxx = zeros(FT, Nx, Ny, 9)
+    gxy = similar(gxx)
+    gyy = similar(gxx)
+    init_conformation_field_2d!(gxx, Cxx, ux, uy)
+    init_conformation_field_2d!(gxy, Cxy, ux, uy)
+    init_conformation_field_2d!(gyy, Cyy, ux, uy)
+    bxx = similar(gxx)
+    bxy = similar(gxy)
+    byy = similar(gyy)
+    Fe_xx = zeros(FT, Nx, Ny, 9)
+    Fe_xy = zeros(FT, Nx, Ny, 9)
+    Fe_yy = zeros(FT, Nx, Ny, 9)
+    tau_xx = zeros(FT, Nx, Ny)
+    tau_xy = zeros(FT, Nx, Ny)
+    tau_yy = zeros(FT, Nx, Ny)
+    Cxx_tmp = similar(Cxx)
+    Cxy_tmp = similar(Cxy)
+    Cyy_tmp = similar(Cyy)
+    s_plus = 1.0 / (3.0 * ν_s + 0.5)
+    phases = (:stream_raw, :wall, :io_reset, :collision, :final_reset)
+    mins = Dict(
+        phase => (
+            eig=Inf, i=0, j=0, region=:none,
+            cxx=NaN, cxy=NaN, cyy=NaN, step=0,
+        ) for phase in phases
+    )
+    first_negative = Dict(phase => 0 for phase in phases)
+    is_solid_h = Array(is_solid)
+    q_wall_h = Array(q_wall)
+    west_mask_h = Array(geom.west_conformation_mask)
+    east_mask_h = Array(geom.east_conformation_mask)
+
+    for step in 1:steps
+        fused_trt_libb_v2_step!(
+            f_out, f_in, ρ, ux, uy, is_solid, q_wall, uwx, uwy,
+            Nx, Ny, FT(ν_s),
+        )
+        apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν_s, Nx, Ny)
+        apply_hermite_source_2d!(
+            f_out, is_solid, s_plus, tau_xx, tau_xy, tau_yy;
+            ce_correction=false, source_scale=FT(0.0),
+        )
+
+        stream_2d!(bxx, gxx, Nx, Ny)
+        stream_2d!(bxy, gxy, Nx, Ny)
+        stream_2d!(byy, gyy, Nx, Ny)
+        compute_conformation_macro_2d!(Cxx_tmp, bxx)
+        compute_conformation_macro_2d!(Cxy_tmp, bxy)
+        compute_conformation_macro_2d!(Cyy_tmp, byy)
+        _observe_square_spd_phase!(
+            mins, first_negative, :stream_raw, step,
+            Cxx_tmp, Cxy_tmp, Cyy_tmp, is_solid_h, q_wall_h,
+            west_mask_h, east_mask_h,
+        )
+
+        apply_polymer_wall_bc!(bxx, gxx, is_solid, q_wall, Cxx, ux, uy, bc)
+        apply_polymer_wall_bc!(bxy, gxy, is_solid, q_wall, Cxy, ux, uy, bc)
+        apply_polymer_wall_bc!(byy, gyy, is_solid, q_wall, Cyy, ux, uy, bc)
+        compute_conformation_macro_2d!(Cxx_tmp, bxx)
+        compute_conformation_macro_2d!(Cxy_tmp, bxy)
+        compute_conformation_macro_2d!(Cyy_tmp, byy)
+        _observe_square_spd_phase!(
+            mins, first_negative, :wall, step,
+            Cxx_tmp, Cxy_tmp, Cyy_tmp, is_solid_h, q_wall_h,
+            west_mask_h, east_mask_h,
+        )
+
+        reset_conformation_inlet_masked_2d!(
+            bxx, Cxx_in, u_profile, geom.west_conformation_mask, Ny,
+        )
+        reset_conformation_inlet_masked_2d!(
+            bxy, Cxy_in, u_profile, geom.west_conformation_mask, Ny,
+        )
+        reset_conformation_inlet_masked_2d!(
+            byy, Cyy_in, u_profile, geom.west_conformation_mask, Ny,
+        )
+        reset_conformation_outlet_masked_2d!(
+            bxx, Nx, Ny, geom.east_conformation_mask,
+        )
+        reset_conformation_outlet_masked_2d!(
+            bxy, Nx, Ny, geom.east_conformation_mask,
+        )
+        reset_conformation_outlet_masked_2d!(
+            byy, Nx, Ny, geom.east_conformation_mask,
+        )
+        gxx, bxx = bxx, gxx
+        gxy, bxy = bxy, gxy
+        gyy, byy = byy, gyy
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _observe_square_spd_phase!(
+            mins, first_negative, :io_reset, step,
+            Cxx, Cxy, Cyy, is_solid_h, q_wall_h, west_mask_h, east_mask_h,
+        )
+
+        _collide_square_direct_phase!(
+            collision, gxx, gxy, gyy, Fe_xx, Fe_xy, Fe_yy,
+            Cxx, Cxy, Cyy, ux, uy, ρ, is_solid, tau_plus, λ, magic,
+        )
+        compute_conformation_macro_2d!(Cxx_tmp, gxx)
+        compute_conformation_macro_2d!(Cxy_tmp, gxy)
+        compute_conformation_macro_2d!(Cyy_tmp, gyy)
+        _observe_square_spd_phase!(
+            mins, first_negative, :collision, step,
+            Cxx_tmp, Cxy_tmp, Cyy_tmp, is_solid_h, q_wall_h,
+            west_mask_h, east_mask_h,
+        )
+
+        reset_conformation_inlet_masked_2d!(
+            gxx, Cxx_in, u_profile, geom.west_conformation_mask, Ny,
+        )
+        reset_conformation_inlet_masked_2d!(
+            gxy, Cxy_in, u_profile, geom.west_conformation_mask, Ny,
+        )
+        reset_conformation_inlet_masked_2d!(
+            gyy, Cyy_in, u_profile, geom.west_conformation_mask, Ny,
+        )
+        reset_conformation_outlet_masked_2d!(
+            gxx, Nx, Ny, geom.east_conformation_mask,
+        )
+        reset_conformation_outlet_masked_2d!(
+            gxy, Nx, Ny, geom.east_conformation_mask,
+        )
+        reset_conformation_outlet_masked_2d!(
+            gyy, Nx, Ny, geom.east_conformation_mask,
+        )
+        compute_conformation_macro_2d!(Cxx, gxx)
+        compute_conformation_macro_2d!(Cxy, gxy)
+        compute_conformation_macro_2d!(Cyy, gyy)
+        _observe_square_spd_phase!(
+            mins, first_negative, :final_reset, step,
+            Cxx, Cxy, Cyy, is_solid_h, q_wall_h, west_mask_h, east_mask_h,
+        )
+
+        update_polymer_stress!(tau_xx, tau_xy, tau_yy, Cxx, Cxy, Cyy, model)
+        f_in, f_out = f_out, f_in
+    end
+
+    return (; mins, first_negative)
+end
+
 function _poiseuille_prod_gradient_source_residual(; orientation=:horizontal,
                                                    mode::Symbol=:embedded_axis)
     Nx, Ny = orientation === :vertical ? (16, 4) : (4, 16)
@@ -2880,6 +3196,45 @@ end
     @test extrap_small_magic.max_abs_C > 100.0
     @test robust_magic.min_eig > 0.5
     @test robust_magic.max_abs_C < small_magic.max_abs_C
+end
+
+@testset "P18b2c5b square direct-C SPD loss is raw-TRT ghost transport" begin
+    raw = _square_direct_cde_phase_timeline(
+        ; collision=:trt, tau_plus=1.0, magic=1e-6,
+        bc=CNEBB(), steps=1_200,
+    )
+    regularized = _square_direct_cde_phase_timeline(
+        ; collision=:regularized, tau_plus=0.50001, magic=1e-6,
+        bc=CNEBB(), steps=1_200,
+    )
+    liu_eq26 = _square_direct_cde_phase_timeline(
+        ; collision=:liu_eq26, tau_plus=0.50001, magic=1e-6,
+        bc=CNEBB(), steps=1_200,
+    )
+
+    # With Liu's Λp=1e-6 but a raw population TRT collision, the odd
+    # non-equilibrium mode is almost undamped. The first non-SPD macro state
+    # appears after streaming in a bulk cell, before the wall BC or the source
+    # collision can create it locally.
+    @test _trt_odd_residual_factor(tau_plus=1.0, magic=1e-6) > 0.999
+    @test _trt_odd_residual_factor(tau_plus=1.0, magic=0.01) < 0.925
+    @test raw.first_negative[:stream_raw] > 0
+    @test raw.first_negative[:wall] == raw.first_negative[:stream_raw]
+    @test raw.first_negative[:io_reset] == raw.first_negative[:stream_raw]
+    @test raw.first_negative[:collision] > raw.first_negative[:stream_raw]
+    @test raw.mins[:stream_raw].region === :bulk
+    @test raw.mins[:stream_raw].eig < -5e-2
+
+    # Liu Eq. 26 / regularized moment reconstruction removes the ghost channel
+    # at the same wall BC and the same Λp=1e-6, without tuning magic.
+    for stable in (regularized, liu_eq26)
+        @test stable.first_negative[:stream_raw] == 0
+        @test stable.first_negative[:wall] == 0
+        @test stable.first_negative[:io_reset] == 0
+        @test stable.first_negative[:collision] == 0
+        @test stable.first_negative[:final_reset] == 0
+        @test stable.mins[:final_reset].eig > 0.35
+    end
 end
 
 @testset "P18b2c6 square log-conf is only weakly sensitive to TRT magic" begin
