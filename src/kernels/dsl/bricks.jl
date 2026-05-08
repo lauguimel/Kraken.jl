@@ -142,6 +142,62 @@ emit_code(::CollideTRTDirect) = quote
     f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7)
 end
 
+"TRT collision with per-cell Guo body force, written directly to f_out."
+struct CollideTRTDirectGuoField <: LBMBrick end
+required_args(::CollideTRTDirectGuoField) =
+    (:f_out, :s_plus, :s_minus, :Fx_field, :Fy_field)
+emit_code(::CollideTRTDirectGuoField) = quote
+    fx = Fx_field[i, j]
+    fy = Fy_field[i, j]
+    if fx != zero(T) || fy != zero(T)
+        inv_ρ = one(T) / ρ
+        ux = (ρ * ux + fx / T(2)) * inv_ρ
+        uy = (ρ * uy + fy / T(2)) * inv_ρ
+        usq = ux * ux + uy * uy
+    end
+
+    feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
+    feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
+    feq3 = feq_2d(Val(3), ρ, ux, uy, usq)
+    feq4 = feq_2d(Val(4), ρ, ux, uy, usq)
+    feq5 = feq_2d(Val(5), ρ, ux, uy, usq)
+    feq6 = feq_2d(Val(6), ρ, ux, uy, usq)
+    feq7 = feq_2d(Val(7), ρ, ux, uy, usq)
+    feq8 = feq_2d(Val(8), ρ, ux, uy, usq)
+    feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
+    a = (s_plus + s_minus) * T(0.5)
+    b = (s_plus - s_minus) * T(0.5)
+    guo_pref = one(T) - s_plus / T(2)
+
+    Sq1 = T(4.0 / 9.0) * ((-ux) * fx + (-uy) * fy) * T(3)
+    Sq2 = T(1.0 / 9.0) * ((one(T) - ux) * fx + (-uy) * fy) * T(3) +
+          T(1.0 / 9.0) * ux * fx * T(9)
+    Sq3 = T(1.0 / 9.0) * ((-ux) * fx + (one(T) - uy) * fy) * T(3) +
+          T(1.0 / 9.0) * uy * fy * T(9)
+    Sq4 = T(1.0 / 9.0) * ((-one(T) - ux) * fx + (-uy) * fy) * T(3) +
+          T(1.0 / 9.0) * ux * fx * T(9)
+    Sq5 = T(1.0 / 9.0) * ((-ux) * fx + (-one(T) - uy) * fy) * T(3) +
+          T(1.0 / 9.0) * uy * fy * T(9)
+    Sq6 = T(1.0 / 36.0) * ((one(T) - ux) * fx + (one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (ux + uy) * (fx + fy) * T(9)
+    Sq7 = T(1.0 / 36.0) * ((-one(T) - ux) * fx + (one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (-ux + uy) * (-fx + fy) * T(9)
+    Sq8 = T(1.0 / 36.0) * ((-one(T) - ux) * fx + (-one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (-ux - uy) * (-fx - fy) * T(9)
+    Sq9 = T(1.0 / 36.0) * ((one(T) - ux) * fx + (-one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (ux - uy) * (fx - fy) * T(9)
+
+    f_out[i, j, 1] = fp1 - s_plus * (fp1 - feq1) + guo_pref * Sq1
+    f_out[i, j, 2] = fp2 - a * (fp2 - feq2) - b * (fp4 - feq4) + guo_pref * Sq2
+    f_out[i, j, 4] = fp4 - a * (fp4 - feq4) - b * (fp2 - feq2) + guo_pref * Sq4
+    f_out[i, j, 3] = fp3 - a * (fp3 - feq3) - b * (fp5 - feq5) + guo_pref * Sq3
+    f_out[i, j, 5] = fp5 - a * (fp5 - feq5) - b * (fp3 - feq3) + guo_pref * Sq5
+    f_out[i, j, 6] = fp6 - a * (fp6 - feq6) - b * (fp8 - feq8) + guo_pref * Sq6
+    f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6) + guo_pref * Sq8
+    f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9) + guo_pref * Sq7
+    f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7) + guo_pref * Sq9
+end
+
 "TRT collision with Liu/Yu Hermite stress source written directly to f_out."
 struct CollideTRTDirectHermite <: LBMBrick end
 required_args(::CollideTRTDirectHermite) =

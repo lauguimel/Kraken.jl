@@ -1190,4 +1190,77 @@ end
             end
         end
     end
+
+    @testset "M8a modular LI-BB V2 Guo field canaries" begin
+        geom = Kraken.backward_facing_step_geometry_2d(;
+            H_in=4, expansion_ratio=2, L_up=2, L_down=3, FT=Float64,
+        )
+        Nx, Ny = geom.Nx, geom.Ny
+        ν = 0.08
+        f_in = zeros(Float64, Nx, Ny, 9)
+        for j in 1:Ny, i in 1:Nx, q in 1:9
+            ux0 = geom.is_solid[i, j] ? 0.0 : 0.015
+            f_in[i, j, q] = Kraken.equilibrium(D2Q9(), 1.0, ux0, 0.0, q)
+        end
+
+        f_ref = similar(f_in)
+        f_force = similar(f_in)
+        rho_ref = zeros(Float64, Nx, Ny)
+        ux_ref = zeros(Float64, Nx, Ny)
+        uy_ref = zeros(Float64, Nx, Ny)
+        rho_force = similar(rho_ref)
+        ux_force = similar(ux_ref)
+        uy_force = similar(uy_ref)
+        uwx = zeros(Float64, Nx, Ny, 9)
+        uwy = zeros(Float64, Nx, Ny, 9)
+        fx_zero = zeros(Float64, Nx, Ny)
+        fy_zero = zeros(Float64, Nx, Ny)
+
+        Kraken.fused_trt_libb_v2_step!(
+            f_ref, f_in, rho_ref, ux_ref, uy_ref, geom.is_solid,
+            geom.q_wall, uwx, uwy, Nx, Ny, ν,
+        )
+        Kraken.fused_trt_libb_v2_guo_field_step!(
+            f_force, f_in, rho_force, ux_force, uy_force, geom.is_solid,
+            geom.q_wall, uwx, uwy, fx_zero, fy_zero, Nx, Ny, ν,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        @test f_force == f_ref
+        @test rho_force == rho_ref
+        @test ux_force == ux_ref
+        @test uy_force == uy_ref
+
+        Nx2, Ny2 = 6, 5
+        ν_bgk = 0.1
+        ω = 1 / (3ν_bgk + 0.5)
+        Λ_bgk = (1 / ω - 0.5)^2
+        f0 = zeros(Float64, Nx2, Ny2, 9)
+        for j in 1:Ny2, i in 1:Nx2, q in 1:9
+            f0[i, j, q] = Kraken.equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
+        end
+        is_fluid = fill(false, Nx2, Ny2)
+        q_wall = zeros(Float64, Nx2, Ny2, 9)
+        uwx2 = zeros(Float64, Nx2, Ny2, 9)
+        uwy2 = zeros(Float64, Nx2, Ny2, 9)
+        fx = [1e-5 * (1 + 0.1i - 0.05j) for i in 1:Nx2, j in 1:Ny2]
+        fy = [-7e-6 * (1 - 0.02i + 0.03j) for i in 1:Nx2, j in 1:Ny2]
+        f_bgk = copy(f0)
+        f_trt = similar(f0)
+        rho = zeros(Float64, Nx2, Ny2)
+        ux = zeros(Float64, Nx2, Ny2)
+        uy = zeros(Float64, Nx2, Ny2)
+
+        Kraken.collide_guo_field_2d!(f_bgk, is_fluid, fx, fy, ω)
+        Kraken.fused_trt_libb_v2_guo_field_step!(
+            f_trt, f0, rho, ux, uy, is_fluid, q_wall, uwx2, uwy2, fx, fy,
+            Nx2, Ny2, ν_bgk; Λ=Λ_bgk,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        @test f_trt ≈ f_bgk atol=2e-15 rtol=2e-15
+        @test all(isfinite, rho)
+        @test all(isfinite, ux)
+        @test all(isfinite, uy)
+    end
 end

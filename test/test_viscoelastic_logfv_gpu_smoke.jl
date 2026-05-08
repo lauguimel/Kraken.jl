@@ -309,6 +309,55 @@ end
             end
         end
 
+        bf_in_h = zeros(FT, bNx, bNy, 9)
+        for j in 1:bNy, i in 1:bNx, q in 1:9
+            ux0 = bfs_solid_h[i, j] ? FT(0) : FT(0.015)
+            bf_in_h[i, j, q] = Kraken.equilibrium(D2Q9(), FT(1), ux0, FT(0), q)
+        end
+        bf_in = _copy_to_backend(backend, bf_in_h)
+        bq_wall = _copy_to_backend(backend, bfs.q_wall)
+        buw_x = KernelAbstractions.zeros(backend, FT, bNx, bNy, 9)
+        buw_y = KernelAbstractions.zeros(backend, FT, bNx, bNy, 9)
+        bf_ref = KernelAbstractions.zeros(backend, FT, bNx, bNy, 9)
+        bf_force = KernelAbstractions.zeros(backend, FT, bNx, bNy, 9)
+        brho_ref = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bux_ref = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        buy_ref = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        brho_force = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bux_force = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        buy_force = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfx_zero = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bfy_zero = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        Kraken.fused_trt_libb_v2_step!(
+            bf_ref, bf_in, brho_ref, bux_ref, buy_ref, bfs_solid,
+            bq_wall, buw_x, buw_y, bNx, bNy, FT(0.08),
+        )
+        Kraken.fused_trt_libb_v2_guo_field_step!(
+            bf_force, bf_in, brho_force, bux_force, buy_force, bfs_solid,
+            bq_wall, buw_x, buw_y, bfx_zero, bfy_zero, bNx, bNy, FT(0.08),
+        )
+        @test Array(bf_force) == Array(bf_ref)
+        @test Array(brho_force) == Array(brho_ref)
+        @test Array(bux_force) == Array(bux_ref)
+        @test Array(buy_force) == Array(buy_ref)
+
+        bfx_drive_h = [bfs_solid_h[i, j] ? FT(0) : FT(1e-5) for i in 1:bNx, j in 1:bNy]
+        bfy_drive_h = [bfs_solid_h[i, j] ? FT(0) : FT(-3e-6) for i in 1:bNx, j in 1:bNy]
+        bfx_drive = _copy_to_backend(backend, bfx_drive_h)
+        bfy_drive = _copy_to_backend(backend, bfy_drive_h)
+        bf_driven = KernelAbstractions.zeros(backend, FT, bNx, bNy, 9)
+        brho_driven = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        bux_driven = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        buy_driven = KernelAbstractions.zeros(backend, FT, bNx, bNy)
+        Kraken.fused_trt_libb_v2_guo_field_step!(
+            bf_driven, bf_in, brho_driven, bux_driven, buy_driven, bfs_solid,
+            bq_wall, buw_x, buw_y, bfx_drive, bfy_drive, bNx, bNy, FT(0.08),
+        )
+        @test all(isfinite, Array(bf_driven))
+        @test all(isfinite, Array(brho_driven))
+        @test all(isfinite, Array(bux_driven))
+        @test maximum(abs, Array(bf_driven) .- Array(bf_ref)) > 0
+
         psixx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psixy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
         psiyy = KernelAbstractions.zeros(backend, FT, Nx, Ny)

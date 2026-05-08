@@ -46,6 +46,13 @@ const _TRT_LIBB_V2_HERMITE_SPEC = LBMSpec(
     WriteMoments(),
 )
 
+const _TRT_LIBB_V2_GUO_FIELD_SPEC = LBMSpec(
+    PullHalfwayBB(), SolidInert(),
+    ApplyLiBBPrePhase(),
+    Moments(), CollideTRTDirectGuoField(),
+    WriteMoments(),
+)
+
 """
     fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
                              q_wall, uw_x, uw_y, Nx, Ny, ν; Λ=3/16)
@@ -92,5 +99,29 @@ function fused_trt_libb_v2_hermite_step!(f_out, f_in, ρ, ux, uy, is_solid,
             tau_p_xx, tau_p_xy, tau_p_yy,
             Nx, Ny, ET(s_plus), ET(s_minus), ET(source_scale),
             source_on_cutlinks;
+            ndrange=(Nx, Ny))
+end
+
+"""
+    fused_trt_libb_v2_guo_field_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                       q_wall, uw_x, uw_y, Fx, Fy,
+                                       Nx, Ny, ν; Λ=3/16)
+
+Modular LI-BB V2 solvent step with a per-cell Guo force field. This keeps the
+same pull-stream, solid handling, and cut-link pre-phase as
+`fused_trt_libb_v2_step!`, while replacing only the collision brick with a
+TRT+Guo-field brick. It is intended for cell-centered log-FV polymer coupling.
+"""
+function fused_trt_libb_v2_guo_field_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                            q_wall, uw_link_x, uw_link_y,
+                                            Fx_field, Fy_field,
+                                            Nx, Ny, ν; Λ::Real=3/16)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    kernel! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_SPEC)
+    kernel!(f_out, ρ, ux, uy, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field,
+            Nx, Ny, ET(s_plus), ET(s_minus);
             ndrange=(Nx, Ny))
 end
