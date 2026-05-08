@@ -1,0 +1,55 @@
+#!/bin/bash -l
+#PBS -N krk_cyl_cd_conv
+#PBS -l select=1:ncpus=8:ngpus=1:mem=48GB:gpu_id=A100
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -m ae
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+export KRAKEN_FT="${KRAKEN_FT:-float64}"
+export KRAKEN_CYLINDER_SUITE="${KRAKEN_CYLINDER_SUITE:-liu}"
+export KRAKEN_CASES="${KRAKEN_CASES:-direct_cnebb}"
+export KRAKEN_R_LIST="${KRAKEN_R_LIST:-20,30,35}"
+export KRAKEN_WI_LIST="${KRAKEN_WI_LIST:-0.1,0.5,1.0}"
+export KRAKEN_U_MEAN="${KRAKEN_U_MEAN:-0.005}"
+export KRAKEN_BETA="${KRAKEN_BETA:-0.59}"
+export KRAKEN_SC="${KRAKEN_SC:-1e4}"
+export KRAKEN_STEPS_LOW_WI="${KRAKEN_STEPS_LOW_WI:-100000}"
+export KRAKEN_STEPS="${KRAKEN_STEPS:-200000}"
+export KRAKEN_SCALE_STEPS_WITH_R="${KRAKEN_SCALE_STEPS_WITH_R:-1}"
+export KRAKEN_AVG_DIVISOR="${KRAKEN_AVG_DIVISOR:-5}"
+export KRAKEN_DRAG_STRIDE="${KRAKEN_DRAG_STRIDE:-200}"
+export KRAKEN_HYDRODYNAMIC_WARMUP_STEPS="${KRAKEN_HYDRODYNAMIC_WARMUP_STEPS:-0}"
+export KRAKEN_RUN_NEWTONIAN="${KRAKEN_RUN_NEWTONIAN:-1}"
+export KRAKEN_SOLVENT_MAGIC="${KRAKEN_SOLVENT_MAGIC:-0.25}"
+export KRAKEN_CONFORMATION_MAGIC_LIST="${KRAKEN_CONFORMATION_MAGIC_LIST:-1e-6}"
+export KRAKEN_SOLVENT_SOURCE_MODE="${KRAKEN_SOLVENT_SOURCE_MODE:-integrated_collision}"
+export KRAKEN_HERMITE_SOURCE_MODE="${KRAKEN_HERMITE_SOURCE_MODE:-liu_direct}"
+export KRAKEN_DRAG_MODE="${KRAKEN_DRAG_MODE:-post_source_mea}"
+export KRAKEN_SOURCE_STRESS_RECONSTRUCTION="${KRAKEN_SOURCE_STRESS_RECONSTRUCTION:-interior}"
+export KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER="${KRAKEN_SOURCE_STRESS_RECONSTRUCTION_ORDER:-2}"
+export KRAKEN_CONFORMATION_DIVERGENCE_MODE="${KRAKEN_CONFORMATION_DIVERGENCE_MODE:-trace_free}"
+export KRAKEN_CONFORMATION_INITIAL_CONDITION="${KRAKEN_CONFORMATION_INITIAL_CONDITION:-inlet_profile}"
+export KRAKEN_WALL_GEOMETRY="${KRAKEN_WALL_GEOMETRY:-cutlink}"
+export KRAKEN_MOMENTUM_EXCHANGE_MODE="${KRAKEN_MOMENTUM_EXCHANGE_MODE:-mei_reconstruct}"
+export KRAKEN_OUTPUT_DIR="${KRAKEN_OUTPUT_DIR:-results/viscoelastic_logfv/cylinder_cd_convergence_${PBS_JOBID:-manual}}"
+
+nvidia-smi
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo "=== Cylinder Cd convergence at $(date) ==="
+julia --project=. bench/viscoelastic_logfv/cylinder_cd_convergence.jl
+echo "=== Done at $(date) ==="
