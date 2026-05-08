@@ -1168,6 +1168,64 @@ end
         @test all(isfinite, visco.fx_total)
     end
 
+    @testset "M7c square channel open-x coupled log-FV stays bounded" begin
+        result = Kraken.run_viscoelastic_logfv_square_channel_coupled_2d(;
+            H=12, side=4, L_up=2, L_down=3,
+            nu_s=0.08, nu_p=0.02, lambda=5.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=20,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test result.geometry.name === :square_obstacle
+        @test any(result.is_solid)
+        @test !all(result.is_solid)
+        @test result.nu_lbm ≈ result.nu_total
+        @test result.polymer_substeps == 10
+        @test result.min_c_eig > 0.9
+        @test result.max_abs_psi < 0.08
+        @test result.max_abs_tau < 4e-4
+        @test result.max_abs_poly_force > 0
+        @test result.max_abs_total_force > 0
+        @test result.max_speed > 1e-4
+        @test result.max_speed < 0.05
+        @test result.rho_min > 0.98
+        @test result.rho_max < 1.03
+        @test all(isfinite, result.ux)
+        @test all(isfinite, result.psixx)
+        @test all(isfinite, result.fx_total)
+    end
+
+    @testset "M7d square channel near-Newtonian limit matches total-viscosity hydro" begin
+        hydro = Kraken.run_viscoelastic_logfv_square_channel_coupled_2d(;
+            H=12, side=4, L_up=2, L_down=3,
+            nu_s=0.10, nu_p=0.0, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=20,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        visco = Kraken.run_viscoelastic_logfv_square_channel_coupled_2d(;
+            H=12, side=4, L_up=2, L_down=3,
+            nu_s=0.08, nu_p=0.02, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=20,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fluid = .!visco.is_solid
+
+        @test visco.nu_lbm ≈ hydro.nu_s
+        @test visco.polymer_substeps == 50
+        @test !visco.subcycle_estimate.clamped
+        @test visco.min_c_eig > 0.98
+        @test visco.max_abs_psi < 0.02
+        @test maximum(abs.(visco.ux[fluid] .- hydro.ux[fluid])) < 7e-4
+        @test maximum(abs.(visco.uy[fluid] .- hydro.uy[fluid])) < 2e-4
+        @test maximum(abs.(visco.rho[fluid] .- hydro.rho[fluid])) < 4e-4
+        @test all(isfinite, visco.ux)
+        @test all(isfinite, visco.psixx)
+        @test all(isfinite, visco.fx_total)
+    end
+
     @testset "M8-pre BFS mask solid-aware operators are analytical" begin
         geom = Kraken.backward_facing_step_geometry_2d(;
             H_in=4, expansion_ratio=2, L_up=2, L_down=3, FT=Float64,

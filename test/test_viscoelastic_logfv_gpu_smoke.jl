@@ -599,6 +599,42 @@ end
         @test all(isfinite, near_newt_square.psixx)
         @test all(isfinite, near_newt_square.fx_total)
 
+        square_channel = Kraken.run_viscoelastic_logfv_square_channel_coupled_2d(;
+            H=12, side=4, L_up=2, L_down=2,
+            nu_s=0.08, nu_p=0.02, lambda=5.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=2,
+            backend=backend, T=FT,
+        )
+        @test square_channel.geometry.name === :square_obstacle
+        @test square_channel.min_c_eig > 0.9
+        @test square_channel.max_speed > 0
+        @test square_channel.rho_min > 0.95
+        @test square_channel.rho_max < 1.05
+        @test all(isfinite, square_channel.psixx)
+        @test all(isfinite, square_channel.fx_total)
+
+        hydro_square_channel = Kraken.run_viscoelastic_logfv_square_channel_coupled_2d(;
+            H=12, side=4, L_up=2, L_down=2,
+            nu_s=0.10, nu_p=0.0, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=1,
+            backend=backend, T=FT,
+        )
+        near_newt_square_channel = Kraken.run_viscoelastic_logfv_square_channel_coupled_2d(;
+            H=12, side=4, L_up=2, L_down=2,
+            nu_s=0.08, nu_p=0.02, lambda=1.0,
+            u_mean=0.01, Fx_body=2e-7,
+            bsd_fraction=1.0, max_steps=1,
+            backend=backend, T=FT,
+        )
+        square_channel_fluid = .!near_newt_square_channel.is_solid
+        @test near_newt_square_channel.nu_lbm ≈ hydro_square_channel.nu_s atol=1e-7 rtol=1e-7
+        @test near_newt_square_channel.min_c_eig > 0.9
+        @test maximum(abs.(near_newt_square_channel.ux[square_channel_fluid] .- hydro_square_channel.ux[square_channel_fluid])) < 2e-4
+        @test all(isfinite, near_newt_square_channel.psixx)
+        @test all(isfinite, near_newt_square_channel.fx_total)
+
         passive_bfs = Kraken.run_viscoelastic_logfv_bfs_passive_2d(;
             H_in=3, expansion_ratio=2, L_up=2, L_down=2,
             nu_s=0.08, nu_p=0.02, lambda=5.0,

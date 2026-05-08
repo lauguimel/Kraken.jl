@@ -10,26 +10,9 @@ using KernelAbstractions
     end
 end
 
-"""
-    run_viscoelastic_logfv_bfs_coupled_2d(; kwargs...)
-
-Run a coarse coupled log-FV polymer canary on a backward-facing-step geometry.
-
-This is the first open-x BFS path with feedback:
-
-```text
-LBM u -> open-x solid-aware log-FV polymer step
-      -> tau_p -> div(tau_p) + BSD -> LI-BB V2 Guo-field solvent step
-```
-
-The driver stays patch-local and uses GPU kernels for the dynamic outlet
-profiles, so no host copy is needed inside the time loop.
-"""
-function run_viscoelastic_logfv_bfs_coupled_2d(;
-    H_in::Integer=4,
-    expansion_ratio::Integer=2,
-    L_up::Integer=2,
-    L_down::Integer=4,
+function _run_viscoelastic_logfv_step_channel_coupled_2d(
+    geom_h;
+    shear_length::Real,
     nu_s::Real=0.08,
     nu_p::Real=0.02,
     lambda::Real=5.0,
@@ -44,21 +27,13 @@ function run_viscoelastic_logfv_bfs_coupled_2d(;
     backend=KernelAbstractions.CPU(),
     T=Float64,
 )
-    H_in >= 3 || throw(ArgumentError("H_in must be >= 3"))
-    expansion_ratio >= 2 || throw(ArgumentError("expansion_ratio must be >= 2"))
+    shear_length > 0 || throw(ArgumentError("shear_length must be positive"))
     nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
     nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
     lambda > 0 || throw(ArgumentError("lambda must be positive"))
     0 <= bsd_fraction <= 1 || throw(ArgumentError("bsd_fraction must be in [0, 1]"))
     max_steps >= 0 || throw(ArgumentError("max_steps must be non-negative"))
 
-    geom_h = backward_facing_step_geometry_2d(;
-        H_in=Int(H_in),
-        expansion_ratio=Int(expansion_ratio),
-        L_up=Int(L_up),
-        L_down=Int(L_down),
-        FT=T,
-    )
     geom = transfer_step_geometry_2d(geom_h, backend)
     Nx, Ny = geom_h.Nx, geom_h.Ny
     is_solid = geom.is_solid
@@ -74,6 +49,7 @@ function run_viscoelastic_logfv_bfs_coupled_2d(;
     Fx_body_t = T(Fx_body)
     nu_lbm_t = nu_s_t + bsd_t * nu_p_t
     nu_lbm_t > zero(T) || throw(ArgumentError("nu_s + bsd_fraction * nu_p must be positive"))
+    shear_length_t = T(shear_length)
     dx = one(T)
     dy = one(T)
 
@@ -128,7 +104,7 @@ function run_viscoelastic_logfv_bfs_coupled_2d(;
     fx_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
     fy_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
 
-    inlet_shear_estimate = T(4) * abs(T(u_mean)) / T(H_in)
+    inlet_shear_estimate = T(4) * abs(T(u_mean)) / shear_length_t
     body_shear_estimate = abs(Fx_body_t) * T(Ny) / (T(2) * max(nu_total_t, eps(T)))
     max_grad_norm_estimate = max(inlet_shear_estimate, body_shear_estimate)
     subcycle_estimate = logfv_oldroydb_subcycle_estimate(
@@ -276,6 +252,72 @@ function run_viscoelastic_logfv_bfs_coupled_2d(;
         max_abs_total_force,
         rho_min=minimum(rho_cpu[fluid_mask]),
         rho_max=maximum(rho_cpu[fluid_mask]),
+    )
+end
+
+"""
+    run_viscoelastic_logfv_bfs_coupled_2d(; kwargs...)
+
+Run a coarse coupled log-FV polymer canary on a backward-facing-step geometry.
+
+This is an open-x `StepChannelGeometry2D` path with feedback:
+
+```text
+LBM u -> open-x solid-aware log-FV polymer step
+      -> tau_p -> div(tau_p) + BSD -> LI-BB V2 Guo-field solvent step
+```
+
+The dynamic outlet profiles are copied on device, so no host copy is needed
+inside the time loop.
+"""
+function run_viscoelastic_logfv_bfs_coupled_2d(;
+    H_in::Integer=4,
+    expansion_ratio::Integer=2,
+    L_up::Integer=2,
+    L_down::Integer=4,
+    kwargs...,
+)
+    H_in >= 3 || throw(ArgumentError("H_in must be >= 3"))
+    expansion_ratio >= 2 || throw(ArgumentError("expansion_ratio must be >= 2"))
+    T = get(kwargs, :T, Float64)
+    geom_h = backward_facing_step_geometry_2d(;
+        H_in=Int(H_in),
+        expansion_ratio=Int(expansion_ratio),
+        L_up=Int(L_up),
+        L_down=Int(L_down),
+        FT=T,
+    )
+    return _run_viscoelastic_logfv_step_channel_coupled_2d(
+        geom_h; shear_length=H_in, kwargs...,
+    )
+end
+
+"""
+    run_viscoelastic_logfv_square_channel_coupled_2d(; kwargs...)
+
+Run the same open-x coupled log-FV polymer path on a centered square obstacle
+channel. This is the Cartesian-obstacle macro canary between periodic square
+tests and curved cylinder validation.
+"""
+function run_viscoelastic_logfv_square_channel_coupled_2d(;
+    H::Integer=12,
+    side::Integer=4,
+    L_up::Integer=2,
+    L_down::Integer=3,
+    kwargs...,
+)
+    H >= side + 4 || throw(ArgumentError("H must leave at least two fluid rows on each side"))
+    side >= 2 || throw(ArgumentError("side must be >= 2"))
+    T = get(kwargs, :T, Float64)
+    geom_h = square_obstacle_channel_geometry_2d(;
+        H=Int(H),
+        side=Int(side),
+        L_up=Int(L_up),
+        L_down=Int(L_down),
+        FT=T,
+    )
+    return _run_viscoelastic_logfv_step_channel_coupled_2d(
+        geom_h; shear_length=H, kwargs...,
     )
 end
 
