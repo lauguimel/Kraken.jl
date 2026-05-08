@@ -692,6 +692,89 @@ function zero_conservative_tree_gpu_level_rows_2d!(
     return F
 end
 
+@kernel function _restrict_conservative_tree_gpu_level_2d_kernel!(
+        restrict_to_parent, @Const(owned), @Const(child_restrict),
+        @Const(parent_ids), @Const(child_ids), @Const(cell_active),
+        nparents::Int32)
+    linear = @index(Global)
+    total = Int(nparents) * 9
+    @inbounds if linear <= total
+        slot = (linear - 1) ÷ 9 + 1
+        q = (linear - 1) % 9 + 1
+        parent_id = Int(parent_ids[slot])
+        acc = zero(eltype(restrict_to_parent))
+        for child_slot in 1:4
+            child_id = Int(child_ids[child_slot, slot])
+            child_id == 0 && continue
+            if cell_active[child_id] == UInt8(1)
+                acc += owned[child_id, q]
+            else
+                acc += child_restrict[child_id, q]
+            end
+        end
+        restrict_to_parent[parent_id, q] = acc
+    end
+end
+
+function restrict_conservative_tree_gpu_level_2d!(
+        restrict_to_parent::AbstractMatrix,
+        owned::AbstractMatrix,
+        child_restrict::AbstractMatrix,
+        parent_pack::ConservativeTreeGPUParentChildPack2D,
+        cell_pack::ConservativeTreeGPUCellPack2D;
+        sync::Bool=true)
+    size(restrict_to_parent, 1) == Int(cell_pack.n_cells) &&
+        size(owned, 1) == Int(cell_pack.n_cells) &&
+        size(child_restrict, 1) == Int(cell_pack.n_cells) ||
+        throw(ArgumentError("F matrices must match pack.n_cells"))
+    size(restrict_to_parent, 2) == 9 && size(owned, 2) == 9 &&
+        size(child_restrict, 2) == 9 ||
+        throw(ArgumentError("F matrices must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(owned)
+    kernel! = _restrict_conservative_tree_gpu_level_2d_kernel!(backend)
+    kernel!(restrict_to_parent, owned, child_restrict, parent_pack.parent_ids,
+            parent_pack.child_ids, cell_pack.cell_active, parent_pack.nparents;
+            ndrange=Int(parent_pack.nparents) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return restrict_to_parent
+end
+
+@kernel function _apply_conservative_tree_gpu_restriction_to_inactive_level_F_2d_kernel!(
+        F, @Const(restrict_to_parent), @Const(cell_level),
+        @Const(cell_active), n_cells::Int32, level::UInt8)
+    linear = @index(Global)
+    total = Int(n_cells) * 9
+    @inbounds if linear <= total
+        cell = (linear - 1) ÷ 9 + 1
+        q = (linear - 1) % 9 + 1
+        if cell_level[cell] == level && cell_active[cell] == UInt8(0)
+            F[cell, q] = restrict_to_parent[cell, q]
+        end
+    end
+end
+
+function apply_conservative_tree_gpu_restriction_to_inactive_level_F_2d!(
+        F::AbstractMatrix,
+        restrict_to_parent::AbstractMatrix,
+        pack::ConservativeTreeGPUCellPack2D,
+        level::Integer;
+        sync::Bool=true)
+    0 <= Int(level) <= typemax(UInt8) ||
+        throw(ArgumentError("level must fit in UInt8"))
+    size(F, 1) == Int(pack.n_cells) &&
+        size(restrict_to_parent, 1) == Int(pack.n_cells) ||
+        throw(ArgumentError("F matrices must match pack.n_cells"))
+    size(F, 2) == 9 && size(restrict_to_parent, 2) == 9 ||
+        throw(ArgumentError("F matrices must have 9 D2Q9 populations"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _apply_conservative_tree_gpu_restriction_to_inactive_level_F_2d_kernel!(
+        backend)
+    kernel!(F, restrict_to_parent, pack.cell_level, pack.cell_active,
+            pack.n_cells, UInt8(level); ndrange=Int(pack.n_cells) * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return F
+end
+
 @kernel function _apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d_kernel!(
         F, @Const(coarse_to_fine), @Const(child_ids), nparents::Int32,
         substep::Int32)

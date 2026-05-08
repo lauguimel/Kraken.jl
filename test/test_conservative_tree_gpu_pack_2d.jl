@@ -429,6 +429,64 @@ using KernelAbstractions
         end
     end
 
+    @testset "restriction kernels match nested CPU buffer restriction" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ])
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(
+            spec.max_level)
+        state_ref = Kraken.create_conservative_tree_subcycle_buffer_bank_2d(
+            spec; schedule=schedule, T=Float64)
+        F = allocate_conservative_tree_F_2d(spec; T=Float64)
+        for cell_id in spec.active_cells, q in 1:9
+            cell = spec.cells[cell_id]
+            F[cell_id, q] =
+                0.07 + 0.001 * q + 0.0001 * cell.level +
+                0.00001 * cell.i + 0.000001 * cell.j
+        end
+        Kraken.conservative_tree_subcycle_store_active_owned_2d!(
+            state_ref, F)
+        Kraken.conservative_tree_subcycle_restrict_all_levels_2d!(
+            state_ref)
+
+        restrict_ref = similar(F)
+        fill!(restrict_ref, 0)
+        for level in 0:(spec.max_level - 1)
+            buffers = state_ref.levels[level + 1]
+            for (cell_id, cell) in pairs(spec.cells)
+                cell.level == level || continue
+                for q in 1:9
+                    restrict_ref[cell_id, q] =
+                        buffers.restrict_to_parent[cell_id, q]
+                end
+            end
+        end
+
+        cell_pack = pack_conservative_tree_gpu_cells_2d(spec; T=Float64)
+        restrict_gpu = similar(F)
+        fill!(restrict_gpu, 0)
+        for parent_level in (spec.max_level - 1):-1:0
+            parent_pack = pack_conservative_tree_gpu_parent_children_2d(
+                spec, parent_level)
+            restrict_conservative_tree_gpu_level_2d!(
+                restrict_gpu, F, restrict_gpu, parent_pack, cell_pack)
+        end
+        @test isapprox(restrict_gpu, restrict_ref; atol=1e-14, rtol=0)
+
+        Fref = allocate_conservative_tree_F_2d(spec; T=Float64)
+        Fgpu = similar(Fref)
+        fill!(Fref, 0)
+        fill!(Fgpu, 0)
+        for level in 0:(spec.max_level - 1)
+            Kraken.conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
+                Fref, state_ref, level)
+            apply_conservative_tree_gpu_restriction_to_inactive_level_F_2d!(
+                Fgpu, restrict_gpu, cell_pack, level)
+        end
+        @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
+    end
+
     if get(ENV, "KRAKEN_TEST_METAL", "0") == "1"
         @testset "Metal smoke for pull stream and active-level collision" begin
             @eval using Metal
@@ -503,6 +561,22 @@ using KernelAbstractions
                 pc_pack_d = transfer_conservative_tree_gpu_parent_child_pack_2d(
                     pack_conservative_tree_gpu_parent_children_2d(spec, 0),
                     backend)
+                state_ref = Kraken.create_conservative_tree_subcycle_buffer_bank_2d(
+                    spec; schedule=schedule, T=Float32)
+                Kraken.conservative_tree_subcycle_store_active_owned_2d!(
+                    state_ref, Fin)
+                Kraken.conservative_tree_subcycle_restrict_all_levels_2d!(
+                    state_ref)
+                restrict_ref = copy(state_ref.levels[1].restrict_to_parent)
+                restrict_d = KernelAbstractions.allocate(
+                    backend, Float32, size(Fin)...)
+                fill!(restrict_d, Float32(0))
+                copyto!(Fd, Fin)
+                restrict_conservative_tree_gpu_level_2d!(
+                    restrict_d, Fd, restrict_d, pc_pack_d, cell_pack_d)
+                @test isapprox(Array(restrict_d), restrict_ref;
+                               atol=2e-6, rtol=2e-6)
+
                 fill!(Foutd, Float32(0))
                 apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d!(
                     Foutd, ledger_d, pc_pack_d, 1)
