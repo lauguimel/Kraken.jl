@@ -45,6 +45,10 @@ function _poiseuille_ux(y, height, umax)
     return 4 * umax * η * (1 - η)
 end
 
+function _couette_ux(y, height, uwall)
+    return uwall * y / height
+end
+
 function _oldroydb_simple_shear_from_identity(γ, λ, t)
     e = exp(-t / λ)
     return (
@@ -450,6 +454,61 @@ end
                 @test fx_total[i, j] ≈ expected_fx atol=1e-13 rtol=1e-13
                 @test fy_total[i, j] ≈ 0.0 atol=1e-13
             end
+        end
+    end
+
+    @testset "M5 local Couette conformation, stress, force, and BSD are analytical" begin
+        Nx, Ny = 8, 18
+        height = 1.0
+        dx = 1.0
+        dy = height / Ny
+        uwall = 0.07
+        γ = uwall / height
+        λ = 9.0
+        prefactor = 0.08
+        nu_p = prefactor * λ
+        psixx = zeros(Float64, Nx, Ny)
+        psixy = zeros(Float64, Nx, Ny)
+        psiyy = zeros(Float64, Nx, Ny)
+        ux = zeros(Float64, Nx, Ny)
+        uy = zeros(Float64, Nx, Ny)
+        csteady = _oldroydb_simple_shear_stationary(γ, λ)
+        ψsteady = _sym2_log(csteady...)
+
+        for j in 1:Ny, i in 1:Nx
+            y = height * (j - 0.5) / Ny
+            psixx[i, j], psixy[i, j], psiyy[i, j] = ψsteady
+            ux[i, j] = _couette_ux(y, height, uwall)
+            source = _oldroydb_source_c(csteady..., 0.0, γ, 0.0, 0.0, λ)
+            _assert_sym2_close(source, (0.0, 0.0, 0.0); atol=2e-14, rtol=2e-14)
+        end
+
+        tauxx = similar(psixx)
+        tauxy = similar(psixy)
+        tauyy = similar(psiyy)
+        fx_poly = similar(psixx)
+        fy_poly = similar(psixx)
+        fx_total = similar(psixx)
+        fy_total = similar(psixx)
+
+        Kraken.logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor)
+        Kraken.logfv_polymer_force_centered_2d!(fx_poly, fy_poly, tauxx, tauxy, tauyy, dx, dy)
+        Kraken.logfv_bsd_correct_force_centered_2d!(
+            fx_total, fy_total, fx_poly, fy_poly, ux, uy, 1.0, nu_p, dx, dy,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        expected_tau = (
+            prefactor * 2 * (λ * γ)^2,
+            prefactor * λ * γ,
+            0.0,
+        )
+        for j in 2:(Ny - 1), i in 2:(Nx - 1)
+            _assert_sym2_close((tauxx[i, j], tauxy[i, j], tauyy[i, j]), expected_tau; atol=2e-14, rtol=2e-14)
+            @test fx_poly[i, j] ≈ 0.0 atol=2e-14
+            @test fy_poly[i, j] ≈ 0.0 atol=2e-14
+            @test fx_total[i, j] ≈ 0.0 atol=2e-14
+            @test fy_total[i, j] ≈ 0.0 atol=2e-14
         end
     end
 end
