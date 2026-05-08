@@ -45,6 +45,8 @@ Implemented:
   route streaming;
 - GPU parent/child packs and coarse-to-fine ledger apply kernel for
   `ghost_from_coarse` injection;
+- no-atomic coarse-to-fine sync-down deposit pack/kernel for flat `alpha=1`
+  interface transfers;
 - local Metal smoke guarded by `KRAKEN_TEST_METAL=1`.
 
 Validation:

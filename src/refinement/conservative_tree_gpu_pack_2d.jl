@@ -50,6 +50,16 @@ struct ConservativeTreeGPUParentChildPack2D{AParent,AChild}
     child_ids::AChild
 end
 
+struct ConservativeTreeGPUC2FDepositPack2D{T,AFirst,ACount,ASrc,AQ,AW}
+    ratio::Int32
+    nparents::Int32
+    ledger_first::AFirst
+    ledger_count::ACount
+    src::ASrc
+    q::AQ
+    weight::AW
+end
+
 function _copy_conservative_tree_gpu_array_2d(backend, host::AbstractArray{T}) where T
     dev = KernelAbstractions.allocate(backend, T, size(host)...)
     copyto!(dev, host)
@@ -327,6 +337,104 @@ function transfer_conservative_tree_gpu_parent_child_pack_2d(
                            child_ids)
 end
 
+@inline function _conservative_tree_gpu_c2f_bucket_2d(
+        ix::Int, iy::Int, q::Int, slot::Int)
+    child_slot = ix + 2 * (iy - 1)
+    return (slot - 1) * 36 + (child_slot - 1) * 9 + q
+end
+
+function pack_conservative_tree_gpu_coarse_to_fine_deposit_2d(
+        spec::ConservativeTreeSpec2D,
+        table::ConservativeTreeRouteTable2D,
+        parent_pack::ConservativeTreeGPUParentChildPack2D,
+        parent_level::Integer;
+        ratio::Integer=2,
+        interface_time_scaling::Symbol=:leaf_equivalent,
+        T::Type{<:Real}=Float32)
+    l = Int(parent_level)
+    l == Int(parent_pack.parent_level) ||
+        throw(ArgumentError("parent_level must match parent_pack"))
+    r = Int(ratio)
+    r >= 1 || throw(ArgumentError("ratio must be positive"))
+    interface_time_scaling in (:leaf_equivalent, :level_native) ||
+        throw(ArgumentError("interface_time_scaling must be :leaf_equivalent or :level_native"))
+    per_substep_factor = interface_time_scaling == :leaf_equivalent ?
+                         one(T) : inv(T(r))
+
+    parent_slot = zeros(Int, length(spec.cells))
+    @inbounds for (slot, parent_id) in pairs(parent_pack.parent_ids)
+        parent_slot[Int(parent_id)] = slot
+    end
+
+    nbuckets = Int(parent_pack.nparents) * 4 * 9
+    buckets = [Tuple{Int32,UInt8,T}[] for _ in 1:nbuckets]
+    @inbounds for route_pos in table.split_route_ranges_by_parent_level[l + 1]
+        route_id = table.interface_routes[route_pos]
+        route = table.routes[route_id]
+        route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER || continue
+        child = spec.cells[route.dst]
+        parent_id = child.parent
+        slot = parent_slot[parent_id]
+        slot != 0 ||
+            throw(ArgumentError("coarse-to-fine route parent missing from GPU parent pack"))
+        parent = spec.cells[parent_id]
+        ix = child.i - 2 * parent.i + 2
+        iy = child.j - 2 * parent.j + 2
+        1 <= ix <= 2 && 1 <= iy <= 2 ||
+            throw(ArgumentError("coarse-to-fine route child is outside its parent"))
+        bucket = _conservative_tree_gpu_c2f_bucket_2d(
+            ix, iy, route.q, slot)
+        push!(buckets[bucket],
+              (Int32(route.src), UInt8(route.q),
+               T(route.weight) * per_substep_factor))
+    end
+
+    ledger_first = zeros(Int32, 2, 2, 9, Int(parent_pack.nparents))
+    ledger_count = zeros(Int32, 2, 2, 9, Int(parent_pack.nparents))
+    n_entries = sum(length, buckets)
+    src = Vector{Int32}(undef, n_entries)
+    q = Vector{UInt8}(undef, n_entries)
+    weight = Vector{T}(undef, n_entries)
+
+    cursor = 1
+    @inbounds for slot in 1:Int(parent_pack.nparents), qidx in 1:9,
+        iy in 1:2, ix in 1:2
+        entries = buckets[_conservative_tree_gpu_c2f_bucket_2d(
+            ix, iy, qidx, slot)]
+        if !isempty(entries)
+            ledger_first[ix, iy, qidx, slot] = Int32(cursor)
+            ledger_count[ix, iy, qidx, slot] = Int32(length(entries))
+            for entry in entries
+                src[cursor] = entry[1]
+                q[cursor] = entry[2]
+                weight[cursor] = entry[3]
+                cursor += 1
+            end
+        end
+    end
+
+    return ConservativeTreeGPUC2FDepositPack2D{T,typeof(ledger_first),
+        typeof(ledger_count),typeof(src),typeof(q),typeof(weight)}(
+            Int32(r), parent_pack.nparents, ledger_first, ledger_count,
+            src, q, weight)
+end
+
+function transfer_conservative_tree_gpu_c2f_deposit_pack_2d(
+        pack::ConservativeTreeGPUC2FDepositPack2D{T},
+        backend) where T
+    ledger_first = _copy_conservative_tree_gpu_array_2d(
+        backend, pack.ledger_first)
+    ledger_count = _copy_conservative_tree_gpu_array_2d(
+        backend, pack.ledger_count)
+    src = _copy_conservative_tree_gpu_array_2d(backend, pack.src)
+    q = _copy_conservative_tree_gpu_array_2d(backend, pack.q)
+    weight = _copy_conservative_tree_gpu_array_2d(backend, pack.weight)
+    return ConservativeTreeGPUC2FDepositPack2D{T,typeof(ledger_first),
+        typeof(ledger_count),typeof(src),typeof(q),typeof(weight)}(
+            pack.ratio, pack.nparents, ledger_first, ledger_count,
+            src, q, weight)
+end
+
 @inline function _conservative_tree_gpu_level_row_selected_2d(
         cell_level, cell_active, cell::Int, level::UInt8, active_only::Bool)
     cell_level[cell] == level || return false
@@ -482,6 +590,57 @@ function apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d!(
             ndrange=Int(pack.nparents) * 4 * 9)
     sync && KernelAbstractions.synchronize(backend)
     return F
+end
+
+@kernel function _deposit_conservative_tree_gpu_coarse_to_fine_routes_F_2d_kernel!(
+        coarse_to_fine, @Const(F), @Const(ledger_first),
+        @Const(ledger_count), @Const(src), @Const(qsrc), @Const(weight),
+        ratio::Int32, nparents::Int32)
+    linear = @index(Global)
+    total = Int(nparents) * 4 * 9
+    @inbounds if linear <= total
+        slot = (linear - 1) ÷ 36 + 1
+        rem = (linear - 1) % 36
+        child_slot = rem ÷ 9 + 1
+        q = rem % 9 + 1
+        ix = (child_slot - 1) % 2 + 1
+        iy = (child_slot - 1) ÷ 2 + 1
+        first_entry = Int(ledger_first[ix, iy, q, slot])
+        count = Int(ledger_count[ix, iy, q, slot])
+        packet = zero(eltype(coarse_to_fine))
+        for offset in 0:(count - 1)
+            entry = first_entry + offset
+            packet += weight[entry] * F[Int(src[entry]), Int(qsrc[entry])]
+        end
+        if packet != zero(packet)
+            for substep in 1:Int(ratio)
+                coarse_to_fine[ix, iy, q, substep, slot] += packet
+            end
+        end
+    end
+end
+
+function deposit_conservative_tree_gpu_coarse_to_fine_routes_F_2d!(
+        coarse_to_fine::AbstractArray,
+        F::AbstractMatrix,
+        pack::ConservativeTreeGPUC2FDepositPack2D;
+        sync::Bool=true)
+    size(F, 2) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations"))
+    size(coarse_to_fine, 1) == 2 && size(coarse_to_fine, 2) == 2 &&
+        size(coarse_to_fine, 3) == 9 ||
+        throw(ArgumentError("coarse_to_fine must have dimensions 2 x 2 x 9 x ratio x nparents"))
+    size(coarse_to_fine, 4) == Int(pack.ratio) ||
+        throw(ArgumentError("coarse_to_fine ratio must match pack"))
+    size(coarse_to_fine, 5) == Int(pack.nparents) ||
+        throw(ArgumentError("coarse_to_fine parent count must match pack"))
+    backend = KernelAbstractions.get_backend(F)
+    kernel! = _deposit_conservative_tree_gpu_coarse_to_fine_routes_F_2d_kernel!(
+        backend)
+    kernel!(coarse_to_fine, F, pack.ledger_first, pack.ledger_count,
+            pack.src, pack.q, pack.weight, pack.ratio, pack.nparents;
+            ndrange=Int(pack.nparents) * 4 * 9)
+    sync && KernelAbstractions.synchronize(backend)
+    return coarse_to_fine
 end
 
 @kernel function _stream_conservative_tree_pull_routes_F_2d_kernel!(

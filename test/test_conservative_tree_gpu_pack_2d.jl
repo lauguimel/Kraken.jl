@@ -274,6 +274,47 @@ using KernelAbstractions
         @test isapprox(Fgpu, Fref; atol=1e-14, rtol=0)
     end
 
+    @testset "coarse-to-fine deposit pack matches CPU sync-down" begin
+        spec = create_conservative_tree_spec_2d(8, 6, [
+            ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
+            ConservativeTreeRefineBlock2D("L2", 7:10, 5:8; parent="L1"),
+        ])
+        table = create_conservative_tree_route_table_2d(
+            spec; periodic_x=true, sampling=:leaf_equivalent)
+        schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(
+            spec.max_level)
+        bank = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+            spec; schedule=schedule, T=Float64)
+        F = allocate_conservative_tree_F_2d(spec; T=Float64)
+        for (cell_id, cell) in pairs(spec.cells), q in 1:9
+            F[cell_id, q] =
+                0.04 + 0.001 * q + 0.0001 * cell.level +
+                0.00001 * cell.i + 0.000001 * cell.j
+        end
+
+        for parent_level in 0:(spec.max_level - 1)
+            pair = bank.ledger_pairs[parent_level + 1]
+            fill!(pair.coarse_to_fine, 0)
+            event = first(e for e in schedule.events
+                          if e.phase == :sync_down &&
+                             e.src_level == parent_level)
+            Kraken.conservative_tree_subcycle_sync_down_routes_F_2d!(
+                bank, event, F, table; interface_time_scaling=:leaf_equivalent)
+            ref = copy(pair.coarse_to_fine)
+            fill!(pair.coarse_to_fine, 0)
+
+            pc_pack = pack_conservative_tree_gpu_parent_children_2d(
+                spec, parent_level)
+            deposit_pack = pack_conservative_tree_gpu_coarse_to_fine_deposit_2d(
+                spec, table, pc_pack, parent_level; ratio=schedule.ratio,
+                interface_time_scaling=:leaf_equivalent, T=Float64)
+            deposit_conservative_tree_gpu_coarse_to_fine_routes_F_2d!(
+                pair.coarse_to_fine, F, deposit_pack)
+
+            @test isapprox(pair.coarse_to_fine, ref; atol=1e-14, rtol=0)
+        end
+    end
+
     @testset "level row kernels match scheduler row utilities" begin
         spec = create_conservative_tree_spec_2d(8, 6, [
             ConservativeTreeRefineBlock2D("L1", 3:6, 2:5),
@@ -397,6 +438,18 @@ using KernelAbstractions
                 apply_conservative_tree_gpu_coarse_to_fine_pair_F_2d!(
                     Foutd, ledger_d, pc_pack_d, 1)
                 @test all(isfinite, Array(Foutd))
+
+                copyto!(Fd, Fin)
+                fill!(ledger_d, Float32(0))
+                dep_pack_d = transfer_conservative_tree_gpu_c2f_deposit_pack_2d(
+                    pack_conservative_tree_gpu_coarse_to_fine_deposit_2d(
+                        spec, table,
+                        pack_conservative_tree_gpu_parent_children_2d(spec, 0),
+                        0; ratio=schedule.ratio, T=Float32),
+                    backend)
+                deposit_conservative_tree_gpu_coarse_to_fine_routes_F_2d!(
+                    ledger_d, Fd, dep_pack_d)
+                @test all(isfinite, Array(ledger_d))
             end
         end
     end
