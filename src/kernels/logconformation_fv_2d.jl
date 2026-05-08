@@ -1,3 +1,5 @@
+using KernelAbstractions
+
 # Cell-centered log-conformation FV/FD helpers for the production polymer
 # backend. These functions are scalar, allocation-free, and GPU-compatible.
 
@@ -89,4 +91,81 @@ end
         logfv_upwind_scalar_advective_rhs_2d(psixy, ux_face, uy_face, i, j),
         logfv_upwind_scalar_advective_rhs_2d(psiyy, ux_face, uy_face, i, j),
     )
+end
+
+@kernel function logfv_relax_log_2d_kernel!(
+    psixx_out, psixy_out, psiyy_out,
+    @Const(psixx), @Const(psixy), @Const(psiyy),
+    lambda, dt, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            rxx, rxy, ryy = logfv_oldroydb_relax_log_2d(
+                psixx[i, j], psixy[i, j], psiyy[i, j], lambda, dt,
+            )
+            psixx_out[i, j] = rxx
+            psixy_out[i, j] = rxy
+            psiyy_out[i, j] = ryy
+        end
+    end
+end
+
+function logfv_relax_log_2d!(
+    psixx_out, psixy_out, psiyy_out,
+    psixx, psixy, psiyy, lambda, dt;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(psixx_out)
+    Nx, Ny = size(psixx_out)
+    kernel! = logfv_relax_log_2d_kernel!(backend)
+    kernel!(
+        psixx_out, psixy_out, psiyy_out,
+        psixx, psixy, psiyy, lambda, dt, Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+@kernel function logfv_advect_upwind_2d_kernel!(
+    psixx_out, psixy_out, psiyy_out,
+    @Const(psixx), @Const(psixy), @Const(psiyy),
+    @Const(ux_face), @Const(uy_face),
+    dt, Nx, Ny,
+)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            if i > 1 && i < Nx && j > 1 && j < Ny
+                rhs_xx, rhs_xy, rhs_yy = logfv_upwind_tensor_advective_rhs_2d(
+                    psixx, psixy, psiyy, ux_face, uy_face, i, j,
+                )
+                psixx_out[i, j] = psixx[i, j] + dt * rhs_xx
+                psixy_out[i, j] = psixy[i, j] + dt * rhs_xy
+                psiyy_out[i, j] = psiyy[i, j] + dt * rhs_yy
+            else
+                psixx_out[i, j] = psixx[i, j]
+                psixy_out[i, j] = psixy[i, j]
+                psiyy_out[i, j] = psiyy[i, j]
+            end
+        end
+    end
+end
+
+function logfv_advect_upwind_2d!(
+    psixx_out, psixy_out, psiyy_out,
+    psixx, psixy, psiyy, ux_face, uy_face, dt;
+    sync::Bool=true,
+)
+    backend = KernelAbstractions.get_backend(psixx_out)
+    Nx, Ny = size(psixx_out)
+    kernel! = logfv_advect_upwind_2d_kernel!(backend)
+    kernel!(
+        psixx_out, psixy_out, psiyy_out,
+        psixx, psixy, psiyy, ux_face, uy_face, dt, Nx, Ny;
+        ndrange=(Nx, Ny),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
 end
