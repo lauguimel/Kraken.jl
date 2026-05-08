@@ -254,7 +254,8 @@ function steps_for_R(R::Int, Wi::Float64, steps_low_wi::Int, steps::Int,
                      scale_steps::Bool, cap::Int)
     base = Wi < 0.01 ? steps_low_wi : steps
     scaled = scale_steps ? round(Int, base * (R / 30)^2) : base
-    return cap > 0 ? min(scaled, cap) : scaled
+    bounded = cap > 0 ? min(scaled, cap) : scaled
+    return max(1, bounded)
 end
 
 function guard_cpu_run!(backend_kind, Nx, Ny, steps, allow_long_cpu, max_lups_cpu)
