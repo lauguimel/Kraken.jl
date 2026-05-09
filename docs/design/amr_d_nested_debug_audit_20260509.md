@@ -70,6 +70,13 @@ Current decision: `route_sampling=:level_native` remains experimental. The
 production nested-channel path should use `:leaf_equivalent` until the
 field-level canary is fixed.
 
+The failure is now localized further: `:level_native` preserves a no-collision
+rest state for an internal vertical x-band, but fails when the same vertical
+coarse/fine interface touches the physical north/south walls. The defect is
+therefore a vertical interface + wall-corner closure issue, mostly in diagonal
+D2Q9 populations. The corresponding test is tracked as a broken canary in
+`test/test_conservative_tree_subcycling_2d.jl`.
+
 ### F1 - Current KRK comparisons mix route modes
 
 The current nested KRK files are not apples-to-apples:

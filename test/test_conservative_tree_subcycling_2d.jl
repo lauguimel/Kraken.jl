@@ -111,6 +111,25 @@ function _test_nested_band_spec_2d(kind::Symbol, max_level::Integer)
     return create_conservative_tree_spec_2d(16, 12, blocks)
 end
 
+function _test_internal_xband_nested_spec_2d(max_level::Integer)
+    ml = Int(max_level)
+    1 <= ml <= 4 ||
+        throw(ArgumentError("test nested band max_level must be in 1:4"))
+    blocks = ConservativeTreeRefineBlock2D[]
+    ir = 5:12
+    jr = 3:10
+    parent = ""
+    for level in 1:ml
+        name = "XI$(level)"
+        push!(blocks, ConservativeTreeRefineBlock2D(
+            name, ir, jr; parent=parent))
+        parent = name
+        ir = _test_shrink_range_2d(_test_child_range_2d(ir))
+        jr = _test_shrink_range_2d(_test_child_range_2d(jr))
+    end
+    return create_conservative_tree_spec_2d(16, 12, blocks)
+end
+
 function _test_cartesian_poiseuille_profile_2d(max_level::Integer,
                                                steps::Integer;
                                                Fx=1e-7,
@@ -216,6 +235,20 @@ function _test_active_field_bounds_2d(result; force_x=0.0,
         ux_max = max(ux_max, ux)
     end
     return (; rho_min, rho_max, ux_min, ux_max)
+end
+
+function _test_subcycled_rest_maxdiff_2d(spec, route_sampling::Symbol)
+    table = create_conservative_tree_route_table_2d(
+        spec; periodic_x=true, sampling=route_sampling)
+    F = allocate_conservative_tree_F_2d(spec)
+    G = similar(F)
+    initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=1.0)
+    Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+        G, F, spec, table; boundary=:periodic_x_wall_y,
+        interface_time_scaling=route_sampling == :level_native ?
+            :level_native : :leaf_equivalent)
+    return maximum(abs.(G[spec.active_cells, :] .-
+                        F[spec.active_cells, :]))
 end
 
 @testset "Conservative tree subcycling ledger 2D" begin
@@ -810,6 +843,18 @@ end
                        atol=1e-12, rtol=0)
         @test maximum(abs.(Fout[spec.active_cells, :] .-
                            Fin[spec.active_cells, :])) <= 1e-14
+    end
+
+    @testset "level-native vertical wall-corner rest canary" begin
+        internal_x = _test_internal_xband_nested_spec_2d(4)
+        wall_touch_x = _test_nested_band_spec_2d(:xband, 4)
+
+        @test _test_subcycled_rest_maxdiff_2d(
+            wall_touch_x, :leaf_equivalent) <= 1e-14
+        @test _test_subcycled_rest_maxdiff_2d(
+            internal_x, :level_native) <= 1e-14
+        @test_broken _test_subcycled_rest_maxdiff_2d(
+            wall_touch_x, :level_native) <= 1e-14
     end
 
     @testset "level-native route sampling is isolated behind explicit scaling" begin
