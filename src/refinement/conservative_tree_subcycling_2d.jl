@@ -51,6 +51,11 @@ struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     route_packet_caches::Vector{ConservativeTreeSubcycleRoutePacketCache2D{T}}
     route_packet_slot_by_route::Vector{Int}
     inactive_route_packet_slots_by_level::Vector{Matrix{Int}}
+    inactive_route_packet_dsts_by_level::Vector{Matrix{Int}}
+    inactive_route_packet_kinds_by_level::Vector{Matrix{RouteKind}}
+    route_packet_cache_valid::Vector{Bool}
+    route_packet_cache_route_objectid::Vector{UInt}
+    route_packet_cache_periodic_x::Vector{Bool}
     refined_parent_ids_by_level::Vector{Vector{Int}}
     inactive_refined_ids_by_level::Vector{Vector{Int}}
 end
@@ -212,7 +217,8 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
 
     return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
         spec, schedule, ledger_pairs, parent_ledger_slot,
-        route_packet_caches, Int[], Matrix{Int}[],
+        route_packet_caches, Int[], Matrix{Int}[], Matrix{Int}[],
+        Matrix{RouteKind}[], Bool[false], UInt[0], Bool[false],
         refined_parent_ids_by_level,
         inactive_refined_ids_by_level)
 end
@@ -398,6 +404,10 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
     fill!(bank.route_packet_slot_by_route, 0)
     resize!(bank.inactive_route_packet_slots_by_level,
             bank.spec.max_level + 1)
+    resize!(bank.inactive_route_packet_dsts_by_level,
+            bank.spec.max_level + 1)
+    resize!(bank.inactive_route_packet_kinds_by_level,
+            bank.spec.max_level + 1)
     @inbounds for level in 0:bank.spec.max_level
         ids = bank.inactive_refined_ids_by_level[level + 1]
         slots = isassigned(bank.inactive_route_packet_slots_by_level,
@@ -410,6 +420,26 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
             fill!(slots, 0)
         end
         bank.inactive_route_packet_slots_by_level[level + 1] = slots
+        dsts = isassigned(bank.inactive_route_packet_dsts_by_level,
+                          level + 1) ?
+               bank.inactive_route_packet_dsts_by_level[level + 1] :
+               zeros(Int, 0, 9)
+        if size(dsts, 1) != length(ids) || size(dsts, 2) != 9
+            dsts = zeros(Int, length(ids), 9)
+        else
+            fill!(dsts, 0)
+        end
+        bank.inactive_route_packet_dsts_by_level[level + 1] = dsts
+        kinds = isassigned(bank.inactive_route_packet_kinds_by_level,
+                           level + 1) ?
+                bank.inactive_route_packet_kinds_by_level[level + 1] :
+                fill(DIRECT, 0, 9)
+        if size(kinds, 1) != length(ids) || size(kinds, 2) != 9
+            kinds = fill(DIRECT, length(ids), 9)
+        else
+            fill!(kinds, DIRECT)
+        end
+        bank.inactive_route_packet_kinds_by_level[level + 1] = kinds
     end
 
     @inbounds for route_id in table.interface_routes
@@ -427,20 +457,37 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
         child_level = parent_level + 1
         inactive_ids = bank.inactive_refined_ids_by_level[child_level + 1]
         inactive_slots = bank.inactive_route_packet_slots_by_level[child_level + 1]
+        inactive_dsts = bank.inactive_route_packet_dsts_by_level[child_level + 1]
+        inactive_kinds = bank.inactive_route_packet_kinds_by_level[child_level + 1]
         for (local_idx, src_id) in enumerate(inactive_ids)
             src = bank.spec.cells[src_id]
             src.active && continue
             for q in 1:9
-                dst_id, _ = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
+                dst_id, kind = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
                     bank.spec, src_id, q; periodic_x=periodic_x)
                 dst_id == 0 && continue
+                inactive_dsts[local_idx, q] = dst_id
+                inactive_kinds[local_idx, q] = kind
                 inactive_slots[local_idx, q] =
                     _ensure_conservative_tree_route_packet_cache_2d!(
                     bank, parent_level, dst_id, q)
             end
         end
     end
+    bank.route_packet_cache_valid[1] = true
+    bank.route_packet_cache_route_objectid[1] = objectid(table.routes)
+    bank.route_packet_cache_periodic_x[1] = periodic_x
     return bank
+end
+
+function _conservative_tree_subcycle_route_packet_cache_ready_2d(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        table::ConservativeTreeRouteTable2D;
+        periodic_x::Bool=false)
+    return bank.route_packet_cache_valid[1] &&
+           bank.route_packet_cache_route_objectid[1] == objectid(table.routes) &&
+           length(bank.route_packet_slot_by_route) == length(table.routes) &&
+           bank.route_packet_cache_periodic_x[1] == periodic_x
 end
 
 function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
@@ -1056,7 +1103,8 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         bank, event)
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
-    if length(bank.route_packet_slot_by_route) < length(table.routes)
+    if !_conservative_tree_subcycle_route_packet_cache_ready_2d(
+            bank, table; periodic_x=periodic_x)
         prepare_conservative_tree_subcycle_route_packet_cache_2d!(
             bank, table; periodic_x=periodic_x)
     end
@@ -1147,14 +1195,16 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
 
     inactive_ids = bank.inactive_refined_ids_by_level[child_level + 1]
     inactive_slots = bank.inactive_route_packet_slots_by_level[child_level + 1]
+    inactive_dsts = bank.inactive_route_packet_dsts_by_level[child_level + 1]
+    inactive_kinds = bank.inactive_route_packet_kinds_by_level[child_level + 1]
     @inbounds for (local_idx, src_id) in enumerate(inactive_ids)
         bank.spec.cells[src_id].active && continue
         for q in 1:9
             packet_slot = inactive_slots[local_idx, q]
             packet_slot == 0 && continue
-            dst_id, kind = _conservative_tree_inactive_parent_coalesce_route_spec_2d(
-                bank.spec, src_id, q; periodic_x=periodic_x)
+            dst_id = inactive_dsts[local_idx, q]
             dst_id == 0 && continue
+            kind = inactive_kinds[local_idx, q]
             _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
                 bank, F, src_id, dst_id, q, 1.0, kind, substep,
                 packet_slot; alpha=alpha,
@@ -1663,7 +1713,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         throw(ArgumentError("state_bank must belong to spec"))
     state_bank_run.schedule === schedule_run ||
         throw(ArgumentError("state_bank schedule must match schedule"))
-    if length(route_bank_run.route_packet_slot_by_route) != length(table.routes)
+    if !_conservative_tree_subcycle_route_packet_cache_ready_2d(
+            route_bank_run, table; periodic_x=periodic_x)
         prepare_conservative_tree_subcycle_route_packet_cache_2d!(
             route_bank_run, table; periodic_x=periodic_x)
     end

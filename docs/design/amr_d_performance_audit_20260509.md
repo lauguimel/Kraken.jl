@@ -32,6 +32,11 @@ flows are usable as a debug loop.
    Channel flows avoid repeated solid-mask checks in direct and boundary route
    loops.
 
+6. Cache inactive-parent coalescing metadata.
+   The inactive refined-parent routes now store `dst` and `kind` alongside the
+   packet slot during topology preparation. The hot loop no longer calls the
+   route-spec helper or cell-ID lookup for those packets.
+
 ## Local Measurements
 
 All measurements were run locally on the same branch with `Float32` where noted.
@@ -92,11 +97,11 @@ After this pass:
 
 - active cells: 12936
 - leaf-equivalent cells: 49152
-- 200 steps: `4.625 s`
-- active MLUPS: `0.559`
-- leaf-equivalent MLUPS: `2.13`
+- 200 steps: `4.396 s`
+- active MLUPS: `0.588`
+- leaf-equivalent MLUPS: `2.24`
 
-The larger KRK case improves by about `1.2x`. It is no longer dominated by the
+The larger KRK case improves by about `1.26x`. It is no longer dominated by the
 packet reconstruction bug; remaining time is spread across route streaming,
 inactive parent coalescing, collision, and buffer copies.
 
@@ -121,8 +126,8 @@ Results:
 The next performance pass should focus on precomputed route execution arrays:
 
 - direct route arrays as compact `src`, `dst`, `q`, `weight` vectors;
-- inactive parent coalescing arrays with precomputed destination, kind and
-  packet slot, avoiding per-substep cell lookup and route reconstruction;
+- interface coalescing arrays with precomputed destination, kind and packet
+  slot, avoiding route-object traversal in every substep;
 - GPU route-native kernels consuming the same compact arrays.
 
 This keeps the CPU and GPU execution models aligned: build topology once, then
