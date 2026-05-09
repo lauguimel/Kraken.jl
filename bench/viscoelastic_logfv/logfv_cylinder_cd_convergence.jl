@@ -320,6 +320,29 @@ function fill_result_row!(row, result, dt, R, u_mean, newtonian_cd_same_run,
     return row
 end
 
+function mark_nonfinite_result!(row::Dict{Symbol,Any}, errors::Vector{String},
+                                label::AbstractString; continue_on_error::Bool)
+    scalar_fields = (
+        :Cd, :Cd_s, :Cd_p, :Cd_bsd, :Cl,
+        :rho_min, :rho_max, :max_speed, :min_c_eig,
+        :max_abs_psi, :max_abs_tau, :max_abs_poly_force, :max_abs_total_force,
+    )
+    bad = Symbol[]
+    for field in scalar_fields
+        value = get(row, field, NaN)
+        if !(value isa Real) || !isfinite(Float64(value))
+            push!(bad, field)
+        end
+    end
+    isempty(bad) && return false
+
+    row[:status] = "nonfinite"
+    row[:error] = "nonfinite fields: " * join(string.(bad), ";")
+    push!(errors, "$(label): $(row[:error])")
+    continue_on_error || error(row[:error])
+    return true
+end
+
 backend, backend_kind, backend_label = select_backend()
 FT = select_float_type(backend_kind)
 
@@ -431,10 +454,14 @@ for R in R_values
             dt = time() - t0
             fill_result_row!(row, result, dt, R, u_mean, NaN, NaN, NaN, NaN)
             newtonian_cd_by_R[R] = result.Cd
-            @printf("  Cd=%.9g Cd_s=%.9g Cd_bsd=%.9g n=%d err_newt=%.4g%% substeps=%d clamped=%s dt=%.1fs\n",
+            bad = mark_nonfinite_result!(
+                row, errors, "R=$(R) newtonian"; continue_on_error,
+            )
+            @printf("  status=%s Cd=%.9g Cd_s=%.9g Cd_bsd=%.9g n=%d err_newt=%.4g%% substeps=%d clamped=%s MLUPS=%.2f dt=%.1fs\n",
+                    bad ? "nonfinite" : "ok",
                     result.Cd, result.Cd_s, result.Cd_bsd, result.n_drag_samples,
                     row[:err_newtonian_ref_pct], result.polymer_substeps,
-                    string(result.subcycle_estimate.clamped), dt)
+                    string(result.subcycle_estimate.clamped), row[:lups] / 1e6, dt)
         catch err
             row[:status] = "error"
             row[:error] = sprint(showerror, err)
@@ -495,12 +522,16 @@ for R in R_values
             dt = time() - t0
             fill_result_row!(row, result, dt, R, u_mean, newt_same,
                              liu_ref, rheo_mean, rheo_last)
-            @printf("  Cd=%.9g Cd_s=%.9g Cd_p=%.9g Cd_bsd=%.9g n=%d Liu_err=%.4g%% Rheo_err=%.4g%% Newt_same=%.4g%% minCeig=%.4g substeps=%d clamped=%s dt=%.1fs\n",
+            bad = mark_nonfinite_result!(
+                row, errors, "R=$(R) Wi=$(Wi)"; continue_on_error,
+            )
+            @printf("  status=%s Cd=%.9g Cd_s=%.9g Cd_p=%.9g Cd_bsd=%.9g n=%d Liu_err=%.4g%% Rheo_err=%.4g%% Newt_same=%.4g%% minCeig=%.4g substeps=%d clamped=%s MLUPS=%.2f dt=%.1fs\n",
+                    bad ? "nonfinite" : "ok",
                     result.Cd, result.Cd_s, result.Cd_p, result.Cd_bsd, result.n_drag_samples,
                     row[:err_liu_pct], row[:err_rheotool_mean_pct],
                     row[:err_newtonian_same_run_pct], result.min_c_eig,
                     result.polymer_substeps,
-                    string(result.subcycle_estimate.clamped), dt)
+                    string(result.subcycle_estimate.clamped), row[:lups] / 1e6, dt)
         catch err
             row[:status] = "error"
             row[:error] = sprint(showerror, err)

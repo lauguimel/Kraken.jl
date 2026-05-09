@@ -78,6 +78,10 @@ Newtonian traction already embedded in the LBM viscosity when
 RheoTool. Liu references are still recorded, but they are secondary because the
 production backend is not the Liu population CDE.
 
+The harness writes `lups` to the CSV and prints `MLUPS` for each completed
+case. If any scalar stability or drag diagnostic is non-finite, the row status
+is `nonfinite` rather than `ok`.
+
 Local Metal smoke:
 
 ```bash
