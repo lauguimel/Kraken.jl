@@ -245,7 +245,9 @@ function conservative_tree_subcycle_restrict_level_2d!(
     fill!(parent_buffers.restrict_to_parent,
           zero(eltype(parent_buffers.restrict_to_parent)))
 
-    @inbounds for (parent_id, parent) in pairs(bank.spec.cells)
+    @inbounds for parent_id in _conservative_tree_subcycle_level_row_ids_2d(
+            bank, parent_l; active_only=false)
+        parent = bank.spec.cells[parent_id]
         parent.level == parent_l || continue
         children = bank.spec.children[parent_id]
         children == (0, 0, 0, 0) && continue
@@ -277,7 +279,9 @@ function conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
     _check_conservative_tree_F_2d(F, bank.spec)
     l = _check_conservative_tree_subcycle_buffer_level_2d(bank.spec, level)
     buffers = bank.levels[l + 1]
-    @inbounds for (cell_id, cell) in pairs(bank.spec.cells)
+    @inbounds for cell_id in _conservative_tree_subcycle_level_row_ids_2d(
+            bank, l; active_only=false)
+        cell = bank.spec.cells[cell_id]
         cell.level == l || continue
         cell.active && continue
         bank.spec.children[cell_id] == (0, 0, 0, 0) && continue

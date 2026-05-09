@@ -489,9 +489,8 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
     slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
     packet = _conservative_tree_f2c_time_factor_2d(
         bank, interface_time_scaling) *
-        reconstructed_integrated_D2Q9_packet(
-        @view(F[child_id, :]), child.metrics.volume, qi, weight;
-        alpha=alpha)
+        _subcycle_cell_route_packet_2d(
+            F, spec, child_id, qi, weight; alpha=alpha)
     pair.fine_to_coarse[qi, step, slot] += packet
     dst_cell_id != 0 ||
         throw(ArgumentError("fine-to-coarse route must have a spatial destination"))
@@ -748,10 +747,27 @@ end
         spec::ConservativeTreeSpec2D,
         route::ConservativeTreeRoute2D;
         alpha=1)
-    src = spec.cells[route.src]
+    return _subcycle_cell_route_packet_2d(
+        F, spec, route.src, route.q, route.weight; alpha=alpha)
+end
+
+@inline function _subcycle_cell_route_packet_2d(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        src_id::Integer,
+        q::Integer,
+        weight;
+        alpha=1)
+    T = typeof(zero(eltype(F)) + weight + alpha)
+    a = T(alpha)
+    qi = _check_d2q9_q(q)
+    src = Int(src_id)
+    if a == one(a)
+        return T(weight) * T(F[src, qi])
+    end
+    cell = spec.cells[src]
     return reconstructed_integrated_D2Q9_packet(
-        @view(F[route.src, :]), src.metrics.volume, route.q, route.weight;
-        alpha=alpha)
+        @view(F[src, :]), cell.metrics.volume, qi, weight; alpha=alpha)
 end
 
 @inline function _check_conservative_tree_coarse_to_fine_prolongation_2d(
@@ -1316,40 +1332,72 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
     prolongation = _check_conservative_tree_coarse_to_fine_prolongation_2d(
         coarse_to_fine_prolongation)
 
-    @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
-        route_id = table.direct_routes[route_pos]
-        route = table.routes[route_id]
-        src_cell = spec.cells[route.src]
-        _conservative_tree_cell_is_solid_2d(spec, src_cell, is_solid) &&
-            continue
-        packet = if prolongation == :limited_linear &&
-                    route.weight < 1.0 &&
-                    src_cell.level < spec.max_level &&
-                    table.source_q_has_split_route[route.src, route.q]
-            _conservative_tree_limited_linear_sampled_route_packet_2d(
-                Fin, spec, route; periodic_x=periodic_x)
-        else
-            route.weight * Fin[route.src, route.q]
-        end
-        if _conservative_tree_cell_is_solid_2d(
-                spec, spec.cells[route.dst], is_solid)
-            Fout[route.src, d2q9_opposite(route.q)] +=
-                packet
-        else
+    if is_solid === nothing
+        @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
+            route_id = table.direct_routes[route_pos]
+            route = table.routes[route_id]
+            src_cell = spec.cells[route.src]
+            packet = if prolongation == :limited_linear &&
+                        route.weight < 1.0 &&
+                        src_cell.level < spec.max_level &&
+                        table.source_q_has_split_route[route.src, route.q]
+                _conservative_tree_limited_linear_sampled_route_packet_2d(
+                    Fin, spec, route; periodic_x=periodic_x)
+            else
+                route.weight * Fin[route.src, route.q]
+            end
             Fout[route.dst, route.q] += packet
         end
+    else
+        @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
+            route_id = table.direct_routes[route_pos]
+            route = table.routes[route_id]
+            src_cell = spec.cells[route.src]
+            _conservative_tree_cell_is_solid_2d(spec, src_cell, is_solid) &&
+                continue
+            packet = if prolongation == :limited_linear &&
+                        route.weight < 1.0 &&
+                        src_cell.level < spec.max_level &&
+                        table.source_q_has_split_route[route.src, route.q]
+                _conservative_tree_limited_linear_sampled_route_packet_2d(
+                    Fin, spec, route; periodic_x=periodic_x)
+            else
+                route.weight * Fin[route.src, route.q]
+            end
+            if _conservative_tree_cell_is_solid_2d(
+                    spec, spec.cells[route.dst], is_solid)
+                Fout[route.src, d2q9_opposite(route.q)] +=
+                    packet
+            else
+                Fout[route.dst, route.q] += packet
+            end
+        end
     end
-    @inbounds for route_pos in table.boundary_route_ranges_by_level[level + 1]
-        route_id = table.boundary_routes[route_pos]
-        route = table.routes[route_id]
-        src_cell = spec.cells[route.src]
-        _conservative_tree_cell_is_solid_2d(spec, src_cell, is_solid) &&
-            continue
-        if policy != :skip
-            Fout[route.src, d2q9_opposite(route.q)] +=
-                _conservative_tree_boundary_reflection_packet_2d(
-                    Fin, spec, route, policy; u_south=u_south,
-                    u_north=u_north, rho_wall=rho_wall)
+
+    if is_solid === nothing
+        @inbounds for route_pos in table.boundary_route_ranges_by_level[level + 1]
+            route_id = table.boundary_routes[route_pos]
+            route = table.routes[route_id]
+            if policy != :skip
+                Fout[route.src, d2q9_opposite(route.q)] +=
+                    _conservative_tree_boundary_reflection_packet_2d(
+                        Fin, spec, route, policy; u_south=u_south,
+                        u_north=u_north, rho_wall=rho_wall)
+            end
+        end
+    else
+        @inbounds for route_pos in table.boundary_route_ranges_by_level[level + 1]
+            route_id = table.boundary_routes[route_pos]
+            route = table.routes[route_id]
+            src_cell = spec.cells[route.src]
+            _conservative_tree_cell_is_solid_2d(spec, src_cell, is_solid) &&
+                continue
+            if policy != :skip
+                Fout[route.src, d2q9_opposite(route.q)] +=
+                    _conservative_tree_boundary_reflection_packet_2d(
+                        Fin, spec, route, policy; u_south=u_south,
+                        u_north=u_north, rho_wall=rho_wall)
+            end
         end
     end
     return Fout
@@ -1362,6 +1410,19 @@ function _copy_conservative_tree_level_rows_2d!(
         level::Int)
     @inbounds for (cell_id, cell) in pairs(spec.cells)
         cell.level == level || continue
+        for q in 1:9
+            Fdst[cell_id, q] = Fsrc[cell_id, q]
+        end
+    end
+    return Fdst
+end
+
+function _copy_conservative_tree_level_rows_2d!(
+        Fdst::AbstractMatrix,
+        Fsrc::AbstractMatrix,
+        ids::AbstractVector{<:Integer})
+    @inbounds for raw_id in ids
+        cell_id = Int(raw_id)
         for q in 1:9
             Fdst[cell_id, q] = Fsrc[cell_id, q]
         end
@@ -1397,6 +1458,13 @@ function _copy_conservative_tree_active_level_rows_2d!(
         end
     end
     return Fdst
+end
+
+function _copy_conservative_tree_active_level_rows_2d!(
+        Fdst::AbstractMatrix,
+        Fsrc::AbstractMatrix,
+        ids::AbstractVector{<:Integer})
+    return _copy_conservative_tree_level_rows_2d!(Fdst, Fsrc, ids)
 end
 
 """
@@ -1595,8 +1663,10 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         throw(ArgumentError("state_bank must belong to spec"))
     state_bank_run.schedule === schedule_run ||
         throw(ArgumentError("state_bank schedule must match schedule"))
-    prepare_conservative_tree_subcycle_route_packet_cache_2d!(
-        route_bank_run, table; periodic_x=periodic_x)
+    if length(route_bank_run.route_packet_slot_by_route) != length(table.routes)
+        prepare_conservative_tree_subcycle_route_packet_cache_2d!(
+            route_bank_run, table; periodic_x=periodic_x)
+    end
     reset_conservative_tree_subcycle_spatial_bank_2d!(route_bank_run)
     reset_conservative_tree_subcycle_buffer_bank_2d!(state_bank_run)
     conservative_tree_subcycle_store_active_owned_2d!(state_bank_run, Fin)
@@ -1620,7 +1690,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             if needs_level_source
                 fill!(Fsource_run, zero(eltype(Fsource_run)))
                 _copy_conservative_tree_level_rows_2d!(
-                    Fsource_run, parent_owned, spec, event.src_level)
+                    Fsource_run, parent_owned,
+                    state_bank_run.active_ids_by_level[event.src_level + 1])
                 conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
                     Fsource_run, state_bank_run, event.src_level)
                 Fparent = Fsource_run
@@ -1628,7 +1699,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             if predictor_weight > zero(predictor_weight)
                 fill!(Fscratch_run, zero(eltype(Fscratch_run)))
                 _copy_conservative_tree_level_rows_2d!(
-                    Fscratch_run, parent_owned, spec, event.src_level)
+                    Fscratch_run, parent_owned,
+                    state_bank_run.active_ids_by_level[event.src_level + 1])
                 conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
                     Fscratch_run, state_bank_run, event.src_level)
                 pre_stream_level! === nothing ||
@@ -1654,7 +1726,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             buffers = state_bank_run.levels[level + 1]
             fill!(Fsource_run, zero(eltype(Fsource_run)))
             _copy_conservative_tree_level_rows_2d!(
-                Fsource_run, buffers.owned, spec, level)
+                Fsource_run, buffers.owned,
+                state_bank_run.active_ids_by_level[level + 1])
             conservative_tree_subcycle_apply_restriction_to_inactive_level_F_2d!(
                 Fsource_run, state_bank_run, level)
             pre_stream_level! === nothing ||
@@ -1690,7 +1763,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             conservative_tree_subcycle_add_and_clear_reflux_to_F_level_2d!(
                 Fscratch_run, state_bank_run, level)
             _copy_conservative_tree_active_level_rows_2d!(
-                buffers.owned, Fscratch_run, spec, level)
+                buffers.owned, Fscratch_run,
+                state_bank_run.active_ids_by_level[level + 1])
         elseif event.phase == :sync_up
             parent_level = _check_subcycle_spatial_sync_up_event_2d(
                 route_bank_run, event)

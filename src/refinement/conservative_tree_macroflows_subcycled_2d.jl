@@ -227,6 +227,108 @@ end
     return F
 end
 
+@inline function _row_moments_integrated_D2Q9_2d(
+        F::AbstractMatrix,
+        cell_id::Int)
+    f1 = F[cell_id, 1]
+    f2 = F[cell_id, 2]
+    f3 = F[cell_id, 3]
+    f4 = F[cell_id, 4]
+    f5 = F[cell_id, 5]
+    f6 = F[cell_id, 6]
+    f7 = F[cell_id, 7]
+    f8 = F[cell_id, 8]
+    f9 = F[cell_id, 9]
+    mass = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+    mx = f2 - f4 + f6 - f7 - f8 + f9
+    my = f3 - f5 + f6 + f7 - f8 - f9
+    return mass, mx, my
+end
+
+@inline function _d2q9_weight_T_2d(::Type{T}, q::Int) where T
+    q == 1 && return T(4) / T(9)
+    q <= 5 && return T(1) / T(9)
+    return T(1) / T(36)
+end
+
+@inline function _equilibrium_D2Q9_T_2d(
+        ::Type{T},
+        rho,
+        ux,
+        uy,
+        q::Int) where T
+    cx = T(d2q9_cx(q))
+    cy = T(d2q9_cy(q))
+    cu = cx * ux + cy * uy
+    usq = ux * ux + uy * uy
+    return _d2q9_weight_T_2d(T, q) * rho *
+           (one(T) + T(3) * cu + T(4.5) * cu * cu - T(1.5) * usq)
+end
+
+function _collide_BGK_integrated_D2Q9_row_2d!(
+        F::AbstractMatrix,
+        cell_id::Int,
+        volume,
+        omega)
+    T = typeof(float(F[cell_id, 1]))
+    volume_T = T(volume)
+    omega_T = T(omega)
+    mass, mx, my = _row_moments_integrated_D2Q9_2d(F, cell_id)
+    m = T(mass)
+    iszero(m) && throw(ArgumentError("Fcell mass must be nonzero"))
+    rho = m / volume_T
+    ux = T(mx) / m
+    uy = T(my) / m
+    mass_after = zero(T)
+    @inbounds for q in 1:9
+        f = T(F[cell_id, q]) / volume_T
+        feq = _equilibrium_D2Q9_T_2d(T, rho, ux, uy, q)
+        Fq = (f - omega_T * (f - feq)) * volume_T
+        F[cell_id, q] = Fq
+        mass_after += Fq
+    end
+    @inbounds F[cell_id, 1] += m - mass_after
+    return F
+end
+
+function _collide_Guo_integrated_D2Q9_row_2d!(
+        F::AbstractMatrix,
+        cell_id::Int,
+        volume,
+        omega,
+        Fx,
+        Fy)
+    T = typeof(float(F[cell_id, 1]))
+    volume_T = T(volume)
+    omega_T = T(omega)
+    Fx_T = T(Fx)
+    Fy_T = T(Fy)
+    mass, mx, my = _row_moments_integrated_D2Q9_2d(F, cell_id)
+    m = T(mass)
+    iszero(m) && throw(ArgumentError("Fcell mass must be nonzero"))
+    rho = m / volume_T
+    ux = (T(mx) / volume_T + Fx_T / T(2)) / rho
+    uy = (T(my) / volume_T + Fy_T / T(2)) / rho
+    guo_pref = one(T) - omega_T / T(2)
+    mass_after = zero(T)
+    @inbounds for q in 1:9
+        cx = T(d2q9_cx(q))
+        cy = T(d2q9_cy(q))
+        ci_dot_u = cx * ux + cy * uy
+        ci_dot_F = cx * Fx_T + cy * Fy_T
+        Sq = _d2q9_weight_T_2d(T, q) *
+             (T(3) * ((cx - ux) * Fx_T + (cy - uy) * Fy_T) +
+              T(9) * ci_dot_u * ci_dot_F)
+        f = T(F[cell_id, q]) / volume_T
+        feq = _equilibrium_D2Q9_T_2d(T, rho, ux, uy, q)
+        Fq = volume_T * (f - omega_T * (f - feq) + guo_pref * Sq)
+        F[cell_id, q] = Fq
+        mass_after += Fq
+    end
+    @inbounds F[cell_id, 1] += m - mass_after
+    return F
+end
+
 function _enforce_active_mass_conservation_2d!(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D,
@@ -281,6 +383,21 @@ function _collide_BGK_conservative_tree_active_level_F_2d!(
     return F
 end
 
+function _collide_BGK_conservative_tree_active_ids_F_2d!(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        ids::AbstractVector{<:Integer},
+        omega)
+    _check_conservative_tree_F_2d(F, spec)
+    @inbounds for raw_id in ids
+        cell_id = Int(raw_id)
+        cell = spec.cells[cell_id]
+        _collide_BGK_integrated_D2Q9_row_2d!(
+            F, cell_id, cell.metrics.volume, omega)
+    end
+    return F
+end
+
 function _collide_Guo_conservative_tree_active_level_F_2d!(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D,
@@ -296,6 +413,23 @@ function _collide_Guo_conservative_tree_active_level_F_2d!(
         collide_Guo_integrated_D2Q9!(@view(F[cell_id, :]),
                                      cell.metrics.volume, omega, Fx, Fy)
         _restore_row_mass_conservative_tree_F_2d!(F, cell_id, mass_before)
+    end
+    return F
+end
+
+function _collide_Guo_conservative_tree_active_ids_F_2d!(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        ids::AbstractVector{<:Integer},
+        omega,
+        Fx,
+        Fy)
+    _check_conservative_tree_F_2d(F, spec)
+    @inbounds for raw_id in ids
+        cell_id = Int(raw_id)
+        cell = spec.cells[cell_id]
+        _collide_Guo_integrated_D2Q9_row_2d!(
+            F, cell_id, cell.metrics.volume, omega, Fx, Fy)
     end
     return F
 end
@@ -317,6 +451,26 @@ function _collide_Guo_conservative_tree_active_fluid_level_F_2d!(
         collide_Guo_integrated_D2Q9!(@view(F[cell_id, :]),
                                      cell.metrics.volume, omega, Fx, Fy)
         _restore_row_mass_conservative_tree_F_2d!(F, cell_id, mass_before)
+    end
+    return F
+end
+
+function _collide_Guo_conservative_tree_active_fluid_ids_F_2d!(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        ids::AbstractVector{<:Integer},
+        is_solid::AbstractArray{Bool,2},
+        omega,
+        Fx,
+        Fy)
+    _check_conservative_tree_F_2d(F, spec)
+    @inbounds for raw_id in ids
+        cell_id = Int(raw_id)
+        cell = spec.cells[cell_id]
+        _conservative_tree_cell_is_solid_2d(spec, cell, is_solid) &&
+            continue
+        _collide_Guo_integrated_D2Q9_row_2d!(
+            F, cell_id, cell.metrics.volume, omega, Fx, Fy)
     end
     return F
 end
@@ -675,6 +829,7 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         route_bank, table; periodic_x=true)
     state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
         spec_run; schedule=schedule, T=T)
+    active_ids_by_level = state_bank.active_ids_by_level
     Fsource = similar(F)
     Fscratch = similar(F)
     initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
@@ -687,8 +842,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
     max_raw_relative_mass_drift = zero(T)
 
     collide_level! = (Flevel, local_spec, level, event) ->
-        _collide_Guo_conservative_tree_active_level_F_2d!(
-            Flevel, local_spec, level,
+        _collide_Guo_conservative_tree_active_ids_F_2d!(
+            Flevel, local_spec, active_ids_by_level[level + 1],
             conservative_tree_leaf_equivalent_omega_2d(
                 omega, local_spec, level),
             conservative_tree_leaf_equivalent_force_2d(Fx, local_spec, level),
@@ -782,6 +937,7 @@ function run_conservative_tree_couette_subcycled_2d(;
         route_bank, table; periodic_x=true)
     state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
         spec_run; schedule=schedule, T=T)
+    active_ids_by_level = state_bank.active_ids_by_level
     Fsource = similar(F)
     Fscratch = similar(F)
     initialize_conservative_tree_equilibrium_F_2d!(F, spec_run; rho=rho0)
@@ -794,8 +950,8 @@ function run_conservative_tree_couette_subcycled_2d(;
     max_raw_relative_mass_drift = zero(T)
 
     collide_level! = (Flevel, local_spec, level, event) ->
-        _collide_BGK_conservative_tree_active_level_F_2d!(
-            Flevel, local_spec, level,
+        _collide_BGK_conservative_tree_active_ids_F_2d!(
+            Flevel, local_spec, active_ids_by_level[level + 1],
             conservative_tree_leaf_equivalent_omega_2d(
                 omega, local_spec, level))
     for _ in 1:nsteps
@@ -881,6 +1037,7 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         route_bank, table; periodic_x=true)
     state_bank = create_conservative_tree_subcycle_buffer_bank_2d(
         spec_run; schedule=schedule, T=T)
+    active_ids_by_level = state_bank.active_ids_by_level
     Fsource = similar(F)
     Fscratch = similar(F)
     initialize_conservative_tree_solid_equilibrium_F_2d!(
@@ -896,8 +1053,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
     max_raw_relative_mass_drift = zero(T)
 
     collide_level! = (Flevel, local_spec, level, event) ->
-        _collide_Guo_conservative_tree_active_fluid_level_F_2d!(
-            Flevel, local_spec, level, solid,
+        _collide_Guo_conservative_tree_active_fluid_ids_F_2d!(
+            Flevel, local_spec, active_ids_by_level[level + 1], solid,
             conservative_tree_leaf_equivalent_omega_2d(
                 omega, local_spec, level),
             conservative_tree_leaf_equivalent_force_2d(Fx, local_spec, level),
