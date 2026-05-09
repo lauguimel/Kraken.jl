@@ -1382,7 +1382,17 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
     prolongation = _check_conservative_tree_coarse_to_fine_prolongation_2d(
         coarse_to_fine_prolongation)
 
-    if is_solid === nothing
+    if is_solid === nothing && prolongation != :limited_linear
+        srcs = table.direct_route_srcs_by_level[level + 1]
+        dsts = table.direct_route_dsts_by_level[level + 1]
+        qs = table.direct_route_qs_by_level[level + 1]
+        weights = table.direct_route_weights_by_level[level + 1]
+        @inbounds for idx in eachindex(srcs)
+            src_id = srcs[idx]
+            q = qs[idx]
+            Fout[dsts[idx], q] += weights[idx] * Fin[src_id, q]
+        end
+    elseif is_solid === nothing
         @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
             route_id = table.direct_routes[route_pos]
             route = table.routes[route_id]

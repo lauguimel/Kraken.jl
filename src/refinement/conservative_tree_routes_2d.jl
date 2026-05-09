@@ -18,6 +18,10 @@ struct ConservativeTreeRouteTable2D
     split_route_ranges_by_parent_level::Vector{UnitRange{Int}}
     coalesce_route_ranges_by_child_level::Vector{UnitRange{Int}}
     source_q_has_split_route::Matrix{Bool}
+    direct_route_srcs_by_level::Vector{Vector{Int}}
+    direct_route_dsts_by_level::Vector{Vector{Int}}
+    direct_route_qs_by_level::Vector{Vector{Int}}
+    direct_route_weights_by_level::Vector{Vector{Float64}}
 end
 
 function _active_leaf_covering_sample_2d(spec::ConservativeTreeSpec2D,
@@ -499,6 +503,32 @@ function _source_q_split_route_flags_2d(
     return flags
 end
 
+function _compact_direct_routes_by_level_2d(
+        direct_routes::Vector{Int},
+        direct_ranges::Vector{UnitRange{Int}},
+        routes::Vector{ConservativeTreeRoute2D})
+    srcs_by_level = [Int[] for _ in direct_ranges]
+    dsts_by_level = [Int[] for _ in direct_ranges]
+    qs_by_level = [Int[] for _ in direct_ranges]
+    weights_by_level = [Float64[] for _ in direct_ranges]
+    @inbounds for level_index in eachindex(direct_ranges)
+        range = direct_ranges[level_index]
+        n = length(range)
+        sizehint!(srcs_by_level[level_index], n)
+        sizehint!(dsts_by_level[level_index], n)
+        sizehint!(qs_by_level[level_index], n)
+        sizehint!(weights_by_level[level_index], n)
+        for route_pos in range
+            route = routes[direct_routes[route_pos]]
+            push!(srcs_by_level[level_index], route.src)
+            push!(dsts_by_level[level_index], route.dst)
+            push!(qs_by_level[level_index], route.q)
+            push!(weights_by_level[level_index], route.weight)
+        end
+    end
+    return srcs_by_level, dsts_by_level, qs_by_level, weights_by_level
+end
+
 """
     create_conservative_tree_route_table_2d(spec; periodic_x=false,
                                             sampling=:leaf_equivalent)
@@ -574,10 +604,15 @@ function create_conservative_tree_route_table_2d(spec::ConservativeTreeSpec2D;
             interface_routes, spec, routes)
     source_q_has_split_route = _source_q_split_route_flags_2d(
         spec, routes, interface_routes)
+    direct_srcs_by_level, direct_dsts_by_level, direct_qs_by_level,
+        direct_weights_by_level = _compact_direct_routes_by_level_2d(
+            direct_routes, direct_ranges, routes)
 
     return ConservativeTreeRouteTable2D(
         links, routes, same_level_links, coarse_to_fine_links,
         fine_to_coarse_links, boundary_links, direct_routes, interface_routes,
         boundary_routes, direct_ranges, boundary_ranges,
-        split_ranges, coalesce_ranges, source_q_has_split_route)
+        split_ranges, coalesce_ranges, source_q_has_split_route,
+        direct_srcs_by_level, direct_dsts_by_level, direct_qs_by_level,
+        direct_weights_by_level)
 end

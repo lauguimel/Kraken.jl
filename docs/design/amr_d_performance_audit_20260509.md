@@ -37,6 +37,11 @@ flows are usable as a debug loop.
    packet slot during topology preparation. The hot loop no longer calls the
    route-spec helper or cell-ID lookup for those packets.
 
+7. Compile direct same-level routes into level arrays.
+   Channel flows with flat prolongation and no solid mask use compact
+   `src/dst/q/weight` arrays instead of traversing route objects in the direct
+   streaming hot loop.
+
 ## Local Measurements
 
 All measurements were run locally on the same branch with `Float32` where noted.
@@ -66,9 +71,9 @@ After this pass:
 
 - active cells: 960
 - leaf-equivalent cells: 49152
-- 100 steps: `0.1420 s`
-- active MLUPS: `0.676`
-- leaf-equivalent MLUPS: `34.6`
+- 100 steps: `0.1337 s`
+- active MLUPS: `0.718`
+- leaf-equivalent MLUPS: `36.8`
 
 The gain here is about `35x` on active-cell MLUPS and about `35x` on
 leaf-equivalent MLUPS. The dominant fix is the `alpha == 1` packet fast path.
@@ -97,11 +102,11 @@ After this pass:
 
 - active cells: 12936
 - leaf-equivalent cells: 49152
-- 200 steps: `4.396 s`
-- active MLUPS: `0.588`
-- leaf-equivalent MLUPS: `2.24`
+- 200 steps: `3.852 s`
+- active MLUPS: `0.672`
+- leaf-equivalent MLUPS: `2.55`
 
-The larger KRK case improves by about `1.26x`. It is no longer dominated by the
+The larger KRK case improves by about `1.44x`. It is no longer dominated by the
 packet reconstruction bug; remaining time is spread across route streaming,
 inactive parent coalescing, collision, and buffer copies.
 
@@ -125,9 +130,9 @@ Results:
 
 The next performance pass should focus on precomputed route execution arrays:
 
-- direct route arrays as compact `src`, `dst`, `q`, `weight` vectors;
 - interface coalescing arrays with precomputed destination, kind and packet
   slot, avoiding route-object traversal in every substep;
+- boundary route arrays for channel BCs, keeping solid-aware paths separate;
 - GPU route-native kernels consuming the same compact arrays.
 
 This keeps the CPU and GPU execution models aligned: build topology once, then
