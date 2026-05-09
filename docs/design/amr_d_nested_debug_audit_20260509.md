@@ -51,6 +51,25 @@ Observed high-level facts:
 
 ## Priority Findings
 
+### F0 - Route 1 can hide field-level failure behind good profiles
+
+The KRK route matrix added after this audit shows that row-mean profiles are
+not sufficient. On `poiseuille_xband_nested4_debug.krk`, forcing
+`route_sampling=1` keeps the profile close to the same-time Cartesian reference
+after 64 coarse steps, but the leaf field is already corrupted:
+
+- `rho_min ~= 0.987`, `rho_max ~= 1.027`;
+- `ux_min ~= -0.04`, `ux_max ~= 0.04`;
+- profile `linf` versus Cartesian remains only `O(1e-5)`.
+
+This means `route_sampling=:level_native` can produce compensating positive and
+negative field errors that vanish in row averages. Any production gate must
+inspect field extrema and field errors, not only averaged profiles.
+
+Current decision: `route_sampling=:level_native` remains experimental. The
+production nested-channel path should use `:leaf_equivalent` until the
+field-level canary is fixed.
+
 ### F1 - Current KRK comparisons mix route modes
 
 The current nested KRK files are not apples-to-apples:
@@ -254,6 +273,13 @@ If `:level_native` is kept as the final policy, it needs a documented invariant:
 5. Re-run the KRK dashboards CPU-small.
 6. Only then re-run Metal and debug the density/mass drift separately.
 
+Implemented diagnostic tools:
+
+- `test/test_conservative_tree_subcycling_2d.jl` now contains a short
+  route-mode transient matrix against same-time Cartesian references.
+- `benchmarks/amr_d_nested_route_matrix_2d.jl` writes per-route profile CSVs and
+  a summary with profile, field, density, mass, and interface-jump metrics.
+
 ## Stop Conditions
 
 Do not proceed to BFS, square obstacle, cylinder, or long GPU benchmarks while:
@@ -262,4 +288,3 @@ Do not proceed to BFS, square obstacle, cylinder, or long GPU benchmarks while:
 - route modes are mixed across comparison cases;
 - max-level-4 non-equilibrium canaries are absent;
 - CPU and Metal one-cycle packed paths are not compared.
-

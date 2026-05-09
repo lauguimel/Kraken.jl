@@ -38,6 +38,79 @@ function _test_wall_refined_ybands_nested_spec_2d()
     ])
 end
 
+@inline _test_child_range_2d(r::UnitRange{Int}) =
+    (2 * first(r) - 1):(2 * last(r))
+
+@inline function _test_shrink_range_2d(r::UnitRange{Int};
+                                       low::Bool=true,
+                                       high::Bool=true,
+                                       pad::Int=2)
+    lo = first(r) + (low ? pad : 0)
+    hi = last(r) - (high ? pad : 0)
+    lo <= hi || throw(ArgumentError("shrunk range is empty"))
+    return lo:hi
+end
+
+function _test_nested_band_spec_2d(kind::Symbol, max_level::Integer)
+    ml = Int(max_level)
+    1 <= ml <= 4 ||
+        throw(ArgumentError("test nested band max_level must be in 1:4"))
+    blocks = ConservativeTreeRefineBlock2D[]
+
+    if kind == :xband
+        ir = 5:12
+        jr = 1:12
+        parent = ""
+        for level in 1:ml
+            name = "X$(level)"
+            push!(blocks, ConservativeTreeRefineBlock2D(
+                name, ir, jr; parent=parent))
+            parent = name
+            ir = _test_shrink_range_2d(_test_child_range_2d(ir))
+            jr = _test_child_range_2d(jr)
+        end
+    elseif kind == :yband
+        ir = 1:16
+        jr = 3:10
+        parent = ""
+        for level in 1:ml
+            name = "Y$(level)"
+            push!(blocks, ConservativeTreeRefineBlock2D(
+                name, ir, jr; parent=parent))
+            parent = name
+            ir = _test_child_range_2d(ir)
+            jr = _test_shrink_range_2d(_test_child_range_2d(jr))
+        end
+    elseif kind == :wall_ybands
+        bottom_i = 1:16
+        bottom_j = 1:5
+        top_i = 1:16
+        top_j = 8:12
+        bottom_parent = ""
+        top_parent = ""
+        for level in 1:ml
+            bottom_name = "B$(level)"
+            top_name = "T$(level)"
+            push!(blocks, ConservativeTreeRefineBlock2D(
+                bottom_name, bottom_i, bottom_j; parent=bottom_parent))
+            push!(blocks, ConservativeTreeRefineBlock2D(
+                top_name, top_i, top_j; parent=top_parent))
+            bottom_parent = bottom_name
+            top_parent = top_name
+            bottom_i = _test_child_range_2d(bottom_i)
+            bottom_j = _test_shrink_range_2d(
+                _test_child_range_2d(bottom_j); low=false, high=true)
+            top_i = _test_child_range_2d(top_i)
+            top_j = _test_shrink_range_2d(
+                _test_child_range_2d(top_j); low=true, high=false)
+        end
+    else
+        throw(ArgumentError("unknown nested band kind $kind"))
+    end
+
+    return create_conservative_tree_spec_2d(16, 12, blocks)
+end
+
 function _test_cartesian_poiseuille_profile_2d(max_level::Integer,
                                                steps::Integer;
                                                Fx=1e-7,
@@ -69,6 +142,80 @@ function _test_cartesian_poiseuille_profile_2d(max_level::Integer,
         profile[j] = ux_sum / nx
     end
     return profile
+end
+
+function _test_cartesian_couette_profile_2d(max_level::Integer,
+                                            steps::Integer;
+                                            U=1e-4,
+                                            omega=1.0,
+                                            rho0=1.0)
+    scale = 1 << Int(max_level)
+    nx = 16 * scale
+    ny = 12 * scale
+    volume = 1.0 / (scale * scale)
+    F = zeros(Float64, nx, ny, 9)
+    Ftmp = similar(F)
+    fill_equilibrium_integrated_D2Q9!(F, volume, rho0, 0.0, 0.0)
+
+    for _ in 1:(Int(steps) * scale)
+        collide_BGK_integrated_D2Q9!(F, volume, omega)
+        stream_periodic_x_moving_wall_y_F_2d!(
+            Ftmp, F; u_south=0.0, u_north=U, rho_wall=rho0,
+            volume=volume)
+        F, Ftmp = Ftmp, F
+    end
+
+    profile = zeros(Float64, ny)
+    for j in 1:ny
+        ux_sum = 0.0
+        for i in 1:nx
+            cell = @view F[i, j, :]
+            rho = mass_F(cell) / volume
+            mx = momentum_F(cell)[1]
+            ux_sum += (mx / volume) / rho
+        end
+        profile[j] = ux_sum / nx
+    end
+    return profile
+end
+
+function _test_profile_linf_2d(a, b)
+    length(a) == length(b) ||
+        throw(ArgumentError("profile lengths differ"))
+    return maximum(abs(Float64(a[i]) - Float64(b[i]))
+                   for i in eachindex(a, b))
+end
+
+function _test_active_field_bounds_2d(result; force_x=0.0,
+                                      level_scaled_force::Bool=false)
+    spec = result.spec
+    F = result.F
+    rho_min = Inf
+    rho_max = -Inf
+    ux_min = Inf
+    ux_max = -Inf
+    @inbounds for cell_id in spec.active_cells
+        cell = spec.cells[cell_id]
+        volume = Float64(cell.metrics.volume)
+        mass = 0.0
+        mx = 0.0
+        for q in 1:9
+            fq = Float64(F[cell_id, q])
+            mass += fq
+            mx += Float64(Kraken.d2q9_cx(q)) * fq
+        end
+        rho = mass / volume
+        fx = level_scaled_force ?
+             Float64(Kraken.conservative_tree_leaf_equivalent_force_2d(
+                force_x, spec, cell.level)) :
+             Float64(force_x)
+        ux = (mx / volume + fx / 2) / rho
+        rho_min = min(rho_min, rho)
+        rho_max = max(rho_max, rho)
+        ux_min = min(ux_min, ux)
+        ux_max = max(ux_max, ux)
+    end
+    return (; rho_min, rho_max, ux_min, ux_max)
 end
 
 @testset "Conservative tree subcycling ledger 2D" begin
@@ -909,6 +1056,50 @@ end
         @test xband.relative_mass_drift < 1e-8
         @test yband.relative_mass_drift < 1e-12
         @test wall_bands.relative_mass_drift < 1e-12
+    end
+
+    @testset "nested route-mode matrix tracks same-time Cartesian transients" begin
+        steps = 16
+        kinds = (:xband, :yband, :wall_ybands)
+        routes = (:leaf_equivalent, :level_native)
+        for max_level in 2:4
+            cart_poiseuille = _test_cartesian_poiseuille_profile_2d(
+                max_level, steps; Fx=1e-7, omega=1.0)
+            cart_couette = _test_cartesian_couette_profile_2d(
+                max_level, steps; U=1e-4, omega=1.0)
+            for kind in kinds, route in routes
+                spec = _test_nested_band_spec_2d(kind, max_level)
+                poiseuille = run_conservative_tree_poiseuille_subcycled_2d(
+                    max_level=max_level, spec=spec, steps=steps,
+                    Fx=1e-7, omega=1.0, route_sampling=route,
+                    enforce_mass=false)
+                couette = run_conservative_tree_couette_subcycled_2d(
+                    max_level=max_level, spec=spec, steps=steps,
+                    U=1e-4, omega=1.0, route_sampling=route,
+                    enforce_mass=false)
+
+                @test _test_profile_linf_2d(
+                    poiseuille.ux_profile, cart_poiseuille) < 1e-4
+                @test _test_profile_linf_2d(
+                    couette.ux_profile, cart_couette) < 1e-4
+                p_bounds = _test_active_field_bounds_2d(
+                    poiseuille; force_x=1e-7, level_scaled_force=true)
+                if kind == :xband && route == :level_native
+                    @test_broken p_bounds.rho_min > 0.999
+                    @test_broken p_bounds.rho_max < 1.001
+                    @test_broken p_bounds.ux_min > -1e-6
+                else
+                    @test p_bounds.rho_min > 0.999
+                    @test p_bounds.rho_max < 1.001
+                    @test p_bounds.ux_min > -1e-6
+                end
+                guard = conservative_tree_mass_roundoff_rtol_2d(
+                    Float64, steps, max_level;
+                    active_cell_count=length(spec.active_cells))
+                @test poiseuille.relative_mass_drift <= max(guard, 1e-10)
+                @test couette.relative_mass_drift <= max(guard, 1e-10)
+            end
+        end
     end
 
     @testset "subcycled Poiseuille macroflow runs from level 1 to 4" begin

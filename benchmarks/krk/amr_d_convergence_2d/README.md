@@ -51,9 +51,10 @@ Nested subcycled channel/solid cases accept two optional numeric A/B knobs:
 
 - `Define route_sampling = 0` selects the production nested AMR-D route
   contract. `1` selects the level-native subcycled route table, and `2`
-  selects the hybrid route table. Nested D defaults to `0`; use
-  `route_sampling = 1` explicitly for wall-normal band debug cases where the
-  periodic-corner reflux fix is required.
+  selects the hybrid route table. Nested D defaults to `0`; keep publication
+  and quicklook channel files on `0` until the level-native field canary is
+  closed. The route-matrix runner can still force `0/1` A/B comparisons without
+  editing KRK files.
 - `Define c2f_prolongation = 0` keeps the production flat coarse-to-fine
   packet geometry. `1` enables the explicit experimental limited-linear
   prolongation. `poiseuille_yband_nested4_limited_debug.krk` is the reference
@@ -62,4 +63,5 @@ Nested subcycled channel/solid cases accept two optional numeric A/B knobs:
   temporal predictor blend. Use `0` for committed parent state only and `1`
   for the local post-collision parent predictor. The default is `0.5` for the
   production leaf-equivalent route contract and `1` when `route_sampling = 1`
-  is requested explicitly.
+  is requested explicitly. Route `1` is experimental: it can preserve row-mean
+  profiles while corrupting the 2D field, so field metrics are mandatory.
