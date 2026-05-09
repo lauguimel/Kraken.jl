@@ -1774,4 +1774,34 @@ end
         @test all(isfinite, visco.psixx)
         @test all(isfinite, visco.fx_total)
     end
+
+    @testset "M9 cylinder channel coupled log-FV coarse canary stays bounded" begin
+        result = Kraken.run_viscoelastic_logfv_cylinder_coupled_2d(;
+            radius=4.0, H=18, L_up=4, L_down=7,
+            nu_s=0.08, nu_p=0.02, lambda=5.0,
+            u_mean=0.006, Fx_body=1e-7,
+            bsd_fraction=1.0, max_steps=50,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fluid = .!result.is_solid
+
+        @test result.geometry.name === :cylinder
+        @test count(fluid) > 0
+        @test result.nu_lbm ≈ result.nu_total
+        @test result.polymer_substeps >= 1
+        @test !result.subcycle_estimate.clamped
+        @test result.min_c_eig > 0.7
+        @test result.max_abs_psi < 0.4
+        @test result.max_abs_tau < 5e-4
+        @test result.max_abs_poly_force > 0
+        @test result.max_abs_total_force > 0
+        @test result.max_speed > 1e-4
+        @test result.max_speed < 0.02
+        @test result.rho_min > 0.995
+        @test result.rho_max < 1.02
+        @test all(isfinite, result.ux[fluid])
+        @test all(isfinite, result.uy[fluid])
+        @test all(isfinite, result.psixx[fluid])
+        @test all(isfinite, result.fx_total[fluid])
+    end
 end

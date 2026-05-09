@@ -321,6 +321,79 @@ function run_viscoelastic_logfv_square_channel_coupled_2d(;
     )
 end
 
+function _logfv_cylinder_channel_geometry_2d(;
+    radius::Real=6,
+    H::Integer=max(ceil(Int, 4 * radius), ceil(Int, 2 * radius + 4)),
+    L_up::Real=4,
+    L_down::Real=8,
+    FT::Type{<:AbstractFloat}=Float64,
+)
+    radius > 1 || throw(ArgumentError("radius must be > 1"))
+    H >= ceil(Int, 2 * radius + 4) ||
+        throw(ArgumentError("H must leave at least two fluid rows around the cylinder"))
+    L_up > 1 || throw(ArgumentError("L_up must leave upstream clearance"))
+    L_down > 1 || throw(ArgumentError("L_down must leave downstream clearance"))
+
+    Nx = ceil(Int, (L_up + L_down) * radius)
+    Ny = Int(H)
+    cx = FT(L_up * radius)
+    cy = FT((Ny - 1) / 2)
+    q_wall, is_solid = precompute_q_wall_cylinder(Nx, Ny, cx, cy, radius; FT=FT)
+    D = max(1, round(Int, 2 * radius))
+
+    hydro_mask = fill(false, Ny)
+    if Ny > 2
+        hydro_mask[2:(Ny - 1)] .= true
+    end
+    conformation_mask = fill(true, Ny)
+
+    return StepChannelGeometry2D{FT,Array{FT,3},Matrix{Bool},Vector{Bool}}(
+        :cylinder,
+        Nx,
+        Ny,
+        round(Int, cx) + 1,
+        1:Ny,
+        1:Ny,
+        D,
+        Ny,
+        Ny,
+        q_wall,
+        Matrix{Bool}(is_solid),
+        hydro_mask,
+        copy(hydro_mask),
+        conformation_mask,
+        copy(conformation_mask),
+    )
+end
+
+"""
+    run_viscoelastic_logfv_cylinder_coupled_2d(; kwargs...)
+
+Run the open-x coupled log-FV polymer path on a circular cylinder with
+precomputed cut-link geometry. This is the curved-wall macro canary above BFS
+and square-obstacle tests; benchmark Cd convergence still belongs in a
+separate harness after the lower ladder is green.
+"""
+function run_viscoelastic_logfv_cylinder_coupled_2d(;
+    radius::Real=6,
+    H::Integer=max(ceil(Int, 4 * radius), ceil(Int, 2 * radius + 4)),
+    L_up::Real=4,
+    L_down::Real=8,
+    kwargs...,
+)
+    T = get(kwargs, :T, Float64)
+    geom_h = _logfv_cylinder_channel_geometry_2d(;
+        radius,
+        H,
+        L_up,
+        L_down,
+        FT=T,
+    )
+    return _run_viscoelastic_logfv_step_channel_coupled_2d(
+        geom_h; shear_length=H, kwargs...,
+    )
+end
+
 @inline function _logfv_channel_ux(flow::Symbol, y, height, umax, uwall)
     if flow === :poiseuille
         eta = y / height
