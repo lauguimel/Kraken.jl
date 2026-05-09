@@ -1,0 +1,53 @@
+#!/bin/bash -l
+#PBS -N krk_amrd_cpu
+#PBS -l select=1:ncpus=1:mem=16GB
+#PBS -l walltime=12:00:00
+#PBS -j oe
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+
+: "${KRK_AMR_D_CPU_CASE:?set KRK_AMR_D_CPU_CASE, e.g. poiseuille_yband_nested4_debug.krk}"
+: "${KRK_AMR_D_CPU_RUN_KIND:?set KRK_AMR_D_CPU_RUN_KIND to sweep12800 or single25600}"
+
+case "$KRK_AMR_D_CPU_RUN_KIND" in
+  sweep12800)
+    export KRK_AMR_D_TEMP_SINGLE_STEP=0
+    export KRK_AMR_D_TEMP_MAX_STEPS=12800
+    export KRK_AMR_D_TEMP_OUTDIR="${KRK_AMR_D_TEMP_OUTDIR:-benchmarks/results/quicklook/amr_d_cpu_nested_channels_steady_sweep_12800_aqua}"
+    ;;
+  single25600)
+    export KRK_AMR_D_TEMP_SINGLE_STEP=1
+    export KRK_AMR_D_TEMP_MAX_STEPS=25600
+    export KRK_AMR_D_TEMP_OUTDIR="${KRK_AMR_D_TEMP_OUTDIR:-benchmarks/results/quicklook/amr_d_cpu_nested_channels_steady_single_25600_aqua}"
+    ;;
+  *)
+    echo "Unknown KRK_AMR_D_CPU_RUN_KIND=$KRK_AMR_D_CPU_RUN_KIND" >&2
+    exit 2
+    ;;
+esac
+
+export KRK_AMR_D_TEMP_BACKEND="${KRK_AMR_D_TEMP_BACKEND:-cpu}"
+export KRK_AMR_D_TEMP_REFERENCE="${KRK_AMR_D_TEMP_REFERENCE:-none}"
+export KRK_AMR_D_TEMP_T="${KRK_AMR_D_TEMP_T:-float32}"
+export KRK_AMR_D_TEMP_MAKE_PLOTS="${KRK_AMR_D_TEMP_MAKE_PLOTS:-0}"
+export KRK_AMR_D_TEMP_CASES="$KRK_AMR_D_CPU_CASE"
+
+mkdir -p "$KRK_AMR_D_TEMP_OUTDIR"
+
+echo "host=$(hostname)"
+echo "date=$(date -Iseconds)"
+echo "case=$KRK_AMR_D_CPU_CASE"
+echo "run_kind=$KRK_AMR_D_CPU_RUN_KIND"
+echo "threads=$JULIA_NUM_THREADS"
+echo "outdir=$KRK_AMR_D_TEMP_OUTDIR"
+echo "backend=$KRK_AMR_D_TEMP_BACKEND T=$KRK_AMR_D_TEMP_T"
+
+julia --project=. benchmarks/amr_d_macroflow_temporal_convergence_2d.jl

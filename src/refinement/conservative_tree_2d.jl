@@ -151,8 +151,13 @@ function fill_equilibrium_integrated_D2Q9!(Fcell::AbstractVector,
                                            ux,
                                            uy)
     _check_d2q9_vector(Fcell, "Fcell")
+    T = typeof(float(Fcell[1]))
+    volume_T = T(volume)
+    rho_T = T(rho)
+    ux_T = T(ux)
+    uy_T = T(uy)
     @inbounds for q in 1:9
-        Fcell[q] = volume * equilibrium(D2Q9(), rho, ux, uy, q)
+        Fcell[q] = volume_T * equilibrium(D2Q9(), rho_T, ux_T, uy_T, q)
     end
     return Fcell
 end
@@ -564,17 +569,22 @@ function collide_BGK_integrated_D2Q9!(Fcell::AbstractVector, volume, omega)
     _check_d2q9_vector(Fcell, "Fcell")
     volume > zero(volume) || throw(ArgumentError("volume must be positive"))
 
-    m = mass_F(Fcell)
+    T = typeof(float(Fcell[1]))
+    volume_T = T(volume)
+    omega_T = T(omega)
+    m = T(mass_F(Fcell))
     iszero(m) && throw(ArgumentError("Fcell mass must be nonzero"))
     mx, my = momentum_F(Fcell)
-    rho = m / volume
-    ux = mx / m
-    uy = my / m
+    mx_T = T(mx)
+    my_T = T(my)
+    rho = m / volume_T
+    ux = mx_T / m
+    uy = my_T / m
 
     @inbounds for q in 1:9
-        f = Fcell[q] / volume
+        f = T(Fcell[q]) / volume_T
         feq = equilibrium(D2Q9(), rho, ux, uy, q)
-        Fcell[q] = (f - omega * (f - feq)) * volume
+        Fcell[q] = (f - omega_T * (f - feq)) * volume_T
     end
     return Fcell
 end
@@ -595,24 +605,32 @@ function collide_Guo_integrated_D2Q9!(Fcell::AbstractVector,
     _check_d2q9_vector(Fcell, "Fcell")
     volume > zero(volume) || throw(ArgumentError("volume must be positive"))
 
-    m = mass_F(Fcell)
+    T = typeof(float(Fcell[1]))
+    volume_T = T(volume)
+    omega_T = T(omega)
+    Fx_T = T(Fx)
+    Fy_T = T(Fy)
+    m = T(mass_F(Fcell))
     iszero(m) && throw(ArgumentError("Fcell mass must be nonzero"))
     mx, my = momentum_F(Fcell)
-    rho = m / volume
-    ux = (mx / volume + Fx / 2) / rho
-    uy = (my / volume + Fy / 2) / rho
-    guo_pref = 1 - omega / 2
+    mx_T = T(mx)
+    my_T = T(my)
+    rho = m / volume_T
+    ux = (mx_T / volume_T + Fx_T / T(2)) / rho
+    uy = (my_T / volume_T + Fy_T / T(2)) / rho
+    guo_pref = T(1) - omega_T / T(2)
 
     @inbounds for q in 1:9
-        cx = d2q9_cx(q)
-        cy = d2q9_cy(q)
-        w = weights(D2Q9())[q]
+        cx = T(d2q9_cx(q))
+        cy = T(d2q9_cy(q))
+        w = T(weights(D2Q9())[q])
         ci_dot_u = cx * ux + cy * uy
-        ci_dot_F = cx * Fx + cy * Fy
-        Sq = w * (3 * ((cx - ux) * Fx + (cy - uy) * Fy) + 9 * ci_dot_u * ci_dot_F)
-        f = Fcell[q] / volume
+        ci_dot_F = cx * Fx_T + cy * Fy_T
+        Sq = w * (T(3) * ((cx - ux) * Fx_T + (cy - uy) * Fy_T) +
+                  T(9) * ci_dot_u * ci_dot_F)
+        f = T(Fcell[q]) / volume_T
         feq = equilibrium(D2Q9(), rho, ux, uy, q)
-        Fcell[q] = volume * (f - omega * (f - feq) + guo_pref * Sq)
+        Fcell[q] = volume_T * (f - omega_T * (f - feq) + guo_pref * Sq)
     end
     return Fcell
 end

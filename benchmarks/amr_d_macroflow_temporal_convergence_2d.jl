@@ -1,6 +1,5 @@
 #!/usr/bin/env julia
 
-using CairoMakie
 using Dates
 using Kraken
 using Printf
@@ -264,12 +263,16 @@ function _temp_write_runtime_csv(path, rows)
     return path
 end
 
-function _temp_existing_case_summary(case, case_dir::AbstractString)
+function _temp_existing_case_summary(case, case_dir::AbstractString;
+                                    make_plots::Bool=true)
     dashboard_png = joinpath(case_dir, "debug_dashboard.png")
     convergence_csv = joinpath(case_dir, "convergence.csv")
     values_csv = joinpath(case_dir, "values.csv")
     runtime_csv = joinpath(case_dir, "runtime.csv")
-    all(isfile, (dashboard_png, convergence_csv, values_csv)) ||
+    required = make_plots ?
+        (dashboard_png, convergence_csv, values_csv) :
+        (convergence_csv, values_csv)
+    all(isfile, required) ||
         return nothing
 
     lines = readlines(convergence_csv)
@@ -279,7 +282,8 @@ function _temp_existing_case_summary(case, case_dir::AbstractString)
     return (;
         case=case.name, flow=case.flow, status=Symbol(fields[3]),
         steps=parse(Int, fields[2]), outdir=case_dir,
-        dashboard_png=dashboard_png, convergence_csv=convergence_csv,
+        dashboard_png=make_plots ? dashboard_png : "",
+        convergence_csv=convergence_csv,
         values_csv=values_csv, runtime_csv=runtime_csv)
 end
 
@@ -361,10 +365,12 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         rho_atol::Float64=_temp_env_float("KRK_AMR_D_TEMP_RHO_ATOL", 2e-4),
         skip_existing::Bool=_temp_env_bool("KRK_AMR_D_TEMP_SKIP_EXISTING"),
         single_step::Bool=_temp_env_bool("KRK_AMR_D_TEMP_SINGLE_STEP"),
+        make_plots::Bool=_temp_env_bool("KRK_AMR_D_TEMP_MAKE_PLOTS", true),
         backend=nothing,
         backend_name::AbstractString="cpu",
         T::Type{<:AbstractFloat}=Float64)
     mkpath(outdir)
+    make_plots && _ql_require_cairomakie!("AMR-D temporal convergence")
     summary_rows = NamedTuple[]
 
     for path in paths
@@ -375,7 +381,8 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         case_dir = joinpath(outdir, _ql_sanitize_name(case.name))
         mkpath(case_dir)
         if skip_existing
-            existing = _temp_existing_case_summary(case, case_dir)
+            existing = _temp_existing_case_summary(
+                case, case_dir; make_plots=make_plots)
             if existing !== nothing
                 push!(summary_rows, existing)
                 println("skipping ", case.name, " ", existing.status,
@@ -492,14 +499,18 @@ function run_amr_d_temporal_convergence_2d(paths=_temp_case_paths();
         _temp_write_values_csv(joinpath(case_dir, "values.csv"), value_rows)
         runtime_csv = _temp_write_runtime_csv(
             joinpath(case_dir, "runtime.csv"), runtime_rows)
-        _temp_final_dashboard(
-            joinpath(case_dir, "debug_dashboard.png"), case, amr_record,
-            reference, convergence_rows)
+        dashboard_png = joinpath(case_dir, "debug_dashboard.png")
+        if make_plots
+            _temp_final_dashboard(
+                dashboard_png, case, amr_record, reference, convergence_rows)
+        else
+            dashboard_png = ""
+        end
 
         push!(summary_rows, (;
             case=case.name, flow=case.flow, status=final_status,
             steps=steps, outdir=case_dir,
-            dashboard_png=joinpath(case_dir, "debug_dashboard.png"),
+            dashboard_png=dashboard_png,
             convergence_csv=joinpath(case_dir, "convergence.csv"),
             values_csv=joinpath(case_dir, "values.csv"),
             runtime_csv=runtime_csv))

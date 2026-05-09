@@ -1,6 +1,5 @@
 #!/usr/bin/env julia
 
-using CairoMakie
 using Dates
 using Kraken
 using Printf
@@ -10,6 +9,24 @@ const DEFAULT_QUICKLOOK_CASE_DIR = joinpath(
 const DEFAULT_QUICKLOOK_OUTDIR = joinpath(
     dirname(@__DIR__), "benchmarks", "results", "quicklook",
     "amr_d_krk_2d_" * Dates.format(now(), "yyyymmdd_HHMMSS"))
+
+function _ql_env_bool(name::AbstractString, default=false)
+    raw = lowercase(strip(get(ENV, name, "")))
+    isempty(raw) && return Bool(default)
+    return raw in ("1", "true", "yes", "on")
+end
+
+function _ql_require_cairomakie!(context::AbstractString)
+    try
+        @eval using CairoMakie
+        return true
+    catch err
+        throw(ArgumentError(
+            "$context needs CairoMakie to make PNG dashboards. " *
+            "Set the corresponding MAKE_PLOTS environment flag to false " *
+            "to run CSV-only. Original error: $(sprint(showerror, err))"))
+    end
+end
 
 struct AMRDQuicklookArtifact2D
     case_name::String
@@ -1348,6 +1365,7 @@ function run_amr_d_quicklook_from_krk_2d(paths;
         make_plots::Bool=true,
         T::Type{<:AbstractFloat}=Float64)
     mkpath(outdir)
+    make_plots && _ql_require_cairomakie!("AMR-D quicklook")
     artifacts = AMRDQuicklookArtifact2D[]
 
     for raw_path in paths
@@ -1489,8 +1507,10 @@ function main()
     paths = _ql_env_case_paths()
     outdir = get(ENV, "KRK_AMR_D_QUICKLOOK_OUTDIR", DEFAULT_QUICKLOOK_OUTDIR)
     include_reference = lowercase(get(ENV, "KRK_AMR_D_QUICKLOOK_REFERENCE", "true")) != "false"
+    make_plots = _ql_env_bool("KRK_AMR_D_QUICKLOOK_MAKE_PLOTS", true)
     artifacts = run_amr_d_quicklook_from_krk_2d(
-        paths; outdir=outdir, include_reference=include_reference)
+        paths; outdir=outdir, include_reference=include_reference,
+        make_plots=make_plots)
     println("wrote ", joinpath(outdir, "summary.csv"))
     for artifact in artifacts
         println("wrote ", artifact.outdir)
