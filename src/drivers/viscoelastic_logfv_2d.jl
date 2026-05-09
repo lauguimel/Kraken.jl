@@ -24,6 +24,12 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     max_deformation_increment::Real=0.05,
     max_polymer_substeps::Integer=64,
     max_steps::Integer=60,
+    avg_window::Union{Nothing,Integer}=nothing,
+    drag_stride::Integer=1,
+    drag_cx::Union{Nothing,Real}=nothing,
+    drag_cy::Union{Nothing,Real}=nothing,
+    drag_radius::Union{Nothing,Real}=nothing,
+    drag_u_ref::Union{Nothing,Real}=nothing,
     backend=KernelAbstractions.CPU(),
     T=Float64,
 )
@@ -33,6 +39,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     lambda > 0 || throw(ArgumentError("lambda must be positive"))
     0 <= bsd_fraction <= 1 || throw(ArgumentError("bsd_fraction must be in [0, 1]"))
     max_steps >= 0 || throw(ArgumentError("max_steps must be non-negative"))
+    drag_stride > 0 || throw(ArgumentError("drag_stride must be positive"))
 
     geom = transfer_step_geometry_2d(geom_h, backend)
     Nx, Ny = geom_h.Nx, geom_h.Ny
@@ -125,11 +132,21 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         throw(ArgumentError("polymer_substeps must be an integer or :auto"))
     end
     dt_poly = one(T) / T(selected_polymer_substeps)
+    drag_enabled = !isnothing(drag_cx) && !isnothing(drag_cy) &&
+                   !isnothing(drag_radius) && !isnothing(drag_u_ref)
+    avg_window_i = isnothing(avg_window) ? max(1, max_steps) : Int(avg_window)
+    avg_window_i >= 1 || throw(ArgumentError("avg_window must be >= 1"))
+    drag_start = max_steps - min(max_steps, avg_window_i)
+    Fx_s_sum = 0.0
+    Fy_s_sum = 0.0
+    Fx_p_sum = 0.0
+    Fy_p_sum = 0.0
+    n_drag = 0
 
     logfv_add_constant_force_fluid_2d!(fx_total, fy_total, is_solid, Fx_body_t, zero(T); sync=false)
     logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_in, fx_total, fy_total; sync=false)
 
-    for _ in 1:max_steps
+    for step in 1:max_steps
         logfv_copy_column_profile_2d!(ux_east, ux, Nx; sync=false)
         logfv_copy_column_profile_2d!(east_xx, psixx, Nx; sync=false)
         logfv_copy_column_profile_2d!(east_xy, psixy, Nx; sync=false)
@@ -178,6 +195,23 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
             Nx, Ny, nu_lbm_t;
         )
         apply_bc_rebuild_2d!(f_out, f_in, bcspec, nu_lbm_t, Nx, Ny)
+        if drag_enabled && step > drag_start &&
+           ((step - drag_start - 1) % drag_stride == 0 || step == max_steps)
+            drag_s = compute_drag_libb_mei_2d(f_out, q_wall, uwx, uwy, Nx, Ny)
+            drag_p = compute_polymeric_drag_2d(
+                tauxx, tauxy, tauyy, q_wall, Nx, Ny;
+                cx=Float64(drag_cx),
+                cy=Float64(drag_cy),
+                radius=Float64(drag_radius),
+                extrapolate=true,
+                reconstruction_order=2,
+            )
+            Fx_s_sum += drag_s.Fx
+            Fy_s_sum += drag_s.Fy
+            Fx_p_sum += drag_p.Fx
+            Fy_p_sum += drag_p.Fy
+            n_drag += 1
+        end
         logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_out, fx_total, fy_total; sync=false)
         f_in, f_out = f_out, f_in
     end
@@ -212,6 +246,17 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     max_abs_tau = max(maximum(abs, tauxx_cpu), maximum(abs, tauxy_cpu), maximum(abs, tauyy_cpu))
     max_abs_poly_force = max(maximum(abs, fx_poly_cpu), maximum(abs, fy_poly_cpu))
     max_abs_total_force = max(maximum(abs, fx_total_cpu), maximum(abs, fy_total_cpu))
+    Fx_s = n_drag > 0 ? Fx_s_sum / n_drag : NaN
+    Fy_s = n_drag > 0 ? Fy_s_sum / n_drag : NaN
+    Fx_p = n_drag > 0 ? Fx_p_sum / n_drag : NaN
+    Fy_p = n_drag > 0 ? Fy_p_sum / n_drag : NaN
+    Fx_drag = n_drag > 0 ? Fx_s + Fx_p : NaN
+    Fy_drag = n_drag > 0 ? Fy_s + Fy_p : NaN
+    drag_diameter = isnothing(drag_radius) ? NaN : 2.0 * Float64(drag_radius)
+    drag_speed = isnothing(drag_u_ref) ? NaN : Float64(drag_u_ref)
+    Cd_s = n_drag > 0 ? 2.0 * Fx_s / (drag_speed^2 * drag_diameter) : NaN
+    Cd_p = n_drag > 0 ? 2.0 * Fx_p / (drag_speed^2 * drag_diameter) : NaN
+    Cd = n_drag > 0 ? Cd_s + Cd_p : NaN
 
     return (;
         geometry=geom_h,
@@ -250,6 +295,16 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         max_abs_tau,
         max_abs_poly_force,
         max_abs_total_force,
+        Fx_s,
+        Fy_s,
+        Fx_p,
+        Fy_p,
+        Fx_drag,
+        Fy_drag,
+        Cd_s,
+        Cd_p,
+        Cd,
+        n_drag_samples=n_drag,
         rho_min=minimum(rho_cpu[fluid_mask]),
         rho_max=maximum(rho_cpu[fluid_mask]),
     )
@@ -390,7 +445,13 @@ function run_viscoelastic_logfv_cylinder_coupled_2d(;
         FT=T,
     )
     return _run_viscoelastic_logfv_step_channel_coupled_2d(
-        geom_h; shear_length=H, kwargs...,
+        geom_h;
+        shear_length=H,
+        drag_cx=Float64(L_up * radius),
+        drag_cy=Float64((H - 1) / 2),
+        drag_radius=Float64(radius),
+        drag_u_ref=Float64(get(kwargs, :u_mean, 0.01)),
+        kwargs...,
     )
 end
 

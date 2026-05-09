@@ -1795,6 +1795,10 @@ end
         @test result.max_abs_tau < 5e-4
         @test result.max_abs_poly_force > 0
         @test result.max_abs_total_force > 0
+        @test result.n_drag_samples > 0
+        @test isfinite(result.Cd)
+        @test isfinite(result.Cd_s)
+        @test isfinite(result.Cd_p)
         @test result.max_speed > 1e-4
         @test result.max_speed < 0.02
         @test result.rho_min > 0.995
