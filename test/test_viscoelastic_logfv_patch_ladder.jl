@@ -868,6 +868,36 @@ end
         end
     end
 
+    @testset "M4c BSD drag correction uses polymer wall quadrature" begin
+        Nx, Ny = 72, 60
+        R = 12.0
+        cx, cy = 35.41, 29.73
+        zeta_nu_p = 0.37
+        q_wall, _ = precompute_q_wall_cylinder(Nx, Ny, cx, cy, R)
+
+        tau_xx = [(i - 1) - cx for i in 1:Nx, j in 1:Ny]
+        tau_xy = zeros(Float64, Nx, Ny)
+        tau_yy = zeros(Float64, Nx, Ny)
+        dudx = tau_xx ./ (2 * zeta_nu_p)
+        dudy = zeros(Float64, Nx, Ny)
+        dvdx = zeros(Float64, Nx, Ny)
+        dvdy = zeros(Float64, Nx, Ny)
+
+        expected = Kraken.compute_polymeric_drag_2d(
+            tau_xx, tau_xy, tau_yy, q_wall, Nx, Ny;
+            cx, cy, radius=R, extrapolate=true, reconstruction_order=2,
+        )
+        drag = Kraken._logfv_compute_bsd_drag_2d(
+            dudx, dudy, dvdx, dvdy, q_wall, Nx, Ny;
+            cx, cy, radius=R, zeta_nu_p, reconstruction_order=2,
+        )
+
+        @test drag.Fx ≈ expected.Fx atol=1e-11 rtol=1e-11
+        @test drag.Fy ≈ expected.Fy atol=1e-11 rtol=1e-11
+        @test drag.Fx ≈ pi * R^2 rtol=2e-4
+        @test abs(drag.Fy) < LOGFV_ATOL
+    end
+
     @testset "M4 force boundary fill copies nearest interior halo" begin
         Nx, Ny = 6, 5
         fx = [100i + j for i in 1:Nx, j in 1:Ny]

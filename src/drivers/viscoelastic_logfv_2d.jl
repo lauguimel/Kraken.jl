@@ -10,6 +10,42 @@ using KernelAbstractions
     end
 end
 
+function _logfv_compute_bsd_drag_2d(
+    dudx, dudy, dvdx, dvdy, q_wall, Nx::Integer, Ny::Integer;
+    cx::Real,
+    cy::Real,
+    radius::Real,
+    zeta_nu_p::Real,
+    reconstruction_order::Integer=2,
+)
+    zeta_nu_p_f = Float64(zeta_nu_p)
+    zeta_nu_p_f == 0.0 && return (Fx=0.0, Fy=0.0)
+
+    dudx_h = Array(dudx)
+    dudy_h = Array(dudy)
+    dvdx_h = Array(dvdx)
+    dvdy_h = Array(dvdy)
+    Nx_i = Int(Nx)
+    Ny_i = Int(Ny)
+    tau_bsd_xx = Matrix{Float64}(undef, Nx_i, Ny_i)
+    tau_bsd_xy = Matrix{Float64}(undef, Nx_i, Ny_i)
+    tau_bsd_yy = Matrix{Float64}(undef, Nx_i, Ny_i)
+    @inbounds for j in 1:Ny_i, i in 1:Nx_i
+        tau_bsd_xx[i, j] = 2.0 * zeta_nu_p_f * Float64(dudx_h[i, j])
+        tau_bsd_xy[i, j] = zeta_nu_p_f * (Float64(dudy_h[i, j]) + Float64(dvdx_h[i, j]))
+        tau_bsd_yy[i, j] = 2.0 * zeta_nu_p_f * Float64(dvdy_h[i, j])
+    end
+
+    return compute_polymeric_drag_2d(
+        tau_bsd_xx, tau_bsd_xy, tau_bsd_yy, q_wall, Nx_i, Ny_i;
+        cx=Float64(cx),
+        cy=Float64(cy),
+        radius=Float64(radius),
+        extrapolate=true,
+        reconstruction_order,
+    )
+end
+
 function _run_viscoelastic_logfv_step_channel_coupled_2d(
     geom_h;
     shear_length::Real,
@@ -141,6 +177,8 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     Fy_s_sum = 0.0
     Fx_p_sum = 0.0
     Fy_p_sum = 0.0
+    Fx_bsd_sum = 0.0
+    Fy_bsd_sum = 0.0
     n_drag = 0
 
     logfv_add_constant_force_fluid_2d!(fx_total, fy_total, is_solid, Fx_body_t, zero(T); sync=false)
@@ -206,10 +244,20 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
                 extrapolate=true,
                 reconstruction_order=2,
             )
+            drag_bsd = _logfv_compute_bsd_drag_2d(
+                dudx, dudy, dvdx, dvdy, q_wall, Nx, Ny;
+                cx=Float64(drag_cx),
+                cy=Float64(drag_cy),
+                radius=Float64(drag_radius),
+                zeta_nu_p=Float64(bsd_t * nu_p_t),
+                reconstruction_order=2,
+            )
             Fx_s_sum += drag_s.Fx
             Fy_s_sum += drag_s.Fy
             Fx_p_sum += drag_p.Fx
             Fy_p_sum += drag_p.Fy
+            Fx_bsd_sum += drag_bsd.Fx
+            Fy_bsd_sum += drag_bsd.Fy
             n_drag += 1
         end
         logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_out, fx_total, fy_total; sync=false)
@@ -250,13 +298,16 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     Fy_s = n_drag > 0 ? Fy_s_sum / n_drag : NaN
     Fx_p = n_drag > 0 ? Fx_p_sum / n_drag : NaN
     Fy_p = n_drag > 0 ? Fy_p_sum / n_drag : NaN
-    Fx_drag = n_drag > 0 ? Fx_s + Fx_p : NaN
-    Fy_drag = n_drag > 0 ? Fy_s + Fy_p : NaN
+    Fx_bsd = n_drag > 0 ? Fx_bsd_sum / n_drag : NaN
+    Fy_bsd = n_drag > 0 ? Fy_bsd_sum / n_drag : NaN
+    Fx_drag = n_drag > 0 ? Fx_s + Fx_p - Fx_bsd : NaN
+    Fy_drag = n_drag > 0 ? Fy_s + Fy_p - Fy_bsd : NaN
     drag_diameter = isnothing(drag_radius) ? NaN : 2.0 * Float64(drag_radius)
     drag_speed = isnothing(drag_u_ref) ? NaN : Float64(drag_u_ref)
     Cd_s = n_drag > 0 ? 2.0 * Fx_s / (drag_speed^2 * drag_diameter) : NaN
     Cd_p = n_drag > 0 ? 2.0 * Fx_p / (drag_speed^2 * drag_diameter) : NaN
-    Cd = n_drag > 0 ? Cd_s + Cd_p : NaN
+    Cd_bsd = n_drag > 0 ? 2.0 * Fx_bsd / (drag_speed^2 * drag_diameter) : NaN
+    Cd = n_drag > 0 ? Cd_s + Cd_p - Cd_bsd : NaN
 
     return (;
         geometry=geom_h,
@@ -299,10 +350,13 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         Fy_s,
         Fx_p,
         Fy_p,
+        Fx_bsd,
+        Fy_bsd,
         Fx_drag,
         Fy_drag,
         Cd_s,
         Cd_p,
+        Cd_bsd,
         Cd,
         n_drag_samples=n_drag,
         rho_min=minimum(rho_cpu[fluid_mask]),
