@@ -389,11 +389,22 @@ function _collide_BGK_conservative_tree_active_ids_F_2d!(
         ids::AbstractVector{<:Integer},
         omega)
     _check_conservative_tree_F_2d(F, spec)
-    @inbounds for raw_id in ids
-        cell_id = Int(raw_id)
-        cell = spec.cells[cell_id]
-        _collide_BGK_integrated_D2Q9_row_2d!(
-            F, cell_id, cell.metrics.volume, omega)
+    if Threads.nthreads() > 1 && length(ids) >= 4096
+        Threads.@threads for idx in eachindex(ids)
+            @inbounds begin
+                cell_id = Int(ids[idx])
+                cell = spec.cells[cell_id]
+                _collide_BGK_integrated_D2Q9_row_2d!(
+                    F, cell_id, cell.metrics.volume, omega)
+            end
+        end
+    else
+        @inbounds for raw_id in ids
+            cell_id = Int(raw_id)
+            cell = spec.cells[cell_id]
+            _collide_BGK_integrated_D2Q9_row_2d!(
+                F, cell_id, cell.metrics.volume, omega)
+        end
     end
     return F
 end
@@ -425,11 +436,22 @@ function _collide_Guo_conservative_tree_active_ids_F_2d!(
         Fx,
         Fy)
     _check_conservative_tree_F_2d(F, spec)
-    @inbounds for raw_id in ids
-        cell_id = Int(raw_id)
-        cell = spec.cells[cell_id]
-        _collide_Guo_integrated_D2Q9_row_2d!(
-            F, cell_id, cell.metrics.volume, omega, Fx, Fy)
+    if Threads.nthreads() > 1 && length(ids) >= 4096
+        Threads.@threads for idx in eachindex(ids)
+            @inbounds begin
+                cell_id = Int(ids[idx])
+                cell = spec.cells[cell_id]
+                _collide_Guo_integrated_D2Q9_row_2d!(
+                    F, cell_id, cell.metrics.volume, omega, Fx, Fy)
+            end
+        end
+    else
+        @inbounds for raw_id in ids
+            cell_id = Int(raw_id)
+            cell = spec.cells[cell_id]
+            _collide_Guo_integrated_D2Q9_row_2d!(
+                F, cell_id, cell.metrics.volume, omega, Fx, Fy)
+        end
     end
     return F
 end
@@ -464,13 +486,26 @@ function _collide_Guo_conservative_tree_active_fluid_ids_F_2d!(
         Fx,
         Fy)
     _check_conservative_tree_F_2d(F, spec)
-    @inbounds for raw_id in ids
-        cell_id = Int(raw_id)
-        cell = spec.cells[cell_id]
-        _conservative_tree_cell_is_solid_2d(spec, cell, is_solid) &&
-            continue
-        _collide_Guo_integrated_D2Q9_row_2d!(
-            F, cell_id, cell.metrics.volume, omega, Fx, Fy)
+    if Threads.nthreads() > 1 && length(ids) >= 4096
+        Threads.@threads for idx in eachindex(ids)
+            @inbounds begin
+                cell_id = Int(ids[idx])
+                cell = spec.cells[cell_id]
+                if !_conservative_tree_cell_is_solid_2d(spec, cell, is_solid)
+                    _collide_Guo_integrated_D2Q9_row_2d!(
+                        F, cell_id, cell.metrics.volume, omega, Fx, Fy)
+                end
+            end
+        end
+    else
+        @inbounds for raw_id in ids
+            cell_id = Int(raw_id)
+            cell = spec.cells[cell_id]
+            _conservative_tree_cell_is_solid_2d(spec, cell, is_solid) &&
+                continue
+            _collide_Guo_integrated_D2Q9_row_2d!(
+                F, cell_id, cell.metrics.volume, omega, Fx, Fy)
+        end
     end
     return F
 end

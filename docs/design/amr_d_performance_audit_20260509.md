@@ -42,6 +42,16 @@ flows are usable as a debug loop.
    `src/dst/q/weight` arrays instead of traversing route objects in the direct
    streaming hot loop.
 
+8. Compile F2C coalescing routes for the production path.
+   For `alpha=1` and `interface_time_scaling=:leaf_equivalent`, the scheduler
+   now accumulates precomputed `src/q/weight/parent_slot/packet_slot` arrays.
+   Experimental `:level_native` corner logic keeps the checked path.
+
+9. Add guarded CPU threading.
+   Collision loops thread over independent active cells, and direct streaming
+   threads only on levels where `(dst, q)` is unique. This is a CPU debug-loop
+   accelerator; GPU production still needs route-native kernels.
+
 ## Local Measurements
 
 All measurements were run locally on the same branch with `Float32` where noted.
@@ -71,9 +81,9 @@ After this pass:
 
 - active cells: 960
 - leaf-equivalent cells: 49152
-- 100 steps: `0.1337 s`
-- active MLUPS: `0.718`
-- leaf-equivalent MLUPS: `36.8`
+- 200 steps: `0.2127 s`
+- active MLUPS: `0.903`
+- leaf-equivalent MLUPS: `46.2`
 
 The gain here is about `35x` on active-cell MLUPS and about `35x` on
 leaf-equivalent MLUPS. The dominant fix is the `alpha == 1` packet fast path.
@@ -102,13 +112,17 @@ After this pass:
 
 - active cells: 12936
 - leaf-equivalent cells: 49152
-- 200 steps: `3.852 s`
-- active MLUPS: `0.672`
-- leaf-equivalent MLUPS: `2.55`
+- 200 steps, 1 Julia thread: `3.115 s`
+- active MLUPS: `0.831`
+- leaf-equivalent MLUPS: `3.16`
+- 200 steps, 8 Julia threads: `2.645 s`
+- active MLUPS: `0.978`
+- leaf-equivalent MLUPS: `3.72`
 
-The larger KRK case improves by about `1.44x`. It is no longer dominated by the
-packet reconstruction bug; remaining time is spread across route streaming,
-inactive parent coalescing, collision, and buffer copies.
+The larger KRK case improves by about `1.78x` in one-thread mode and about
+`2.10x` with the guarded 8-thread CPU path. This is still far below a dense LBM
+kernel; the remaining overhead is the conservative subcycling scheduler itself,
+especially direct streaming, C2F application, collision, and buffer copies.
 
 ## Validation
 
@@ -130,8 +144,6 @@ Results:
 
 The next performance pass should focus on precomputed route execution arrays:
 
-- interface coalescing arrays with precomputed destination, kind and packet
-  slot, avoiding route-object traversal in every substep;
 - boundary route arrays for channel BCs, keeping solid-aware paths separate;
 - GPU route-native kernels consuming the same compact arrays.
 

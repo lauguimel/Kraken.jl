@@ -22,6 +22,7 @@ struct ConservativeTreeRouteTable2D
     direct_route_dsts_by_level::Vector{Vector{Int}}
     direct_route_qs_by_level::Vector{Vector{Int}}
     direct_route_weights_by_level::Vector{Vector{Float64}}
+    direct_route_unique_dsts_by_level::Vector{Bool}
 end
 
 function _active_leaf_covering_sample_2d(spec::ConservativeTreeSpec2D,
@@ -511,6 +512,7 @@ function _compact_direct_routes_by_level_2d(
     dsts_by_level = [Int[] for _ in direct_ranges]
     qs_by_level = [Int[] for _ in direct_ranges]
     weights_by_level = [Float64[] for _ in direct_ranges]
+    unique_dsts_by_level = fill(false, length(direct_ranges))
     @inbounds for level_index in eachindex(direct_ranges)
         range = direct_ranges[level_index]
         n = length(range)
@@ -525,8 +527,30 @@ function _compact_direct_routes_by_level_2d(
             push!(qs_by_level[level_index], route.q)
             push!(weights_by_level[level_index], route.weight)
         end
+        order = sortperm(eachindex(qs_by_level[level_index]);
+                         by=idx -> (
+                             qs_by_level[level_index][idx],
+                             srcs_by_level[level_index][idx],
+                             dsts_by_level[level_index][idx]))
+        srcs_by_level[level_index] = srcs_by_level[level_index][order]
+        dsts_by_level[level_index] = dsts_by_level[level_index][order]
+        qs_by_level[level_index] = qs_by_level[level_index][order]
+        weights_by_level[level_index] = weights_by_level[level_index][order]
+        seen = Set{Tuple{Int,Int}}()
+        unique_dsts = true
+        for idx in eachindex(dsts_by_level[level_index])
+            key = (dsts_by_level[level_index][idx],
+                   qs_by_level[level_index][idx])
+            if key in seen
+                unique_dsts = false
+                break
+            end
+            push!(seen, key)
+        end
+        unique_dsts_by_level[level_index] = unique_dsts
     end
-    return srcs_by_level, dsts_by_level, qs_by_level, weights_by_level
+    return srcs_by_level, dsts_by_level, qs_by_level, weights_by_level,
+           unique_dsts_by_level
 end
 
 """
@@ -605,7 +629,8 @@ function create_conservative_tree_route_table_2d(spec::ConservativeTreeSpec2D;
     source_q_has_split_route = _source_q_split_route_flags_2d(
         spec, routes, interface_routes)
     direct_srcs_by_level, direct_dsts_by_level, direct_qs_by_level,
-        direct_weights_by_level = _compact_direct_routes_by_level_2d(
+        direct_weights_by_level, direct_unique_dsts_by_level =
+            _compact_direct_routes_by_level_2d(
             direct_routes, direct_ranges, routes)
 
     return ConservativeTreeRouteTable2D(
@@ -614,5 +639,5 @@ function create_conservative_tree_route_table_2d(spec::ConservativeTreeSpec2D;
         boundary_routes, direct_ranges, boundary_ranges,
         split_ranges, coalesce_ranges, source_q_has_split_route,
         direct_srcs_by_level, direct_dsts_by_level, direct_qs_by_level,
-        direct_weights_by_level)
+        direct_weights_by_level, direct_unique_dsts_by_level)
 end

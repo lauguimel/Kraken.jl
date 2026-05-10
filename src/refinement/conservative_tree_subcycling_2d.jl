@@ -53,6 +53,15 @@ struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     inactive_route_packet_slots_by_level::Vector{Matrix{Int}}
     inactive_route_packet_dsts_by_level::Vector{Matrix{Int}}
     inactive_route_packet_kinds_by_level::Vector{Matrix{RouteKind}}
+    f2c_route_srcs_by_child_level::Vector{Vector{Int}}
+    f2c_route_qs_by_child_level::Vector{Vector{Int}}
+    f2c_route_weights_by_child_level::Vector{Vector{Float64}}
+    f2c_route_parent_slots_by_child_level::Vector{Vector{Int}}
+    f2c_route_packet_slots_by_child_level::Vector{Vector{Int}}
+    inactive_f2c_route_srcs_by_child_level::Vector{Vector{Int}}
+    inactive_f2c_route_qs_by_child_level::Vector{Vector{Int}}
+    inactive_f2c_route_parent_slots_by_child_level::Vector{Vector{Int}}
+    inactive_f2c_route_packet_slots_by_child_level::Vector{Vector{Int}}
     route_packet_cache_valid::Vector{Bool}
     route_packet_cache_route_objectid::Vector{UInt}
     route_packet_cache_periodic_x::Vector{Bool}
@@ -218,7 +227,17 @@ function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
     return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
         spec, schedule, ledger_pairs, parent_ledger_slot,
         route_packet_caches, Int[], Matrix{Int}[], Matrix{Int}[],
-        Matrix{RouteKind}[], Bool[false], UInt[0], Bool[false],
+        Matrix{RouteKind}[],
+        [Int[] for _ in 0:spec.max_level],
+        [Int[] for _ in 0:spec.max_level],
+        [Float64[] for _ in 0:spec.max_level],
+        [Int[] for _ in 0:spec.max_level],
+        [Int[] for _ in 0:spec.max_level],
+        [Int[] for _ in 0:spec.max_level],
+        [Int[] for _ in 0:spec.max_level],
+        [Int[] for _ in 0:spec.max_level],
+        [Int[] for _ in 0:spec.max_level],
+        Bool[false], UInt[0], Bool[false],
         refined_parent_ids_by_level,
         inactive_refined_ids_by_level)
 end
@@ -409,6 +428,15 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
     resize!(bank.inactive_route_packet_kinds_by_level,
             bank.spec.max_level + 1)
     @inbounds for level in 0:bank.spec.max_level
+        empty!(bank.f2c_route_srcs_by_child_level[level + 1])
+        empty!(bank.f2c_route_qs_by_child_level[level + 1])
+        empty!(bank.f2c_route_weights_by_child_level[level + 1])
+        empty!(bank.f2c_route_parent_slots_by_child_level[level + 1])
+        empty!(bank.f2c_route_packet_slots_by_child_level[level + 1])
+        empty!(bank.inactive_f2c_route_srcs_by_child_level[level + 1])
+        empty!(bank.inactive_f2c_route_qs_by_child_level[level + 1])
+        empty!(bank.inactive_f2c_route_parent_slots_by_child_level[level + 1])
+        empty!(bank.inactive_f2c_route_packet_slots_by_child_level[level + 1])
         ids = bank.inactive_refined_ids_by_level[level + 1]
         slots = isassigned(bank.inactive_route_packet_slots_by_level,
                            level + 1) ?
@@ -452,6 +480,16 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
         slot = _ensure_conservative_tree_route_packet_cache_2d!(
             bank, parent.level, route.dst, route.q)
         bank.route_packet_slot_by_route[route_id] = slot
+        push!(bank.f2c_route_srcs_by_child_level[child.level + 1],
+              route.src)
+        push!(bank.f2c_route_qs_by_child_level[child.level + 1],
+              route.q)
+        push!(bank.f2c_route_weights_by_child_level[child.level + 1],
+              route.weight)
+        push!(bank.f2c_route_parent_slots_by_child_level[child.level + 1],
+              bank.parent_ledger_slot[child.parent])
+        push!(bank.f2c_route_packet_slots_by_child_level[child.level + 1],
+              slot)
     end
     @inbounds for parent_level in 0:(bank.spec.max_level - 1)
         child_level = parent_level + 1
@@ -471,6 +509,14 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
                 inactive_slots[local_idx, q] =
                     _ensure_conservative_tree_route_packet_cache_2d!(
                     bank, parent_level, dst_id, q)
+                push!(bank.inactive_f2c_route_srcs_by_child_level[child_level + 1],
+                      src_id)
+                push!(bank.inactive_f2c_route_qs_by_child_level[child_level + 1],
+                      q)
+                push!(bank.inactive_f2c_route_parent_slots_by_child_level[child_level + 1],
+                      bank.parent_ledger_slot[src.parent])
+                push!(bank.inactive_f2c_route_packet_slots_by_child_level[child_level + 1],
+                      inactive_slots[local_idx, q])
             end
         end
     end
@@ -1066,6 +1112,63 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
         periodic_x=periodic_x)
 end
 
+@inline function _conservative_tree_fast_leaf_f2c_enabled_2d(
+        alpha,
+        interface_time_scaling::Symbol)
+    return alpha == 1 && interface_time_scaling == :leaf_equivalent
+end
+
+function _conservative_tree_subcycle_accumulate_compact_f2c_routes_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D,
+        F::AbstractMatrix)
+    parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
+        bank, event)
+    child_level = parent_level + 1
+    pair = bank.ledger_pairs[parent_level + 1]
+    cache = bank.route_packet_caches[parent_level + 1]
+    srcs = bank.f2c_route_srcs_by_child_level[child_level + 1]
+    qs = bank.f2c_route_qs_by_child_level[child_level + 1]
+    weights = bank.f2c_route_weights_by_child_level[child_level + 1]
+    parent_slots = bank.f2c_route_parent_slots_by_child_level[child_level + 1]
+    packet_slots = bank.f2c_route_packet_slots_by_child_level[child_level + 1]
+    factor = _conservative_tree_f2c_time_factor_2d(bank, :leaf_equivalent)
+    ratio = bank.schedule.ratio
+    @inbounds for idx in eachindex(srcs)
+        q = qs[idx]
+        packet = factor * weights[idx] * F[srcs[idx], q]
+        pair.fine_to_coarse[q, substep, parent_slots[idx]] += packet
+        cache.packets[(packet_slots[idx] - 1) * ratio + substep] += packet
+    end
+    return bank
+end
+
+function _conservative_tree_subcycle_accumulate_compact_inactive_f2c_routes_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D,
+        F::AbstractMatrix)
+    parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
+        bank, event)
+    child_level = parent_level + 1
+    pair = bank.ledger_pairs[parent_level + 1]
+    cache = bank.route_packet_caches[parent_level + 1]
+    srcs = bank.inactive_f2c_route_srcs_by_child_level[child_level + 1]
+    qs = bank.inactive_f2c_route_qs_by_child_level[child_level + 1]
+    parent_slots =
+        bank.inactive_f2c_route_parent_slots_by_child_level[child_level + 1]
+    packet_slots =
+        bank.inactive_f2c_route_packet_slots_by_child_level[child_level + 1]
+    factor = _conservative_tree_f2c_time_factor_2d(bank, :leaf_equivalent)
+    ratio = bank.schedule.ratio
+    @inbounds for idx in eachindex(srcs)
+        q = qs[idx]
+        packet = factor * F[srcs[idx], q]
+        pair.fine_to_coarse[q, substep, parent_slots[idx]] += packet
+        cache.packets[(packet_slots[idx] - 1) * ratio + substep] += packet
+    end
+    return bank
+end
+
 function conservative_tree_subcycle_sync_down_routes_F_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         event::ConservativeTreeSubcycleEvent2D,
@@ -1107,6 +1210,11 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
             bank, table; periodic_x=periodic_x)
         prepare_conservative_tree_subcycle_route_packet_cache_2d!(
             bank, table; periodic_x=periodic_x)
+    end
+    if _conservative_tree_fast_leaf_f2c_enabled_2d(
+            alpha, interface_time_scaling)
+        return _conservative_tree_subcycle_accumulate_compact_f2c_routes_2d!(
+            bank, event, F)
     end
     child_level = parent_level + 1
 
@@ -1192,6 +1300,11 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
         bank, event)
     child_level = parent_level + 1
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
+    if _conservative_tree_fast_leaf_f2c_enabled_2d(
+            alpha, interface_time_scaling)
+        return _conservative_tree_subcycle_accumulate_compact_inactive_f2c_routes_2d!(
+            bank, event, F)
+    end
 
     inactive_ids = bank.inactive_refined_ids_by_level[child_level + 1]
     inactive_slots = bank.inactive_route_packet_slots_by_level[child_level + 1]
@@ -1387,10 +1500,21 @@ function _stream_conservative_tree_direct_level_routes_F_2d!(
         dsts = table.direct_route_dsts_by_level[level + 1]
         qs = table.direct_route_qs_by_level[level + 1]
         weights = table.direct_route_weights_by_level[level + 1]
-        @inbounds for idx in eachindex(srcs)
-            src_id = srcs[idx]
-            q = qs[idx]
-            Fout[dsts[idx], q] += weights[idx] * Fin[src_id, q]
+        if table.direct_route_unique_dsts_by_level[level + 1] &&
+                Threads.nthreads() > 1 && length(srcs) >= 4096
+            Threads.@threads for idx in eachindex(srcs)
+                @inbounds begin
+                    src_id = srcs[idx]
+                    q = qs[idx]
+                    Fout[dsts[idx], q] += weights[idx] * Fin[src_id, q]
+                end
+            end
+        else
+            @inbounds for idx in eachindex(srcs)
+                src_id = srcs[idx]
+                q = qs[idx]
+                Fout[dsts[idx], q] += weights[idx] * Fin[src_id, q]
+            end
         end
     elseif is_solid === nothing
         @inbounds for route_pos in table.direct_route_ranges_by_level[level + 1]
