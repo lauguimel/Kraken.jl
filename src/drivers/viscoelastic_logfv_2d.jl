@@ -79,6 +79,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     avg_window::Union{Nothing,Integer}=nothing,
     drag_stride::Integer=1,
     diagnostic_stride::Integer=0,
+    force_boundary_fill::Symbol=:nearest,
     drag_cx::Union{Nothing,Real}=nothing,
     drag_cy::Union{Nothing,Real}=nothing,
     drag_radius::Union{Nothing,Real}=nothing,
@@ -94,6 +95,8 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     max_steps >= 0 || throw(ArgumentError("max_steps must be non-negative"))
     drag_stride > 0 || throw(ArgumentError("drag_stride must be positive"))
     diagnostic_stride >= 0 || throw(ArgumentError("diagnostic_stride must be non-negative"))
+    force_boundary_fill in (:nearest, :none) ||
+        throw(ArgumentError("force_boundary_fill must be :nearest or :none"))
 
     geom = transfer_step_geometry_2d(geom_h, backend)
     Nx, Ny = geom_h.Nx, geom_h.Ny
@@ -251,6 +254,9 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
             fx_total, fy_total, fx_poly, fy_poly, ux, uy, is_solid, bsd_t, nu_p_t, dx, dy;
             sync=false,
         )
+        if force_boundary_fill === :nearest
+            logfv_fill_nearest_boundary_2d!(fx_total, fy_total; sync=false)
+        end
         logfv_add_constant_force_fluid_2d!(fx_total, fy_total, is_solid, Fx_body_t, zero(T); sync=false)
 
         fused_trt_libb_v2_guo_field_step!(
@@ -378,6 +384,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         polymer_substeps=selected_polymer_substeps,
         requested_polymer_substeps=polymer_substeps,
         diagnostic_stride,
+        force_boundary_fill,
         first_nonfinite_step,
         first_nonfinite_field,
         first_nonfinite_i,

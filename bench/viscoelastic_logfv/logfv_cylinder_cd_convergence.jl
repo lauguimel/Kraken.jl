@@ -68,6 +68,7 @@ const CSV_COLUMNS = [
     :nu_total, :nu_s, :nu_p, :lambda, :stress_prefactor,
     :bsd_fraction, :Fx_body,
     :steps, :completed_steps, :avg_window, :drag_stride, :diagnostic_stride,
+    :force_boundary_fill,
     :polymer_substeps_requested, :polymer_substeps,
     :raw_substeps, :relax_substeps, :deformation_substeps,
     :memory_deformation_substeps,
@@ -242,7 +243,8 @@ end
 function row_base(; timestamp, suite, backend_label, FT, case_name, R, Nx, Ny,
                   H, L_up, L_down, Re_R, beta, Wi, u_mean, nu_total,
                   nu_s, nu_p, lambda, bsd_fraction, Fx_body, steps,
-                  avg_window, drag_stride, diagnostic_stride, polymer_substeps,
+                  avg_window, drag_stride, diagnostic_stride,
+                  force_boundary_fill, polymer_substeps,
                   subcycle_relative_tolerance, max_deformation_increment,
                   max_memory_deformation_increment)
     return Dict{Symbol,Any}(
@@ -276,6 +278,7 @@ function row_base(; timestamp, suite, backend_label, FT, case_name, R, Nx, Ny,
         :avg_window => avg_window,
         :drag_stride => drag_stride,
         :diagnostic_stride => diagnostic_stride,
+        :force_boundary_fill => force_boundary_fill,
         :polymer_substeps_requested => polymer_substeps,
         :subcycle_relative_tolerance => subcycle_relative_tolerance,
         :max_deformation_increment => max_deformation_increment,
@@ -411,6 +414,9 @@ avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR",
 drag_stride = parse(Int, get(ENV, "KRAKEN_DRAG_STRIDE",
                              string(defaults.drag_stride)))
 diagnostic_stride = parse(Int, get(ENV, "KRAKEN_DIAGNOSTIC_STRIDE", "0"))
+force_boundary_fill = Symbol(lowercase(get(ENV, "KRAKEN_FORCE_BOUNDARY_FILL", "nearest")))
+force_boundary_fill in (:nearest, :none) ||
+    error("KRAKEN_FORCE_BOUNDARY_FILL must be nearest or none")
 allow_long_local = parse_bool_env("KRAKEN_ALLOW_LONG_LOCAL", false)
 max_local_updates = parse(Float64, get(ENV, "KRAKEN_MAX_LOCAL_UPDATES", "5e7"))
 continue_on_error = parse_bool_env("KRAKEN_CONTINUE_ON_ERROR", !smoke)
@@ -454,6 +460,7 @@ for R in R_values
             bsd_fraction=0.0, Fx_body, steps=steps_newtonian,
             avg_window=avg_window_newtonian, drag_stride,
             diagnostic_stride,
+            force_boundary_fill,
             polymer_substeps=newtonian_polymer_substeps,
             subcycle_relative_tolerance, max_deformation_increment,
             max_memory_deformation_increment)
@@ -482,6 +489,7 @@ for R in R_values
                 avg_window=avg_window_newtonian,
                 drag_stride,
                 diagnostic_stride,
+                force_boundary_fill,
                 backend,
                 T=FT,
             )
@@ -528,6 +536,7 @@ for R in R_values
             u_mean, nu_total, nu_s, nu_p, lambda, bsd_fraction, Fx_body,
             steps=max_steps, avg_window, drag_stride, polymer_substeps,
             diagnostic_stride,
+            force_boundary_fill,
             subcycle_relative_tolerance, max_deformation_increment,
             max_memory_deformation_increment)
         try
@@ -555,6 +564,7 @@ for R in R_values
                 avg_window,
                 drag_stride,
                 diagnostic_stride,
+                force_boundary_fill,
                 backend,
                 T=FT,
             )

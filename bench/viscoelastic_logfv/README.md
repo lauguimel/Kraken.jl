@@ -88,6 +88,12 @@ the first observed non-finite field, and records `completed_steps` plus
 `first_nonfinite_step/field/i/j` in the CSV. Leave it at the default `0` for
 production timing runs.
 
+`KRAKEN_FORCE_BOUNDARY_FILL=nearest` is the default for the open-x log-FV
+coupled driver. It copies the Guo force field on domain boundary cells from the
+nearest interior cell before adding any constant body force, matching the
+Poiseuille coupled path and avoiding stale corner force values. Use `none` only
+for defect-isolation audits.
+
 `KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT` controls the `:auto`
 `polymer_substeps` memory-time criterion:
 

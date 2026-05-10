@@ -1838,8 +1838,11 @@ end
         @test result.geometry.name === :cylinder
         @test count(fluid) > 0
         @test result.nu_lbm ≈ result.nu_total
+        @test result.force_boundary_fill === :nearest
         @test result.polymer_substeps >= 1
         @test !result.subcycle_estimate.clamped
+        @test result.fx_total[1, 1] ≈ result.fx_total[2, 2]
+        @test result.fy_total[1, 1] ≈ result.fy_total[2, 2]
         @test result.min_c_eig > 0.7
         @test result.max_abs_psi < 0.4
         @test result.max_abs_tau < 5e-4
@@ -1876,6 +1879,7 @@ end
         @test !result.subcycle_estimate.clamped
         @test result.completed_steps == 1
         @test result.diagnostic_stride == 1
+        @test result.force_boundary_fill === :nearest
         @test result.first_nonfinite_step == 0
         @test result.first_nonfinite_field === :none
         @test result.first_nonfinite_i == 0
