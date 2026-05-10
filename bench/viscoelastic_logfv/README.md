@@ -112,3 +112,19 @@ KRAKEN_BACKEND=metal KRAKEN_LOGFV_CYLINDER_SUITE=nearnewtonian \
 
 Long benchmark runs should use CUDA/HPC or set `KRAKEN_ALLOW_LONG_LOCAL=1`
 intentionally. The script refuses long CPU/Metal runs by default.
+
+A100/H100 PBS run:
+
+```bash
+qsub bench/viscoelastic_logfv/run_cylinder_cd_convergence_a100.pbs
+```
+
+For the memory-deformation sensitivity canary used on `R35/Wi=0.5`, override
+the step count and threshold explicitly:
+
+```bash
+KRAKEN_R_LIST=35 KRAKEN_WI_LIST=0.5 KRAKEN_RUN_NEWTONIAN=0 \
+  KRAKEN_SCALE_STEPS_WITH_R=0 KRAKEN_STEPS=272222 \
+  KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT=0.07 \
+  qsub bench/viscoelastic_logfv/run_cylinder_cd_convergence_a100.pbs
+```
