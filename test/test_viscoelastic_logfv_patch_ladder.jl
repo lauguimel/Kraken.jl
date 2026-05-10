@@ -1865,7 +1865,8 @@ end
             nu_s=0.059, nu_p=0.041, lambda=400.0,
             u_mean=0.005, Fx_body=0.0,
             bsd_fraction=1.0, polymer_substeps=:auto,
-            max_steps=1, backend=KernelAbstractions.CPU(), T=Float64,
+            max_steps=1, diagnostic_stride=1,
+            backend=KernelAbstractions.CPU(), T=Float64,
         )
 
         @test result.max_grad_norm_estimate ≈ 4 * 0.005 / 16
@@ -1873,6 +1874,12 @@ end
         @test result.subcycle_estimate.memory_deformation_substeps == 8
         @test result.polymer_substeps == 8
         @test !result.subcycle_estimate.clamped
+        @test result.completed_steps == 1
+        @test result.diagnostic_stride == 1
+        @test result.first_nonfinite_step == 0
+        @test result.first_nonfinite_field === :none
+        @test result.first_nonfinite_i == 0
+        @test result.first_nonfinite_j == 0
         @test isfinite(result.Cd)
         @test result.min_c_eig > 0
     end

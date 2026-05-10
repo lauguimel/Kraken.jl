@@ -46,6 +46,21 @@ function _logfv_compute_bsd_drag_2d(
     )
 end
 
+function _logfv_first_nonfinite_field_2d(is_solid_h, fields::Pair{Symbol,<:Any}...)
+    for pair in fields
+        name = pair.first
+        values = Array(pair.second)
+        @inbounds for j in axes(values, 2), i in axes(values, 1)
+            is_solid_h[i, j] && continue
+            value = Float64(values[i, j])
+            if !isfinite(value)
+                return (finite=false, field=name, i=i, j=j)
+            end
+        end
+    end
+    return (finite=true, field=:none, i=0, j=0)
+end
+
 function _run_viscoelastic_logfv_step_channel_coupled_2d(
     geom_h;
     shear_length::Real,
@@ -63,6 +78,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     max_steps::Integer=60,
     avg_window::Union{Nothing,Integer}=nothing,
     drag_stride::Integer=1,
+    diagnostic_stride::Integer=0,
     drag_cx::Union{Nothing,Real}=nothing,
     drag_cy::Union{Nothing,Real}=nothing,
     drag_radius::Union{Nothing,Real}=nothing,
@@ -77,6 +93,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     0 <= bsd_fraction <= 1 || throw(ArgumentError("bsd_fraction must be in [0, 1]"))
     max_steps >= 0 || throw(ArgumentError("max_steps must be non-negative"))
     drag_stride > 0 || throw(ArgumentError("drag_stride must be positive"))
+    diagnostic_stride >= 0 || throw(ArgumentError("diagnostic_stride must be non-negative"))
 
     geom = transfer_step_geometry_2d(geom_h, backend)
     Nx, Ny = geom_h.Nx, geom_h.Ny
@@ -182,11 +199,17 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     Fx_bsd_sum = 0.0
     Fy_bsd_sum = 0.0
     n_drag = 0
+    completed_steps = 0
+    first_nonfinite_step = 0
+    first_nonfinite_field = :none
+    first_nonfinite_i = 0
+    first_nonfinite_j = 0
 
     logfv_add_constant_force_fluid_2d!(fx_total, fy_total, is_solid, Fx_body_t, zero(T); sync=false)
     logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_in, fx_total, fy_total; sync=false)
 
     for step in 1:max_steps
+        completed_steps = step
         logfv_copy_column_profile_2d!(ux_east, ux, Nx; sync=false)
         logfv_copy_column_profile_2d!(east_xx, psixx, Nx; sync=false)
         logfv_copy_column_profile_2d!(east_xy, psixy, Nx; sync=false)
@@ -263,6 +286,33 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
             n_drag += 1
         end
         logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_out, fx_total, fy_total; sync=false)
+        if diagnostic_stride > 0 &&
+           (step == 1 || step % diagnostic_stride == 0 || step == max_steps)
+            KernelAbstractions.synchronize(backend)
+            finite_diag = _logfv_first_nonfinite_field_2d(
+                is_solid_h,
+                :rho => rho,
+                :ux => ux,
+                :uy => uy,
+                :psixx => psixx,
+                :psixy => psixy,
+                :psiyy => psiyy,
+                :tauxx => tauxx,
+                :tauxy => tauxy,
+                :tauyy => tauyy,
+                :fx_poly => fx_poly,
+                :fy_poly => fy_poly,
+                :fx_total => fx_total,
+                :fy_total => fy_total,
+            )
+            if !finite_diag.finite
+                first_nonfinite_step = step
+                first_nonfinite_field = finite_diag.field
+                first_nonfinite_i = finite_diag.i
+                first_nonfinite_j = finite_diag.j
+                break
+            end
+        end
         f_in, f_out = f_out, f_in
     end
     logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor_t)
@@ -324,8 +374,14 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         Fx_body=Float64(Fx_body_t),
         bsd_fraction=Float64(bsd_t),
         max_steps,
+        completed_steps,
         polymer_substeps=selected_polymer_substeps,
         requested_polymer_substeps=polymer_substeps,
+        diagnostic_stride,
+        first_nonfinite_step,
+        first_nonfinite_field,
+        first_nonfinite_i,
+        first_nonfinite_j,
         subcycle_estimate,
         max_grad_norm_estimate=Float64(max_grad_norm_estimate),
         rho=rho_cpu,

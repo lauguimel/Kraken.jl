@@ -67,7 +67,7 @@ const CSV_COLUMNS = [
     :Re_R, :Re_D, :beta, :Wi, :u_mean,
     :nu_total, :nu_s, :nu_p, :lambda, :stress_prefactor,
     :bsd_fraction, :Fx_body,
-    :steps, :avg_window, :drag_stride,
+    :steps, :completed_steps, :avg_window, :drag_stride, :diagnostic_stride,
     :polymer_substeps_requested, :polymer_substeps,
     :raw_substeps, :relax_substeps, :deformation_substeps,
     :memory_deformation_substeps,
@@ -78,6 +78,8 @@ const CSV_COLUMNS = [
     :Cd, :Cd_s, :Cd_p, :Cd_bsd, :Cl, :Fx_s, :Fx_p, :Fx_bsd, :Fy_s, :Fy_p, :Fy_bsd,
     :n_drag_samples,
     :rho_min, :rho_max, :max_speed, :min_c_eig,
+    :first_nonfinite_step, :first_nonfinite_field,
+    :first_nonfinite_i, :first_nonfinite_j,
     :max_abs_psi, :max_abs_tau, :max_abs_poly_force, :max_abs_total_force,
     :newtonian_ref, :err_newtonian_ref_pct,
     :newtonian_cd_same_run, :err_newtonian_same_run_pct,
@@ -240,7 +242,7 @@ end
 function row_base(; timestamp, suite, backend_label, FT, case_name, R, Nx, Ny,
                   H, L_up, L_down, Re_R, beta, Wi, u_mean, nu_total,
                   nu_s, nu_p, lambda, bsd_fraction, Fx_body, steps,
-                  avg_window, drag_stride, polymer_substeps,
+                  avg_window, drag_stride, diagnostic_stride, polymer_substeps,
                   subcycle_relative_tolerance, max_deformation_increment,
                   max_memory_deformation_increment)
     return Dict{Symbol,Any}(
@@ -270,8 +272,10 @@ function row_base(; timestamp, suite, backend_label, FT, case_name, R, Nx, Ny,
         :bsd_fraction => bsd_fraction,
         :Fx_body => Fx_body,
         :steps => steps,
+        :completed_steps => 0,
         :avg_window => avg_window,
         :drag_stride => drag_stride,
+        :diagnostic_stride => diagnostic_stride,
         :polymer_substeps_requested => polymer_substeps,
         :subcycle_relative_tolerance => subcycle_relative_tolerance,
         :max_deformation_increment => max_deformation_increment,
@@ -283,8 +287,9 @@ function fill_result_row!(row, result, dt, R, u_mean, newtonian_cd_same_run,
                           liu_ref, rheo_mean, rheo_last)
     row[:status] = "ok"
     row[:dt_s] = dt
+    row[:completed_steps] = result.completed_steps
     row[:lups] = Float64(result.Nx) * Float64(result.Ny) *
-                 Float64(result.max_steps) / dt
+                 Float64(result.completed_steps) / dt
     row[:polymer_substeps] = result.polymer_substeps
     row[:raw_substeps] = result.subcycle_estimate.raw_substeps
     row[:relax_substeps] = result.subcycle_estimate.relax_substeps
@@ -311,6 +316,10 @@ function fill_result_row!(row, result, dt, R, u_mean, newtonian_cd_same_run,
     row[:rho_max] = result.rho_max
     row[:max_speed] = result.max_speed
     row[:min_c_eig] = result.min_c_eig
+    row[:first_nonfinite_step] = result.first_nonfinite_step
+    row[:first_nonfinite_field] = result.first_nonfinite_field
+    row[:first_nonfinite_i] = result.first_nonfinite_i
+    row[:first_nonfinite_j] = result.first_nonfinite_j
     row[:max_abs_psi] = result.max_abs_psi
     row[:max_abs_tau] = result.max_abs_tau
     row[:max_abs_poly_force] = result.max_abs_poly_force
@@ -342,10 +351,20 @@ function mark_nonfinite_result!(row::Dict{Symbol,Any}, errors::Vector{String},
             push!(bad, field)
         end
     end
-    isempty(bad) && return false
+    first_bad_step = get(row, :first_nonfinite_step, 0)
+    has_first_bad = first_bad_step isa Integer && first_bad_step > 0
+    isempty(bad) && !has_first_bad && return false
 
     row[:status] = "nonfinite"
-    row[:error] = "nonfinite fields: " * join(string.(bad), ";")
+    detail = has_first_bad ?
+        @sprintf("first nonfinite at step %d field=%s i=%d j=%d",
+                 first_bad_step, string(get(row, :first_nonfinite_field, :unknown)),
+                 Int(get(row, :first_nonfinite_i, 0)),
+                 Int(get(row, :first_nonfinite_j, 0))) :
+        ""
+    row[:error] = isempty(bad) ? detail :
+        "nonfinite fields: " * join(string.(bad), ";") *
+        (isempty(detail) ? "" : "; " * detail)
     push!(errors, "$(label): $(row[:error])")
     continue_on_error || error(row[:error])
     return true
@@ -391,6 +410,7 @@ avg_divisor = parse(Int, get(ENV, "KRAKEN_AVG_DIVISOR",
                              string(defaults.avg_divisor)))
 drag_stride = parse(Int, get(ENV, "KRAKEN_DRAG_STRIDE",
                              string(defaults.drag_stride)))
+diagnostic_stride = parse(Int, get(ENV, "KRAKEN_DIAGNOSTIC_STRIDE", "0"))
 allow_long_local = parse_bool_env("KRAKEN_ALLOW_LONG_LOCAL", false)
 max_local_updates = parse(Float64, get(ENV, "KRAKEN_MAX_LOCAL_UPDATES", "5e7"))
 continue_on_error = parse_bool_env("KRAKEN_CONTINUE_ON_ERROR", !smoke)
@@ -433,6 +453,7 @@ for R in R_values
             Re_R, beta, Wi=0.0, u_mean, nu_total, nu_s, nu_p, lambda,
             bsd_fraction=0.0, Fx_body, steps=steps_newtonian,
             avg_window=avg_window_newtonian, drag_stride,
+            diagnostic_stride,
             polymer_substeps=newtonian_polymer_substeps,
             subcycle_relative_tolerance, max_deformation_increment,
             max_memory_deformation_increment)
@@ -460,6 +481,7 @@ for R in R_values
                 max_steps=steps_newtonian,
                 avg_window=avg_window_newtonian,
                 drag_stride,
+                diagnostic_stride,
                 backend,
                 T=FT,
             )
@@ -469,11 +491,12 @@ for R in R_values
             bad = mark_nonfinite_result!(
                 row, errors, "R=$(R) newtonian"; continue_on_error,
             )
-            @printf("  status=%s Cd=%.9g Cd_s=%.9g Cd_bsd=%.9g n=%d err_newt=%.4g%% substeps=%d clamped=%s MLUPS=%.2f dt=%.1fs\n",
+            @printf("  status=%s Cd=%.9g Cd_s=%.9g Cd_bsd=%.9g n=%d err_newt=%.4g%% substeps=%d clamped=%s first_bad=%d MLUPS=%.2f dt=%.1fs\n",
                     bad ? "nonfinite" : "ok",
                     result.Cd, result.Cd_s, result.Cd_bsd, result.n_drag_samples,
                     row[:err_newtonian_ref_pct], result.polymer_substeps,
-                    string(result.subcycle_estimate.clamped), row[:lups] / 1e6, dt)
+                    string(result.subcycle_estimate.clamped),
+                    result.first_nonfinite_step, row[:lups] / 1e6, dt)
         catch err
             row[:status] = "error"
             row[:error] = sprint(showerror, err)
@@ -504,6 +527,7 @@ for R in R_values
             case_name, R, Nx, Ny, H, L_up, L_down, Re_R, beta, Wi,
             u_mean, nu_total, nu_s, nu_p, lambda, bsd_fraction, Fx_body,
             steps=max_steps, avg_window, drag_stride, polymer_substeps,
+            diagnostic_stride,
             subcycle_relative_tolerance, max_deformation_increment,
             max_memory_deformation_increment)
         try
@@ -530,6 +554,7 @@ for R in R_values
                 max_steps,
                 avg_window,
                 drag_stride,
+                diagnostic_stride,
                 backend,
                 T=FT,
             )
@@ -539,13 +564,14 @@ for R in R_values
             bad = mark_nonfinite_result!(
                 row, errors, "R=$(R) Wi=$(Wi)"; continue_on_error,
             )
-            @printf("  status=%s Cd=%.9g Cd_s=%.9g Cd_p=%.9g Cd_bsd=%.9g n=%d Liu_err=%.4g%% Rheo_err=%.4g%% Newt_same=%.4g%% minCeig=%.4g substeps=%d clamped=%s MLUPS=%.2f dt=%.1fs\n",
+            @printf("  status=%s Cd=%.9g Cd_s=%.9g Cd_p=%.9g Cd_bsd=%.9g n=%d Liu_err=%.4g%% Rheo_err=%.4g%% Newt_same=%.4g%% minCeig=%.4g substeps=%d clamped=%s first_bad=%d MLUPS=%.2f dt=%.1fs\n",
                     bad ? "nonfinite" : "ok",
                     result.Cd, result.Cd_s, result.Cd_p, result.Cd_bsd, result.n_drag_samples,
                     row[:err_liu_pct], row[:err_rheotool_mean_pct],
                     row[:err_newtonian_same_run_pct], result.min_c_eig,
                     result.polymer_substeps,
-                    string(result.subcycle_estimate.clamped), row[:lups] / 1e6, dt)
+                    string(result.subcycle_estimate.clamped),
+                    result.first_nonfinite_step, row[:lups] / 1e6, dt)
         catch err
             row[:status] = "error"
             row[:error] = sprint(showerror, err)

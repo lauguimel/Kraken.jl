@@ -82,6 +82,12 @@ The harness writes `lups` to the CSV and prints `MLUPS` for each completed
 case. If any scalar stability or drag diagnostic is non-finite, the row status
 is `nonfinite` rather than `ok`.
 
+For failure localization, set `KRAKEN_DIAGNOSTIC_STRIDE=N`. This opt-in path
+copies diagnostic fields back to the host every `N` steps, stops the case at
+the first observed non-finite field, and records `completed_steps` plus
+`first_nonfinite_step/field/i/j` in the CSV. Leave it at the default `0` for
+production timing runs.
+
 `KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT` controls the `:auto`
 `polymer_substeps` memory-time criterion:
 
