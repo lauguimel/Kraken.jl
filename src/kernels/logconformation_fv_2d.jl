@@ -144,6 +144,7 @@ function logfv_oldroydb_subcycle_estimate(
     dt::Real=1;
     relative_tolerance::Real=0.01,
     max_deformation_increment::Real=0.05,
+    max_memory_deformation_increment::Real=Inf,
     min_substeps::Integer=1,
     max_substeps::Integer=64,
 )
@@ -152,16 +153,23 @@ function logfv_oldroydb_subcycle_estimate(
     dt > 0 || throw(ArgumentError("dt must be positive"))
     max_deformation_increment > 0 ||
         throw(ArgumentError("max_deformation_increment must be positive"))
+    max_memory_deformation_increment > 0 ||
+        throw(ArgumentError("max_memory_deformation_increment must be positive"))
     min_substeps >= 1 || throw(ArgumentError("min_substeps must be >= 1"))
     max_substeps >= min_substeps ||
         throw(ArgumentError("max_substeps must be >= min_substeps"))
 
     relax_increment = dt / lambda
     deformation_increment = dt * max_grad_norm
+    memory_deformation_increment = lambda * max_grad_norm
     max_relax_increment = logfv_oldroydb_split_relax_increment(relative_tolerance)
     relax_substeps = max(min_substeps, ceil(Int, relax_increment / max_relax_increment))
     deformation_substeps = max(min_substeps, ceil(Int, deformation_increment / max_deformation_increment))
-    raw_substeps = max(relax_substeps, deformation_substeps)
+    memory_deformation_substeps = max(
+        min_substeps,
+        ceil(Int, memory_deformation_increment / max_memory_deformation_increment),
+    )
+    raw_substeps = max(relax_substeps, deformation_substeps, memory_deformation_substeps)
     recommended = min(raw_substeps, max_substeps)
 
     return (;
@@ -169,11 +177,14 @@ function logfv_oldroydb_subcycle_estimate(
         raw_substeps,
         relax_substeps,
         deformation_substeps,
+        memory_deformation_substeps,
         clamped=raw_substeps > max_substeps,
         relax_increment,
         deformation_increment,
+        memory_deformation_increment,
         max_relax_increment,
         max_deformation_increment,
+        max_memory_deformation_increment,
         relative_tolerance,
     )
 end

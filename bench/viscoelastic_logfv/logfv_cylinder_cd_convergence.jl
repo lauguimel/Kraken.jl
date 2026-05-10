@@ -70,8 +70,10 @@ const CSV_COLUMNS = [
     :steps, :avg_window, :drag_stride,
     :polymer_substeps_requested, :polymer_substeps,
     :raw_substeps, :relax_substeps, :deformation_substeps,
+    :memory_deformation_substeps,
     :substeps_clamped, :max_grad_norm_estimate,
     :subcycle_relative_tolerance, :max_deformation_increment,
+    :memory_deformation_increment, :max_memory_deformation_increment,
     :dt_s, :lups,
     :Cd, :Cd_s, :Cd_p, :Cd_bsd, :Cl, :Fx_s, :Fx_p, :Fx_bsd, :Fy_s, :Fy_p, :Fy_bsd,
     :n_drag_samples,
@@ -239,7 +241,8 @@ function row_base(; timestamp, suite, backend_label, FT, case_name, R, Nx, Ny,
                   H, L_up, L_down, Re_R, beta, Wi, u_mean, nu_total,
                   nu_s, nu_p, lambda, bsd_fraction, Fx_body, steps,
                   avg_window, drag_stride, polymer_substeps,
-                  subcycle_relative_tolerance, max_deformation_increment)
+                  subcycle_relative_tolerance, max_deformation_increment,
+                  max_memory_deformation_increment)
     return Dict{Symbol,Any}(
         :timestamp => timestamp,
         :suite => suite,
@@ -272,6 +275,7 @@ function row_base(; timestamp, suite, backend_label, FT, case_name, R, Nx, Ny,
         :polymer_substeps_requested => polymer_substeps,
         :subcycle_relative_tolerance => subcycle_relative_tolerance,
         :max_deformation_increment => max_deformation_increment,
+        :max_memory_deformation_increment => max_memory_deformation_increment,
     )
 end
 
@@ -285,8 +289,12 @@ function fill_result_row!(row, result, dt, R, u_mean, newtonian_cd_same_run,
     row[:raw_substeps] = result.subcycle_estimate.raw_substeps
     row[:relax_substeps] = result.subcycle_estimate.relax_substeps
     row[:deformation_substeps] = result.subcycle_estimate.deformation_substeps
+    row[:memory_deformation_substeps] = result.subcycle_estimate.memory_deformation_substeps
     row[:substeps_clamped] = result.subcycle_estimate.clamped
     row[:max_grad_norm_estimate] = result.max_grad_norm_estimate
+    row[:memory_deformation_increment] = result.subcycle_estimate.memory_deformation_increment
+    row[:max_memory_deformation_increment] =
+        result.subcycle_estimate.max_memory_deformation_increment
     row[:Cd] = result.Cd
     row[:Cd_s] = result.Cd_s
     row[:Cd_p] = result.Cd_p
@@ -370,6 +378,8 @@ subcycle_relative_tolerance =
     parse(Float64, get(ENV, "KRAKEN_SUBCYCLE_RELATIVE_TOLERANCE", "0.01"))
 max_deformation_increment =
     parse(Float64, get(ENV, "KRAKEN_MAX_DEFORMATION_INCREMENT", "0.05"))
+max_memory_deformation_increment =
+    parse(Float64, get(ENV, "KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT", "0.07"))
 max_polymer_substeps = parse(Int, get(ENV, "KRAKEN_MAX_POLYMER_SUBSTEPS", "64"))
 
 steps_low_wi = parse(Int, get(ENV, "KRAKEN_STEPS_LOW_WI",
@@ -424,7 +434,8 @@ for R in R_values
             bsd_fraction=0.0, Fx_body, steps=steps_newtonian,
             avg_window=avg_window_newtonian, drag_stride,
             polymer_substeps=newtonian_polymer_substeps,
-            subcycle_relative_tolerance, max_deformation_increment)
+            subcycle_relative_tolerance, max_deformation_increment,
+            max_memory_deformation_increment)
         try
             guard_local_run!(backend_kind, Nx, Ny, steps_newtonian,
                              allow_long_local, max_local_updates)
@@ -444,6 +455,7 @@ for R in R_values
                 polymer_substeps=newtonian_polymer_substeps,
                 subcycle_relative_tolerance=FT(subcycle_relative_tolerance),
                 max_deformation_increment=FT(max_deformation_increment),
+                max_memory_deformation_increment=FT(max_memory_deformation_increment),
                 max_polymer_substeps,
                 max_steps=steps_newtonian,
                 avg_window=avg_window_newtonian,
@@ -492,7 +504,8 @@ for R in R_values
             case_name, R, Nx, Ny, H, L_up, L_down, Re_R, beta, Wi,
             u_mean, nu_total, nu_s, nu_p, lambda, bsd_fraction, Fx_body,
             steps=max_steps, avg_window, drag_stride, polymer_substeps,
-            subcycle_relative_tolerance, max_deformation_increment)
+            subcycle_relative_tolerance, max_deformation_increment,
+            max_memory_deformation_increment)
         try
             guard_local_run!(backend_kind, Nx, Ny, max_steps,
                              allow_long_local, max_local_updates)
@@ -512,6 +525,7 @@ for R in R_values
                 polymer_substeps,
                 subcycle_relative_tolerance=FT(subcycle_relative_tolerance),
                 max_deformation_increment=FT(max_deformation_increment),
+                max_memory_deformation_increment=FT(max_memory_deformation_increment),
                 max_polymer_substeps,
                 max_steps,
                 avg_window,

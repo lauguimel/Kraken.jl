@@ -82,6 +82,19 @@ The harness writes `lups` to the CSV and prints `MLUPS` for each completed
 case. If any scalar stability or drag diagnostic is non-finite, the row status
 is `nonfinite` rather than `ok`.
 
+`KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT` controls the `:auto`
+`polymer_substeps` memory-time criterion:
+
+```text
+memory_deformation_increment = lambda * max_grad_norm_estimate
+memory_deformation_substeps =
+    ceil(memory_deformation_increment / KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT)
+```
+
+The default is `0.07`, which makes the Liu/RheoTool `Wi=0.5` cylinder choose
+eight source substeps instead of one. This is a temporal convergence control,
+not a physical or benchmark-fitting parameter.
+
 Local Metal smoke:
 
 ```bash

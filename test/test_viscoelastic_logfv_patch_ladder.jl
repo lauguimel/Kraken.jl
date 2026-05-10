@@ -393,11 +393,26 @@ end
             0.23, 1e6, 1.0;
             relative_tolerance=0.01,
             max_deformation_increment=0.05,
+            max_memory_deformation_increment=Inf,
             max_substeps=64,
         )
         @test deformation_limited.recommended == 5
         @test deformation_limited.relax_substeps == 1
         @test deformation_limited.deformation_substeps == 5
+        @test deformation_limited.memory_deformation_substeps == 1
+
+        memory_limited = Kraken.logfv_oldroydb_subcycle_estimate(
+            0.5 / 3500, 3500.0, 1.0;
+            relative_tolerance=0.01,
+            max_deformation_increment=0.05,
+            max_memory_deformation_increment=0.07,
+            max_substeps=64,
+        )
+        @test memory_limited.recommended == 8
+        @test memory_limited.relax_substeps == 1
+        @test memory_limited.deformation_substeps == 1
+        @test memory_limited.memory_deformation_substeps == 8
+        @test memory_limited.memory_deformation_increment ≈ 0.5
 
         clamped = Kraken.logfv_oldroydb_subcycle_estimate(
             0.0, 0.01, 1.0;
@@ -411,6 +426,9 @@ end
         @test_throws ArgumentError Kraken.logfv_oldroydb_split_relax_increment(0.0)
         @test_throws ArgumentError Kraken.logfv_oldroydb_subcycle_estimate(-1.0, 1.0, 1.0)
         @test_throws ArgumentError Kraken.logfv_oldroydb_subcycle_estimate(0.0, -1.0, 1.0)
+        @test_throws ArgumentError Kraken.logfv_oldroydb_subcycle_estimate(
+            0.0, 1.0, 1.0; max_memory_deformation_increment=0.0,
+        )
     end
 
     @testset "M2c velocity gradient kernel is exact on affine and Poiseuille fields" begin
@@ -1758,7 +1776,9 @@ end
 
         @test result.nu_s / result.nu_total <= 0.02
         @test result.nu_lbm ≈ result.nu_total
-        @test result.polymer_substeps == 1
+        @test result.polymer_substeps == 9
+        @test result.subcycle_estimate.memory_deformation_substeps == 9
+        @test result.subcycle_estimate.memory_deformation_increment ≈ 0.6
         @test !result.subcycle_estimate.clamped
         @test result.min_c_eig > 0.75
         @test result.max_abs_psi < 0.3
@@ -1837,5 +1857,23 @@ end
         @test all(isfinite, result.uy[fluid])
         @test all(isfinite, result.psixx[fluid])
         @test all(isfinite, result.fx_total[fluid])
+    end
+
+    @testset "M9b cylinder auto substeps resolves elastic memory deformation" begin
+        result = Kraken.run_viscoelastic_logfv_cylinder_coupled_2d(;
+            radius=4.0, H=16, L_up=4, L_down=7,
+            nu_s=0.059, nu_p=0.041, lambda=400.0,
+            u_mean=0.005, Fx_body=0.0,
+            bsd_fraction=1.0, polymer_substeps=:auto,
+            max_steps=1, backend=KernelAbstractions.CPU(), T=Float64,
+        )
+
+        @test result.max_grad_norm_estimate ≈ 4 * 0.005 / 16
+        @test result.subcycle_estimate.memory_deformation_increment ≈ 0.5
+        @test result.subcycle_estimate.memory_deformation_substeps == 8
+        @test result.polymer_substeps == 8
+        @test !result.subcycle_estimate.clamped
+        @test isfinite(result.Cd)
+        @test result.min_c_eig > 0
     end
 end

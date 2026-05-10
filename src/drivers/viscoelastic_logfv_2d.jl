@@ -58,6 +58,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     polymer_substeps=:auto,
     subcycle_relative_tolerance::Real=0.01,
     max_deformation_increment::Real=0.05,
+    max_memory_deformation_increment::Real=0.07,
     max_polymer_substeps::Integer=64,
     max_steps::Integer=60,
     avg_window::Union{Nothing,Integer}=nothing,
@@ -156,6 +157,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         1.0;
         relative_tolerance=Float64(subcycle_relative_tolerance),
         max_deformation_increment=Float64(max_deformation_increment),
+        max_memory_deformation_increment=Float64(max_memory_deformation_increment),
         min_substeps=1,
         max_substeps=max_polymer_substeps,
     )
@@ -873,8 +875,9 @@ LBM u -> wall-exact channel grad(u) -> log-C Oldroyd-B source
 `polymer_substeps` is a time-integration convergence control for the current
 Lie source split. It is not a physical parameter and must not be fitted to a
 benchmark. Use `:auto` to choose a global patch value from the source
-subcycling estimator; future Strang or local affine source solves should
-reduce this requirement.
+subcycling estimator. The estimator limits per-step relaxation, per-step
+deformation, and memory-time deformation `lambda * ||grad(u)||`; future Strang
+or local affine source solves should reduce this requirement.
 """
 function run_viscoelastic_logfv_poiseuille_coupled_2d(;
     Nx::Integer=6,
@@ -887,6 +890,7 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
     polymer_substeps=:auto,
     subcycle_relative_tolerance::Real=0.01,
     max_deformation_increment::Real=0.05,
+    max_memory_deformation_increment::Real=0.07,
     max_polymer_substeps::Integer=64,
     force_boundary_fill::Symbol=:nearest,
     max_steps::Integer=10000,
@@ -919,6 +923,7 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
         1.0;
         relative_tolerance=Float64(subcycle_relative_tolerance),
         max_deformation_increment=Float64(max_deformation_increment),
+        max_memory_deformation_increment=Float64(max_memory_deformation_increment),
         min_substeps=1,
         max_substeps=max_polymer_substeps,
     )
@@ -1085,6 +1090,7 @@ function run_viscoelastic_logfv_square_periodic_2d(;
     polymer_substeps=:auto,
     subcycle_relative_tolerance::Real=0.01,
     max_deformation_increment::Real=0.05,
+    max_memory_deformation_increment::Real=0.07,
     max_polymer_substeps::Integer=64,
     max_steps::Integer=500,
     backend=KernelAbstractions.CPU(),
@@ -1123,6 +1129,7 @@ function run_viscoelastic_logfv_square_periodic_2d(;
         1.0;
         relative_tolerance=Float64(subcycle_relative_tolerance),
         max_deformation_increment=Float64(max_deformation_increment),
+        max_memory_deformation_increment=Float64(max_memory_deformation_increment),
         min_substeps=1,
         max_substeps=max_polymer_substeps,
     )
@@ -1281,6 +1288,7 @@ function run_viscoelastic_logfv_bfs_passive_2d(;
     hydro_steps::Integer=60,
     polymer_steps::Integer=20,
     polymer_substeps=:auto,
+    max_memory_deformation_increment::Real=0.07,
     max_polymer_substeps::Integer=64,
     backend=KernelAbstractions.CPU(),
     T=Float64,
@@ -1358,6 +1366,7 @@ function run_viscoelastic_logfv_bfs_passive_2d(;
         0.0,
         Float64(lambda_t),
         1.0;
+        max_memory_deformation_increment=Float64(max_memory_deformation_increment),
         min_substeps=1,
         max_substeps=max_polymer_substeps,
     )
