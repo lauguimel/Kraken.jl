@@ -1,11 +1,1 @@
 case,level,in_wall_cone,count,sum_absdiff,max_absdiff
-mini_wall_touch_max_level_2_bgk_omega1_rest,0,false,12,1.9984014443252818e-15,1.6653345369377348e-16
-mini_wall_touch_max_level_2_bgk_omega1_rest,0,true,24,6.0849622770920889e-02,6.9444444444444545e-03
-mini_wall_touch_max_level_2_bgk_omega1_rest,1,true,36,1.3176336857291363e-02,1.5405306927297659e-03
-mini_wall_touch_max_level_2_bgk_omega1_rest,2,true,56,9.6251064282674506e-03,4.3402777777777840e-04
-wall_touch_xband_max2_bgk_omega1_rest,0,false,80,1.3322676295501878e-14,1.6653345369377348e-16
-wall_touch_xband_max2_bgk_omega1_rest,0,true,24,5.5555555555558217e-02,6.9444444444444545e-03
-wall_touch_xband_max2_bgk_omega1_rest,1,true,44,2.0056480890213151e-02,1.5405306927297651e-03
-wall_touch_xband_max2_bgk_omega1_rest,2,true,56,9.6251064282674922e-03,4.3402777777777840e-04
-bulk_touch_max_level_2_bgk_omega1_rest,0,false,40,6.6613381477509392e-15,1.6653345369377348e-16
-bulk_touch_max_level_2_bgk_omega1_rest,0,true,16,2.6645352591003757e-15,1.6653345369377348e-16

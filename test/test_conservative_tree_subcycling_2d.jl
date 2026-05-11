@@ -130,6 +130,52 @@ function _test_internal_xband_nested_spec_2d(max_level::Integer)
     return create_conservative_tree_spec_2d(16, 12, blocks)
 end
 
+function _test_wall_closed_xband_nested_spec_2d(max_level::Integer)
+    blocks = Kraken.conservative_tree_wall_closed_xband_refine_blocks_2d(
+        "XWC", 16, 12, 5:12, Int(max_level))
+    return create_conservative_tree_spec_2d(16, 12, blocks)
+end
+
+function _test_wall_touch_xband_one_level_spec_2d()
+    return create_conservative_tree_spec_2d(6, 4, [
+        ConservativeTreeRefineBlock2D("X", 3:4, 1:4),
+    ])
+end
+
+function _test_wall_phase_three_level_spec_2d()
+    return create_conservative_tree_spec_2d(8, 4, [
+        ConservativeTreeRefineBlock2D("L1", 4:5, 1:4),
+        ConservativeTreeRefineBlock2D("L2", 8:9, 1:8; parent="L1"),
+    ])
+end
+
+function _test_wall_phase_xband_max2_spec_2d()
+    return create_conservative_tree_spec_2d(16, 12, [
+        ConservativeTreeRefineBlock2D("X1", 5:12, 1:12),
+        ConservativeTreeRefineBlock2D("X2", 11:22, 1:24; parent="X1"),
+    ])
+end
+
+function _test_wall_phase_bulk_touch_max_level_2_spec_2d()
+    return create_conservative_tree_spec_2d(8, 8, [
+        ConservativeTreeRefineBlock2D("L1", 4:5, 3:6),
+        ConservativeTreeRefineBlock2D("L2", 8:9, 7:10; parent="L1"),
+    ])
+end
+
+function _test_affine_operator_one_level_spec_2d()
+    return create_conservative_tree_spec_2d(12, 8, [
+        ConservativeTreeRefineBlock2D("L1", 6:7, 3:6),
+    ])
+end
+
+function _test_affine_operator_two_level_spec_2d()
+    return create_conservative_tree_spec_2d(12, 8, [
+        ConservativeTreeRefineBlock2D("L1", 5:8, 3:6),
+        ConservativeTreeRefineBlock2D("L2", 12:13, 6:11; parent="L1"),
+    ])
+end
+
 function _test_cartesian_poiseuille_profile_2d(max_level::Integer,
                                                steps::Integer;
                                                Fx=1e-7,
@@ -237,6 +283,216 @@ function _test_active_field_bounds_2d(result; force_x=0.0,
     return (; rho_min, rho_max, ux_min, ux_max)
 end
 
+function _test_fill_uniform_tree_equilibrium_2d!(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D;
+        rho=1.0,
+        ux=0.0,
+        uy=0.0)
+    fill!(F, zero(eltype(F)))
+    @inbounds for cell_id in spec.active_cells
+        volume = spec.cells[cell_id].metrics.volume
+        for q in 1:9
+            F[cell_id, q] = volume * equilibrium(D2Q9(), rho, ux, uy, q)
+        end
+    end
+    return F
+end
+
+function _test_fill_diagonal_x_odd_tree_perturbation_2d!(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D;
+        epsilon=1e-6)
+    fill!(F, zero(eltype(F)))
+    @inbounds for cell_id in spec.active_cells
+        volume = spec.cells[cell_id].metrics.volume
+        packet = epsilon * volume
+        F[cell_id, 6] = packet
+        F[cell_id, 9] = packet
+        F[cell_id, 7] = -packet
+        F[cell_id, 8] = -packet
+    end
+    return F
+end
+
+function _test_leaf_rho_level_boundary_metrics_2d(
+        spec::ConservativeTreeSpec2D,
+        F::AbstractMatrix;
+        rho0=1.0,
+        margin=2)
+    leaf_nx = spec.Nx << spec.max_level
+    leaf_ny = spec.Ny << spec.max_level
+    rho = fill(NaN, leaf_nx, leaf_ny)
+    level = fill(-1, leaf_nx, leaf_ny)
+    @inbounds for cell_id in spec.active_cells
+        cell = spec.cells[cell_id]
+        scale = 1 << (spec.max_level - cell.level)
+        mass = zero(eltype(F))
+        for q in 1:9
+            mass += F[cell_id, q]
+        end
+        cell_rho = mass / cell.metrics.volume
+        i0 = (cell.i - 1) * scale + 1
+        i1 = cell.i * scale
+        j0 = (cell.j - 1) * scale + 1
+        j1 = cell.j * scale
+        rho[i0:i1, j0:j1] .= cell_rho
+        level[i0:i1, j0:j1] .= cell.level
+    end
+
+    jlo = 1 + margin
+    jhi = leaf_ny - margin
+    max_x_jump = 0.0
+    max_y_jump = 0.0
+    max_abs_dev = 0.0
+    x_count = 0
+    y_count = 0
+    @inbounds for i in 1:(leaf_nx - 1), j in jlo:jhi
+        level[i, j] == level[i + 1, j] && continue
+        x_count += 1
+        a = Float64(rho[i, j])
+        b = Float64(rho[i + 1, j])
+        max_x_jump = max(max_x_jump, abs(b - a))
+        max_abs_dev = max(max_abs_dev, abs(a - rho0), abs(b - rho0))
+    end
+    @inbounds for i in 1:leaf_nx, j in jlo:(jhi - 1)
+        level[i, j] == level[i, j + 1] && continue
+        y_count += 1
+        a = Float64(rho[i, j])
+        b = Float64(rho[i, j + 1])
+        max_y_jump = max(max_y_jump, abs(b - a))
+        max_abs_dev = max(max_abs_dev, abs(a - rho0), abs(b - rho0))
+    end
+    return (;
+        x_count, y_count, max_x_jump, max_y_jump, max_abs_dev)
+end
+
+@inline _test_affine_population_value_2d(x, y) =
+    1.0 + 0.2 * x - 0.13 * y
+
+function _test_cell_leaf_bounds_2d(spec::ConservativeTreeSpec2D,
+                                   cell_id::Int)
+    cell = spec.cells[cell_id]
+    scale = 1 << (spec.max_level - cell.level)
+    i0 = (cell.i - 1) * scale + 1
+    i1 = cell.i * scale
+    j0 = (cell.j - 1) * scale + 1
+    j1 = cell.j * scale
+    return i0, i1, j0, j1
+end
+
+function _test_fill_single_q_affine_tree_2d!(
+        F::AbstractMatrix,
+        spec::ConservativeTreeSpec2D,
+        q::Int)
+    fill!(F, zero(eltype(F)))
+    leaf_nx = spec.Nx << spec.max_level
+    leaf_ny = spec.Ny << spec.max_level
+    leaf_scale = 1 << spec.max_level
+    leaf_volume = 1.0 / Float64(leaf_scale * leaf_scale)
+    @inbounds for cell_id in spec.active_cells
+        i0, i1, j0, j1 = _test_cell_leaf_bounds_2d(spec, cell_id)
+        for jj in j0:j1, ii in i0:i1
+            x = (Float64(ii) - 0.5) / leaf_nx
+            y = (Float64(jj) - 0.5) / leaf_ny
+            F[cell_id, q] += leaf_volume *
+                             _test_affine_population_value_2d(x, y)
+        end
+    end
+    return F
+end
+
+function _test_affine_expected_after_leaf_stream_2d(
+        spec::ConservativeTreeSpec2D,
+        cell_id::Int,
+        q::Int)
+    leaf_nx = spec.Nx << spec.max_level
+    leaf_ny = spec.Ny << spec.max_level
+    leaf_scale = 1 << spec.max_level
+    leaf_volume = 1.0 / Float64(leaf_scale * leaf_scale)
+    shift_i = leaf_scale * d2q9_cx(q)
+    shift_j = leaf_scale * d2q9_cy(q)
+    i0, i1, j0, j1 = _test_cell_leaf_bounds_2d(spec, cell_id)
+
+    total = 0.0
+    @inbounds for jj in j0:j1, ii in i0:i1
+        dep_i = mod1(ii - shift_i, leaf_nx)
+        dep_j = jj - shift_j
+        1 <= dep_j <= leaf_ny || return nothing
+        x = (Float64(dep_i) - 0.5) / leaf_nx
+        y = (Float64(dep_j) - 0.5) / leaf_ny
+        total += leaf_volume * _test_affine_population_value_2d(x, y)
+    end
+    return total
+end
+
+function _test_leaf_level_map_2d(spec::ConservativeTreeSpec2D)
+    leaf_nx = spec.Nx << spec.max_level
+    leaf_ny = spec.Ny << spec.max_level
+    levels = fill(-1, leaf_nx, leaf_ny)
+    @inbounds for cell_id in spec.active_cells
+        cell = spec.cells[cell_id]
+        i0, i1, j0, j1 = _test_cell_leaf_bounds_2d(spec, cell_id)
+        levels[i0:i1, j0:j1] .= cell.level
+    end
+    return levels
+end
+
+function _test_touches_level_jump_2d(levels::AbstractMatrix{Int},
+                                     i0::Int, i1::Int,
+                                     j0::Int, j1::Int)
+    nx, ny = size(levels)
+    own = levels[i0, j0]
+    @inbounds for j in max(1, j0 - 1):min(ny, j1 + 1),
+                  i in max(1, i0 - 1):min(nx, i1 + 1)
+        levels[i, j] == own || return true
+    end
+    return false
+end
+
+function _test_subcycled_affine_operator_metrics_2d(
+        spec::ConservativeTreeSpec2D,
+        q::Int,
+        route_sampling::Symbol)
+    table = create_conservative_tree_route_table_2d(
+        spec; periodic_x=true, sampling=route_sampling)
+    Fin = allocate_conservative_tree_F_2d(spec; T=Float64)
+    Fout = similar(Fin)
+    _test_fill_single_q_affine_tree_2d!(Fin, spec, q)
+    Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+        Fout, Fin, spec, table; boundary=:periodic_x_wall_y,
+        interface_time_scaling=route_sampling == :level_native ?
+            :level_native : :leaf_equivalent,
+        coarse_to_fine_predictor_weight=0,
+        interface_balance=false)
+
+    levels = _test_leaf_level_map_2d(spec)
+    max_l0_bulk = 0.0
+    max_refined_or_interface = 0.0
+    max_all = 0.0
+    l0_bulk_count = 0
+    refined_or_interface_count = 0
+    @inbounds for cell_id in spec.active_cells
+        expected = _test_affine_expected_after_leaf_stream_2d(
+            spec, cell_id, q)
+        expected === nothing && continue
+        err = abs(Float64(Fout[cell_id, q]) - expected)
+        max_all = max(max_all, err)
+        i0, i1, j0, j1 = _test_cell_leaf_bounds_2d(spec, cell_id)
+        near_interface = _test_touches_level_jump_2d(
+            levels, i0, i1, j0, j1)
+        if spec.cells[cell_id].level == 0 && !near_interface
+            l0_bulk_count += 1
+            max_l0_bulk = max(max_l0_bulk, err)
+        else
+            refined_or_interface_count += 1
+            max_refined_or_interface = max(max_refined_or_interface, err)
+        end
+    end
+    return (; max_all, max_l0_bulk, max_refined_or_interface,
+            l0_bulk_count, refined_or_interface_count)
+end
+
 function _test_subcycled_rest_maxdiff_2d(spec, route_sampling::Symbol)
     table = create_conservative_tree_route_table_2d(
         spec; periodic_x=true, sampling=route_sampling)
@@ -249,6 +505,88 @@ function _test_subcycled_rest_maxdiff_2d(spec, route_sampling::Symbol)
             :level_native : :leaf_equivalent)
     return maximum(abs.(G[spec.active_cells, :] .-
                         F[spec.active_cells, :]))
+end
+
+function _test_subcycled_rest_prestream_maxdiff_2d(
+        spec::ConservativeTreeSpec2D;
+        mode::Symbol,
+        omega=1.0)
+    table = create_conservative_tree_route_table_2d(
+        spec; periodic_x=true, sampling=:level_native)
+    F = allocate_conservative_tree_F_2d(spec; T=Float64)
+    G = similar(F)
+    initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=1.0)
+    schedule = Kraken.create_conservative_tree_subcycle_schedule_2d(
+        spec.max_level)
+    route_bank = Kraken.create_conservative_tree_subcycle_spatial_ledger_bank_2d(
+        spec; schedule=schedule, T=Float64)
+    state_bank = Kraken.create_conservative_tree_subcycle_buffer_bank_2d(
+        spec; schedule=schedule, T=Float64)
+    active_ids_by_level = state_bank.active_ids_by_level
+    Fsource = similar(F)
+    Fscratch = similar(F)
+    pre_stream_level! = if mode == :noop
+        (Flevel, local_spec, level, event) -> nothing
+    elseif mode == :bgk
+        (Flevel, local_spec, level, event) ->
+            Kraken._collide_BGK_conservative_tree_active_ids_F_2d!(
+                Flevel, local_spec, active_ids_by_level[level + 1],
+                Kraken.conservative_tree_leaf_equivalent_omega_2d(
+                    omega, local_spec, level))
+    else
+        throw(ArgumentError("mode must be :noop or :bgk"))
+    end
+    Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+        G, F, spec, table; boundary=:periodic_x_wall_y,
+        interface_time_scaling=:level_native,
+        coarse_to_fine_predictor_weight=0,
+        pre_stream_level! = pre_stream_level!,
+        schedule=schedule, route_bank=route_bank, state_bank=state_bank,
+        Fsource=Fsource, Fscratch=Fscratch)
+    return maximum(abs.(G[spec.active_cells, :] .-
+                        F[spec.active_cells, :]))
+end
+
+function _test_subcycled_unit_packet_level_native_2d(
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int)
+    table = create_conservative_tree_route_table_2d(
+        spec; periodic_x=true, sampling=:level_native)
+    F = allocate_conservative_tree_F_2d(spec; T=Float64)
+    G = similar(F)
+    fill!(F, 0.0)
+    fill!(G, 0.0)
+    F[src_id, q] = 1.0
+    Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+        G, F, spec, table; boundary=:periodic_x_wall_y,
+        interface_time_scaling=:level_native,
+        coarse_to_fine_predictor_weight=0)
+    return G
+end
+
+function _test_subcycled_rest_row_maxdiffs_2d(spec, route_sampling::Symbol)
+    table = create_conservative_tree_route_table_2d(
+        spec; periodic_x=true, sampling=route_sampling)
+    F = allocate_conservative_tree_F_2d(spec)
+    G = similar(F)
+    initialize_conservative_tree_equilibrium_F_2d!(F, spec; rho=1.0)
+    Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+        G, F, spec, table; boundary=:periodic_x_wall_y,
+        interface_time_scaling=route_sampling == :level_native ?
+            :level_native : :leaf_equivalent)
+
+    rows = Dict{Tuple{Int,Int},Float64}()
+    @inbounds for cell_id in spec.active_cells
+        cell = spec.cells[cell_id]
+        key = (cell.level, cell.j)
+        rowdiff = get(rows, key, 0.0)
+        for q in 1:9
+            rowdiff = max(rowdiff, abs(Float64(G[cell_id, q] - F[cell_id, q])))
+        end
+        rows[key] = rowdiff
+    end
+    return rows
 end
 
 @testset "Conservative tree subcycling ledger 2D" begin
@@ -846,15 +1184,178 @@ end
     end
 
     @testset "level-native vertical wall-corner rest canary" begin
+        one_level_wall_touch_x = _test_wall_touch_xband_one_level_spec_2d()
         internal_x = _test_internal_xband_nested_spec_2d(4)
         wall_touch_x = _test_nested_band_spec_2d(:xband, 4)
+        wall_closed_x = _test_wall_closed_xband_nested_spec_2d(4)
 
+        @test _test_subcycled_rest_maxdiff_2d(
+            one_level_wall_touch_x, :level_native) <= 1e-14
         @test _test_subcycled_rest_maxdiff_2d(
             wall_touch_x, :leaf_equivalent) <= 1e-14
         @test _test_subcycled_rest_maxdiff_2d(
+            wall_closed_x, :leaf_equivalent) <= 1e-14
+        @test _test_subcycled_rest_maxdiff_2d(
             internal_x, :level_native) <= 1e-14
-        @test_broken _test_subcycled_rest_maxdiff_2d(
+        @test _test_subcycled_rest_maxdiff_2d(
             wall_touch_x, :level_native) <= 1e-14
+
+        one_level_rows = _test_subcycled_rest_row_maxdiffs_2d(
+            one_level_wall_touch_x, :level_native)
+        nested_rows = _test_subcycled_rest_row_maxdiffs_2d(
+            wall_touch_x, :level_native)
+        @test maximum(values(one_level_rows)) <= 1e-14
+        @test maximum(values(nested_rows)) <= 1e-14
+        @test one_level_rows[(0, 1)] <= 1e-14
+        @test one_level_rows[(1, 1)] <= 1e-14
+        @test one_level_rows[(1, 2)] <= 1e-14
+    end
+
+    @testset "level-native wall-phase three-level packet canary" begin
+        spec = _test_wall_phase_three_level_spec_2d()
+
+        south_src = conservative_tree_cell_id_2d(spec, 2, 15, 4)
+        south_oracle_dst = conservative_tree_cell_id_2d(spec, 0, 3, 1)
+        south_spill_dst = conservative_tree_cell_id_2d(spec, 1, 7, 1)
+        @test south_src > 0
+        @test south_oracle_dst > 0
+        @test south_spill_dst > 0
+
+        south = _test_subcycled_unit_packet_level_native_2d(
+            spec, south_src, 8)
+        @test abs(Float64(south[south_oracle_dst, 6]) - 1.0) <= 1e-14
+        @test abs(Float64(south[south_spill_dst, 6])) <= 1e-14
+        @test abs(Float64(sum(south[spec.active_cells, :])) - 1.0) <= 1e-14
+
+        north_src = conservative_tree_cell_id_2d(spec, 2, 15, 13)
+        north_oracle_dst = conservative_tree_cell_id_2d(spec, 0, 3, 4)
+        north_spill_dst = conservative_tree_cell_id_2d(spec, 1, 7, 8)
+        @test north_src > 0
+        @test north_oracle_dst > 0
+        @test north_spill_dst > 0
+
+        north = _test_subcycled_unit_packet_level_native_2d(
+            spec, north_src, 7)
+        @test abs(Float64(north[north_oracle_dst, 9]) - 1.0) <= 1e-14
+        @test abs(Float64(north[north_spill_dst, 9])) <= 1e-14
+        @test abs(Float64(sum(north[spec.active_cells, :])) - 1.0) <= 1e-14
+    end
+
+    @testset "level-native wall-only packet guard" begin
+        spec = _test_wall_phase_three_level_spec_2d()
+        src = conservative_tree_cell_id_2d(spec, 0, 1, 1)
+        dst_self = conservative_tree_cell_id_2d(spec, 0, 1, 1)
+        dst_east = conservative_tree_cell_id_2d(spec, 0, 2, 1)
+        dst_wrap = conservative_tree_cell_id_2d(spec, 0, 8, 1)
+        @test src > 0
+        @test dst_self > 0
+        @test dst_east > 0
+        @test dst_wrap > 0
+
+        sw = _test_subcycled_unit_packet_level_native_2d(spec, src, 8)
+        @test abs(Float64(sw[dst_self, 6]) - 0.5) <= 1e-14
+        @test abs(Float64(sw[dst_east, 6]) - 0.25) <= 1e-14
+        @test abs(Float64(sw[dst_wrap, 6]) - 0.25) <= 1e-14
+        @test abs(Float64(sum(sw[spec.active_cells, :])) - 1.0) <= 1e-14
+
+        se = _test_subcycled_unit_packet_level_native_2d(spec, src, 9)
+        @test abs(Float64(se[dst_self, 7]) - 0.5) <= 1e-14
+        @test abs(Float64(se[dst_east, 7]) - 0.25) <= 1e-14
+        @test abs(Float64(se[dst_wrap, 7]) - 0.25) <= 1e-14
+        @test abs(Float64(sum(se[spec.active_cells, :])) - 1.0) <= 1e-14
+    end
+
+    @testset "level-native wall-adjacent C2F dipole canary" begin
+        spec = _test_wall_phase_three_level_spec_2d()
+        src = conservative_tree_cell_id_2d(spec, 1, 7, 1)
+        dsts = [
+            conservative_tree_cell_id_2d(spec, 2, 17, 1),
+            conservative_tree_cell_id_2d(spec, 2, 18, 1),
+            conservative_tree_cell_id_2d(spec, 2, 17, 2),
+            conservative_tree_cell_id_2d(spec, 2, 18, 2),
+        ]
+        @test src > 0
+        @test all(>(0), dsts)
+
+        east = _test_subcycled_unit_packet_level_native_2d(spec, src, 2)
+        c2f_weights = [Float64(east[dst, 2]) for dst in dsts]
+        @test_broken maximum(abs.(c2f_weights .- 0.25)) <= 1e-14
+        @test abs(Float64(sum(east[spec.active_cells, :])) - 1.0) <= 1e-14
+    end
+
+    @testset "level-native pre-stream wall-phase rest gates" begin
+        mini = _test_wall_phase_three_level_spec_2d()
+        xband = _test_wall_phase_xband_max2_spec_2d()
+        bulk = _test_wall_phase_bulk_touch_max_level_2_spec_2d()
+
+        @test _test_subcycled_rest_prestream_maxdiff_2d(
+            mini; mode=:noop) <= 1e-14
+        @test _test_subcycled_rest_prestream_maxdiff_2d(
+            xband; mode=:noop) <= 1e-14
+        @test _test_subcycled_rest_prestream_maxdiff_2d(
+            bulk; mode=:noop) <= 1e-14
+
+        @test _test_subcycled_rest_prestream_maxdiff_2d(
+            mini; mode=:bgk, omega=1.0) <= 1e-14
+        @test _test_subcycled_rest_prestream_maxdiff_2d(
+            xband; mode=:bgk, omega=1.0) <= 1e-14
+        @test _test_subcycled_rest_prestream_maxdiff_2d(
+            bulk; mode=:bgk, omega=1.0) <= 1e-14
+    end
+
+    @testset "uniform streamwise equilibrium isolates x-normal interface rho defect" begin
+        metrics = Dict{Symbol,NamedTuple}()
+        diagonal_metrics = Dict{Symbol,NamedTuple}()
+        specs = Dict(
+            :xband_center_only => _test_nested_band_spec_2d(:xband, 4),
+            :xband_wall_closed => _test_wall_closed_xband_nested_spec_2d(4),
+            :yband => _test_nested_band_spec_2d(:yband, 4),
+        )
+        for kind in (:xband_center_only, :xband_wall_closed, :yband)
+            spec = specs[kind]
+            table = create_conservative_tree_route_table_2d(
+                spec; periodic_x=true, sampling=:leaf_equivalent)
+            Fin = allocate_conservative_tree_F_2d(spec)
+            Fout = similar(Fin)
+            _test_fill_uniform_tree_equilibrium_2d!(
+                Fin, spec; rho=1.0, ux=1e-4, uy=0.0)
+
+            Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+                Fout, Fin, spec, table; boundary=:periodic_x_wall_y)
+
+            metrics[kind] = _test_leaf_rho_level_boundary_metrics_2d(
+                spec, Fout; rho0=1.0)
+
+            _test_fill_diagonal_x_odd_tree_perturbation_2d!(
+                Fin, spec; epsilon=1e-6)
+            fill!(Fout, 0.0)
+            Kraken.stream_conservative_tree_subcycled_buffered_routes_F_2d!(
+                Fout, Fin, spec, table; boundary=:periodic_x_wall_y)
+            diagonal_metrics[kind] =
+                _test_leaf_rho_level_boundary_metrics_2d(
+                    spec, Fout; rho0=0.0)
+        end
+
+        @test metrics[:xband_center_only].x_count > 0
+        @test_broken metrics[:xband_center_only].max_x_jump <= 1e-14
+        @test_broken metrics[:xband_center_only].max_abs_dev <= 1e-14
+        @test diagonal_metrics[:xband_center_only].x_count > 0
+        @test_broken diagonal_metrics[:xband_center_only].max_x_jump <= 1e-18
+        @test_broken diagonal_metrics[:xband_center_only].max_abs_dev <= 1e-18
+
+        @test metrics[:xband_wall_closed].x_count > 0
+        @test metrics[:xband_wall_closed].max_x_jump <= 1e-14
+        @test metrics[:xband_wall_closed].max_abs_dev <= 1e-14
+        @test diagonal_metrics[:xband_wall_closed].x_count > 0
+        @test diagonal_metrics[:xband_wall_closed].max_x_jump <= 1e-18
+        @test diagonal_metrics[:xband_wall_closed].max_abs_dev <= 1e-18
+
+        @test metrics[:yband].y_count > 0
+        @test metrics[:yband].max_y_jump <= 1e-14
+        @test metrics[:yband].max_abs_dev <= 1e-14
+        @test diagonal_metrics[:yband].y_count > 0
+        @test diagonal_metrics[:yband].max_y_jump <= 1e-18
+        @test diagonal_metrics[:yband].max_abs_dev <= 1e-18
     end
 
     @testset "level-native route sampling is isolated behind explicit scaling" begin
@@ -923,6 +1424,12 @@ end
                   for route in wall_corner)
         @test any(route.kind == ROUTE_BOUNDARY && route.weight == 0.5
                   for route in wall_corner)
+
+        wall_partner = [route for route in wall_touch_table.routes
+                        if route.src == 5 && route.q == 8]
+        @test length(wall_partner) == 1
+        @test wall_partner[1].kind == ROUTE_BOUNDARY
+        @test wall_partner[1].weight == 1.0
 
         Fin = allocate_conservative_tree_F_2d(spec)
         Fout = allocate_conservative_tree_F_2d(spec)
@@ -998,10 +1505,49 @@ end
         @test isapprox(sum(active_population_sums_F_2d(Foutw, wall_touch_spec)),
                        sum(active_population_sums_F_2d(Finw, wall_touch_spec));
                        atol=1e-12, rtol=0)
+        @test maximum(abs.(Foutw[wall_touch_spec.active_cells, :] .-
+                           Finw[wall_touch_spec.active_cells, :])) <= 1e-14
 
         @test_throws ArgumentError run_conservative_tree_poiseuille_subcycled_2d(
             max_level=2, steps=1, route_sampling=:level_native,
             coarse_to_fine_prolongation=:limited_linear)
+    end
+
+    @testset "analytical affine leaf-equivalent operator canaries" begin
+        one_level = _test_affine_operator_one_level_spec_2d()
+        two_level = _test_affine_operator_two_level_spec_2d()
+
+        for q in (2, 3, 4, 5)
+            leaf = _test_subcycled_affine_operator_metrics_2d(
+                one_level, q, :leaf_equivalent)
+            native = _test_subcycled_affine_operator_metrics_2d(
+                one_level, q, :level_native)
+
+            @test leaf.l0_bulk_count > 0
+            @test native.l0_bulk_count == leaf.l0_bulk_count
+            @test native.refined_or_interface_count > 0
+            @test native.max_l0_bulk <= 1e-14
+
+            @test_broken leaf.max_l0_bulk <= 1e-14
+            @test native.max_refined_or_interface <= 1e-14
+        end
+
+        for q in (6, 7, 8, 9)
+            native = _test_subcycled_affine_operator_metrics_2d(
+                one_level, q, :level_native)
+            @test native.refined_or_interface_count > 0
+            @test native.max_l0_bulk <= 1e-14
+            @test native.max_refined_or_interface <= 1e-14
+        end
+
+        for q in 2:9
+            nested = _test_subcycled_affine_operator_metrics_2d(
+                two_level, q, :level_native)
+            @test nested.l0_bulk_count > 0
+            @test nested.max_l0_bulk <= 1e-14
+            @test nested.refined_or_interface_count > 0
+            @test nested.max_refined_or_interface <= 1e-14
+        end
     end
 
     @testset "full-domain nested Poiseuille matches Cartesian at same physical time" begin
@@ -1113,7 +1659,9 @@ end
             cart_couette = _test_cartesian_couette_profile_2d(
                 max_level, steps; U=1e-4, omega=1.0)
             for kind in kinds, route in routes
-                spec = _test_nested_band_spec_2d(kind, max_level)
+                spec = kind == :xband ?
+                    _test_wall_closed_xband_nested_spec_2d(max_level) :
+                    _test_nested_band_spec_2d(kind, max_level)
                 poiseuille = run_conservative_tree_poiseuille_subcycled_2d(
                     max_level=max_level, spec=spec, steps=steps,
                     Fx=1e-7, omega=1.0, route_sampling=route,
