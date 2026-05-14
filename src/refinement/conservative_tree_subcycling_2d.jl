@@ -1,456 +1,38 @@
-# Conservative subcycling ledgers for route-native D2Q9 AMR.
-#
-# This is not yet the full time integrator. It records the packet accounting
-# needed for one coarse step and two fine half-steps so interface transfers can
-# be tested before they are put in the hot loop.
+include("subcycling_schedule_2d.jl")
 
-struct ConservativeTreeSubcycleLedger2D{T}
-    ratio::Int
-    coarse_to_fine::Array{T,4}
-    fine_to_coarse::Matrix{T}
-end
 
-struct ConservativeTreeSubcycleEvent2D
-    tick::Int
-    phase::Symbol
-    src_level::Int
-    dst_level::Int
-end
 
-struct ConservativeTreeSubcycleSchedule2D
-    max_level::Int
-    ratio::Int
-    finest_ticks::Int
-    level_step_ticks::Vector{Int}
-    events::Vector{ConservativeTreeSubcycleEvent2D}
-end
 
-struct ConservativeTreeSubcycleLedgerBank2D{T}
-    schedule::ConservativeTreeSubcycleSchedule2D
-    pair_ledgers::Vector{ConservativeTreeSubcycleLedger2D{T}}
-end
 
-struct ConservativeTreeSubcyclePackedLedgerPair2D{T}
-    parent_ids::Vector{Int}
-    coarse_to_fine::Array{T,5}
-    fine_to_coarse::Array{T,3}
-end
 
-struct ConservativeTreeSubcycleRoutePacketCache2D{T}
-    key_to_slot::Dict{Tuple{Int,Int},Int}
-    dst_ids::Vector{Int}
-    qs::Vector{Int}
-    packets::Vector{T}
-end
 
-struct ConservativeTreeWallPhaseScatter2D{T}
-    source_mask::BitMatrix
-    src_ids::Vector{Int}
-    src_qs::Vector{Int}
-    dst_ids::Vector{Int}
-    dst_qs::Vector{Int}
-    weights::Vector{T}
-    event_mask_phases::Vector{Symbol}
-    event_mask_ticks::Vector{Int}
-    event_mask_levels::Vector{Int}
-    event_mask_src_ids::Vector{Int}
-    event_mask_src_qs::Vector{Int}
-    sync_ticks::Vector{Int}
-    sync_parent_levels::Vector{Int}
-    sync_child_substeps::Vector{Int}
-    sync_src_ids::Vector{Int}
-    sync_src_qs::Vector{Int}
-    sync_parent_ids::Vector{Int}
-    sync_ixs::Vector{Int}
-    sync_iys::Vector{Int}
-    sync_dst_qs::Vector{Int}
-    sync_weights::Vector{T}
-    advance_ticks::Vector{Int}
-    advance_levels::Vector{Int}
-    advance_src_ids::Vector{Int}
-    advance_src_qs::Vector{Int}
-    advance_dst_ids::Vector{Int}
-    advance_dst_qs::Vector{Int}
-    advance_weights::Vector{T}
-    reflux_ticks::Vector{Int}
-    reflux_levels::Vector{Int}
-    reflux_src_ids::Vector{Int}
-    reflux_src_qs::Vector{Int}
-    reflux_dst_ids::Vector{Int}
-    reflux_dst_qs::Vector{Int}
-    reflux_weights::Vector{T}
-end
 
-struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
-    spec::ConservativeTreeSpec2D
-    schedule::ConservativeTreeSubcycleSchedule2D
-    ledger_pairs::Vector{ConservativeTreeSubcyclePackedLedgerPair2D{T}}
-    parent_ledger_slot::Vector{Int}
-    route_packet_caches::Vector{ConservativeTreeSubcycleRoutePacketCache2D{T}}
-    route_packet_slot_by_route::Vector{Int}
-    inactive_route_packet_slots_by_level::Vector{Matrix{Int}}
-    inactive_route_packet_dsts_by_level::Vector{Matrix{Int}}
-    inactive_route_packet_kinds_by_level::Vector{Matrix{RouteKind}}
-    f2c_route_srcs_by_child_level::Vector{Vector{Int}}
-    f2c_route_qs_by_child_level::Vector{Vector{Int}}
-    f2c_route_weights_by_child_level::Vector{Vector{Float64}}
-    f2c_route_parent_slots_by_child_level::Vector{Vector{Int}}
-    f2c_route_packet_slots_by_child_level::Vector{Vector{Int}}
-    inactive_f2c_route_srcs_by_child_level::Vector{Vector{Int}}
-    inactive_f2c_route_qs_by_child_level::Vector{Vector{Int}}
-    inactive_f2c_route_parent_slots_by_child_level::Vector{Vector{Int}}
-    inactive_f2c_route_packet_slots_by_child_level::Vector{Vector{Int}}
-    route_packet_cache_valid::Vector{Bool}
-    route_packet_cache_route_objectid::Vector{UInt}
-    route_packet_cache_periodic_x::Vector{Bool}
-    refined_parent_ids_by_level::Vector{Vector{Int}}
-    inactive_refined_ids_by_level::Vector{Vector{Int}}
-end
 
-function create_conservative_tree_subcycle_ledger_2d(;
-        T::Type{<:Real}=Float64,
-        ratio::Integer=2)
-    r = Int(ratio)
-    r == 2 || throw(ArgumentError("conservative-tree subcycling currently requires ratio = 2"))
-    return ConservativeTreeSubcycleLedger2D{T}(
-        r, zeros(T, 2, 2, 9, r), zeros(T, 9, r))
-end
 
-function _check_conservative_tree_schedule_ratio_2d(ratio::Integer)
-    r = Int(ratio)
-    r >= 2 || throw(ArgumentError("subcycling ratio must be >= 2"))
-    return r
-end
 
-function _conservative_tree_level_step_ticks_2d(max_level::Int, ratio::Int)
-    return [ratio^(max_level - level) for level in 0:max_level]
-end
 
-function _push_conservative_tree_schedule_interval_2d!(
-        events::Vector{ConservativeTreeSubcycleEvent2D},
-        level::Int,
-        max_level::Int,
-        ratio::Int,
-        tick_start::Int,
-        tick_end::Int)
-    if level == max_level
-        push!(events, ConservativeTreeSubcycleEvent2D(
-            tick_end, :advance, level, level))
-        return events
-    end
 
-    child = level + 1
-    push!(events, ConservativeTreeSubcycleEvent2D(
-        tick_start, :sync_down, level, child))
 
-    interval_ticks = tick_end - tick_start
-    interval_ticks % ratio == 0 ||
-        throw(ArgumentError("subcycle interval is not divisible by ratio"))
-    child_ticks = div(interval_ticks, ratio)
-    for substep in 1:ratio
-        child_start = tick_start + (substep - 1) * child_ticks
-        child_end = child_start + child_ticks
-        _push_conservative_tree_schedule_interval_2d!(
-            events, child, max_level, ratio, child_start, child_end)
-    end
 
-    push!(events, ConservativeTreeSubcycleEvent2D(
-        tick_end, :sync_up, child, level))
-    push!(events, ConservativeTreeSubcycleEvent2D(
-        tick_end, :advance, level, level))
-    return events
-end
 
-"""
-    create_conservative_tree_subcycle_schedule_2d(max_level; ratio=2)
 
-Build a level-agnostic recursive subcycling calendar for one level-0 coarse
-step. Time is expressed in integer ticks of the finest level. For `ratio = 2`,
-level `l` advances every `2^(max_level-l)` finest ticks.
 
-The event order is recursive and deterministic:
 
-1. `:sync_down` from a parent level to its child at the beginning of that
-   parent interval;
-2. all child sub-intervals;
-3. `:sync_up` from child to parent at the synchronization point;
-4. `:advance` of the parent level.
 
-This object owns no populations and performs no physics. It is the dispatch
-contract that the future route/reflux kernels must follow for any number of
-levels.
-"""
-function create_conservative_tree_subcycle_schedule_2d(max_level::Integer;
-                                                       ratio::Integer=2)
-    ml = Int(max_level)
-    ml >= 0 || throw(ArgumentError("max_level must be nonnegative"))
-    r = _check_conservative_tree_schedule_ratio_2d(ratio)
-    finest_ticks = r^ml
-    level_step_ticks = _conservative_tree_level_step_ticks_2d(ml, r)
-    events = ConservativeTreeSubcycleEvent2D[]
-    _push_conservative_tree_schedule_interval_2d!(
-        events, 0, ml, r, 0, finest_ticks)
-    return ConservativeTreeSubcycleSchedule2D(
-        ml, r, finest_ticks, level_step_ticks, events)
-end
 
-include("conservative_tree_subcycle_buffers_2d.jl")
 
-function create_conservative_tree_subcycle_ledger_bank_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D;
-        T::Type{<:Real}=Float64)
-    pair_ledgers = ConservativeTreeSubcycleLedger2D{T}[
-        create_conservative_tree_subcycle_ledger_2d(T=T, ratio=schedule.ratio)
-        for _ in 1:schedule.max_level
-    ]
-    return ConservativeTreeSubcycleLedgerBank2D{T}(schedule, pair_ledgers)
-end
 
-function create_conservative_tree_subcycle_ledger_bank_2d(max_level::Integer;
-                                                          ratio::Integer=2,
-                                                          T::Type{<:Real}=Float64)
-    schedule = create_conservative_tree_subcycle_schedule_2d(
-        max_level; ratio=ratio)
-    return create_conservative_tree_subcycle_ledger_bank_2d(schedule; T=T)
-end
 
-function _check_conservative_tree_subcycle_spec_schedule_2d(
-        spec::ConservativeTreeSpec2D,
-        schedule::ConservativeTreeSubcycleSchedule2D)
-    spec.max_level == schedule.max_level ||
-        throw(ArgumentError("subcycle schedule max_level must match the tree spec"))
-    schedule.ratio == 2 ||
-        throw(ArgumentError("conservative-tree spatial subcycling requires ratio = 2"))
-    return nothing
-end
 
-function create_conservative_tree_subcycle_spatial_ledger_bank_2d(
-        spec::ConservativeTreeSpec2D;
-        schedule::ConservativeTreeSubcycleSchedule2D=
-            create_conservative_tree_subcycle_schedule_2d(spec.max_level),
-        T::Type{<:Real}=Float64)
-    _check_conservative_tree_subcycle_spec_schedule_2d(spec, schedule)
-    route_packet_caches = [
-        ConservativeTreeSubcycleRoutePacketCache2D{T}(
-            Dict{Tuple{Int,Int},Int}(), Int[], Int[], T[])
-        for _ in 1:spec.max_level
-    ]
-    refined_parent_ids_by_level = [Int[] for _ in 1:spec.max_level]
-    inactive_refined_ids_by_level = [Int[] for _ in 0:spec.max_level]
-    parent_ledger_slot = zeros(Int, length(spec.cells))
 
-    @inbounds for (cell_id, cell) in pairs(spec.cells)
-        children = spec.children[cell_id]
-        children == (0, 0, 0, 0) && continue
-        push!(inactive_refined_ids_by_level[cell.level + 1], cell_id)
-        cell.level < spec.max_level || continue
-        push!(refined_parent_ids_by_level[cell.level + 1], cell_id)
-    end
 
-    ledger_pairs = Vector{ConservativeTreeSubcyclePackedLedgerPair2D{T}}(
-        undef, spec.max_level)
-    for parent_level in 0:(spec.max_level - 1)
-        parent_ids = refined_parent_ids_by_level[parent_level + 1]
-        nparents = length(parent_ids)
-        @inbounds for (slot, parent_id) in enumerate(parent_ids)
-            parent_ledger_slot[parent_id] = slot
-        end
-        ledger_pairs[parent_level + 1] =
-            ConservativeTreeSubcyclePackedLedgerPair2D{T}(
-                parent_ids,
-                zeros(T, 2, 2, 9, schedule.ratio, nparents),
-                zeros(T, 9, schedule.ratio, nparents))
-    end
 
-    return ConservativeTreeSubcycleSpatialLedgerBank2D{T}(
-        spec, schedule, ledger_pairs, parent_ledger_slot,
-        route_packet_caches, Int[], Matrix{Int}[], Matrix{Int}[],
-        Matrix{RouteKind}[],
-        [Int[] for _ in 0:spec.max_level],
-        [Int[] for _ in 0:spec.max_level],
-        [Float64[] for _ in 0:spec.max_level],
-        [Int[] for _ in 0:spec.max_level],
-        [Int[] for _ in 0:spec.max_level],
-        [Int[] for _ in 0:spec.max_level],
-        [Int[] for _ in 0:spec.max_level],
-        [Int[] for _ in 0:spec.max_level],
-        [Int[] for _ in 0:spec.max_level],
-        Bool[false], UInt[0], Bool[false],
-        refined_parent_ids_by_level,
-        inactive_refined_ids_by_level)
-end
 
-function conservative_tree_subcycle_events_at_tick_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D,
-        tick::Integer)
-    t = Int(tick)
-    0 <= t <= schedule.finest_ticks ||
-        throw(ArgumentError("tick is outside the schedule"))
-    return [event for event in schedule.events if event.tick == t]
-end
 
-function conservative_tree_subcycle_advance_counts_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D)
-    counts = zeros(Int, schedule.max_level + 1)
-    @inbounds for event in schedule.events
-        event.phase == :advance || continue
-        counts[event.src_level + 1] += 1
-    end
-    return counts
-end
 
-function conservative_tree_subcycle_sync_counts_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D)
-    counts = Dict{Tuple{Symbol,Int,Int},Int}()
-    @inbounds for event in schedule.events
-        event.phase == :advance && continue
-        key = (event.phase, event.src_level, event.dst_level)
-        counts[key] = get(counts, key, 0) + 1
-    end
-    return counts
-end
 
-function _check_conservative_tree_pair_level_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D,
-        parent_level::Integer)
-    parent = Int(parent_level)
-    0 <= parent < schedule.max_level ||
-        throw(ArgumentError("parent_level must identify an adjacent level pair"))
-    return parent
-end
 
-function conservative_tree_subcycle_pair_ledger_2d(
-        bank::ConservativeTreeSubcycleLedgerBank2D,
-        parent_level::Integer)
-    parent = _check_conservative_tree_pair_level_2d(
-        bank.schedule, parent_level)
-    return bank.pair_ledgers[parent + 1]
-end
 
-function reset_conservative_tree_subcycle_bank_2d!(
-        bank::ConservativeTreeSubcycleLedgerBank2D)
-    for ledger in bank.pair_ledgers
-        reset_conservative_tree_subcycle_ledger_2d!(ledger)
-    end
-    return bank
-end
-
-function reset_conservative_tree_subcycle_pair_2d!(
-        bank::ConservativeTreeSubcycleLedgerBank2D,
-        parent_level::Integer)
-    reset_conservative_tree_subcycle_ledger_2d!(
-        conservative_tree_subcycle_pair_ledger_2d(bank, parent_level))
-    return bank
-end
-
-function conservative_tree_subcycle_spatial_pair_ledgers_2d(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        parent_level::Integer)
-    parent = _check_conservative_tree_pair_level_2d(
-        bank.schedule, parent_level)
-    pair = bank.ledger_pairs[parent + 1]
-    ledgers = Vector{ConservativeTreeSubcycleLedger2D{eltype(pair.fine_to_coarse)}}(
-        undef, length(pair.parent_ids))
-    @inbounds for slot in eachindex(pair.parent_ids)
-        ledgers[slot] = ConservativeTreeSubcycleLedger2D(
-            bank.schedule.ratio,
-            copy(@view(pair.coarse_to_fine[:, :, :, :, slot])),
-            copy(@view(pair.fine_to_coarse[:, :, slot])))
-    end
-    return ledgers
-end
-
-function _conservative_tree_packed_ledger_pair_2d(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        parent_level::Integer)
-    parent = _check_conservative_tree_pair_level_2d(
-        bank.schedule, parent_level)
-    return bank.ledger_pairs[parent + 1]
-end
-
-function _conservative_tree_packed_ledger_slot_2d(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        parent_cell_id::Integer)
-    parent_id = Int(parent_cell_id)
-    1 <= parent_id <= length(bank.spec.cells) ||
-        throw(ArgumentError("parent_cell_id is outside the tree"))
-    parent = bank.spec.cells[parent_id]
-    _check_conservative_tree_pair_level_2d(bank.schedule, parent.level)
-    slot = bank.parent_ledger_slot[parent_id]
-    slot != 0 ||
-        throw(ArgumentError("parent_cell_id does not identify a refined parent"))
-    return slot
-end
-
-function conservative_tree_subcycle_spatial_ledger_2d(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        parent_cell_id::Integer)
-    parent_id = Int(parent_cell_id)
-    1 <= parent_id <= length(bank.spec.cells) ||
-        throw(ArgumentError("parent_cell_id is outside the tree"))
-    parent = bank.spec.cells[parent_id]
-    pair = _conservative_tree_packed_ledger_pair_2d(bank, parent.level)
-    slot = _conservative_tree_packed_ledger_slot_2d(bank, parent_id)
-    return ConservativeTreeSubcycleLedger2D(
-        bank.schedule.ratio,
-        copy(@view(pair.coarse_to_fine[:, :, :, :, slot])),
-        copy(@view(pair.fine_to_coarse[:, :, slot])))
-end
-
-function reset_conservative_tree_subcycle_spatial_bank_2d!(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D)
-    for pair in bank.ledger_pairs
-        fill!(pair.coarse_to_fine, zero(eltype(pair.coarse_to_fine)))
-        fill!(pair.fine_to_coarse, zero(eltype(pair.fine_to_coarse)))
-    end
-    for cache in bank.route_packet_caches
-        _zero_conservative_tree_route_packet_cache_2d!(cache)
-    end
-    return bank
-end
-
-function reset_conservative_tree_subcycle_spatial_pair_2d!(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        parent_level::Integer)
-    parent = _check_conservative_tree_pair_level_2d(
-        bank.schedule, parent_level)
-    pair = bank.ledger_pairs[parent + 1]
-    fill!(pair.coarse_to_fine, zero(eltype(pair.coarse_to_fine)))
-    fill!(pair.fine_to_coarse, zero(eltype(pair.fine_to_coarse)))
-    _zero_conservative_tree_route_packet_cache_2d!(
-        bank.route_packet_caches[parent + 1])
-    return bank
-end
-
-function _zero_conservative_tree_route_packet_cache_2d!(
-        cache::ConservativeTreeSubcycleRoutePacketCache2D)
-    fill!(cache.packets, zero(eltype(cache.packets)))
-    return cache
-end
-
-function _ensure_conservative_tree_route_packet_cache_2d!(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D{T},
-        parent_level::Integer,
-        dst_id::Integer,
-        q::Integer) where T
-    parent = _check_conservative_tree_pair_level_2d(
-        bank.schedule, parent_level)
-    cache = bank.route_packet_caches[parent + 1]
-    key = (Int(dst_id), _check_d2q9_q(q))
-    slot = get(cache.key_to_slot, key, 0)
-    if slot == 0
-        push!(cache.dst_ids, key[1])
-        push!(cache.qs, key[2])
-        slot = length(cache.dst_ids)
-        cache.key_to_slot[key] = slot
-        old_len = length(cache.packets)
-        resize!(cache.packets, old_len + bank.schedule.ratio)
-        @inbounds for idx in (old_len + 1):length(cache.packets)
-            cache.packets[idx] = zero(T)
-        end
-    end
-    return slot
-end
 
 function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
@@ -563,7 +145,6 @@ function prepare_conservative_tree_subcycle_route_packet_cache_2d!(
     bank.route_packet_cache_periodic_x[1] = periodic_x
     return bank
 end
-
 function _conservative_tree_subcycle_route_packet_cache_ready_2d(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
         table::ConservativeTreeRouteTable2D;
@@ -586,6 +167,8 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
         route_packet_slot::Integer=0;
         alpha=1,
         interface_time_scaling::Symbol=:leaf_equivalent,
+        current_tick::Integer=0,
+        delayed_same_level_transit::Bool=true,
         periodic_x::Bool=false)
     kind == COALESCE_FACE || kind == COALESCE_CORNER ||
         throw(ArgumentError("route must be a fine-to-coarse coalesce route"))
@@ -607,6 +190,48 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
         throw(ArgumentError("substep must be inside 1:$(bank.schedule.ratio)"))
     packet_slot_i = Int(route_packet_slot)
     if interface_time_scaling == :level_native && kind == COALESCE_CORNER
+        if delayed_same_level_transit
+            delayed_dst, delayed_q, delayed_tick =
+                _conservative_tree_level_native_delayed_same_level_transit_state_2d(
+                    spec, bank.schedule, child_id, src_q, Int(current_tick),
+                    dst_cell_id; periodic_x=periodic_x)
+            if delayed_dst != 0
+                packet = _conservative_tree_f2c_time_factor_2d(
+                    bank, interface_time_scaling) *
+                    _subcycle_cell_route_packet_2d(
+                        F, spec, child_id, src_q, weight; alpha=alpha)
+                _push_conservative_tree_delayed_same_level_packet_2d!(
+                    bank, delayed_tick, child.level, delayed_dst, delayed_q,
+                    packet)
+                return bank
+            end
+        end
+        transit_dst, transit_q =
+            _conservative_tree_level_native_corner_child_transit_state_2d(
+                spec, child_id, src_q, step, bank.schedule.ratio,
+                dst_cell_id; periodic_x=periodic_x)
+        if transit_dst != 0
+            transit_parent_id = spec.cells[transit_dst].parent
+            transit_parent_id != 0 ||
+                throw(ArgumentError("native child transit destination must have a parent"))
+            transit_parent = spec.cells[transit_parent_id]
+            transit_parent.level == parent.level ||
+                throw(ArgumentError("native child transit parent level mismatch"))
+            pair = _conservative_tree_packed_ledger_pair_2d(
+                bank, parent.level)
+            transit_slot = _conservative_tree_packed_ledger_slot_2d(
+                bank, transit_parent_id)
+            ix, iy = _conservative_tree_child_index_in_parent_2d(
+                transit_parent, spec.cells[transit_dst])
+            packet = _conservative_tree_f2c_time_factor_2d(
+                bank, interface_time_scaling) *
+                _subcycle_cell_route_packet_2d(
+                    F, spec, child_id, src_q, weight; alpha=alpha)
+            pair.coarse_to_fine[
+                ix, iy, transit_q, bank.schedule.ratio, transit_slot] +=
+                packet
+            return bank
+        end
         native_dst, native_q = _conservative_tree_level_native_corner_reflux_state_2d(
             spec, child_id, src_q, step, bank.schedule.ratio, dst_cell_id;
             periodic_x=periodic_x)
@@ -634,6 +259,118 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_
     end
     cache = bank.route_packet_caches[parent.level + 1]
     cache.packets[(packet_slot - 1) * bank.schedule.ratio + step] += packet
+    return bank
+end
+
+function _conservative_tree_level_native_corner_child_transit_state_2d(
+        spec::ConservativeTreeSpec2D,
+        src_id::Int,
+        q::Int,
+        substep::Int,
+        ratio::Int,
+        fallback_dst::Int;
+        periodic_x::Bool=false)
+    src = spec.cells[src_id]
+    src.active || return 0, q
+    src.level > 0 || return 0, q
+    remaining_strides = ratio - substep + 1
+    remaining_strides > 1 || return 0, q
+    parent = spec.cells[src.parent]
+    nx_child = _conservative_tree_level_size_2d(spec.Nx, src.level)
+    ny_child = _conservative_tree_level_size_2d(spec.Ny, src.level)
+    i_cur = src.i
+    j_cur = src.j
+    q_cur = q
+
+    advanced, i_cur, j_cur, q_cur =
+        _conservative_tree_phase_advance_periodic_x_wall_y_2d(
+            i_cur, j_cur, q_cur, nx_child, ny_child;
+            periodic_x=periodic_x)
+    advanced || return 0, q
+    first_owner = _active_leaf_covering_sample_2d(
+        spec, src.level, i_cur, j_cur)
+    first_owner == fallback_dst || return 0, q_cur
+    first = spec.cells[first_owner]
+    first.active || return 0, q_cur
+    first.level == parent.level || return 0, q_cur
+    spec.children[first_owner] == (0, 0, 0, 0) || return 0, q_cur
+
+    for _ in 2:remaining_strides
+        advanced, i_cur, j_cur, q_cur =
+            _conservative_tree_phase_advance_periodic_x_wall_y_2d(
+                i_cur, j_cur, q_cur, nx_child, ny_child;
+                periodic_x=periodic_x)
+        advanced || return 0, q
+    end
+
+    dst_id = conservative_tree_cell_id_2d(
+        spec, src.level, i_cur, j_cur)
+    dst_id == 0 && return 0, q_cur
+    dst = spec.cells[dst_id]
+    dst.active || return 0, q_cur
+    dst.parent != 0 || return 0, q_cur
+    dst_parent = spec.cells[dst.parent]
+    dst_parent.level == parent.level || return 0, q_cur
+    spec.children[dst.parent] != (0, 0, 0, 0) || return 0, q_cur
+    return dst_id, q_cur
+end
+
+function _conservative_tree_level_native_delayed_same_level_transit_state_2d(
+        spec::ConservativeTreeSpec2D,
+        schedule::ConservativeTreeSubcycleSchedule2D,
+        src_id::Int,
+        q::Int,
+        current_tick::Int,
+        fallback_dst::Int;
+        periodic_x::Bool=false)
+    src = spec.cells[src_id]
+    src.active || return 0, q, 0
+    src.level > 0 || return 0, q, 0
+    stride = schedule.level_step_ticks[src.level + 1]
+    current_tick > 0 || return 0, q, 0
+    current_tick % stride == 0 || return 0, q, 0
+    nx_level = _conservative_tree_level_size_2d(spec.Nx, src.level)
+    ny_level = _conservative_tree_level_size_2d(spec.Ny, src.level)
+    i_cur = src.i
+    j_cur = src.j
+    q_cur = q
+    tick = current_tick
+    first_stride = true
+
+    while tick <= schedule.finest_ticks
+        advanced, i_cur, j_cur, q_cur =
+            _conservative_tree_phase_advance_periodic_x_wall_y_2d(
+                i_cur, j_cur, q_cur, nx_level, ny_level;
+                periodic_x=periodic_x)
+        advanced || return 0, q, 0
+        owner_id = _active_leaf_covering_sample_2d(
+            spec, src.level, i_cur, j_cur)
+        owner_id == 0 && return 0, q_cur, 0
+        owner = spec.cells[owner_id]
+        if owner.level == src.level
+            first_stride && return 0, q_cur, 0
+            return owner_id, q_cur, tick
+        end
+        owner.level < src.level || return 0, q_cur, 0
+        first_stride && owner_id != fallback_dst && return 0, q_cur, 0
+        first_stride = false
+        tick += stride
+    end
+    return 0, q_cur, 0
+end
+
+function _push_conservative_tree_delayed_same_level_packet_2d!(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D{T},
+        tick::Integer,
+        level::Integer,
+        dst_id::Integer,
+        q::Integer,
+        packet) where T
+    push!(bank.delayed_same_level_ticks, Int(tick))
+    push!(bank.delayed_same_level_levels, Int(level))
+    push!(bank.delayed_same_level_dst_ids, Int(dst_id))
+    push!(bank.delayed_same_level_qs, _check_d2q9_q(q))
+    push!(bank.delayed_same_level_packets, T(packet))
     return bank
 end
 
@@ -704,44 +441,22 @@ function _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
         route_packet_slot::Integer=0;
         alpha=1,
         interface_time_scaling::Symbol=:leaf_equivalent,
+        current_tick::Integer=0,
+        delayed_same_level_transit::Bool=true,
         periodic_x::Bool=false)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_unchecked_2d!(
         bank, F, src_id, dst_id, q, weight, kind, substep,
         route_packet_slot; alpha=alpha,
         interface_time_scaling=interface_time_scaling,
+        current_tick=current_tick,
+        delayed_same_level_transit=delayed_same_level_transit,
         periodic_x=periodic_x)
 end
 
-@inline function _conservative_tree_child_slot_2d(ix::Int, iy::Int)
-    1 <= ix <= 2 || throw(ArgumentError("child ix must be 1 or 2"))
-    1 <= iy <= 2 || throw(ArgumentError("child iy must be 1 or 2"))
-    return ix + 2 * (iy - 1)
-end
 
-@inline function _conservative_tree_child_index_in_parent_2d(
-        parent::ConservativeTreeCell2D,
-        child::ConservativeTreeCell2D)
-    child.level == parent.level + 1 ||
-        throw(ArgumentError("child cell is not one level below parent"))
-    ix = child.i - 2 * parent.i + 2
-    iy = child.j - 2 * parent.j + 2
-    1 <= ix <= 2 && 1 <= iy <= 2 ||
-        throw(ArgumentError("child cell is not inside parent"))
-    return ix, iy
-end
 
-function _check_conservative_tree_subcycle_spatial_F_2d(
-        F::AbstractMatrix,
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D)
-    _check_conservative_tree_F_2d(F, bank.spec)
-    return nothing
-end
 
-function _check_conservative_tree_subcycle_route_table_2d(
-        table::ConservativeTreeRouteTable2D)
-    return table
-end
 
 function _check_conservative_tree_leaf_solid_mask_2d(
         spec::ConservativeTreeSpec2D,
@@ -816,88 +531,12 @@ function validate_conservative_tree_solid_mask_resolved_2d(
     return is_solid
 end
 
-function conservative_tree_subcycle_local_substep_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D,
-        parent_level::Integer,
-        tick::Integer)
-    parent = _check_conservative_tree_pair_level_2d(schedule, parent_level)
-    t = Int(tick)
-    0 < t <= schedule.finest_ticks ||
-        throw(ArgumentError("tick must be a positive schedule tick"))
 
-    parent_ticks = schedule.level_step_ticks[parent + 1]
-    child_ticks = schedule.level_step_ticks[parent + 2]
-    t % child_ticks == 0 ||
-        throw(ArgumentError("tick is not aligned with the child level"))
 
-    parent_start = div(t - 1, parent_ticks) * parent_ticks
-    local_step = div(t - parent_start, child_ticks)
-    1 <= local_step <= schedule.ratio ||
-        throw(ArgumentError("tick is outside the parent subcycle interval"))
-    return local_step
-end
 
-function _check_subcycle_sync_down_event_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D,
-        event::ConservativeTreeSubcycleEvent2D)
-    event.phase == :sync_down ||
-        throw(ArgumentError("event must be :sync_down"))
-    event.dst_level == event.src_level + 1 ||
-        throw(ArgumentError("sync_down event must target an adjacent child level"))
-    _check_conservative_tree_pair_level_2d(schedule, event.src_level)
-    return event.src_level
-end
 
-function _check_subcycle_sync_up_event_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D,
-        event::ConservativeTreeSubcycleEvent2D)
-    event.phase == :sync_up ||
-        throw(ArgumentError("event must be :sync_up"))
-    event.src_level == event.dst_level + 1 ||
-        throw(ArgumentError("sync_up event must target an adjacent parent level"))
-    _check_conservative_tree_pair_level_2d(schedule, event.dst_level)
-    return event.dst_level
-end
 
-function _check_subcycle_child_advance_event_2d(
-        schedule::ConservativeTreeSubcycleSchedule2D,
-        event::ConservativeTreeSubcycleEvent2D)
-    event.phase == :advance ||
-        throw(ArgumentError("event must be :advance"))
-    event.src_level == event.dst_level ||
-        throw(ArgumentError("advance event must have identical src/dst levels"))
-    event.src_level > 0 ||
-        throw(ArgumentError("level-0 advance has no parent subcycle ledger"))
-    parent = event.src_level - 1
-    substep = conservative_tree_subcycle_local_substep_2d(
-        schedule, parent, event.tick)
-    return parent, substep
-end
 
-function _check_subcycle_spatial_sync_down_event_2d(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        event::ConservativeTreeSubcycleEvent2D)
-    parent = _check_subcycle_sync_down_event_2d(bank.schedule, event)
-    _conservative_tree_packed_ledger_pair_2d(bank, parent)
-    return parent
-end
-
-function _check_subcycle_spatial_sync_up_event_2d(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        event::ConservativeTreeSubcycleEvent2D)
-    parent = _check_subcycle_sync_up_event_2d(bank.schedule, event)
-    _conservative_tree_packed_ledger_pair_2d(bank, parent)
-    return parent
-end
-
-function _check_subcycle_spatial_child_advance_event_2d(
-        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
-        event::ConservativeTreeSubcycleEvent2D)
-    parent, substep = _check_subcycle_child_advance_event_2d(
-        bank.schedule, event)
-    _conservative_tree_packed_ledger_pair_2d(bank, parent)
-    return parent, substep
-end
 
 @inline function _subcycle_route_packet_2d(
         F::AbstractMatrix,
@@ -1168,11 +807,15 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_route_2d!(
         route_packet_slot::Integer=0;
         alpha=1,
         interface_time_scaling::Symbol=:leaf_equivalent,
+        current_tick::Integer=0,
+        delayed_same_level_transit::Bool=true,
         periodic_x::Bool=false)
     return _conservative_tree_subcycle_accumulate_fine_to_coarse_packet_2d!(
         bank, F, route.src, route.dst, route.q, route.weight, route.kind,
         substep, route_packet_slot; alpha=alpha,
         interface_time_scaling=interface_time_scaling,
+        current_tick=current_tick,
+        delayed_same_level_transit=delayed_same_level_transit,
         periodic_x=periodic_x)
 end
 
@@ -1233,25 +876,6 @@ function _conservative_tree_subcycle_accumulate_compact_inactive_f2c_routes_2d!(
     return bank
 end
 
-function _conservative_tree_phase_advance_periodic_x_wall_y_2d(
-        i::Int,
-        j::Int,
-        q::Int,
-        nx::Int,
-        ny::Int;
-        periodic_x::Bool=false)
-    trial_i = i + d2q9_cx(q)
-    trial_j = j + d2q9_cy(q)
-    if periodic_x
-        trial_i = mod1(trial_i, nx)
-    elseif !(1 <= trial_i <= nx)
-        return false, i, j, q
-    end
-    if !(1 <= trial_j <= ny)
-        return true, i, j, d2q9_opposite(q)
-    end
-    return true, trial_i, trial_j, q
-end
 
 function conservative_tree_subcycle_sync_down_level_native_phase_routes_F_2d!(
         bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
@@ -1359,6 +983,7 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
         table::ConservativeTreeRouteTable2D;
         alpha=1,
         interface_time_scaling::Symbol=:leaf_equivalent,
+        delayed_same_level_transit::Bool=true,
         periodic_x::Bool=false)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
@@ -1384,6 +1009,8 @@ function conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
             bank, F, route.src, route.dst, route.q, route.weight, route.kind,
             substep, packet_slot; alpha=alpha,
             interface_time_scaling=interface_time_scaling,
+            current_tick=event.tick,
+            delayed_same_level_transit=delayed_same_level_transit,
             periodic_x=periodic_x)
     end
     return bank
@@ -1453,6 +1080,7 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
         F::AbstractMatrix;
         alpha=1,
         interface_time_scaling::Symbol=:leaf_equivalent,
+        delayed_same_level_transit::Bool=true,
         periodic_x::Bool=false)
     parent_level, substep = _check_subcycle_spatial_child_advance_event_2d(
         bank, event)
@@ -1480,6 +1108,8 @@ function conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
                 bank, F, src_id, dst_id, q, 1.0, kind, substep,
                 packet_slot; alpha=alpha,
                 interface_time_scaling=interface_time_scaling,
+                current_tick=event.tick,
+                delayed_same_level_transit=delayed_same_level_transit,
                 periodic_x=periodic_x)
         end
     end
@@ -1536,6 +1166,26 @@ function conservative_tree_subcycle_apply_child_advance_injection_F_2d!(
         bank, event)
     return conservative_tree_subcycle_apply_coarse_to_fine_pair_F_2d!(
         F, bank, parent_level, substep)
+end
+
+function conservative_tree_subcycle_apply_delayed_same_level_packets_F_2d!(
+        F::AbstractMatrix,
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D,
+        event::ConservativeTreeSubcycleEvent2D)
+    event.phase == :advance || return F
+    _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
+    level = event.src_level
+    tick = event.tick
+    @inbounds for idx in eachindex(bank.delayed_same_level_packets)
+        bank.delayed_same_level_ticks[idx] == tick || continue
+        bank.delayed_same_level_levels[idx] == level || continue
+        packet = bank.delayed_same_level_packets[idx]
+        iszero(packet) && continue
+        F[bank.delayed_same_level_dst_ids[idx],
+          bank.delayed_same_level_qs[idx]] += packet
+        bank.delayed_same_level_packets[idx] = zero(packet)
+    end
+    return F
 end
 
 function conservative_tree_subcycle_apply_fine_to_coarse_F_2d!(
@@ -1977,48 +1627,79 @@ function _append_conservative_tree_wall_phase_one_tick_scatter_2d!(
         periodic_x::Bool=false) where {T}
     src = spec.cells[src_id]
     level = src.level
-    i0, i1, j0, j1 = _conservative_tree_cell_leaf_bounds_2d(spec, src)
-    nsub = (i1 - i0 + 1) * (j1 - j0 + 1)
-    weight = one(T) / T(nsub)
-    nx_leaf = _conservative_tree_level_size_2d(spec.Nx, spec.max_level)
-    ny_leaf = _conservative_tree_level_size_2d(spec.Ny, spec.max_level)
     advance_tick = _conservative_tree_wall_phase_owner_advance_tick_2d(
         schedule, level, leaf_tick)
 
-    @inbounds for leaf_j in j0:j1, leaf_i in i0:i1
-        pos_i = leaf_i
-        pos_j = leaf_j
+    if level == spec.max_level
+        nx = _conservative_tree_level_size_2d(spec.Nx, level)
+        ny = _conservative_tree_level_size_2d(spec.Ny, level)
+        advanced, next_i, next_j, next_q =
+            _conservative_tree_phase_advance_periodic_x_wall_y_2d(
+                src.i, src.j, q, nx, ny; periodic_x=periodic_x)
+        advanced || return nothing
+        dst_id = _active_leaf_covering_sample_2d(
+            spec, level, next_i, next_j)
+        dst_id == 0 && return nothing
+        dst = spec.cells[dst_id]
+        _push_conservative_tree_wall_phase_event_mask_2d!(
+            event_mask_seen, event_mask_phases, event_mask_ticks,
+            event_mask_levels, event_mask_src_ids, event_mask_src_qs,
+            :advance, advance_tick, level, src_id, q)
+        if dst.level < level
+            push!(reflux_ticks, advance_tick)
+            push!(reflux_levels, level)
+            push!(reflux_src_ids, src_id)
+            push!(reflux_src_qs, q)
+            push!(reflux_dst_ids, dst_id)
+            push!(reflux_dst_qs, next_q)
+            push!(reflux_weights, one(T))
+        elseif dst.level == level
+            push!(advance_ticks, advance_tick)
+            push!(advance_levels, level)
+            push!(advance_src_ids, src_id)
+            push!(advance_src_qs, q)
+            push!(advance_dst_ids, dst_id)
+            push!(advance_dst_qs, next_q)
+            push!(advance_weights, one(T))
+        end
+        return nothing
+    end
+
+    ratio = 2
+    child_level = level + 1
+    nx_child = _conservative_tree_level_size_2d(spec.Nx, child_level)
+    ny_child = _conservative_tree_level_size_2d(spec.Ny, child_level)
+    weight = one(T) / T(ratio * ratio)
+    sync_tick = _conservative_tree_wall_phase_interval_start_tick_2d(
+        schedule, level, leaf_tick)
+
+    @inbounds for sj in 1:ratio, si in 1:ratio
+        pos_i = (src.i - 1) * ratio + si
+        pos_j = (src.j - 1) * ratio + sj
         qcur = q
-        for tick in leaf_tick:advance_tick
+        alive = true
+        entered_fine = false
+        for substep in 1:ratio
             advanced, next_i, next_j, next_q =
                 _conservative_tree_phase_advance_periodic_x_wall_y_2d(
-                    pos_i, pos_j, qcur, nx_leaf, ny_leaf;
+                    pos_i, pos_j, qcur, nx_child, ny_child;
                     periodic_x=periodic_x)
-            advanced || break
-            dst_id = _active_leaf_covering_sample_2d(
-                spec, spec.max_level, next_i, next_j)
-            dst_id == 0 && break
-            dst = spec.cells[dst_id]
-            if dst.level > level
-                child_level = level + 1
-                child_i, child_j = _conservative_tree_level_coord_from_leaf_2d(
-                    spec, child_level, next_i, next_j)
-                child_id = conservative_tree_cell_id_2d(
-                    spec, child_level, child_i, child_j)
-                child_id == 0 && break
-                parent_id = spec.cells[child_id].parent
-                parent_id == 0 && break
-                parent = spec.cells[parent_id]
-                parent.level == level || break
-                spec.children[parent_id] == (0, 0, 0, 0) && break
-                child_event_tick =
-                    _conservative_tree_wall_phase_owner_advance_tick_2d(
-                        schedule, child_level, tick)
-                child_substep = conservative_tree_subcycle_local_substep_2d(
-                    schedule, level, child_event_tick)
-                sync_tick =
-                    _conservative_tree_wall_phase_interval_start_tick_2d(
-                        schedule, level, tick)
+            if !advanced
+                alive = false
+                break
+            end
+            pos_i = next_i
+            pos_j = next_j
+            qcur = next_q
+            child_id = conservative_tree_cell_id_2d(
+                spec, child_level, pos_i, pos_j)
+            child_id == 0 && continue
+            parent_id = spec.cells[child_id].parent
+            parent_id == 0 && continue
+            parent = spec.cells[parent_id]
+            if parent.level == level &&
+               spec.children[parent_id] != (0, 0, 0, 0) &&
+               parent_id != src_id
                 _push_conservative_tree_wall_phase_event_mask_2d!(
                     event_mask_seen, event_mask_phases, event_mask_ticks,
                     event_mask_levels, event_mask_src_ids, event_mask_src_qs,
@@ -2027,44 +1708,44 @@ function _append_conservative_tree_wall_phase_one_tick_scatter_2d!(
                     parent, spec.cells[child_id])
                 push!(sync_ticks, sync_tick)
                 push!(sync_parent_levels, level)
-                push!(sync_child_substeps, child_substep)
+                push!(sync_child_substeps, substep)
                 push!(sync_src_ids, src_id)
                 push!(sync_src_qs, q)
                 push!(sync_parent_ids, parent_id)
                 push!(sync_ixs, ix)
                 push!(sync_iys, iy)
-                push!(sync_dst_qs, next_q)
+                push!(sync_dst_qs, qcur)
                 push!(sync_weights, weight)
+                entered_fine = true
                 break
-            elseif dst.level < level
-                _push_conservative_tree_wall_phase_event_mask_2d!(
-                    event_mask_seen, event_mask_phases, event_mask_ticks,
-                    event_mask_levels, event_mask_src_ids, event_mask_src_qs,
-                    :advance, advance_tick, level, src_id, q)
-                push!(reflux_ticks, advance_tick)
-                push!(reflux_levels, level)
-                push!(reflux_src_ids, src_id)
-                push!(reflux_src_qs, q)
-                push!(reflux_dst_ids, dst_id)
-                push!(reflux_dst_qs, next_q)
-                push!(reflux_weights, weight)
-                break
-            elseif tick == advance_tick
-                _push_conservative_tree_wall_phase_event_mask_2d!(
-                    event_mask_seen, event_mask_phases, event_mask_ticks,
-                    event_mask_levels, event_mask_src_ids, event_mask_src_qs,
-                    :advance, advance_tick, level, src_id, q)
-                push!(advance_ticks, advance_tick)
-                push!(advance_levels, level)
-                push!(advance_src_ids, src_id)
-                push!(advance_src_qs, q)
-                push!(advance_dst_ids, dst_id)
-                push!(advance_dst_qs, next_q)
-                push!(advance_weights, weight)
             end
-            pos_i = next_i
-            pos_j = next_j
-            qcur = next_q
+        end
+        alive || continue
+        entered_fine && continue
+        dst_id = _active_leaf_covering_sample_2d(
+            spec, child_level, pos_i, pos_j)
+        dst_id == 0 && continue
+        dst = spec.cells[dst_id]
+        _push_conservative_tree_wall_phase_event_mask_2d!(
+            event_mask_seen, event_mask_phases, event_mask_ticks,
+            event_mask_levels, event_mask_src_ids, event_mask_src_qs,
+            :advance, advance_tick, level, src_id, q)
+        if dst.level < level
+            push!(reflux_ticks, advance_tick)
+            push!(reflux_levels, level)
+            push!(reflux_src_ids, src_id)
+            push!(reflux_src_qs, q)
+            push!(reflux_dst_ids, dst_id)
+            push!(reflux_dst_qs, qcur)
+            push!(reflux_weights, weight)
+        elseif dst.level == level
+            push!(advance_ticks, advance_tick)
+            push!(advance_levels, level)
+            push!(advance_src_ids, src_id)
+            push!(advance_src_qs, q)
+            push!(advance_dst_ids, dst_id)
+            push!(advance_dst_qs, qcur)
+            push!(advance_weights, weight)
         end
     end
     return nothing
@@ -2248,6 +1929,23 @@ function _prepare_conservative_tree_wall_phase_scatter_2d(
         advance_dst_ids, advance_dst_qs, advance_weights, reflux_ticks,
         reflux_levels, reflux_src_ids, reflux_src_qs, reflux_dst_ids,
         reflux_dst_qs, reflux_weights)
+end
+
+function _cached_conservative_tree_wall_phase_scatter_2d(
+        bank::ConservativeTreeSubcycleSpatialLedgerBank2D{T};
+        periodic_x::Bool=false) where {T}
+    if !isempty(bank.wall_phase_scatter_cache) &&
+       !isempty(bank.wall_phase_scatter_cache_periodic_x) &&
+       bank.wall_phase_scatter_cache_periodic_x[1] == periodic_x
+        return bank.wall_phase_scatter_cache[1]
+    end
+    scatter = _prepare_conservative_tree_wall_phase_scatter_2d(
+        bank.spec; periodic_x=periodic_x, schedule=bank.schedule, T=T)
+    empty!(bank.wall_phase_scatter_cache)
+    empty!(bank.wall_phase_scatter_cache_periodic_x)
+    push!(bank.wall_phase_scatter_cache, scatter)
+    push!(bank.wall_phase_scatter_cache_periodic_x, periodic_x)
+    return scatter
 end
 
 function _mask_conservative_tree_wall_phase_sources_2d!(
@@ -2482,8 +2180,15 @@ function _stream_conservative_tree_level_native_wall_phase_transport_F_2d!(
         scatter_source=nothing)
     periodic_x = true
     scatter_run = scatter === nothing ?
-        _prepare_conservative_tree_wall_phase_scatter_2d(
-            spec; periodic_x=periodic_x, T=Float64) :
+        (route_bank === nothing ?
+            (schedule === nothing ?
+                _prepare_conservative_tree_wall_phase_scatter_2d(
+                    spec; periodic_x=periodic_x, T=eltype(Fout)) :
+                _prepare_conservative_tree_wall_phase_scatter_2d(
+                    spec; periodic_x=periodic_x, schedule=schedule,
+                    T=eltype(Fout))) :
+            _cached_conservative_tree_wall_phase_scatter_2d(
+                route_bank; periodic_x=periodic_x)) :
         scatter
     Fmasked = copy(Fin)
     _mask_conservative_tree_wall_phase_sources_2d!(Fmasked, scatter_run)
@@ -2499,7 +2204,9 @@ function _stream_conservative_tree_level_native_wall_phase_transport_F_2d!(
         pre_stream_level! = pre_stream_level!,
         schedule=schedule, route_bank=route_bank, state_bank=state_bank,
         Fsource=Fsource, Fscratch=Fscratch,
-        wall_phase_transport_correction=false)
+        wall_phase_transport_correction=false,
+        level_native_delayed_same_level_transit=
+            pre_stream_level! === nothing && scatter_source === nothing)
 
     return _apply_conservative_tree_wall_phase_scatter_2d!(
         Fout, scatter_source === nothing ? Fin : scatter_source, scatter_run)
@@ -2517,8 +2224,9 @@ end
 #   exact child substep and child slot.
 # - advance(level): post pre_stream_level! source packets that remain on the
 #   same active level are added to Fscratch_run. Packets landing on a coarser
-#   owner bypass pair.fine_to_coarse redirection and are added directly to the
-#   destination level reflux buffer that will be consumed by the next advance.
+#   owner must not bypass the level-native fine-to-coarse/corner redirection:
+#   v38-v39 route-family replacement audits show that direct reflux deposits
+#   over-replace the native F2C family at wall-terminating xfaces.
 # - advance(level): packets landing in a finer owner are illegal here unless
 #   represented by the earlier sync_down table for that parent interval.
 # - Scatter deposits are always additive: Fdst[dst_id, dst_q] += packet.
@@ -2836,7 +2544,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         Fscratch = nothing,
         is_solid=nothing,
         interface_balance::Bool=false,
-        wall_phase_transport_correction::Bool=true)
+        wall_phase_transport_correction::Bool=true,
+        level_native_delayed_same_level_transit::Bool=true)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
     periodic_x = _conservative_tree_periodic_x_policy_2d(policy)
@@ -2921,19 +2630,22 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
        interface_time_scaling == :level_native &&
        coarse_to_fine_prolongation == :flat &&
        coarse_to_fine_state == :owned &&
-       iszero(coarse_to_fine_predictor_weight) &&
+       (iszero(coarse_to_fine_predictor_weight) ||
+        coarse_to_fine_predictor_weight == 1) &&
        alpha_c2f == 1 &&
        alpha_f2c == 1 &&
        is_solid === nothing
-        scatter_run = _prepare_conservative_tree_wall_phase_scatter_2d(
-            spec; periodic_x=periodic_x, schedule=schedule_run,
-            T=eltype(Fout))
-        if !isempty(scatter_run.src_ids)
+        scatter_run = _cached_conservative_tree_wall_phase_scatter_2d(
+            route_bank_run; periodic_x=periodic_x)
+        if (iszero(coarse_to_fine_predictor_weight) &&
+            !isempty(scatter_run.src_ids)) ||
+           (!iszero(coarse_to_fine_predictor_weight) &&
+            !isempty(scatter_run.event_mask_src_ids))
             Fpost_run = similar(Fout)
             _conservative_tree_apply_prestream_over_schedule_2d!(
                 Fpost_run, Fin, spec, schedule_run, pre_stream_level!)
             return _stream_conservative_tree_level_native_wall_phase_transport_F_2d!(
-                Fout, Fin, spec, table; boundary=boundary,
+                Fout, Fpost_run, spec, table; boundary=boundary,
                 u_south=u_south, u_north=u_north, rho_wall=rho_wall,
                 alpha_c2f=alpha_c2f, alpha_f2c=alpha_f2c,
                 coarse_to_fine_state=coarse_to_fine_state,
@@ -2945,8 +2657,11 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
         end
     end
     # The substep-keyed scatter table is prepared above as a WIP contract, but
-    # remains disabled until its per-event conservation is exact on rest.
+    # remains disabled until its per-event mask scope is exact on BGK+force.
     wall_phase_substep_scatter = nothing
+    delayed_same_level_transit =
+        level_native_delayed_same_level_transit &&
+        pre_stream_level! === nothing
     Fmasked_run = wall_phase_substep_scatter === nothing ?
         Fsource_run : similar(Fout)
     Fwall_source_run = wall_phase_substep_scatter === nothing ?
@@ -3018,7 +2733,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Fparent_routes = Fparent
             Fparent_scatter = Fparent
             if wall_phase_substep_scatter !== nothing
-                if pre_stream_level! !== nothing
+                if pre_stream_level! !== nothing &&
+                   predictor_weight < one(predictor_weight)
                     copyto!(Fwall_source_run, Fsource_run)
                     pre_stream_level!(
                         Fwall_source_run, spec, event.src_level, event)
@@ -3059,25 +2775,37 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
                 Froute_source = Fmasked_run
             end
 
+            phase_direct_active =
+                use_phase_level_native_direct &&
+                level < spec.max_level &&
+                phase_level_source_valid[level + 1]
+
             if level > 0
                 conservative_tree_subcycle_accumulate_advance_routes_F_2d!(
                     route_bank_run, event, Froute_source, table;
                     alpha=alpha_f2c,
                     interface_time_scaling=interface_time_scaling,
+                    delayed_same_level_transit=delayed_same_level_transit,
                     periodic_x=periodic_x)
                 conservative_tree_subcycle_accumulate_inactive_parent_routes_F_2d!(
                     route_bank_run, event, Froute_source; alpha=alpha_f2c,
                     interface_time_scaling=interface_time_scaling,
+                    delayed_same_level_transit=delayed_same_level_transit,
                     periodic_x=periodic_x)
             end
 
             fill!(Fscratch_run, zero(eltype(Fscratch_run)))
-            phase_direct_active =
-                use_phase_level_native_direct &&
-                level < spec.max_level &&
-                phase_level_source_valid[level + 1]
-            Fdirect_source = phase_direct_active ?
-                phase_level_sources[level + 1] : Froute_source
+            Fdirect_source = Froute_source
+            if phase_direct_active
+                Fdirect_source = phase_level_sources[level + 1]
+                if wall_phase_substep_scatter !== nothing &&
+                   _copy_mask_conservative_tree_wall_phase_event_sources_2d!(
+                        Fmasked_run, Fdirect_source,
+                        wall_phase_substep_scatter, :advance, level,
+                        event.tick)
+                    Fdirect_source = Fmasked_run
+                end
+            end
             _stream_conservative_tree_direct_level_routes_F_2d!(
                 Fscratch_run, Fdirect_source, spec, table, level, policy;
                 u_south=u_south, u_north=u_north, rho_wall=rho_wall,
@@ -3089,6 +2817,8 @@ function stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             if phase_direct_active
                 phase_level_source_valid[level + 1] = false
             end
+            conservative_tree_subcycle_apply_delayed_same_level_packets_F_2d!(
+                Fscratch_run, route_bank_run, event)
             if wall_phase_substep_scatter !== nothing
                 _apply_conservative_tree_wall_phase_advance_scatter_2d!(
                     Fscratch_run, Fsource_run, wall_phase_substep_scatter,
@@ -3225,26 +2955,8 @@ function conservative_tree_subcycle_sync_up_ledger_2d(
     return conservative_tree_subcycle_pair_ledger_2d(bank, parent)
 end
 
-function reset_conservative_tree_subcycle_ledger_2d!(
-        ledger::ConservativeTreeSubcycleLedger2D)
-    ledger.coarse_to_fine .= 0
-    ledger.fine_to_coarse .= 0
-    return ledger
-end
 
-function conservative_tree_subcycle_weights_2d(ledger::ConservativeTreeSubcycleLedger2D{T}) where T
-    ledger.ratio == 2 ||
-        throw(ArgumentError("conservative-tree subcycle weights require ratio = 2"))
-    return fill(inv(T(ledger.ratio)), ledger.ratio)
-end
 
-@inline function _check_subcycle_step_2d(ledger::ConservativeTreeSubcycleLedger2D,
-                                         substep::Integer)
-    step = Int(substep)
-    1 <= step <= ledger.ratio ||
-        throw(ArgumentError("substep must be inside 1:$(ledger.ratio)"))
-    return step
-end
 
 function conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!(
         ledger::ConservativeTreeSubcycleLedger2D,
@@ -3302,24 +3014,4 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!(
     ledger.fine_to_coarse[qi, step] +=
         coalesce_fine_to_coarse_corner_F(fine_half_step, qi, corner)
     return ledger
-end
-
-function conservative_tree_subcycle_orientation_sums_2d(
-        ledger::ConservativeTreeSubcycleLedger2D{T}) where T
-    coarse_to_fine = zeros(T, 9)
-    fine_to_coarse = zeros(T, 9)
-    @inbounds for substep in 1:ledger.ratio, q in 1:9
-        fine_to_coarse[q] += ledger.fine_to_coarse[q, substep]
-        for j in 1:2, i in 1:2
-            coarse_to_fine[q] += ledger.coarse_to_fine[i, j, q, substep]
-        end
-    end
-    return (coarse_to_fine=coarse_to_fine, fine_to_coarse=fine_to_coarse)
-end
-
-function conservative_tree_subcycle_total_sums_2d(
-        ledger::ConservativeTreeSubcycleLedger2D)
-    sums = conservative_tree_subcycle_orientation_sums_2d(ledger)
-    return (coarse_to_fine=sum(sums.coarse_to_fine),
-            fine_to_coarse=sum(sums.fine_to_coarse))
 end
