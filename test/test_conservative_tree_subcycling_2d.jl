@@ -367,6 +367,29 @@ function _test_leaf_rho_level_boundary_metrics_2d(
         x_count, y_count, max_x_jump, max_y_jump, max_abs_dev)
 end
 
+function _test_leaf_equivalent_rho_field_2d(result)
+    spec = result.spec
+    F = result.F
+    leaf_nx = spec.Nx << spec.max_level
+    leaf_ny = spec.Ny << spec.max_level
+    rho = zeros(Float64, leaf_nx, leaf_ny)
+    @inbounds for cell_id in spec.active_cells
+        cell = spec.cells[cell_id]
+        scale = 1 << (spec.max_level - cell.level)
+        mass = 0.0
+        for q in 1:9
+            mass += Float64(F[cell_id, q])
+        end
+        cell_rho = mass / Float64(cell.metrics.volume)
+        i0 = (cell.i - 1) * scale + 1
+        i1 = cell.i * scale
+        j0 = (cell.j - 1) * scale + 1
+        j1 = cell.j * scale
+        rho[i0:i1, j0:j1] .= cell_rho
+    end
+    return rho
+end
+
 @inline _test_affine_population_value_2d(x, y) =
     1.0 + 0.2 * x - 0.13 * y
 
@@ -1561,6 +1584,38 @@ end
         @test length(spec.active_cells) == 16 * 12 * 4^2
         @test maximum(abs.(amr.ux_profile .- cart_profile)) < 1e-14
         @test amr.relative_mass_drift < 1e-13
+    end
+
+    @testset "nested xband closure forced rho regression" begin
+        case_path = joinpath(dirname(@__DIR__), "benchmarks", "krk",
+                             "amr_d_convergence_2d",
+                             "poiseuille_xband_nested4_debug.krk")
+        setup = load_kraken(case_path)
+        spec = create_conservative_tree_spec_from_krk_2d(setup)
+        rho0 = 1.0
+        target = (148, 37)
+        thresh_200 = 1.0e-7
+        thresh_1000 = 1.0e-6
+
+        zero = run_conservative_tree_poiseuille_subcycled_2d(
+            max_level=4, spec=spec, steps=1000, Fx=0.0, omega=1.0,
+            rho0=rho0, route_sampling=:leaf_equivalent,
+            wall_phase_transport_correction=true)
+        zero_max_dev = maximum(abs.(_test_leaf_equivalent_rho_field_2d(zero) .-
+                                    rho0))
+        @test zero_max_dev < 1e-12 # LOCATE-4: 1000-step zero-force control stayed at roundoff, -2.2204e-16; 1e-12 leaves only roundoff room.
+
+        forced_200 = run_conservative_tree_amr_d_case_from_krk_2d(
+            case_path; steps_override=200)
+        rho_200 = _test_leaf_equivalent_rho_field_2d(forced_200)
+        dev_200 = abs(rho_200[target...] - rho0)
+        @test dev_200 < thresh_200 # LOCATE-4: observed forced 200-step target deviation was about 1.6e-6; 1e-7 is about one order tighter.
+
+        forced_1000 = run_conservative_tree_amr_d_case_from_krk_2d(
+            case_path; steps_override=1000)
+        rho_1000 = _test_leaf_equivalent_rho_field_2d(forced_1000)
+        dev_1000 = abs(rho_1000[target...] - rho0)
+        @test dev_1000 < thresh_1000 # LOCATE-4: observed forced 1000-step target deviation was about 1.4e-5; 1e-6 is about one order tighter.
     end
 
     @testset "short-time wall-normal Poiseuille improves with wall coverage" begin
