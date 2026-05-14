@@ -69,6 +69,16 @@ end
 
 # --- Public API ---
 
+"""
+    collide_guo_2d!(f, is_solid, ω, Fx, Fy)
+
+Convention: Integrated. This collision guarantees post-collision raw moments
+whose spatial mean advances as the physical velocity on the isothermal 2D
+periodic-box Guo convention test.
+
+Canonical pair member: `compute_macroscopic_2d!` at
+`src/kernels/macroscopic.jl:20`.
+"""
 function collide_guo_2d!(f, is_solid, ω, Fx, Fy)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)

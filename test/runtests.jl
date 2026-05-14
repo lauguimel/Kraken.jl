@@ -4,6 +4,7 @@ using Kraken
 @testset "Kraken.jl v0.1.0" begin
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
+    include("test_guo_convention_pairs.jl")
     include("test_poiseuille_3d.jl")
     include("test_couette.jl")
     include("test_taylor_green.jl")

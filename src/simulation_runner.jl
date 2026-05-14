@@ -183,12 +183,9 @@ function run_simulation(setup::SimulationSetup;
             collide_2d!(f_out, is_solid, ω)
         end
 
-        # 4. Macroscopic quantities
-        if has_body_force
-            compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, Fx_val, Fy_val)
-        else
-            compute_macroscopic_2d!(ρ, ux, uy, f_out)
-        end
+        # 4. Macroscopic quantities. collide_guo_2d! is Convention I
+        # (integrated), so post-collision raw moments are already physical.
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
 
         # 5. Swap
         f_in, f_out = f_out, f_in
