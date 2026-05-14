@@ -1,0 +1,6 @@
+version = v16
+kind = signed_residual_dashboard
+generated_at = 2026-05-13T18:31:12
+dashboard = /Users/guillaume/Documents/Recherche/Kraken.jl/benchmarks/results/quicklook/amr_d_v16_signed_residuals/v16_signed_residual_dashboard.png
+input_dir = benchmarks/results/quicklook/amr_d_v14_symptom_pred1p0_wallphaseon_steps2048
+topologies = xband_wall/xband_h

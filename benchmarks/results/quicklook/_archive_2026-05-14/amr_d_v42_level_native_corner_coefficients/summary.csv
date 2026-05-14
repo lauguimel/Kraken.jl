@@ -1,0 +1,9 @@
+case,topo,ratio,max_level,active_cells,routes,bad_rows,max_absdiff,worst_src_id,worst_src_level,worst_src_i,worst_src_j,worst_src_q,worst_src_geom,worst_dst_id,worst_dst_level,worst_dst_i,worst_dst_j,worst_dst_q,worst_dst_geom,worst_oracle,worst_amr,worst_diff,worst_classification
+uniform_r1,uniform,1,0,192,1728,0,0.0000000000000000e+00,0,0,0,0,0,none,0,0,0,0,0,none,0,0,0,none
+yband_r2,yband_center,2,1,480,4416,0,0.0000000000000000e+00,0,0,0,0,0,none,0,0,0,0,0,none,0,0,0,none
+xband_internal_r2,xband_internal,2,1,264,2436,0,0.0000000000000000e+00,0,0,0,0,0,none,0,0,0,0,0,none,0,0,0,none
+xband_wall_r2,xband_wall,2,1,336,3096,32,6.2500000000000000e-02,6,0,6,1,2,south_wall|east_iface|wall_level_corner,193,1,13,1,2,south_wall|west_iface|wall_level_corner,2.5000000000000000e-01,3.1250000000000000e-01,6.2500000000000000e-02,c2f
+xband_h_r2,xband_h,2,1,648,5916,0,0.0000000000000000e+00,0,0,0,0,0,none,0,0,0,0,0,none,0,0,0,none
+xband_internal_r4,xband_internal,4,2,624,5820,0,0.0000000000000000e+00,0,0,0,0,0,none,0,0,0,0,0,none,0,0,0,none
+xband_wall_r4,xband_wall,4,2,984,9072,80,6.2500000000000000e-02,5,0,5,1,2,south_wall|east_iface|wall_level_corner,193,1,11,1,2,south_wall|west_iface|wall_level_corner,2.5000000000000000e-01,3.1250000000000000e-01,6.2500000000000000e-02,c2f
+xband_h_r4,xband_h,4,2,2088,19092,0,0.0000000000000000e+00,0,0,0,0,0,none,0,0,0,0,0,none,0,0,0,none

@@ -1,0 +1,7 @@
+version = v17
+kind = level_native_symptom_audit
+generated_at = 2026-05-13T19:52:40
+input_dir = /Users/guillaume/Documents/Recherche/Kraken.jl/benchmarks/results/quicklook/amr_d_v14_symptom_pred1p0_wallphaseon_steps2048
+source_fields = fields_long.csv
+source_summary = summary.csv
+note = CSV-only audit; no solver rerun

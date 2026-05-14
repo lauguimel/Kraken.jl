@@ -1,0 +1,7 @@
+version = v39
+kind = wall_phase_route_family_replacement_audit
+generated_at = 2026-05-14T08:22:29
+ratios = 2,4,8,16
+omega = 1.0
+Fx = 1.0e-7
+comparison = native_full - native_masked vs substep scatter

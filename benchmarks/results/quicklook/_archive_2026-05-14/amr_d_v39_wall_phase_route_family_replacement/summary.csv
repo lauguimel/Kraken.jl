@@ -1,0 +1,9 @@
+case,topo,ratio,max_level,active,rows,bad_rows,max_score
+xband_wall_r2,xband_wall,2,1,336,6,1,6.9444465277779359e-03
+xband_h_r2,xband_h,2,1,648,0,0,0.0000000000000000e+00
+xband_wall_r4,xband_wall,4,2,984,16,6,1.4414159856264736e-02
+xband_h_r4,xband_h,4,2,2088,0,0,0.0000000000000000e+00
+xband_wall_r8,xband_wall,8,3,3432,36,18,1.4192094699555284e-02
+xband_h_r8,xband_h,8,3,6936,0,0,0.0000000000000000e+00
+xband_wall_r16,xband_wall,16,4,12936,76,42,1.4281195591049956e-02
+xband_h_r16,xband_h,16,4,24360,0,0,0.0000000000000000e+00

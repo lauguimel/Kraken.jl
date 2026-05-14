@@ -1,0 +1,9 @@
+case,src_geom,count,sum_absdiff,max_absdiff
+xband_wall_r2,north_wall|east_iface|wall_level_corner,8,5.0000000000000000e-01,6.2500000000000000e-02
+xband_wall_r2,north_wall|west_iface|wall_level_corner,8,5.0000000000000000e-01,6.2500000000000000e-02
+xband_wall_r2,south_wall|east_iface|wall_level_corner,8,5.0000000000000000e-01,6.2500000000000000e-02
+xband_wall_r2,south_wall|west_iface|wall_level_corner,8,5.0000000000000000e-01,6.2500000000000000e-02
+xband_wall_r4,north_wall|east_iface|wall_level_corner,20,1.2500000000000000e+00,6.2500000000000000e-02
+xband_wall_r4,north_wall|west_iface|wall_level_corner,20,1.2500000000000000e+00,6.2500000000000000e-02
+xband_wall_r4,south_wall|east_iface|wall_level_corner,20,1.2500000000000000e+00,6.2500000000000000e-02
+xband_wall_r4,south_wall|west_iface|wall_level_corner,20,1.2500000000000000e+00,6.2500000000000000e-02

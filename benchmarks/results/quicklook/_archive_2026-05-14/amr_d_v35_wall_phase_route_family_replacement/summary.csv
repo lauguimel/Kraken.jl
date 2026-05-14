@@ -1,0 +1,3 @@
+case,topo,ratio,max_level,active,rows,bad_rows,max_score
+xband_wall_r4,xband_wall,4,2,984,16,16,2.7777811111119120e-02
+xband_h_r4,xband_h,4,2,2088,0,0,0.0000000000000000e+00

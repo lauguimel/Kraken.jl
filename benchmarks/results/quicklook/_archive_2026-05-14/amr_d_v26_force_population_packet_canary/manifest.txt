@@ -1,0 +1,7 @@
+version = v26
+kind = level_native_force_population_packet_canary
+generated_at = 2026-05-13T20:34:05
+omega = 1.0
+Fx = 1.0e-7
+wall_phase_transport_correction = true
+reference = leaf transport of one Guo source packet

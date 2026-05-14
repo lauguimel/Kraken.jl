@@ -1,0 +1,10 @@
+version = v22
+kind = level_native_bgk_force_budget_canary
+generated_at = 2026-05-13T20:26:51
+cases = xband_wall_r2/xband_h_r2/xband_wall_r4/xband_h_r4/xband_wall_r8/xband_h_r8/xband_wall_r16/xband_h_r16
+omega = 1.0
+Fx = 1.0e-7
+c2f_predictor_weight = 1.0
+wall_phase_transport_correction = true
+steps = 1 top-level AMR step
+reference = leaf oracle with 1<<max_level Guo+stream ticks

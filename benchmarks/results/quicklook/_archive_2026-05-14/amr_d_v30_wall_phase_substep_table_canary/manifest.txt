@@ -1,0 +1,6 @@
+version = v30
+kind = wall_phase_substep_table_canary
+generated_at = 2026-05-13T20:54:31
+ratios = 2,4,8,16
+tolerance = 1.0e-12
+invariant = sum outgoing event-keyed weights per masked source should be 1

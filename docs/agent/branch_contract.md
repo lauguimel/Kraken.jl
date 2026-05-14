@@ -35,7 +35,16 @@ AMR-D uses conservative integrated populations on a cell-centered tree.
 - 2D production path:
   - `src/refinement/conservative_tree_spec_2d.jl`
   - `src/refinement/conservative_tree_routes_2d.jl`
-  - `src/refinement/conservative_tree_subcycling_2d.jl`
+  - `src/refinement/conservative_tree_subcycling_2d.jl` (umbrella, 6 lines)
+    includes:
+      - `subcycling_schedule_2d.jl`
+      - `subcycling_explosion_2d.jl`
+      - `subcycling_coalesce_2d.jl`
+      - `subcycling_streaming_2d.jl`
+      - `subcycling_wall_phase_2d.jl`
+      - `subcycling_driver_2d.jl`
+  - Split landed 2026-05-14, commits 63698a3..44f54b1. No semantic
+    change; baseline test signature preserved.
   - `src/refinement/conservative_tree_macroflows_subcycled_2d.jl`
   - `src/refinement/conservative_tree_gpu_pack_2d.jl`
   - `src/refinement/conservative_tree_krk_validation_2d.jl`
@@ -71,6 +80,17 @@ Not closed:
 - H100 benchmark versus CPU and Cartesian baselines;
 - D3Q19 conservative-tree publication path.
 
+### Recent changes (2026-05-14)
+
+- Subcycling monolith split into 6 cohesive files (<=700 lines each).
+- 6-marche validation ladder added: test/test_amr_d_ladder.jl.
+- Ladder runs: marche 1 pure stream; 2 BGK no force;
+  3 BGK + constant force, periodic; 4 BB Poiseuille; 5 one-level
+  refinement; 6 nested-4 refinement.
+- Current status: marches 1-2 pass; marche 3 fails with
+  max_err ~= gx/2 (suspected half-force convention ambiguity,
+  parked pending disambiguation).
+
 ## Validation Ladder
 
 Every AMR-D change climbs this ladder:
@@ -88,9 +108,14 @@ ledger, boundary, or collision canary that can explain the failure.
 Required local canaries before committing AMR-D scheduler/GPU/KRK changes:
 
 ```bash
+julia --project=. -e 'using Test; using Kraken; include("test/test_amr_d_ladder.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_conservative_tree_gpu_pack_2d.jl")'
 julia --project=. -e 'using Test; using Kraken; include("test/test_amr_d_krk_validation_2d.jl")'
 ```
+
+The ladder above is the primary gate. Work on marche N is blocked while any
+marche M < N is red. Tolerances are explicit and tied to physics (see the file
+header). Do not relax tolerances to make the suite green.
 
 Optional local Metal smoke when GPU route code changes:
 
@@ -108,6 +133,17 @@ KRK_AMR_D_TEMP_MAX_STEPS=3200 \
 KRK_AMR_D_TEMP_CASES=poiseuille_yband_nested4_debug.krk \
 julia --project=. benchmarks/amr_d_macroflow_temporal_convergence_2d.jl
 ```
+
+## File Size Limits
+
+Files in src/refinement/ must not exceed 700 lines. Before editing any file at
+or above this threshold, propose a mechanical split (one module per cohesive
+concern, one commit per module, baseline test signature preserved) and wait for
+user approval. The 2026-05-14 split of subcycling_2d is the reference protocol.
+
+Other src/ files have no hard cap, but the same principle applies: if a session
+keeps adding to a 1000+ line file, the next sustainable move is a split, not
+another inline patch.
 
 ## Acceptance Gates
 
@@ -145,6 +181,26 @@ Performance gates:
 - Do not modify SLBM/body-fit/multiblock files for an AMR-D fix unless the bug
   is proven cross-cutting and documented.
 - Do not stage unrelated dirty files.
+
+## Canary Lifecycle
+
+Canaries are short-lived diagnostic scripts (typically under
+benchmarks/results/quicklook/ or as ad hoc test files). They are permitted to
+find bugs. They are NOT permitted to accumulate.
+
+Rules:
+
+- Any canary that reveals a real bug must, before the session ends, become a
+  permanent @test in test/ that exercises the bug. Once the bug is fixed, the
+  @test stays as regression.
+- Canaries that reveal no bug are deleted at session end.
+- The benchmarks/results/quicklook/amr_d_v14 .. amr_d_v41 series and the
+  docs/design/amr_d_* audits prior to 2026-05-14 are archived (see
+  _archive_2026-05-14/). They are snapshots of past sessions, not current
+  truth. Do not read them to "understand the history" — they will mislead.
+- If you find yourself about to create amr_d_v(N+1)_canary, stop. Write a
+  @test instead, or ask the user to relax the rule with explicit
+  justification.
 
 ## Milestones
 

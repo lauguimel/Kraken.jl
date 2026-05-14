@@ -1,0 +1,13 @@
+version = v14
+kind = symptom_dashboard
+generated_at = 2026-05-13T18:29:01
+dashboard = /Users/guillaume/Documents/Recherche/Kraken.jl/benchmarks/results/quicklook/amr_d_v14_symptom_pred1p0_wallphaseon_steps2048/v14_dashboard.png
+steps = 2048
+Fx = 1.0e-7
+omega = 1.0
+route_sampling = level_native
+c2f_predictor_weight = 1.0
+wall_phase_transport_correction = true
+enforce_mass = true
+template_dir = none
+cases = poiseuille_xband_wall_r2_native_postfix, poiseuille_xband_wall_r4_native_postfix, poiseuille_xband_wall_r8_native_postfix, poiseuille_xband_wall_r16_native_postfix, poiseuille_xband_h_r2_native_postfix, poiseuille_xband_h_r4_native_postfix, poiseuille_xband_h_r8_native_postfix, poiseuille_xband_h_r16_native_postfix
