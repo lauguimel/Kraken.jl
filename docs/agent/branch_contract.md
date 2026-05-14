@@ -134,43 +134,32 @@ KRK_AMR_D_TEMP_CASES=poiseuille_yband_nested4_debug.krk \
 julia --project=. benchmarks/amr_d_macroflow_temporal_convergence_2d.jl
 ```
 
+Gate behavior follows skill Discipline Pattern #4: work on marche N is blocked
+while any marche M < N is red. Tolerances must not be relaxed to bypass a
+failing marche.
+
 ## File Size Limits
 
-Files in src/refinement/ must not exceed 700 lines. Before editing any file at
-or above this threshold, propose a mechanical split (one module per cohesive
-concern, one commit per module, baseline test signature preserved) and wait for
-user approval. The 2026-05-14 split of subcycling_2d is the reference protocol.
+Default per skill `kraken-branch-governor` (Discipline Pattern #1): 700 lines
+in active debug paths. For this branch, the active debug path is
+`src/refinement/`. No other override.
 
-Other src/ files have no hard cap, but the same principle applies: if a session
-keeps adding to a 1000+ line file, the next sustainable move is a split, not
-another inline patch.
+Reference split: subcycling monolith split (commits 63698a3..44f54b1,
+2026-05-14).
 
 ## Guo Forcing Convention (isothermal 2D)
 
-Two mathematically correct conventions co-exist in the codebase when paired
-consistently.
+Instance of skill `kraken-branch-governor` Discipline Pattern #3 ("Conventions
+as executable contracts") for isothermal 2D Guo forcing. The two valid forms
+are:
 
-Convention I — Integrated. The collision integrates the Guo source into `f` so
-that `sum_q c_q F_q == rho * u_phys`. The macroscopic getter reads
-`u = sum(c_q F_q) / rho` without external correction.
+- Convention I (Integrated): the collision integrates the Guo source so
+  `sum_q c_q F_q == rho * u_phys`; the getter reads
+  `u = sum(c_q F_q) / rho`.
+- Convention II (Raw + half-step): the collision leaves raw moments; the getter
+  reads `u = (sum(c_q F_q) + F/2) / rho`.
 
-Convention II — Raw + half-step. The collision leaves raw moments below
-physical by `F/2`. The macroscopic getter reads
-`u = (sum(c_q F_q) + F/2) / rho`.
-
-Mixed pairings (integrated kernel + raw getter, or raw kernel + integrated
-getter) are bugs: they shift mean velocity by +/- F/2 per step on a periodic
-uniform box.
-
-Production kernel-getter pairs are enumerated and tested in
-`test/test_guo_convention_pairs.jl`. Adding a new Guo-aware kernel or getter
-requires:
-
-1. A docstring stating its convention.
-2. A new `@testset` in `test_guo_convention_pairs.jl` exercising it on the
-   periodic-box analytic.
-3. Branch contract update if the pair extends to 3D, thermal, phasefield, VOF,
-   or DSL paths (which are deferred — see below).
+Pair test: `test/test_guo_convention_pairs.jl`.
 
 ### Validated pairs (2026-05-14)
 
@@ -279,23 +268,17 @@ Performance gates:
 
 ## Canary Lifecycle
 
-Canaries are short-lived diagnostic scripts (typically under
-benchmarks/results/quicklook/ or as ad hoc test files). They are permitted to
-find bugs. They are NOT permitted to accumulate.
+Per skill `kraken-branch-governor` Discipline Pattern #2.
 
-Rules:
+Archived sets for this branch (2026-05-14):
 
-- Any canary that reveals a real bug must, before the session ends, become a
-  permanent @test in test/ that exercises the bug. Once the bug is fixed, the
-  @test stays as regression.
-- Canaries that reveal no bug are deleted at session end.
-- The benchmarks/results/quicklook/amr_d_v14 .. amr_d_v41 series and the
-  docs/design/amr_d_* audits prior to 2026-05-14 are archived (see
-  _archive_2026-05-14/). They are snapshots of past sessions, not current
-  truth. Do not read them to "understand the history" — they will mislead.
-- If you find yourself about to create amr_d_v(N+1)_canary, stop. Write a
-  @test instead, or ask the user to relax the rule with explicit
-  justification.
+- `benchmarks/results/quicklook/_archive_2026-05-14/`
+  (29 amr_d_v* canary directories)
+- `docs/design/_archive_2026-05-14/`
+  (16 amr_d_* / amr_route_native_progress audits)
+
+Do NOT consult these archives to "understand history"; they are snapshots of
+stale state.
 
 ## Milestones
 
