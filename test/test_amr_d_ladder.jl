@@ -14,26 +14,13 @@ function _amr_d_ladder_convergence_dir()
                     "amr_d_convergence_2d")
 end
 
-function _amr_d_ladder_macroscopic(F; force_x=0.0, force_y=0.0)
+function _amr_d_ladder_macroscopic(F)
     nx, ny, nq = size(F)
     nq == 9 || throw(ArgumentError("D2Q9 state must have 9 populations"))
     rho = Matrix{Float64}(undef, nx, ny)
     ux = Matrix{Float64}(undef, nx, ny)
     uy = Matrix{Float64}(undef, nx, ny)
-    @inbounds for j in 1:ny, i in 1:nx
-        mass = 0.0
-        mx = 0.0
-        my = 0.0
-        for q in 1:9
-            Fq = Float64(F[i, j, q])
-            mass += Fq
-            mx += d2q9_cx(q) * Fq
-            my += d2q9_cy(q) * Fq
-        end
-        rho[i, j] = mass
-        ux[i, j] = (mx + force_x / 2) / mass
-        uy[i, j] = (my + force_y / 2) / mass
-    end
+    compute_macroscopic_2d!(rho, ux, uy, F; sync=true)
     return rho, ux, uy
 end
 
@@ -128,7 +115,7 @@ function marche_3()
         stream_fully_periodic_F_2d!(Fnext, F)
         F, Fnext = Fnext, F
     end
-    _, ux, uy = _amr_d_ladder_macroscopic(F; force_x=gx)
+    _, ux, uy = _amr_d_ladder_macroscopic(F)
     observed = sum(ux) / length(ux)
     expected_physical = gx * steps
     expected_raw = gx * (steps - 0.5)
