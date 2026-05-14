@@ -3,6 +3,24 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.1] — 2026-05-14
+
+Patch release.
+
+### Fixed
+- **Guo body force convention**: `collide_guo_2d!` is now explicitly declared
+  as Convention I (integrated), and the post-collision readout uses
+  `compute_macroscopic_2d!` instead of `compute_macroscopic_forced_2d!`. The
+  previous pairing accumulated a `+gx/2`-per-step offset on the periodic-box
+  mean velocity (5e-6 over 500 steps for `gx = 1e-5`). Production callsites
+  updated in `src/simulation_runner.jl` and `src/drivers/basic.jl`. A
+  regression test (`test/test_guo_convention_pairs.jl`) covers both the
+  fixed production pair and the historically broken pair as a sentinel.
+
+### Internal
+- Docstring on `collide_guo_2d!` documenting its Convention I status and the
+  canonical pair member `compute_macroscopic_2d!`.
+
 ## [0.1.0] — 2026-04-27
 
 First public release. Scope: single-phase Newtonian + thermal (DDF) flows.
