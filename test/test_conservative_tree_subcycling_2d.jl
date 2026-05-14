@@ -202,7 +202,7 @@ function _test_cartesian_poiseuille_profile_2d(max_level::Integer,
             cell = @view F[i, j, :]
             rho = mass_F(cell) / volume
             mx = momentum_F(cell)[1]
-            ux_sum += (mx / volume + Fx / 2) / rho
+            ux_sum += (mx / volume) / rho
         end
         profile[j] = ux_sum / nx
     end

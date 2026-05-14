@@ -69,11 +69,10 @@ end
 """
     compute_macroscopic_forced_2d!(ρ, ux, uy, f, Fx, Fy)
 
-Convention: Raw + half-step. This getter expects raw moments below physical
-velocity by `F/2` and adds the Guo half-step correction during readout.
+Convention: Integrated. This getter reads raw moments directly as physical
+velocity for the isothermal 2D Guo collision pair.
 
-Canonical pair member: a raw-moment Guo collision, not
-`collide_guo_2d!` at `src/kernels/collide_guo_2d.jl:72`.
+Canonical pair member: `collide_guo_2d!` at `src/kernels/collide_guo_2d.jl:72`.
 """
 @kernel function compute_macroscopic_forced_2d_kernel!(ρ, ux, uy, @Const(f), Fx, Fy)
     i, j = @index(Global, NTuple)
@@ -86,8 +85,8 @@ Canonical pair member: a raw-moment Guo collision, not
         ρ_local = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
         inv_ρ = one(ρ_local) / ρ_local
         ρ[i,j] = ρ_local
-        ux[i,j] = ((f2 - f4 + f6 - f7 - f8 + f9) + T(Fx) / T(2)) * inv_ρ
-        uy[i,j] = ((f3 - f5 + f6 + f7 - f8 - f9) + T(Fy) / T(2)) * inv_ρ
+        ux[i,j] = (f2 - f4 + f6 - f7 - f8 + f9) * inv_ρ
+        uy[i,j] = (f3 - f5 + f6 + f7 - f8 - f9) * inv_ρ
     end
 end
 

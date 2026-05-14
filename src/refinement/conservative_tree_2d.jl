@@ -1740,12 +1740,11 @@ end
 """
     composite_leaf_mean_ux_profile(coarse_F, patch; volume_leaf, force_x)
 
-Convention: Raw + half-step. This getter expects raw moments below physical by
-`force_x/2` and adds that correction while building the leaf-equivalent profile.
+Convention: Integrated. This getter reads integrated Guo moments directly while
+building the leaf-equivalent profile.
 
-Canonical pair member: a raw composite Guo collision; mixed use with
-`collide_Guo_composite_F_2d!` at `src/refinement/conservative_tree_2d.jl:1623`
-is tested in `test/test_guo_convention_pairs.jl`.
+Canonical pair member: `collide_Guo_composite_F_2d!` at
+`src/refinement/conservative_tree_2d.jl:1661`.
 """
 function composite_leaf_mean_ux_profile(coarse_F::AbstractArray{T,3},
                                         patch::ConservativeTreePatch2D{T};
@@ -1760,7 +1759,7 @@ function composite_leaf_mean_ux_profile(coarse_F::AbstractArray{T,3},
         for i in axes(leaf, 1)
             cell = @view leaf[i, j, :]
             rho = mass_F(cell) / volume_leaf
-            ux_sum += (momentum_F(cell)[1] / volume_leaf + force_x / 2) / rho
+            ux_sum += (momentum_F(cell)[1] / volume_leaf) / rho
         end
         profile[j] = ux_sum / T(size(leaf, 1))
     end
@@ -1771,12 +1770,11 @@ end
     composite_leaf_velocity_field_2d(coarse_F, patch; volume_leaf,
                                      force_x, force_y)
 
-Convention: Raw + half-step. This getter expects raw moments below physical by
-`F/2` and adds the half-step correction while forming leaf-equivalent fields.
+Convention: Integrated. This getter reads integrated Guo moments directly while
+forming leaf-equivalent fields.
 
-Canonical pair member: a raw composite Guo collision; mixed use with
-`collide_Guo_composite_F_2d!` at `src/refinement/conservative_tree_2d.jl:1623`
-is tested in `test/test_guo_convention_pairs.jl`.
+Canonical pair member: `collide_Guo_composite_F_2d!` at
+`src/refinement/conservative_tree_2d.jl:1661`.
 """
 function composite_leaf_velocity_field_2d(coarse_F::AbstractArray{T,3},
                                           patch::ConservativeTreePatch2D{T};
@@ -1793,8 +1791,8 @@ function composite_leaf_velocity_field_2d(coarse_F::AbstractArray{T,3},
         rho = mass_F(cell) / volume_leaf
         rho > zero(T) || throw(ArgumentError("leaf cell density must be positive"))
         mx, my = momentum_F(cell)
-        ux[i, j] = (mx / volume_leaf + force_x / 2) / rho
-        uy[i, j] = (my / volume_leaf + force_y / 2) / rho
+        ux[i, j] = (mx / volume_leaf) / rho
+        uy[i, j] = (my / volume_leaf) / rho
     end
     return (ux=ux, uy=uy)
 end
@@ -1841,12 +1839,13 @@ end
 """
     _leaf_fluid_mean_ux_F(F, is_solid; volume, force_x)
 
-Convention: Raw + half-step. This getter expects raw moments below physical by
-`force_x/2` and adds that correction to the fluid-cell mean `ux`.
+Convention: Integrated. This getter reads integrated Guo moments directly for
+the fluid-cell mean `ux`.
 
-Canonical pair member: a raw solid-mask Guo collision; mixed use with
-`collide_Guo_integrated_D2Q9!` at `src/refinement/conservative_tree_2d.jl:1015`
-is tested in `test/test_guo_convention_pairs.jl`.
+Canonical pair members: `collide_Guo_integrated_D2Q9!` at
+`src/refinement/conservative_tree_2d.jl:1042` and
+`collide_Guo_composite_solid_F_2d!` at
+`src/refinement/conservative_tree_streaming_2d.jl:792`.
 """
 function _leaf_fluid_mean_ux_F(F::AbstractArray{T,3},
                                is_solid::AbstractArray{Bool,2};
@@ -1859,7 +1858,7 @@ function _leaf_fluid_mean_ux_F(F::AbstractArray{T,3},
         is_solid[i, j] && continue
         cell = @view F[i, j, :]
         rho = mass_F(cell) / volume
-        ux_sum += (momentum_F(cell)[1] / volume + force_x / 2) / rho
+        ux_sum += (momentum_F(cell)[1] / volume) / rho
         n_fluid += 1
     end
     n_fluid > 0 || throw(ArgumentError("solid mask leaves no fluid cells"))
@@ -1869,12 +1868,11 @@ end
 """
     _leaf_fluid_mean_velocity_F(F, is_solid; volume, force_x, force_y)
 
-Convention: Raw + half-step. This getter expects raw moments below physical by
-`F/2` and adds that correction to the fluid-cell mean velocity.
+Convention: Integrated. This getter reads integrated Guo moments directly for
+the fluid-cell mean velocity.
 
-Canonical pair member: a raw solid-mask Guo collision; mixed use with
-`collide_Guo_integrated_D2Q9!` at `src/refinement/conservative_tree_2d.jl:1015`
-is tested in `test/test_guo_convention_pairs.jl`.
+Canonical pair member: `collide_Guo_integrated_D2Q9!` at
+`src/refinement/conservative_tree_2d.jl:1042`.
 """
 function _leaf_fluid_mean_velocity_F(F::AbstractArray{T,3},
                                      is_solid::AbstractArray{Bool,2};
@@ -1890,8 +1888,8 @@ function _leaf_fluid_mean_velocity_F(F::AbstractArray{T,3},
         cell = @view F[i, j, :]
         rho = mass_F(cell) / volume
         p = momentum_F(cell)
-        ux_sum += (p[1] / volume + force_x / 2) / rho
-        uy_sum += (p[2] / volume + force_y / 2) / rho
+        ux_sum += (p[1] / volume) / rho
+        uy_sum += (p[2] / volume) / rho
         n_fluid += 1
     end
     n_fluid > 0 || throw(ArgumentError("solid mask leaves no fluid cells"))

@@ -181,45 +181,55 @@ requires:
      (commit 734a6f9, verdict PHYSICAL) and by
      `test/test_guo_convention_pairs.jl`.
 
-### Known-broken pairs (2026-05-14)
-
 - `collide_guo_2d!` (`src/kernels/collide_guo_2d.jl:72`)
-  + `compute_macroscopic_forced_2d!` (`src/kernels/macroscopic.jl:76`)
-  -> observed offset `+4.999999999924336e-6` for `gx=1e-5`, i.e. `+gx/2`.
+  + `compute_macroscopic_forced_2d!` (`src/kernels/macroscopic.jl:93`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
 
 - `collide_Guo_composite_F_2d!`
-  (`src/refinement/conservative_tree_2d.jl:1623`)
+  (`src/refinement/conservative_tree_2d.jl:1661`)
   + `composite_leaf_mean_ux_profile`
-  (`src/refinement/conservative_tree_2d.jl:1702`)
-  -> observed offset `+4.999999999925203e-6` for `gx=1e-5`, i.e. `+gx/2`.
+  (`src/refinement/conservative_tree_2d.jl:1749`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
 
 - `collide_Guo_composite_F_2d!`
-  (`src/refinement/conservative_tree_2d.jl:1623`)
+  (`src/refinement/conservative_tree_2d.jl:1661`)
   + `composite_leaf_velocity_field_2d`
-  (`src/refinement/conservative_tree_2d.jl:1722`)
-  -> observed offset `+4.999999999924336e-6` for `gx=1e-5`, i.e. `+gx/2`.
+  (`src/refinement/conservative_tree_2d.jl:1779`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
 
 - `collide_Guo_integrated_D2Q9!`
-  (`src/refinement/conservative_tree_2d.jl:1015`)
+  (`src/refinement/conservative_tree_2d.jl:1042`)
   + `_leaf_fluid_mean_velocity_F`
-  (`src/refinement/conservative_tree_2d.jl:1800`)
-  -> observed offset `+4.999999999790762e-6` for `gx=1e-5`, i.e. `+gx/2`.
+  (`src/refinement/conservative_tree_2d.jl:1877`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
+
+- `collide_Guo_integrated_D2Q9!`
+  (`src/refinement/conservative_tree_2d.jl:1042`)
+  + `_leaf_fluid_mean_ux_F`
+  (`src/refinement/conservative_tree_2d.jl:1850`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
+
+- `collide_Guo_composite_solid_F_2d!`
+  (`src/refinement/conservative_tree_streaming_2d.jl:792`)
+  + `_leaf_fluid_mean_ux_F`
+  (`src/refinement/conservative_tree_2d.jl:1850`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
 
 - `_collide_Guo_conservative_tree_active_ids_F_2d!`
-  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431`)
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:450`)
   + `conservative_tree_leaf_mean_ux_profile_2d`
-  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:513`)
-  -> observed offset `+4.999999998760336e-6` for `gx=1e-5`, i.e. `+gx/2`.
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:542`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
 
-- `_collide_Guo_conservative_tree_active_ids_F_2d!`
-  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431`)
+- `_collide_Guo_conservative_tree_active_fluid_ids_F_2d!`
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:499`)
   + `conservative_tree_leaf_fluid_mean_velocity_2d`
-  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:555`)
-  -> observed offset `+4.999999998799368e-6` for `gx=1e-5`, i.e. `+gx/2`.
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:595`)
+  -> Convention I, verified by `test/test_guo_convention_pairs.jl`.
 
-Do not fix these in a convention-pin session. A follow-up convention-fix session
-must change the minimum production readout/collision surface and keep
-`test/test_guo_convention_pairs.jl` as regression coverage.
+### Known-broken pairs (2026-05-14)
+
+As of the 2026-05-14 convention-fix session, none remain in isothermal 2D.
 
 ### Deferred (need their own convention-pin sessions)
 

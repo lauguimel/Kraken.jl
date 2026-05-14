@@ -533,13 +533,11 @@ end
     conservative_tree_leaf_mean_ux_profile_2d(F, spec; force_x,
                                               level_scaled_force)
 
-Convention: Raw + half-step. This getter expects raw moments below physical by
-`F/2` and adds the half-step correction while forming a leaf-equivalent profile.
+Convention: Integrated. This getter reads integrated Guo row moments directly
+while forming a leaf-equivalent profile.
 
-Canonical pair member: a raw conservative-tree Guo collision; mixed use with
-`_collide_Guo_conservative_tree_active_ids_F_2d!` at
-`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431` is tested in
-`test/test_guo_convention_pairs.jl`.
+Canonical pair member: `_collide_Guo_conservative_tree_active_ids_F_2d!` at
+`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:450`.
 """
 function conservative_tree_leaf_mean_ux_profile_2d(
         F::AbstractMatrix,
@@ -567,7 +565,7 @@ function conservative_tree_leaf_mean_ux_profile_2d(
              conservative_tree_leaf_equivalent_force_2d(force_x, spec,
                                                         cell.level) :
              force_x
-        ux = (mx / volume + fx / 2) / rho
+        ux = (mx / volume) / rho
         row_packet = mass / scale
         for sj in 1:scale
             jf = (cell.j - 1) * scale + sj
@@ -588,13 +586,11 @@ end
                                                   force_x, force_y,
                                                   level_scaled_force)
 
-Convention: Raw + half-step. This getter expects raw moments below physical by
-`F/2` and adds the half-step correction while averaging fluid-cell velocity.
+Convention: Integrated. This getter reads integrated Guo row moments directly
+while averaging fluid-cell velocity.
 
-Canonical pair member: a raw conservative-tree Guo collision; mixed use with
-`_collide_Guo_conservative_tree_active_ids_F_2d!` at
-`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431` is tested in
-`test/test_guo_convention_pairs.jl`.
+Canonical pair member: `_collide_Guo_conservative_tree_active_fluid_ids_F_2d!`
+at `src/refinement/conservative_tree_macroflows_subcycled_2d.jl:499`.
 """
 function conservative_tree_leaf_fluid_mean_velocity_2d(
         F::AbstractMatrix,
@@ -630,8 +626,8 @@ function conservative_tree_leaf_fluid_mean_velocity_2d(
              conservative_tree_leaf_equivalent_force_2d(force_y, spec,
                                                         cell.level) :
              force_y
-        ux = (mx / volume + fx / 2) / rho
-        uy = (my / volume + fy / 2) / rho
+        ux = (mx / volume) / rho
+        uy = (my / volume) / rho
         sum_ux += volume * ux
         sum_uy += volume * uy
         sum_volume += volume
