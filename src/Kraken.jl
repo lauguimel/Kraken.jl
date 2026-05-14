@@ -22,6 +22,7 @@ include("rheology/models.jl")
 include("rheology/viscosity.jl")
 include("rheology/strain_rate.jl")
 include("rheology/linalg.jl")
+include("rheology/linalg_3d.jl")
 
 # --- GPU kernels ---
 include("kernels/equilibrium_helpers.jl")
@@ -59,6 +60,8 @@ include("kernels/viscoelastic_2d.jl")
 include("kernels/conformation_lbm_2d.jl")
 include("kernels/conformation_lbm_3d.jl")
 include("kernels/logconformation_lbm_2d.jl")
+include("kernels/logconformation_lbm_3d.jl")
+include("fvfd/FVFD.jl")
 include("kernels/logconformation_fv_2d.jl")
 include("kernels/collide_viscoelastic_source_2d.jl")
 include("kernels/collide_viscoelastic_guo_2d.jl")
@@ -298,16 +301,41 @@ export collide_twophase_rheology_2d!
 
 # Viscoelastic
 export eigen_sym2x2, mat_exp_sym2x2, mat_log_sym2x2, decompose_velocity_gradient
+export eigen_sym3x3, mat_exp_sym3x3, mat_log_spd_sym3x3
 export compute_polymeric_force_2d!
 export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 export run_viscoelastic_cylinder_2d, run_conformation_cylinder_2d
 export run_conformation_cylinder_libb_2d
-export run_viscoelastic_logfv_channel_2d, run_viscoelastic_logfv_poiseuille_frozen_force_2d
+export run_viscoelastic_logfv_channel_2d, run_viscoelastic_logfv_frozen_channel_cde_2d
+export run_viscoelastic_logfv_frozen_circle_shear_cde_2d
+export run_viscoelastic_logfv_frozen_circle_tangential_shear_cde_2d
+export run_viscoelastic_logfv_poiseuille_frozen_force_2d
 export run_viscoelastic_logfv_poiseuille_coupled_2d
 export run_viscoelastic_logfv_square_periodic_2d
 export run_viscoelastic_logfv_bfs_passive_2d, run_viscoelastic_logfv_bfs_coupled_2d
+export run_viscoelastic_logfv_contraction_coupled_2d
+export run_viscoelastic_logfv_cavity_coupled_2d
 export run_viscoelastic_logfv_square_channel_coupled_2d
+export FVFDDomainBC2D, FVFDFieldBC2D, FVFDEmbeddedBoundary2D, FVFDPatch2D, FVFDGeometry2D
+export fvfd_domain_bc_code, fvfd_periodicx_wally_bcspec_2d, fvfd_openx_wally_bcspec_2d
+export fvfd_empty_embedded_boundary_2d, fvfd_embedded_boundary_from_qwall_2d
+export fvfd_embedded_boundary_from_halfplane_2d, fvfd_geometry_from_halfplane_2d
+export fvfd_embedded_boundary_from_circle_2d, fvfd_geometry_from_circle_2d
+export fvfd_transfer_field_bc_2d, fvfd_transfer_embedded_boundary_2d
+export fvfd_geometry_from_lbm_2d, fvfd_transfer_geometry_2d
+export fvfd_velocity_gradient_2d!, fvfd_velocity_gradient_embedded_2d!
+export fvfd_tensor_divergence_2d!, fvfd_tensor_divergence_embedded_2d!
+export fvfd_embedded_wall_traction_2d!
+export fvfd_bsd_force_2d!
+export fvfd_cell_velocity_to_faces_2d!, fvfd_cell_velocity_to_faces_embedded_2d!
+export fvfd_advect_upwind_2d!, fvfd_advect_upwind_embedded_2d!
+export fvfd_sym2_advect_upwind_2d!, fvfd_sym2_advect_upwind_embedded_2d!
+export LogFVDomainBC2D, LogFVFieldBC2D, logfv_domain_bc_code
+export logfv_periodicx_wally_bcspec_2d, logfv_openx_wally_bcspec_2d,
+       logfv_wallxwally_bcspec_2d
+export fvfd_wallxwally_bcspec_2d
+export logfv_cell_velocity_to_faces_bc_aware_2d!, logfv_cell_velocity_to_faces_embedded_2d!
 export conformation_field_diagnostics_2d
 export StepChannelGeometry2D, step_channel_geometry_2d
 export contraction_step_geometry_2d, backward_facing_step_geometry_2d,
@@ -318,13 +346,16 @@ export run_conformation_step_libb_2d
 export run_conformation_contraction_libb_2d
 export vortex_length_contraction_2d, outlet_centerline_N1_contraction_2d
 export run_conformation_sphere_libb_3d
-export AbstractPolymerModel, OldroydB, LogConfOldroydB, update_polymer_stress!
+export AbstractPolymerModel, OldroydB, LogConfOldroydB, FENEPPolymer, update_polymer_stress!
 export uses_log_conformation
 export collide_logconf_2d!, collide_logconf_2d_with_gradient_stencils!,
        psi_to_C_2d!, C_to_psi_2d!, logconf_source_2d
+export psi_to_C_3d!, C_to_psi_3d!, compute_stress_from_logconf_3d!,
+       logconf_source_3d, logconf_source_with_divergence_3d,
+       collide_logconf_3d!
 export reset_conformation_inlet_2d!, reset_conformation_outlet_2d!
 export reset_conformation_inlet_masked_2d!, reset_conformation_outlet_masked_2d!
-export polymer_modulus, polymer_relaxation_time
+export polymer_modulus, polymer_relaxation_time, polymer_lmax
 export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
        CNEBBFieldEquilibrium,
        CNEBBEqGradient, CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,

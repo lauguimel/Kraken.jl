@@ -326,8 +326,45 @@ end
                                              bc.mask, s_p, s_m; ndrange=(Ny - 2,))
 end
 
-# (South / North ZouHe variants can be added later — channel walls are
-# HalfwayBB in all current benchmarks.)
+# North wall Zou-He velocity (tangential lid). Used by the closed
+# lid-driven cavity driver. The wall is impermeable (u_y = 0), the
+# tangential component u_x is given per-i by the profile array of
+# length Nx. Corners i=1 and i=Nx are skipped (HW-BB fallback in the
+# fused kernel handles them, consistent with u_lid = 0 at corners via
+# the rheoTool x^2 (1-x)^2 shape).
+@kernel function _bc_north_zh_velocity_2d!(f_out, f_in, profile, Ny, s_p, s_m)
+    im1 = @index(Global); i = im1 + 1
+    T = eltype(f_out)
+    @inbounds begin
+        fp1 = f_in[i,     Ny,   1]
+        fp2 = f_in[i - 1, Ny,   2]
+        fp3 = f_in[i,     Ny-1, 3]
+        fp4 = f_in[i + 1, Ny,   4]
+        fp6 = f_in[i - 1, Ny-1, 6]
+        fp7 = f_in[i + 1, Ny-1, 7]
+        u_t = profile[i]
+        ρ_w = fp1 + fp2 + fp4 + T(2) * (fp3 + fp6 + fp7)
+        fp5 = fp3
+        fp8 = fp6 + T(0.5) * (fp2 - fp4) - T(0.5) * ρ_w * u_t
+        fp9 = fp7 - T(0.5) * (fp2 - fp4) + T(0.5) * ρ_w * u_t
+        F1,F2,F3,F4,F5,F6,F7,F8,F9 = _trt_collide_local(
+            fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, s_p, s_m)
+        f_out[i, Ny, 1] = F1; f_out[i, Ny, 2] = F2; f_out[i, Ny, 3] = F3
+        f_out[i, Ny, 4] = F4; f_out[i, Ny, 5] = F5; f_out[i, Ny, 6] = F6
+        f_out[i, Ny, 7] = F7; f_out[i, Ny, 8] = F8; f_out[i, Ny, 9] = F9
+    end
+end
+
+@inline function _apply_bc_2d_north!(backend, f_out, f_in, ::HalfwayBB,
+                                      s_p, s_m, Nx, Ny) end
+@inline function _apply_bc_2d_north!(backend, f_out, f_in, bc::ZouHeVelocity,
+                                      s_p, s_m, Nx, Ny)
+    _bc_north_zh_velocity_2d!(backend)(f_out, f_in, bc.profile, Ny, s_p, s_m;
+                                        ndrange=(Nx - 2,))
+end
+
+@inline function _apply_bc_2d_south!(backend, f_out, f_in, ::HalfwayBB,
+                                      s_p, s_m, Nx, Ny) end
 
 """
     apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν, Nx, Ny)
@@ -345,7 +382,8 @@ function apply_bc_rebuild_2d!(f_out, f_in, bcspec::BCSpec2D, ν::Real,
     s_p = T(s_p_r); s_m = T(s_m_r)
     _apply_bc_2d_west!(backend, f_out, f_in, bcspec.west, s_p, s_m, Nx, Ny)
     _apply_bc_2d_east!(backend, f_out, f_in, bcspec.east, s_p, s_m, Nx, Ny)
-    # south / north: HalfwayBB only for now (kernel fallback handles)
+    _apply_bc_2d_south!(backend, f_out, f_in, bcspec.south, s_p, s_m, Nx, Ny)
+    _apply_bc_2d_north!(backend, f_out, f_in, bcspec.north, s_p, s_m, Nx, Ny)
     return nothing
 end
 

@@ -1,0 +1,6 @@
+# dynamicCode:
+# SHA1 = 43814293f77940407d31fed82bd2846394aaa497
+
+codedFunctionObjectTemplate.C
+
+LIB = $(PWD)/../platforms/$(WM_OPTIONS)/lib/libkineticEnergy_43814293f77940407d31fed82bd2846394aaa497
