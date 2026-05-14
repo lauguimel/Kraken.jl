@@ -145,6 +145,91 @@ Other src/ files have no hard cap, but the same principle applies: if a session
 keeps adding to a 1000+ line file, the next sustainable move is a split, not
 another inline patch.
 
+## Guo Forcing Convention (isothermal 2D)
+
+Two mathematically correct conventions co-exist in the codebase when paired
+consistently.
+
+Convention I — Integrated. The collision integrates the Guo source into `f` so
+that `sum_q c_q F_q == rho * u_phys`. The macroscopic getter reads
+`u = sum(c_q F_q) / rho` without external correction.
+
+Convention II — Raw + half-step. The collision leaves raw moments below
+physical by `F/2`. The macroscopic getter reads
+`u = (sum(c_q F_q) + F/2) / rho`.
+
+Mixed pairings (integrated kernel + raw getter, or raw kernel + integrated
+getter) are bugs: they shift mean velocity by +/- F/2 per step on a periodic
+uniform box.
+
+Production kernel-getter pairs are enumerated and tested in
+`test/test_guo_convention_pairs.jl`. Adding a new Guo-aware kernel or getter
+requires:
+
+1. A docstring stating its convention.
+2. A new `@testset` in `test_guo_convention_pairs.jl` exercising it on the
+   periodic-box analytic.
+3. Branch contract update if the pair extends to 3D, thermal, phasefield, VOF,
+   or DSL paths (which are deferred — see below).
+
+### Validated pairs (2026-05-14)
+
+- `collide_Guo_integrated_D2Q9!`
+  (`src/refinement/conservative_tree_2d.jl:600`)
+  + `compute_macroscopic_2d!` with `sync=true`
+  -> Convention I, verified by `test_amr_d_ladder.jl` marche 3
+     (commit 734a6f9, verdict PHYSICAL) and by
+     `test/test_guo_convention_pairs.jl`.
+
+### Known-broken pairs (2026-05-14)
+
+- `collide_guo_2d!` (`src/kernels/collide_guo_2d.jl:72`)
+  + `compute_macroscopic_forced_2d!` (`src/kernels/macroscopic.jl:76`)
+  -> observed offset `+4.999999999924336e-6` for `gx=1e-5`, i.e. `+gx/2`.
+
+- `collide_Guo_composite_F_2d!`
+  (`src/refinement/conservative_tree_2d.jl:1623`)
+  + `composite_leaf_mean_ux_profile`
+  (`src/refinement/conservative_tree_2d.jl:1702`)
+  -> observed offset `+4.999999999925203e-6` for `gx=1e-5`, i.e. `+gx/2`.
+
+- `collide_Guo_composite_F_2d!`
+  (`src/refinement/conservative_tree_2d.jl:1623`)
+  + `composite_leaf_velocity_field_2d`
+  (`src/refinement/conservative_tree_2d.jl:1722`)
+  -> observed offset `+4.999999999924336e-6` for `gx=1e-5`, i.e. `+gx/2`.
+
+- `collide_Guo_integrated_D2Q9!`
+  (`src/refinement/conservative_tree_2d.jl:1015`)
+  + `_leaf_fluid_mean_velocity_F`
+  (`src/refinement/conservative_tree_2d.jl:1800`)
+  -> observed offset `+4.999999999790762e-6` for `gx=1e-5`, i.e. `+gx/2`.
+
+- `_collide_Guo_conservative_tree_active_ids_F_2d!`
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431`)
+  + `conservative_tree_leaf_mean_ux_profile_2d`
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:513`)
+  -> observed offset `+4.999999998760336e-6` for `gx=1e-5`, i.e. `+gx/2`.
+
+- `_collide_Guo_conservative_tree_active_ids_F_2d!`
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431`)
+  + `conservative_tree_leaf_fluid_mean_velocity_2d`
+  (`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:555`)
+  -> observed offset `+4.999999998799368e-6` for `gx=1e-5`, i.e. `+gx/2`.
+
+Do not fix these in a convention-pin session. A follow-up convention-fix session
+must change the minimum production readout/collision surface and keep
+`test/test_guo_convention_pairs.jl` as regression coverage.
+
+### Deferred (need their own convention-pin sessions)
+
+- 3D Guo: `src/refinement/conservative_tree_3d.jl`,
+  `src/refinement/conservative_tree_streaming_3d.jl`
+- Phasefield 2D: `src/kernels/phasefield_2d.jl`
+- Pressure-VOF: `src/kernels/pressure_vof_2d.jl`
+- Fused thermal 2D: `src/kernels/fused_thermal_2d.jl`
+- DSL bricks: `src/kernels/dsl/bricks.jl`
+
 ## Acceptance Gates
 
 Correctness gates:

@@ -2,6 +2,15 @@ using KernelAbstractions
 
 # --- 2D macroscopic computation ---
 
+"""
+    compute_macroscopic_2d!(ρ, ux, uy, f; sync=false)
+
+Convention: Integrated. This getter expects populations whose raw moments
+already equal `rho * u_phys` and applies no external Guo half-step correction.
+
+Canonical pair member: `collide_Guo_integrated_D2Q9!` at
+`src/refinement/conservative_tree_2d.jl:600`.
+"""
 @kernel function compute_macroscopic_2d_kernel!(ρ, ux, uy, @Const(f))
     i, j = @index(Global, NTuple)
     @inbounds begin
@@ -57,6 +66,15 @@ end
 
 # --- 2D force-corrected macroscopic computation ---
 
+"""
+    compute_macroscopic_forced_2d!(ρ, ux, uy, f, Fx, Fy)
+
+Convention: Raw + half-step. This getter expects raw moments below physical
+velocity by `F/2` and adds the Guo half-step correction during readout.
+
+Canonical pair member: a raw-moment Guo collision, not
+`collide_guo_2d!` at `src/kernels/collide_guo_2d.jl:72`.
+"""
 @kernel function compute_macroscopic_forced_2d_kernel!(ρ, ux, uy, @Const(f), Fx, Fy)
     i, j = @index(Global, NTuple)
     @inbounds begin

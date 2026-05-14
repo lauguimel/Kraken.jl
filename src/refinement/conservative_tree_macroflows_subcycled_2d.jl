@@ -291,6 +291,15 @@ function _collide_BGK_integrated_D2Q9_row_2d!(
     return F
 end
 
+"""
+    _collide_Guo_integrated_D2Q9_row_2d!(F, cell_id, volume, omega, Fx, Fy)
+
+Convention: Integrated. This row collision integrates the Guo source into
+conservative-tree populations so raw row moments read as physical velocity.
+
+Canonical pair member: `conservative_tree_leaf_mean_ux_profile_2d` at
+`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:513`.
+"""
 function _collide_Guo_integrated_D2Q9_row_2d!(
         F::AbstractMatrix,
         cell_id::Int,
@@ -428,6 +437,16 @@ function _collide_Guo_conservative_tree_active_level_F_2d!(
     return F
 end
 
+"""
+    _collide_Guo_conservative_tree_active_ids_F_2d!(F, spec, ids,
+                                                    omega, Fx, Fy)
+
+Convention: Integrated. This active-cell collision applies integrated Guo row
+updates to conservative-tree fluid cells.
+
+Canonical pair member: `conservative_tree_leaf_mean_ux_profile_2d` at
+`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:513`.
+"""
 function _collide_Guo_conservative_tree_active_ids_F_2d!(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D,
@@ -510,6 +529,18 @@ function _collide_Guo_conservative_tree_active_fluid_ids_F_2d!(
     return F
 end
 
+"""
+    conservative_tree_leaf_mean_ux_profile_2d(F, spec; force_x,
+                                              level_scaled_force)
+
+Convention: Raw + half-step. This getter expects raw moments below physical by
+`F/2` and adds the half-step correction while forming a leaf-equivalent profile.
+
+Canonical pair member: a raw conservative-tree Guo collision; mixed use with
+`_collide_Guo_conservative_tree_active_ids_F_2d!` at
+`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431` is tested in
+`test/test_guo_convention_pairs.jl`.
+"""
 function conservative_tree_leaf_mean_ux_profile_2d(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D;
@@ -552,6 +583,19 @@ function conservative_tree_leaf_mean_ux_profile_2d(
     return profile
 end
 
+"""
+    conservative_tree_leaf_fluid_mean_velocity_2d(F, spec, is_solid;
+                                                  force_x, force_y,
+                                                  level_scaled_force)
+
+Convention: Raw + half-step. This getter expects raw moments below physical by
+`F/2` and adds the half-step correction while averaging fluid-cell velocity.
+
+Canonical pair member: a raw conservative-tree Guo collision; mixed use with
+`_collide_Guo_conservative_tree_active_ids_F_2d!` at
+`src/refinement/conservative_tree_macroflows_subcycled_2d.jl:431` is tested in
+`test/test_guo_convention_pairs.jl`.
+"""
 function conservative_tree_leaf_fluid_mean_velocity_2d(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D,
