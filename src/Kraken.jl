@@ -34,6 +34,9 @@ include("kernels/thermal_2d.jl")
 include("kernels/thermal_3d.jl")
 include("kernels/fused_thermal_2d.jl")
 
+# --- FVFD operator core ---
+include("fvfd/FVFD.jl")
+
 # --- I/O ---
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
@@ -98,6 +101,31 @@ export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export collide_boussinesq_3d!
 export fused_natconv_step!, fused_natconv_vt_step!
+
+# FVFD operator core
+export FVFD_BC_PERIODIC, FVFD_BC_OPEN, FVFD_BC_WALL
+export FVFDDomainBC2D, FVFDFieldBC2D, FVFDEmbeddedBoundary2D, FVFDPatch2D, FVFDGeometry2D
+export fvfd_domain_bc_code, fvfd_periodicx_wally_bcspec_2d, fvfd_openx_wally_bcspec_2d
+export fvfd_wallxwally_bcspec_2d
+export fvfd_empty_embedded_boundary_2d, fvfd_embedded_boundary_from_qwall_2d
+export fvfd_embedded_boundary_from_halfplane_2d, fvfd_geometry_from_halfplane_2d
+export fvfd_embedded_boundary_from_circle_2d, fvfd_geometry_from_circle_2d
+export fvfd_transfer_field_bc_2d, fvfd_transfer_embedded_boundary_2d
+export fvfd_geometry_from_lbm_2d, fvfd_transfer_geometry_2d
+export fvfd_velocity_gradient_2d!, fvfd_velocity_gradient_embedded_2d!
+export fvfd_tensor_divergence_2d!, fvfd_tensor_divergence_embedded_2d!
+export fvfd_embedded_wall_traction_2d!
+export fvfd_bsd_force_2d!
+export fvfd_cell_velocity_to_faces_2d!, fvfd_cell_velocity_to_faces_embedded_2d!
+export fvfd_advect_upwind_2d!, fvfd_advect_upwind_embedded_2d!
+export fvfd_sym2_advect_upwind_2d!, fvfd_sym2_advect_upwind_embedded_2d!
+export LOGFV_BC_PERIODIC, LOGFV_BC_OPEN, LOGFV_BC_WALL
+export LogFVDomainBC2D, LogFVFieldBC2D, LogFVEmbeddedBoundary2D
+export logfv_domain_bc_code
+export logfv_periodicx_wally_bcspec_2d, logfv_openx_wally_bcspec_2d
+export logfv_wallxwally_bcspec_2d
+export logfv_empty_embedded_boundary_2d, logfv_embedded_boundary_from_qwall_2d
+export logfv_transfer_embedded_boundary_2d, logfv_transfer_field_bc_2d
 
 # Simulation drivers
 export LBMConfig, omega, reynolds

@@ -15,3 +15,7 @@ output/
 # results/ at root only (top-level), NOT benchmarks/results/ which is
 # a versioned sync point for the doc figures.
 /results/
+
+# Kraken-E orchestration: Codex pilot ephemeral artifacts
+.codex_brief.md
+.codex_logs/
