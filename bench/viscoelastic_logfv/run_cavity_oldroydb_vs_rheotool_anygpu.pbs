@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#PBS -N krk_cavity_vs_rheotool
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m ae
+
+# Cavity Oldroyd-B comparison against the rheoTool tutorial reference.
+# Runs the closed lid-driven cavity at a user-tunable resolution sweep and
+# writes CSV profile comparisons + a fields.jls snapshot per case.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+# Backend / float type
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+
+# Cavity comparison parameters. Defaults target rheoTool Cavity/Oldroyd-BLog:
+# beta=0.5, De=1, Re=0.01 (matched on De and beta; Re_LU is finite for
+# uniform-mesh LBM stability).
+export KRAKEN_N_LIST="${KRAKEN_N_LIST:-64,96,128}"
+export KRAKEN_END_TIME="${KRAKEN_END_TIME:-8.0}"
+export KRAKEN_U_MAX="${KRAKEN_U_MAX:-0.005}"
+export KRAKEN_LAMBDA_PHYS="${KRAKEN_LAMBDA_PHYS:-1.0}"
+export KRAKEN_NU_S="${KRAKEN_NU_S:-0.1}"
+export KRAKEN_NU_P="${KRAKEN_NU_P:-0.1}"
+export KRAKEN_BSD_FRACTION="${KRAKEN_BSD_FRACTION:-0.75}"
+export KRAKEN_POLYMER_MODEL="${KRAKEN_POLYMER_MODEL:-oldroydb}"
+export KRAKEN_L_MAX="${KRAKEN_L_MAX:-10.0}"
+export KRAKEN_MAX_POLYMER_SUBSTEPS="${KRAKEN_MAX_POLYMER_SUBSTEPS:-4096}"
+export KRAKEN_DIAGNOSTIC_STRIDE="${KRAKEN_DIAGNOSTIC_STRIDE:-2000}"
+export KRAKEN_RHEOTOOL_CASE="${KRAKEN_RHEOTOOL_CASE:-bench/rheotool/cavity_oldroydb_log_re001_de1_b05}"
+export KRAKEN_OUTPUT_DIR="${KRAKEN_OUTPUT_DIR:-results/viscoelastic_logfv/cavity_oldroydb_anygpu_${PBS_JOBID:-manual}}"
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+
+nvidia-smi
+echo "=== cavity Oldroyd-B vs rheoTool at $(date) ==="
+echo "N_LIST=$KRAKEN_N_LIST end_time=$KRAKEN_END_TIME u_max=$KRAKEN_U_MAX"
+echo "lambda_phys=$KRAKEN_LAMBDA_PHYS bsd=$KRAKEN_BSD_FRACTION"
+echo "max_polymer_substeps=$KRAKEN_MAX_POLYMER_SUBSTEPS"
+echo "output=$KRAKEN_OUTPUT_DIR"
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+
+julia --project=. bench/viscoelastic_logfv/run_cavity_oldroydb_vs_rheotool.jl
+
+echo "=== Done at $(date) ==="

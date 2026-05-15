@@ -757,9 +757,9 @@ end
     T = eltype(profile)
     @inbounds if 1 <= i <= Nx
         x_phys = (T(i) - T(0.5)) / T(Nx)
-        ramp = one(T) + tanh(T(ramp_steepness) * (T(t_phys) - T(ramp_start)))
+        ramp = one(T) + tanh(ramp_steepness * (t_phys - ramp_start))
         shape = x_phys * x_phys * (one(T) - x_phys) * (one(T) - x_phys)
-        profile[i] = T(8) * T(u_max) * ramp * shape
+        profile[i] = T(8) * u_max * ramp * shape
     end
 end
 
@@ -768,10 +768,11 @@ function _logfv_cavity_update_lid_profile!(
     sync::Bool=true,
 )
     backend = KernelAbstractions.get_backend(profile)
+    T = eltype(profile)
     Nx = length(profile)
     kernel! = _logfv_cavity_lid_profile_kernel!(backend)
     kernel!(
-        profile, t_phys, u_max, ramp_start, ramp_steepness, Nx;
+        profile, T(t_phys), T(u_max), T(ramp_start), T(ramp_steepness), Nx;
         ndrange=(Nx,),
     )
     sync && KernelAbstractions.synchronize(backend)
@@ -902,8 +903,10 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     dx = one(T)
     dy = one(T)
 
-    # Geometry: pure square cavity, no interior solid cells
-    is_solid_h = falses(Nx, Ny)
+    # Geometry: pure square cavity, no interior solid cells.
+    # Use a concrete Matrix{Bool} (not BitMatrix) so MtlArray copyto!
+    # works without scalar indexing.
+    is_solid_h = zeros(Bool, Nx, Ny)
     is_solid = KernelAbstractions.allocate(backend, Bool, Nx, Ny)
     copyto!(is_solid, is_solid_h)
     # q_wall placeholder (no curved geometry); shaped for fused kernel compatibility
