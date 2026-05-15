@@ -36,7 +36,7 @@ before continuing.
 
 | ID | Topic | Branch | Exit criterion | Status |
 |----|-------|--------|----------------|--------|
-| S0 | Setup: roadmap + FVFD resource bilan + branches | slbm-paper (docs) + dev/fvfd-core created | Both docs committed; `git branch` shows fvfd-core created from main | in-progress |
+| S0 | Setup: roadmap + FVFD resource bilan + branches | dev/fvfd-core created from main | Both docs committed at `31e700df`; worktree `Kraken.jl-fvfd-core` live | done |
 | S1 | Extract FVFD core (src/fvfd, test, design doc) onto dev/fvfd-core | dev/fvfd-core | `test_fvfd_operators_2d.jl` green on CPU; one commit `feat(fvfd): extract operator library from dev-viscoelastic` | pending |
 | S2 | D1 ownership + D2 same-level LBM block update | dev/kraken-e-fvfd-blocks (branched from fvfd-core) | Derivation doc D1+D2 committed; uniform-block solver passes Poiseuille/Couette/Taylor-Green tests | pending |
 | S3 | D3 FVFD operators on block + D4 coarse/fine Cartesian face geometry | dev/kraken-e-fvfd-blocks | Derivation doc D3+D4 committed; constants and affine fields exact on c/f faces; rank checks | pending |
@@ -128,7 +128,12 @@ after `done`.
 
 ## Current state (live)
 
-- 2026-05-15: S0 in progress. Plan committed by user on slbm-paper as
-  [docs/agent/kraken_e_fvfd_interface_plan_2026-05-15.md](kraken_e_fvfd_interface_plan_2026-05-15.md).
-  Roadmap and FVFD resource bilan being drafted on slbm-paper, will be
-  moved to `dev/fvfd-core` worktree at end of S0.
+- 2026-05-15: S0 done at commit `31e700df` on dev/fvfd-core.
+  Worktree `/Users/guillaume/Documents/Recherche/Kraken.jl-fvfd-core`
+  created from `main` (1b8f8b94). Roadmap and FVFD resource bilan
+  committed on dev/fvfd-core. Drafts removed from slbm-paper.
+- Plan reference (source of truth on slbm-paper):
+  `docs/agent/kraken_e_fvfd_interface_plan_2026-05-15.md` in the
+  `/Users/guillaume/Documents/Recherche/Kraken.jl` worktree.
+- Next session: S1. Will use the `kraken-codex-pilot` claude skill (in
+  `~/.claude/skills/`) to delegate the FVFD extraction work to Codex.
