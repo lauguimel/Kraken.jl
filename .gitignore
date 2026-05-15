@@ -11,3 +11,8 @@ output/
 # results/ at root only (top-level), NOT benchmarks/results/ which is
 # a versioned sync point for the doc figures.
 /results/
+
+# Orchestrator runtime artefacts (briefs and logs are ephemeral;
+# mandate + memory under .orchestrator/ ARE tracked).
+.engineer_brief.md
+.engineer_logs/
