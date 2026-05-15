@@ -40,7 +40,7 @@ before continuing.
 | S1 | Extract FVFD core (src/fvfd, test, design doc) onto dev/fvfd-core | dev/fvfd-core | 923/923 green on CPU (15.9s); commit `dba83bef`; 8 isdefined gates skip viscoelastic-only fixtures | done |
 | S2 | D1 ownership + D2 same-level LBM block update | dev/kraken-e-fvfd-blocks (branched from fvfd-core@dbfa09c5) | Derivation doc D1+D2 committed; uniform-block solver passes Poiseuille (L2=0.05%), Couette (L2=4e-6), Taylor-Green (slope err=0.08%, mass drift 1e-14) canaries; 396/396 green | done |
 | S3 | D3 FVFD operators on block + D4 coarse/fine Cartesian face geometry | dev/kraken-e-fvfd-blocks | Derivation doc D3+D4 committed; view-based FVFD-on-LeafBlock2D adapter; CFFaceRecord2D geometry; constants & affine exact at ≤1.5e-15 (D3 grad, D3 div, D4 quadrature, D4 prolongation); corner ownership unique; 421/421 green | done |
-| S4 | D5 conservative interface fluxes on 2-block patch | dev/kraken-e-fvfd-blocks | Mass/momentum conservation roundoff on isolated two-level patch; F_coarse = sum(F_fine_k) test | pending |
+| S4 | D5 conservative interface fluxes on 2-block patch | dev/kraken-e-fvfd-blocks | Derivation doc D5 committed; ScalarFluxField2D + TwoBlockPatch2D + explicit Euler step; telescoping err = 0.0 exactly (≪ 1e-14); 100-step mass drift = 1.4e-15 relative; 424/424 green | done |
 | S5 | D7 LBM-to-moment extraction + D8 FVFD-to-LBM reconstruction | dev/kraken-e-fvfd-blocks | Inverse on chosen subspace; identity on uniform equilibrium; rho/j preserved exactly | pending |
 | S6 | D9 stress consistency + Poiseuille canary with c/f interface | dev/kraken-e-fvfd-blocks | Continuous stress across c/f interface; no density/velocity jump beyond discretization order | pending |
 | S7 | D10 wall + interface + Guo force (AMR-D marche 5 redo) | dev/kraken-e-fvfd-blocks | Forced Poiseuille with c/f near wall: roundoff mass conservation, no unexplained wall/interface density jump | pending |
@@ -178,3 +178,27 @@ after `done`.
   patch. Stays on dev/kraken-e-fvfd-blocks. First time c/f fluxes are
   computed — must satisfy F_coarse = sum(F_fine_k) telescoping to
   roundoff.
+- 2026-05-15: S4 done on dev/kraken-e-fvfd-blocks. Derivation doc:
+  `docs/agent/kraken_e_S4_D5_interface_fluxes_2026-05-15.md`. D5: scalar
+  FV flux field (`ScalarFluxField2D`) and two-block patch
+  (`TwoBlockPatch2D`) drive a closed-x + periodic-y explicit-Euler step
+  on a coarse (8×8, dx=1) + fine (16×16, dx=0.5) patch sharing one c/f
+  interface (8 coarse faces). The coarse face flux is **reconstructed
+  by quadrature** from the two fine subface fluxes via
+  `record.fine_to_coarse_weights = (1/2, 1/2)` — never computed
+  independently from coarse-side data. This single design choice makes
+  the telescoping `F_coarse · A_coarse = Σ F_fine_k · A_fine_k`
+  identically zero in floating-point. New files:
+  `src/kraken_e/interface_flux_2d.jl` (86 lines),
+  `src/kraken_e/two_block_patch_2d.jl` (121 lines),
+  `test/kraken_e/test_S4_telescoping_2d.jl` (62 lines). Canary metrics
+  on Gaussian IC over 100 explicit-Euler steps at CFL=0.5 with
+  prescribed v=(0.1, 0): max telescoping err = 0.0 exactly (≪ 1e-14
+  threshold); max conservation drift = 1.4e-15 relative (≪ 1e-12
+  threshold); synthetic-face ulp identity = 0.0. 424/424 green in
+  3m55s. S2 + S3 regression bit-identical. Plan §14 stop criterion
+  on D5 telescoping passed.
+- Next session: S5. D7 LBM-to-moment extraction + D8 FVFD-to-LBM
+  reconstruction. First time LBM populations meet the FVFD interface.
+  Must preserve `rho, j` exactly while imposing the chosen interface
+  stress.

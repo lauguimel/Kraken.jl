@@ -150,6 +150,14 @@ export fvfd_velocity_gradient_block_2d!
 export fvfd_tensor_divergence_block_2d!
 export fvfd_cell_velocity_to_faces_block_2d!
 
+# Kraken-E S4 exports
+export ScalarFluxField2D, allocate_scalar_flux_field_2d
+export TwoBlockPatch2D, build_two_block_patch_2d
+export compute_same_level_upwind_fluxes_2d!
+export reconstruct_coarse_flux_from_fine_2d
+export cf_flux_telescoping_error
+export explicit_euler_step!, patch_total_mass
+
 # Simulation drivers
 export LBMConfig, omega, reynolds
 export initialize_2d, initialize_3d

@@ -20,4 +20,5 @@ using Kraken
     include("test_postprocess.jl")
     ("kraken_e_S2" in ARGS || isempty(ARGS)) && include("kraken_e/test_S2_uniform_block.jl")
     ("kraken_e_S3" in ARGS || isempty(ARGS)) && include("kraken_e/test_S3_cf_faces_2d.jl")
+    ("kraken_e_S4" in ARGS || isempty(ARGS)) && include("kraken_e/test_S4_telescoping_2d.jl")
 end
