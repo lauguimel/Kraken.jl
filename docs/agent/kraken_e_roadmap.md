@@ -37,7 +37,7 @@ before continuing.
 | ID | Topic | Branch | Exit criterion | Status |
 |----|-------|--------|----------------|--------|
 | S0 | Setup: roadmap + FVFD resource bilan + branches | dev/fvfd-core created from main | Both docs committed at `31e700df`; worktree `Kraken.jl-fvfd-core` live | done |
-| S1 | Extract FVFD core (src/fvfd, test, design doc) onto dev/fvfd-core | dev/fvfd-core | `test_fvfd_operators_2d.jl` green on CPU; one commit `feat(fvfd): extract operator library from dev-viscoelastic` | pending |
+| S1 | Extract FVFD core (src/fvfd, test, design doc) onto dev/fvfd-core | dev/fvfd-core | 923/923 green on CPU (15.9s); commit `dba83bef`; 8 isdefined gates skip viscoelastic-only fixtures | done |
 | S2 | D1 ownership + D2 same-level LBM block update | dev/kraken-e-fvfd-blocks (branched from fvfd-core) | Derivation doc D1+D2 committed; uniform-block solver passes Poiseuille/Couette/Taylor-Green tests | pending |
 | S3 | D3 FVFD operators on block + D4 coarse/fine Cartesian face geometry | dev/kraken-e-fvfd-blocks | Derivation doc D3+D4 committed; constants and affine fields exact on c/f faces; rank checks | pending |
 | S4 | D5 conservative interface fluxes on 2-block patch | dev/kraken-e-fvfd-blocks | Mass/momentum conservation roundoff on isolated two-level patch; F_coarse = sum(F_fine_k) test | pending |
@@ -128,12 +128,18 @@ after `done`.
 
 ## Current state (live)
 
-- 2026-05-15: S0 done at commit `31e700df` on dev/fvfd-core.
-  Worktree `/Users/guillaume/Documents/Recherche/Kraken.jl-fvfd-core`
-  created from `main` (1b8f8b94). Roadmap and FVFD resource bilan
-  committed on dev/fvfd-core. Drafts removed from slbm-paper.
+- 2026-05-15: S0 done at `31e700df` + `00c6706e` (bootstrap + roadmap update).
+- 2026-05-15: S1 done at `dba83bef` on dev/fvfd-core.
+  FVFD operator library extracted from dev-viscoelastic (10 files, +3222 lines).
+  test/test_fvfd_operators_2d.jl: 923/923 green on CPU in 15.9s.
+  8 isdefined gates skip viscoelastic-only fixtures (logfv_* helpers and
+  precompute_q_wall_cylinder, all of which live on dev-viscoelastic only).
+  Pattern used: 3-layer (orchestrator → subagent → codex via pilot.sh).
+  Subagent identified the cylinder fixture gap, orchestrator fixed with a
+  1-line isdefined gate, then committed atomically.
 - Plan reference (source of truth on slbm-paper):
   `docs/agent/kraken_e_fvfd_interface_plan_2026-05-15.md` in the
   `/Users/guillaume/Documents/Recherche/Kraken.jl` worktree.
-- Next session: S1. Will use the `kraken-codex-pilot` claude skill (in
-  `~/.claude/skills/`) to delegate the FVFD extraction work to Codex.
+- Next session: S2. Branches from dev/fvfd-core into a new branch
+  `dev/kraken-e-fvfd-blocks`. Derives D1 (state ownership) and D2 (same-level
+  LBM block update). No interface work yet.
