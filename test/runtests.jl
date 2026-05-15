@@ -18,4 +18,5 @@ using Kraken
     include("test_krk_examples.jl")
     include("test_vtk_3d.jl")
     include("test_postprocess.jl")
+    ("kraken_e_S2" in ARGS || isempty(ARGS)) && include("kraken_e/test_S2_uniform_block.jl")
 end

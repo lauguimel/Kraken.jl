@@ -37,6 +37,9 @@ include("kernels/fused_thermal_2d.jl")
 # --- FVFD operator core ---
 include("fvfd/FVFD.jl")
 
+# --- Kraken-E AMR leaf-block runtime ---
+include("kraken_e/KrakenE.jl")
+
 # --- I/O ---
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
@@ -126,6 +129,16 @@ export logfv_periodicx_wally_bcspec_2d, logfv_openx_wally_bcspec_2d
 export logfv_wallxwally_bcspec_2d
 export logfv_empty_embedded_boundary_2d, logfv_embedded_boundary_from_qwall_2d
 export logfv_transfer_embedded_boundary_2d, logfv_transfer_field_bc_2d
+
+# Kraken-E AMR leaf-block runtime
+export LeafBlock2D, CFFaceRecord, KrakenELeafBlock2D, allocate_leaf_block_2d
+export KRAKEN_E_INTERIOR, KRAKEN_E_GHOST_HALO, KRAKEN_E_GHOST_CF, KRAKEN_E_WALL
+export kraken_e_apply_bcs!, kraken_e_exchange_halo!, kraken_e_exchange_halo_periodic_x!
+export kraken_e_exchange_halo_periodic_xy!, kraken_e_compute_macroscopic_2d!
+export kraken_e_collide_2d!, kraken_e_stream_2d!, kraken_e_step!
+export kraken_e_initialize_equilibrium_2d!, kraken_e_initialize_taylor_green_2d!
+export kraken_e_poiseuille_reference, kraken_e_couette_reference
+export kraken_e_mean_ux_by_y, kraken_e_l2_over_scale, kraken_e_kinetic_energy, kraken_e_mass
 
 # Simulation drivers
 export LBMConfig, omega, reynolds

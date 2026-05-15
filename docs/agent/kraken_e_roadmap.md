@@ -38,7 +38,7 @@ before continuing.
 |----|-------|--------|----------------|--------|
 | S0 | Setup: roadmap + FVFD resource bilan + branches | dev/fvfd-core created from main | Both docs committed at `31e700df`; worktree `Kraken.jl-fvfd-core` live | done |
 | S1 | Extract FVFD core (src/fvfd, test, design doc) onto dev/fvfd-core | dev/fvfd-core | 923/923 green on CPU (15.9s); commit `dba83bef`; 8 isdefined gates skip viscoelastic-only fixtures | done |
-| S2 | D1 ownership + D2 same-level LBM block update | dev/kraken-e-fvfd-blocks (branched from fvfd-core) | Derivation doc D1+D2 committed; uniform-block solver passes Poiseuille/Couette/Taylor-Green tests | pending |
+| S2 | D1 ownership + D2 same-level LBM block update | dev/kraken-e-fvfd-blocks (branched from fvfd-core@dbfa09c5) | Derivation doc D1+D2 committed; uniform-block solver passes Poiseuille (L2=0.05%), Couette (L2=4e-6), Taylor-Green (slope err=0.08%, mass drift 1e-14) canaries; 396/396 green | done |
 | S3 | D3 FVFD operators on block + D4 coarse/fine Cartesian face geometry | dev/kraken-e-fvfd-blocks | Derivation doc D3+D4 committed; constants and affine fields exact on c/f faces; rank checks | pending |
 | S4 | D5 conservative interface fluxes on 2-block patch | dev/kraken-e-fvfd-blocks | Mass/momentum conservation roundoff on isolated two-level patch; F_coarse = sum(F_fine_k) test | pending |
 | S5 | D7 LBM-to-moment extraction + D8 FVFD-to-LBM reconstruction | dev/kraken-e-fvfd-blocks | Inverse on chosen subspace; identity on uniform equilibrium; rho/j preserved exactly | pending |
@@ -140,6 +140,20 @@ after `done`.
 - Plan reference (source of truth on slbm-paper):
   `docs/agent/kraken_e_fvfd_interface_plan_2026-05-15.md` in the
   `/Users/guillaume/Documents/Recherche/Kraken.jl` worktree.
-- Next session: S2. Branches from dev/fvfd-core into a new branch
-  `dev/kraken-e-fvfd-blocks`. Derives D1 (state ownership) and D2 (same-level
-  LBM block update). No interface work yet.
+- 2026-05-15: S2 done on dev/kraken-e-fvfd-blocks (branched from
+  dev/fvfd-core@dbfa09c5). Architectural decisions taken (no reuse of
+  src/multiblock/ — SLBM gmsh substrate wrong for AMR-tree; ghost cells
+  with halo-exchange phase, ng=1 D2Q9; D1 ownership taxonomy paper-only
+  for c/f, reflux, epoch buffers; D2 pipeline = apply_bcs! → exchange_halo!
+  → collide! → stream! with half-way BB walls + Guo force).
+  Derivation doc: `docs/agent/kraken_e_S2_D1_D2_leaf_block_2026-05-15.md`.
+  Branch contract: `docs/agent/branch_contract_fvfd_blocks.md`.
+  Module: `src/kraken_e/` (5 files: KrakenE.jl entry, leaf_block.jl,
+  pipeline.jl, bcs.jl, canaries.jl).
+  Tests: `test/kraken_e/test_S2_uniform_block.jl`. 396/396 green.
+  Canaries on 32×32 at τ=0.8: Poiseuille L2=0.05%, Couette L2=4e-6,
+  TG decay-slope err=0.08%, mass drift 1.1e-14, equilibrium-fixed 1.1e-16
+  (all ≪ 1% target).
+- Next session: S3. D3 FVFD operators on block + D4 coarse/fine Cartesian
+  face geometry. Stays on dev/kraken-e-fvfd-blocks. First c/f geometry
+  work — no fluxes yet (those at S4).
