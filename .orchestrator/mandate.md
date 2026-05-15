@@ -54,7 +54,12 @@ without breaking other validated benchmarks (channel, cylinder).
 
 ### M1 — Re-mismatch sweep (Candidate 1)
 
-- **Status**: prep done (2026-05-15); awaiting Aqua submit
+- **Status**: done 2026-05-15 — **verdict: Re mismatch refuted**.
+  L2 flat across `u_max ∈ {0.005, 0.002, 0.001}` (centerline L2
+  1.797e-1 → 1.795e-1, psi_xy L2 2.44e-1 → 2.38e-1). Job
+  `21339238.aqua` walltime 04:22, Exit_status 0. Verdict file:
+  `bench/viscoelastic_logfv/CAVITY_REMISMATCH_M1_VERDICT_20260515.md`.
+  Per §6: launch M2 and M3 in parallel next.
 - **Goal**: determine whether the cavity profile gap shrinks
   monotonically as Re_LU drops from 6.4 → 1.3 by sweeping
   `u_max ∈ {0.005, 0.002, 0.001}` while holding `N=64`, `De=1`,

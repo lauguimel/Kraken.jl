@@ -26,3 +26,16 @@ contributor to the cavity gap at N=64.
 
 **Implication**: do NOT propose a brief that tries `bsd=1.0` on cavity.
 Document if the urge arises again.
+
+## 2026-05-15 — M1 closed: Re mismatch refuted
+
+L2 essentially flat across u_max ∈ {0.005, 0.002, 0.001}: centerline
+1.797e-1 → 1.795e-1 (0.1% change); psi_xy 2.44e-1 → 2.38e-1 (2.5%).
+Inertia is NOT the cavity-gap driver. The 18-24% L2 band is robust
+under Re_LU 6.4 → 1.3. See verdict file
+`bench/viscoelastic_logfv/CAVITY_REMISMATCH_M1_VERDICT_20260515.md`.
+
+**Implication**: do NOT re-attempt a smaller-u_max sweep as a fix; the
+gap is dx-bound (spatial discretisation / coupling), not Re-bound.
+Next missions: M2 (wall-corner artifact) + M3 (frozen-replay polymer)
+in parallel per Mandate §6.
