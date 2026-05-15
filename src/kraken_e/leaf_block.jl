@@ -3,8 +3,7 @@ const KRAKEN_E_GHOST_HALO = Int8(1)
 const KRAKEN_E_GHOST_CF = Int8(2)
 const KRAKEN_E_WALL = Int8(3)
 
-struct CFFaceRecord
-end
+# Typed coarse/fine face records are defined in cf_face_2d.jl.
 
 mutable struct LeafBlock2D{T<:AbstractFloat,AT2<:AbstractArray{T,2},AT3<:AbstractArray{T,3}}
     id::Int
@@ -23,7 +22,7 @@ mutable struct LeafBlock2D{T<:AbstractFloat,AT2<:AbstractArray{T,2},AT3<:Abstrac
     parent_id::Int
     child_ids::Vector{Int}
     same_level_neighbor_ids::NTuple{4,Int}
-    cf_face_records::Vector{CFFaceRecord}
+    cf_face_records::Vector{CFFaceRecord2D{T}}
     reflux_accumulators::Vector{T}
     epoch_remap_buffers::Vector{T}
 end
@@ -58,7 +57,7 @@ function allocate_leaf_block_2d(::Type{T}=Float64; Nx::Integer, Ny::Integer,
     return LeafBlock2D{T,typeof(ρ),typeof(f)}(
         Int(id), Int(level), origin_vec, T(dx), Int(Nx), Int(Ny), Int(ng),
         f, f_tmp, ρ, ux, uy, cell_kind,
-        -1, Int[], (-1, -1, -1, -1), CFFaceRecord[], T[], T[],
+        -1, Int[], (-1, -1, -1, -1), CFFaceRecord2D{T}[], T[], T[],
     )
 end
 
@@ -74,3 +73,5 @@ end
 
 @inline kraken_e_west_i(block::LeafBlock2D, i::Int) = i == 2 ? block.Nx + 1 : i - 1
 @inline kraken_e_east_i(block::LeafBlock2D, i::Int) = i == block.Nx + 1 ? 2 : i + 1
+
+const CFFaceRecord = CFFaceRecord2D{Float64}

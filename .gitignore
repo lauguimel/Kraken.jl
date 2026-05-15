@@ -19,3 +19,5 @@ output/
 # Kraken-E orchestration: Codex pilot ephemeral artifacts
 .codex_brief.md
 .codex_logs/
+.engineer_brief.md
+.engineer_logs/

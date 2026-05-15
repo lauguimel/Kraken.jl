@@ -39,7 +39,7 @@ before continuing.
 | S0 | Setup: roadmap + FVFD resource bilan + branches | dev/fvfd-core created from main | Both docs committed at `31e700df`; worktree `Kraken.jl-fvfd-core` live | done |
 | S1 | Extract FVFD core (src/fvfd, test, design doc) onto dev/fvfd-core | dev/fvfd-core | 923/923 green on CPU (15.9s); commit `dba83bef`; 8 isdefined gates skip viscoelastic-only fixtures | done |
 | S2 | D1 ownership + D2 same-level LBM block update | dev/kraken-e-fvfd-blocks (branched from fvfd-core@dbfa09c5) | Derivation doc D1+D2 committed; uniform-block solver passes Poiseuille (L2=0.05%), Couette (L2=4e-6), Taylor-Green (slope err=0.08%, mass drift 1e-14) canaries; 396/396 green | done |
-| S3 | D3 FVFD operators on block + D4 coarse/fine Cartesian face geometry | dev/kraken-e-fvfd-blocks | Derivation doc D3+D4 committed; constants and affine fields exact on c/f faces; rank checks | pending |
+| S3 | D3 FVFD operators on block + D4 coarse/fine Cartesian face geometry | dev/kraken-e-fvfd-blocks | Derivation doc D3+D4 committed; view-based FVFD-on-LeafBlock2D adapter; CFFaceRecord2D geometry; constants & affine exact at ≤1.5e-15 (D3 grad, D3 div, D4 quadrature, D4 prolongation); corner ownership unique; 421/421 green | done |
 | S4 | D5 conservative interface fluxes on 2-block patch | dev/kraken-e-fvfd-blocks | Mass/momentum conservation roundoff on isolated two-level patch; F_coarse = sum(F_fine_k) test | pending |
 | S5 | D7 LBM-to-moment extraction + D8 FVFD-to-LBM reconstruction | dev/kraken-e-fvfd-blocks | Inverse on chosen subspace; identity on uniform equilibrium; rho/j preserved exactly | pending |
 | S6 | D9 stress consistency + Poiseuille canary with c/f interface | dev/kraken-e-fvfd-blocks | Continuous stress across c/f interface; no density/velocity jump beyond discretization order | pending |
@@ -157,3 +157,24 @@ after `done`.
 - Next session: S3. D3 FVFD operators on block + D4 coarse/fine Cartesian
   face geometry. Stays on dev/kraken-e-fvfd-blocks. First c/f geometry
   work — no fluxes yet (those at S4).
+- 2026-05-15: S3 done on dev/kraken-e-fvfd-blocks. Derivation doc:
+  `docs/agent/kraken_e_S3_D3_D4_block_fvfd_and_cf_faces_2026-05-15.md`.
+  D3: thin view-based adapter (`src/kraken_e/fvfd_block_adapters.jl`)
+  drives the existing FVFD ops on `LeafBlock2D` interior arrays with no
+  reimplementation, no allocation, isotropic dx=dy=block.dx. D4: typed
+  `CFFaceRecord2D{T}` static-blittable record (`src/kraken_e/cf_face_2d.jl`)
+  with 2 fine faces per coarse face, trapezoidal half-half quadrature,
+  3-point central tangential prolongation `(3/4, 1/4)`, side-based
+  corner ownership rule. `LeafBlock2D.cf_face_records` retyped from
+  empty struct to `Vector{CFFaceRecord2D{T}}`; back-compat alias
+  `CFFaceRecord = CFFaceRecord2D{Float64}` retained. Tests:
+  `test/kraken_e/test_S3_cf_faces_2d.jl` (206 lines, 25 assertions).
+  Canary metrics: D3 const grad = 0.0; D3 affine grad err ≤ 1.5e-15;
+  D3 const tensor div = 0.0; D4 weights sum = 1 exactly; D4 affine
+  quadrature err = 2.8e-17; D4 prolongation const/affine err = 0.0;
+  corner ownership unique (boolean). 421/421 green in 3m54s. S2
+  regression untouched (Poiseuille 0.05%, Couette 4e-6, TG 0.08%).
+- Next session: S4. D5 conservative interface fluxes on a two-block
+  patch. Stays on dev/kraken-e-fvfd-blocks. First time c/f fluxes are
+  computed — must satisfy F_coarse = sum(F_fine_k) telescoping to
+  roundoff.

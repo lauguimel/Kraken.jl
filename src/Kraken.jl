@@ -140,6 +140,16 @@ export kraken_e_initialize_equilibrium_2d!, kraken_e_initialize_taylor_green_2d!
 export kraken_e_poiseuille_reference, kraken_e_couette_reference
 export kraken_e_mean_ux_by_y, kraken_e_l2_over_scale, kraken_e_kinetic_energy, kraken_e_mass
 
+# Kraken-E S3 exports
+export CFFaceRecord2D, KrakenECFFaceAxis, KrakenECFFaceSide
+export KRAKEN_E_CF_FACE_X, KRAKEN_E_CF_FACE_Y
+export KRAKEN_E_CF_FACE_LO, KRAKEN_E_CF_FACE_HI
+export kraken_e_build_cf_face_record_2d
+export kraken_e_interior_view_2d
+export fvfd_velocity_gradient_block_2d!
+export fvfd_tensor_divergence_block_2d!
+export fvfd_cell_velocity_to_faces_block_2d!
+
 # Simulation drivers
 export LBMConfig, omega, reynolds
 export initialize_2d, initialize_3d
