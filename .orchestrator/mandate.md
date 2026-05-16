@@ -259,28 +259,18 @@ convergence) will further bound which sub-component.
   the LBM viscosity at Wi=0 is therefore broken at the discrete
   level. This is the 3.42 % M7b residual.
 
-### M11 — BSD same-stencil fix (planned)
+### M11 — BSD same-stencil fix (attempted 2026-05-16 — RED, REVERTED)
 
-- **Status**: open as the actionable follow-up to M10.
-- **Goal**: rewire the BSD body-force assembly in the cavity
-  driver to use the SAME wide-stencil divergence as `div(τ_p)`.
-  M10 identified that
-  `logfv_bsd_stress_from_gradient_2d!`
-  (`src/kernels/logconformation_fv_2d.jl:678-708`) already exists
-  and produces `τ_BSD = 2·ζ·ν_p·D` cell-centered; feeding it
-  through `fvfd_tensor_divergence_2d!` then makes `F_poly − F_BSD`
-  cancel cleanly at the discrete level.
-- **Allowed edit zones** (when greenlit):
-  - `src/drivers/viscoelastic_logfv_2d.jl:1088-1091` (~5 LOC
-    substitution) + ~5 persistent N×N buffer allocations at init.
-- **Exit criterion**: re-run M7b PBS after fix. PASS bar:
-  A-vs-B rel L2 < 0.1 % (well below the 3.42 % bug signal, well
-  above the 0.014 % Newtonian noise floor).
-- **Top risk** (per M10): cross-derivative terms `∂_y(∂_x v)` use
-  yet another stencil. Expected residual after the fix: 0.05-0.2 %
-  at N=64 — well below the bug signal but visible vs noise. If
-  exceeded, escalate to M5-B kinetic path
-  (`bsd_kind=:kinetic` default, 1-LOC change).
+- **Status**: attempted on the monolithic driver, reverted same
+  session. Same-stencil route
+  (`logfv_bsd_stress_from_gradient_2d!` → `fvfd_tensor_divergence_2d!`)
+  produced **64 % A-vs-B** vs the 3.4 % bug signal (worse than the
+  bug). Root cause: BSD captured `D_corrected` while `τ_p` carried
+  `Ψ_history` from the source ODE — same stencil, different
+  "times". Fix requires capturing both at the SAME pipeline step,
+  which in turn requires the cavity driver SPLIT (see M16).
+- **Lesson**: do NOT retry M11-style fix on the monolith. Reframed
+  as M17, gated on M16.
 
 ### M8 — Poiseuille polymer-pipeline analytical (done 2026-05-16)
 
@@ -298,18 +288,27 @@ convergence) will further bound which sub-component.
   stencil are SOUND. The cavity 18-24 % gap MUST be in the LBM ↔
   polymer coupling.
 
-### M9 — Cavity grid convergence (planned 2026-05-16)
+### M9 — Cavity grid convergence (done 2026-05-16 — partial floor confirmed)
 
-- **Status**: PBS written
-  (`bench/viscoelastic_logfv/run_cavity_grid_convergence.pbs`,
-  62 lines), Aqua submit pending. PBS dumps running L2 to
-  `$SWEEP_ROOT/running_l2.txt` after each case for live monitoring.
-- **Goal**: sweep `N ∈ {32, 64, 96, 128}` at cavity defaults
-  (bsd=0.75, u_max=0.005, lambda_phys=1.0). If profile L2 shrinks
-  monotonically with `N`, the 18-24 % gap is partly a
-  discretization-floor against rheoTool's N=127 reference. If L2
-  stays flat or grows, the gap is structural and the coupling-layer
-  search (M10+) is the only path left.
+- **Status**: GREEN. Aqua `21405282.aqua` walltime 04:21:31,
+  Exit_status 0. **L2 falls monotonically with N**, approaching an
+  asymptotic floor (not zero).
+- **Results** (centerline u L2 / psi_xy L2):
+  - N=32: 31.4 % / 35.2 %
+  - N=64: 18.0 % / 24.4 % (baseline)
+  - N=96: 12.9 % / 20.1 %
+  - N=128: **10.0 %** / **17.9 %**
+- **Asymptotic-floor extrapolation** (assuming p=2 second-order
+  convergence): `L2_∞ ≈ 7.4 %` on centerline u, `~16.5 %` on psi_xy.
+  About **half** the N=64 gap is discretization-driven; the other
+  half is the Kraken-specific bug (M7b 3.4 % Wi-independent +
+  finite-Wi BSD drift).
+- **Implication for M17**: after closing the Wi-independent bug,
+  the expected post-M17 u-centerline gap at N=64 drops to ~14-15 %;
+  the residual ~10 pp is discretization floor. At N=127 (rheoTool
+  match) the residual shrinks further. Target: post-M17 u L2 ~5-8 %.
+- **Verdict file**:
+  `bench/viscoelastic_logfv/CAVITY_GRIDCONV_M9_VERDICT_20260516.md`.
 
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 
@@ -360,14 +359,107 @@ convergence) will further bound which sub-component.
   +19/-4 lines), `bench/viscoelastic_logfv/run_bsd_kinetic_audit_2d.jl`
   (NEW).
 
+### M12 — BSD literature audit (done 2026-05-16)
+
+- **Status**: GREEN. Audit doc
+  `bench/viscoelastic_audit/BSD_LITERATURE_AUDIT_20260516.md`.
+- **Finding**: rheoTool's `stabilization coupling` (iBSD) enforces
+  same-stencil cancellation at the `fvSchemes` dictionary level —
+  both `div(τ)` and `div((etaP)·grad(U))` declared `Gauss linear`.
+  Liu 2025 has no BSD: it injects stress directly via Hermite
+  moments into the LBM `f_i` (Eq. 22). The wide-vs-narrow trap
+  that bites Kraken is structurally absent from both references.
+  **This validates M17's Option 3 design** (rheoTool-style
+  same-stencil routing).
+
+### M13 — Guo body-force inverse test (done 2026-05-16)
+
+- **Status**: GREEN. Bench
+  `bench/viscoelastic_logfv/run_poiseuille_imposed_stress_2d.jl`.
+  Frozen analytical τ → Guo injection bit-exact (2.7e-20) and
+  second-order convergent in N. Guo path is ratched out.
+
+### M14 — BSD dual-path diagnostic (done 2026-05-16)
+
+- **Status**: GREEN as instrumentation. `diagnose_bsd_dual::Bool`
+  kwarg in the cavity driver records FD vs kinetic divergence per
+  step. On smooth t=0: bit-equivalent. On dynamic cavity: diverges
+  by O(1) — confirming the M10 stencil-mismatch hypothesis at
+  production gradients. Canary for any future BSD work.
+
+### M15 — Cavity pipeline architectural audit (done 2026-05-16)
+
+- **Status**: GREEN. Audit doc
+  `bench/viscoelastic_audit/CAVITY_PIPELINE_ARCH_AUDIT_20260516.md`
+  identifies 9 faults at Wi→0. Top is M10's stencil mismatch.
+  Secondary: `τ_p` carries `Ψ_history` while a fresh
+  `τ_BSD(D_now)` would be instantaneous (different "times"); the
+  default `:fd` BSD path reads `ux, uy` directly, NOT the
+  wall-corrected `D` the source ODE consumes. **Prescribes Option
+  3** (capture both BSD and source-ODE at the same pipeline step,
+  route through the same divergence operator). M17 implements it.
+
+### M16 — SPLIT cavity driver (in-flight 2026-05-17)
+
+- **Status**: BLOCKING M17. The cavity driver
+  `src/drivers/viscoelastic_logfv_2d.jl` is 3429 LOC and mixes 5
+  concerns (geometry, BC, solver, stencil, physics). Per
+  `feedback_orchestrator_discipline` + skill hygiene rules, no
+  substantive BSD change targets the monolith. M11 destabilised
+  exactly because of this; the SPLIT is the prerequisite.
+- **Goal**: decompose the driver along its natural seams into
+  ≤700-LOC modules. Refactor pur — zero behavioural change.
+  Proposed targets (Engineer may adjust to natural seams):
+  - `cavity_wall_correction_2d.jl` — wall-gradient correction
+    kernels (smallest, most isolated → extract first).
+  - `cavity_bsd_assembly_2d.jl` — BSD path selection
+    (`:fd` / `:kinetic`) + `diagnose_bsd_dual` instrumentation.
+  - `cavity_init_2d.jl` — buffer allocation + IC setup.
+  - `cavity_snapshot_2d.jl` — output / diagnostics writers.
+  - The remaining `viscoelastic_logfv_2d.jl` keeps the timestep
+    loop only, ≤700 LOC.
+- **Allowed edit zones**: the new files + the existing driver to
+  remove migrated code + `src/Kraken.jl` to update includes/exports.
+- **Forbidden**: any kwarg semantic change, any reordering of
+  operations inside the timestep loop, any deletion of reverted
+  code (M11/kinetic-default cleanup is a separate M16b mission).
+- **Exit criterion**: `julia --project=. test/runtests.jl` exits 0
+  AND `julia --project=. -e 'include("bench/viscoelastic_logfv/run_cavity_oldroydb_vs_rheotool.jl"); …'`
+  at N=64 t=8 reproduces the M1 baseline (centerline L2 = 0.1797,
+  psi_xy L2 = 0.2441) to ≥4 sig figs (machine precision modulo
+  GPU non-determinism). Local Metal F32 smoke at N=32 t=2 must
+  match pre-split byte-for-byte.
+
+### M17 — Option 3 BSD same-stencil fix (planned, gated on M16)
+
+- **Status**: gated. Per M12/M15, capture `D_corrected` at the
+  source-ODE step, build `τ_BSD = 2·ζ·ν_p·D_corrected` via
+  `logfv_bsd_stress_from_gradient_2d!`, route through the SAME
+  `fvfd_tensor_divergence_2d!` operator with the same
+  `polymer_wall_extrap` as `div(τ_p)`. ~50-85 LOC + 5 persistent
+  N×N buffers per M15.
+- **Allowed edit zones**: post-M16 modules only.
+- **Exit criterion**: M7b PBS A-vs-B centerline u rel L2 < 0.1 %
+  (vs the 3.4 % bug, well above the 0.014 % noise floor).
+
+### M18 — Production validation (planned, gated on M17)
+
+- **Status**: gated. Re-run cavity Oldroyd-B comparison at N=64
+  t=8 De=1 β=0.5 with the M17 fix.
+- **Pass bars**: centerline u L2 drops from 18.0 % toward the M9
+  discretization floor; psi_xy L2 drops from 24.4 % similarly.
+  If gap closes to ~5-8 % combined with M9 N=128 trajectory →
+  cavity benchmark validated; mandate moves to "done".
+
 ## 6. Mission dependency graph
 
 ```text
-M1 ──► (decide based on L2 trend)
-       ├─► if L2 drops monotonically:  Re mismatch dominant; STOP further candidates, document
-       ├─► if L2 flat or non-monotonic: M2 (corner) and M3 (frozen replay) in parallel
-       └─► M4 only if M2 and M3 are GREEN but residual gap remains
-M5 — fallback if M1-M4 do not close the gap
+M1..M10 ──► ratchet sequence (all closed; see entries above)
+M11 (RED, REVERTED)
+   └─► reframed as M17, gated on M16 SPLIT (architecture hygiene)
+M16 (SPLIT, in-flight) ──► M17 (Option 3) ──► M18 (production validate)
+                                          └─► escalate to other M15 faults if RED
+M9  N=128 ──► sets the discretization floor for M18 verdict
 ```
 
 ## 7. Open questions
