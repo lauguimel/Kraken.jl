@@ -875,6 +875,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     ramp_start::Real=0.5,
     ramp_steepness::Real=8.0,
     skip_top_corners::Bool=false,
+    bsd_kind::Symbol = :fd,
     diagnostic_stride::Integer=0,
     backend=KernelAbstractions.CPU(),
     T=Float64,
@@ -887,6 +888,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     lambda_phys > 0 || throw(ArgumentError("lambda_phys must be positive"))
     end_time > 0 || throw(ArgumentError("end_time must be positive"))
     diagnostic_stride >= 0 || throw(ArgumentError("diagnostic_stride must be non-negative"))
+    bsd_kind in (:fd, :kinetic) || throw(ArgumentError("bsd_kind must be :fd or :kinetic"))
 
     Nx = Int(N)
     Ny = Int(N)
@@ -1071,10 +1073,19 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
         )
 
         # 7. BSD correction
-        logfv_bsd_correct_force_bc_aware_2d!(
-            fx_total, fy_total, fx_poly, fy_poly, ux, uy, is_solid, bsd_t, nu_p_t, dx, dy,
-            logfv_bc; sync=false,
-        )
+        if bsd_kind === :kinetic
+            s_plus_t = T(trt_rates(nu_lbm_t)[1])
+            compute_bsd_force_kinetic_2d!(
+                fx_total, fy_total, fx_poly, fy_poly,
+                f_in, rho, ux, uy, is_solid,
+                bsd_t, nu_p_t, s_plus_t, dx, dy; sync=false,
+            )
+        else
+            logfv_bsd_correct_force_bc_aware_2d!(
+                fx_total, fy_total, fx_poly, fy_poly, ux, uy, is_solid, bsd_t, nu_p_t, dx, dy,
+                logfv_bc; sync=false,
+            )
+        end
 
         # 8. LBM solvent step with Guo body force
         fused_trt_libb_v2_guo_field_step!(

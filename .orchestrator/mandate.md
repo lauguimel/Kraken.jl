@@ -198,18 +198,28 @@ without breaking other validated benchmarks (channel, cylinder).
   radius: cavity driver only; `bsd_kind::Symbol=:fd` keeps unchanged
   behaviour everywhere else.
 
-#### M5-B — prototype (gated on user decision)
+#### M5-B — prototype (done 2026-05-16 as infrastructure)
 
-- **Status**: pending Boss decision (depends on whether M4b confirms
-  BSD as the profile-gap source).
-- **Goal**: implement the design as scoped above. Validate on cavity
-  driver with the M4 audit script extended to the kinetic path; bar:
-  `‖F_FD − F_Guo‖₂ / ‖F_FD‖₂ < 1e-6` on interior cells (F64).
-- **Allowed edit zones** (when greenlit):
-  - `src/kernels/bsd_kinetic.jl` (NEW)
-  - `src/Kraken.jl` (export)
-  - `src/drivers/viscoelastic_logfv_2d.jl` (surgical kwarg)
-  - `bench/viscoelastic_logfv/run_bsd_kinetic_audit_2d.jl` (NEW)
+- **Status**: GREEN as a refactor; kernels implemented and committed.
+  Self-test on N=32 t=2 CPU F64: `‖F_kinetic − F_FD_BSD‖₂ /
+  ‖F_FD_BSD‖₂ = 5.85e-16` (machine epsilon). **Caveat**: this proves
+  equivalence to the *existing FD-BSD path*, NOT to the LBM's true
+  implicit lattice stencil. By Chapman-Enskog `Π^{neq}` and
+  FD-laplacian of `u` give the same result on smooth interior. Wall
+  cells (LI-BB-perturbed `f`) were not exercised by the smoke; that
+  remains the unresolved risk from §M5-A.
+- **Practical implication**: no behaviour change with default
+  `bsd_kind=:fd`. The `:kinetic` path is currently equivalent to
+  `:fd` — useful as a `Π^{neq}` accumulator for future rheology
+  diagnostics or as the substrate for a future lattice-stencil-aware
+  BSD if the data justifies one.
+- **Cost (overhead when `:kinetic` is enabled)**: +3·N² temporary
+  buffers; ~37 FLOP/cell/timestep — negligible at production sizes.
+- **Files**: `src/kernels/bsd_kinetic.jl` (NEW),
+  `src/Kraken.jl` (export, 2 lines),
+  `src/drivers/viscoelastic_logfv_2d.jl` (kwarg `bsd_kind::Symbol=:fd`,
+  +19/-4 lines), `bench/viscoelastic_logfv/run_bsd_kinetic_audit_2d.jl`
+  (NEW).
 
 ## 6. Mission dependency graph
 

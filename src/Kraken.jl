@@ -63,6 +63,7 @@ include("kernels/logconformation_lbm_2d.jl")
 include("kernels/logconformation_lbm_3d.jl")
 include("fvfd/FVFD.jl")
 include("kernels/logconformation_fv_2d.jl")
+include("kernels/bsd_kinetic.jl")
 include("kernels/collide_viscoelastic_source_2d.jl")
 include("kernels/collide_viscoelastic_guo_2d.jl")
 # `kernels/viscoelastic_3d.jl` dispatches `update_polymer_stress_3d!` on
@@ -302,6 +303,7 @@ export collide_twophase_rheology_2d!
 # Viscoelastic
 export eigen_sym2x2, mat_exp_sym2x2, mat_log_sym2x2, decompose_velocity_gradient
 export eigen_sym3x3, mat_exp_sym3x3, mat_log_spd_sym3x3
+export compute_bsd_force_kinetic_2d!
 export compute_polymeric_force_2d!
 export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
