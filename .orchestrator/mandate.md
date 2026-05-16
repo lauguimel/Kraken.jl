@@ -207,16 +207,31 @@ in the **LBM ↔ polymer coupling layer** (Guo body-force injection on
 reconstruction after the Guo source). M7 (low-Wi sanity) and M9 (grid
 convergence) will further bound which sub-component.
 
-### M7 — Low-Wi sanity (planned 2026-05-16)
+### M7 — Low-Wi sanity (done 2026-05-16 — INCONCLUSIVE, design flaw)
 
-- **Status**: PBS written
-  (`bench/viscoelastic_logfv/run_cavity_lowwi_sanity.pbs`, 64 lines);
-  Aqua submit pending.
-- **Goal**: run cavity at `lambda_phys=0.001` (Wi ≈ 0.001) in two
-  cases — `polymer_on` (default `nu_p=0.1`) and `nu_p_zero`
-  (`nu_p=0.0`). At Wi → 0 the polymer stress is negligible, so the
-  two cases must give near-identical profiles. If they diverge, the
-  polymer-coupling layer has a Wi-independent bug.
+- **Status**: Aqua run completed (`21405281.aqua`, walltime 00:04:19,
+  Exit_status 0). Kraken-vs-Kraken centerline rel L2 = **3.41 %**.
+  **But the test is confounded by a Boss-brief design flaw**: the
+  two cases have different total LBM viscosities (`ν_s + ν_p`):
+  - `polymer_on`: `ν_total = 0.2`, `Re_LU = 1.6`
+  - `nu_p_zero`: `ν_total = 0.1`, `Re_LU = 3.2`
+
+  The 3.4 % delta is plausibly explained by the Re factor 2 alone,
+  not a polymer-coupling bug. Verdict file:
+  `bench/viscoelastic_logfv/CAVITY_LOWWI_M7_VERDICT_20260516.md`.
+
+### M7b — Low-Wi sanity with matched viscosity (planned)
+
+- **Status**: open; needed before any conclusion can be drawn from M7.
+- **Goal**: re-run at `lambda_phys=0.001` with three cases:
+  - A: `ν_s=0.1, ν_p=0.1` (current polymer_on, Re_LU=1.6)
+  - B: `ν_s=0.2, ν_p=0.0` (matched ν_total=0.2, Re_LU=1.6, polymer
+    code path silent)
+  - C: `ν_s=0.1, ν_p=0.0` (Re_LU=3.2 — kept as Re-doubling
+    reference)
+- **Decision rule**: if `‖A − B‖ ≈ 0`, polymer machinery is silent
+  at Wi=0 and the cavity gap is NOT a Wi-independent coupling bug.
+  If `‖A − B‖ ≫ noise`, smoking gun for Wi-independent coupling bug.
 
 ### M8 — Poiseuille polymer-pipeline analytical (done 2026-05-16)
 
