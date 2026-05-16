@@ -212,3 +212,32 @@ rheoTool are NOT a fitness function for the polymer pipeline alone —
 they always carry the coupling-layer signal.
 
 **Why**: cleaner separation of concerns for future debugging sessions.
+
+## 2026-05-16 — M7b confirms Wi-INDEPENDENT polymer-coupling bug (SMOKING GUN)
+
+At Wi=0.001 with matched total LBM viscosity, two cavity cases that
+differ only in whether the polymer code path is active diverge by
+**3.42 % centerline u rel L2**. Control case (Newtonian Re-doubling)
+produces only 0.014 % delta — confirming Re is NOT the source. The
+polymer machinery introduces a Wi-independent perturbation on `u`
+that should not exist if the BSD/Guo split correctly absorbs the
+Newtonian portion of τ_p into the LBM solvent viscosity. Verdict:
+`bench/viscoelastic_logfv/CAVITY_LOWWI_M7B_VERDICT_20260516.md`.
+
+**Implication**: the cavity-gap bug is now LOCALISED. M10 (BSD/Guo
+coupling Wi→0 audit) is the natural next mission — algebraic
+verification that the implementation matches the design intent
+`ν_LBM_eff = ν_s + ν_p` at the discrete level.
+
+**Why**: prevents future Departments from re-attempting any high-Wi
+diagnostic chase — the bug is in the coupling and visible cleanly at
+Wi=0. Any future audit should leverage this clean Wi-0 isolation.
+
+## 2026-05-16 — Cavity Kraken-vs-Kraken noise floor is 0.014 %
+
+The B-vs-C control of M7b (Newtonian, Re-doubling 1.6 → 3.2 at
+N=64, u_max=0.005) gives 0.014 % centerline u rel L2. Any future
+Kraken-vs-Kraken comparison delta above ~0.1 % is meaningful.
+
+**Why**: gives a quantitative threshold for "noise" vs "signal" in
+any future cavity sensitivity study.

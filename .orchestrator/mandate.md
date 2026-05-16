@@ -220,18 +220,37 @@ convergence) will further bound which sub-component.
   not a polymer-coupling bug. Verdict file:
   `bench/viscoelastic_logfv/CAVITY_LOWWI_M7_VERDICT_20260516.md`.
 
-### M7b — Low-Wi sanity with matched viscosity (planned)
+### M7b — Low-Wi matched-viscosity sanity (done 2026-05-16 — SMOKING GUN)
 
-- **Status**: open; needed before any conclusion can be drawn from M7.
-- **Goal**: re-run at `lambda_phys=0.001` with three cases:
-  - A: `ν_s=0.1, ν_p=0.1` (current polymer_on, Re_LU=1.6)
-  - B: `ν_s=0.2, ν_p=0.0` (matched ν_total=0.2, Re_LU=1.6, polymer
-    code path silent)
-  - C: `ν_s=0.1, ν_p=0.0` (Re_LU=3.2 — kept as Re-doubling
-    reference)
-- **Decision rule**: if `‖A − B‖ ≈ 0`, polymer machinery is silent
-  at Wi=0 and the cavity gap is NOT a Wi-independent coupling bug.
-  If `‖A − B‖ ≫ noise`, smoking gun for Wi-independent coupling bug.
+- **Status**: GREEN. Aqua job `21406676.aqua`, walltime 03:11,
+  Exit_status 0. **A Wi-independent polymer-coupling bug is
+  confirmed.**
+- **Result** (centerline u relative L2, Kraken-vs-Kraken):
+  - **A vs B (matched ν_total=0.2, Re_LU=1.6 identical) = 3.42 %**
+  - A vs C (unmatched ν_total) = 3.41 %
+  - B vs C (Re-doubling at Newtonian, nu_p=0 both) = **0.014 %**
+- **Critical reading**: B and C are both Newtonian; they differ only
+  in Re_LU (1.6 vs 3.2) and yet their delta is 0.014 % — pure noise
+  floor. **The 3.4 % A-vs-B delta is therefore NOT the Re factor (as
+  M7 mistakenly attributed it) — it is entirely the polymer-coupling
+  Wi-independent contribution.** At Wi=0.001 the polymer stress is
+  essentially Newtonian-additive (`τ_p ≈ 2·ν_p·D`); the BSD/Guo split
+  is supposed to absorb this exactly into `ν_LBM = ν_s + ζ·ν_p`. The
+  3.4 % residual proves the absorption is incomplete.
+- **Verdict file**:
+  `bench/viscoelastic_logfv/CAVITY_LOWWI_M7B_VERDICT_20260516.md`.
+- **First concrete localisation** of the cavity-gap bug since M1.
+
+### M10 — BSD/Guo coupling Wi→0 audit (planned)
+
+- **Status**: open as the natural follow-up to M7b.
+- **Goal**: algebraically write out `F_Guo applied to the LBM =
+  div(τ_p) + BSD_correction` in the Wi=0 limit and verify that the
+  Kraken implementation actually achieves the design intent
+  `ν_LBM_eff = ν_s + ν_p` at the discrete level. Likely candidates
+  for the bug: BSD sign/factor, Guo prefactor mis-application, or
+  operator staggering. M5-B's `Π^{neq}` accumulator is a diagnostic
+  for the wall-region case.
 
 ### M8 — Poiseuille polymer-pipeline analytical (done 2026-05-16)
 
