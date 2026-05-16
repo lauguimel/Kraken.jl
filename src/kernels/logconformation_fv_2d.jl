@@ -649,9 +649,11 @@ end
 function logfv_polymer_force_bc_aware_2d!(
     fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy, bc::LogFVDomainBC2D;
     sync::Bool=true,
+    polymer_wall_extrap::Symbol=:quadratic,
 )
     return fvfd_tensor_divergence_2d!(
-        fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy, bc; sync,
+        fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy, bc;
+        sync=sync, polymer_wall_extrap=polymer_wall_extrap,
     )
 end
 

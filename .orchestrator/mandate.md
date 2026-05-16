@@ -156,20 +156,32 @@ without breaking other validated benchmarks (channel, cylinder).
   M5-B (interior bit-exactness + wall stencil alignment are
   orthogonal fixes).
 
-#### M6-B — wall-BC matching (gated on M4b + Boss decision)
+#### M6-B — wall-BC matching (done 2026-05-16)
 
-- **Status**: pending. Do NOT run in parallel with M5-B; both could
-  touch `src/fvfd/operators_2d.jl`. Sequence: M5-B first (current
-  background), then M6-B if greenlit.
-- **Goal**: add `polymer_wall_extrap::Symbol = :quadratic` kwarg to
-  the relevant FD wall helpers, with `:linear` selecting the
-  rheoTool-style 2-point extrapolation. Default unchanged.
-- **Allowed edit zones** (when greenlit):
-  - `src/fvfd/operators_2d.jl` (surgical, ≤ 25 LOC)
-  - 2 callers (cited in the audit doc)
-- **Exit criterion**: re-run `analyse_cavity_guo_vs_fd_2d.jl` on a
-  cavity run with `polymer_wall_extrap=:linear`; expect
-  ~54 % → ~15-30 % interior L2.
+- **Status**: implementation GREEN. Split across two branches:
+  - **`dev/fvfd-core`** commit `7c790cd8` adds the `polymer_wall_extrap`
+    kwarg + the `Val{:linear}` branch in
+    `_fvfd_solid_bc_derivative_{x,y}_2d` and threads it through the
+    public FVFD divergence wrappers. Default `:quadratic` preserves
+    byte-identical behaviour for velocity-gradient consumers.
+  - **`dev-viscoelastic`** commit (this one) threads the kwarg
+    through `logfv_polymer_force_bc_aware_2d!` and
+    `run_viscoelastic_logfv_cavity_coupled_2d`, plus adds the audit
+    bench `run_wall_stencil_audit_2d.jl`.
+- **Self-test (N=32 t=2 CPU F64)**: wall-row rel L2 between
+  `:quadratic` and `:linear` = **12.0 %** (signal real, kwarg
+  correctly wired). Bulk far-from-wall max abs = 5.3e-8 (well below
+  the relaxed 1e-3 assertion — advection propagation over 12800 LBM
+  steps as expected).
+- **Files** (dev-viscoelastic side):
+  - `src/kernels/logconformation_fv_2d.jl` (+3 lines)
+  - `src/drivers/viscoelastic_logfv_2d.jl` (+4 lines)
+  - `bench/viscoelastic_logfv/run_wall_stencil_audit_2d.jl` (NEW)
+- **Next**: queue an Aqua N=64 t=8 production run with
+  `polymer_wall_extrap=:linear` to measure the actual `u(0.5, y)`
+  and `psi_xy(x, 0.75)` L2 drop. Prediction (M6-A): drop from
+  18-24 % toward single-digit % if the wall-stencil hypothesis is
+  the dominant remaining lever.
 
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 

@@ -876,6 +876,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     ramp_steepness::Real=8.0,
     skip_top_corners::Bool=false,
     bsd_kind::Symbol = :fd,
+    polymer_wall_extrap::Symbol = :quadratic,
     diagnostic_stride::Integer=0,
     backend=KernelAbstractions.CPU(),
     T=Float64,
@@ -889,6 +890,8 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     end_time > 0 || throw(ArgumentError("end_time must be positive"))
     diagnostic_stride >= 0 || throw(ArgumentError("diagnostic_stride must be non-negative"))
     bsd_kind in (:fd, :kinetic) || throw(ArgumentError("bsd_kind must be :fd or :kinetic"))
+    polymer_wall_extrap in (:quadratic, :linear) ||
+        throw(ArgumentError("polymer_wall_extrap must be :quadratic or :linear"))
 
     Nx = Int(N)
     Ny = Int(N)
@@ -1070,6 +1073,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
         # 6. Polymer body force = div(tau)
         logfv_polymer_force_bc_aware_2d!(
             fx_poly, fy_poly, tauxx, tauxy, tauyy, is_solid, dx, dy, logfv_bc; sync=false,
+            polymer_wall_extrap=polymer_wall_extrap,
         )
 
         # 7. BSD correction

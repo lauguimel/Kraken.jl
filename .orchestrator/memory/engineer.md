@@ -99,3 +99,35 @@ behaviour).
 **Why**: avoids a future Engineer proposing an `enum` extension that
 would be invasive across all drivers; the kwarg approach is the
 proper surgical path.
+
+## 2026-05-16 — Val-dispatched kwarg pattern for kernel constant-folding
+
+`KernelAbstractions.@kernel` bodies cannot take kwargs natively. To
+parameterise a kernel on a discrete choice (e.g. stencil variant)
+without runtime branching cost, pass the parameter as
+`Val{:tag}` rather than `Symbol`. The public Julia wrapper accepts a
+`Symbol`, validates it (`x in (:a, :b)`), wraps it once via `Val(x)`,
+and launches the kernel with the `Val`. Inside the kernel, branch
+with `if param isa Val{:linear}` — this is constant-folded at
+compile time per specialization.
+
+Example deployed in `src/fvfd/operators_2d.jl` (dev/fvfd-core) for the
+`polymer_wall_extrap::Val=Val(:quadratic)` kwarg on
+`_fvfd_solid_bc_derivative_{x,y}_2d`. Reusable for any future
+stencil-variant kwarg in `src/fvfd/`.
+
+**Why**: keeps kernel hot-paths branch-free across the discrete
+choice; documented so future contributors don't reach for a
+`@generated` macro or duplicate the kernel.
+
+## 2026-05-16 — `_fvfd_solid_bc_derivative_{x,y}_2d` are shared
+
+These helpers are called from BOTH the polymer body-force divergence
+path AND the velocity-gradient path (`fvfd_velocity_gradient_2d!`).
+Any future change to them MUST keep the velocity-gradient default
+behaviour byte-identical — otherwise channel, cylinder, and
+contraction benchmarks silently regress. Pattern: kwarg with default
+preserving the existing behaviour, threaded ONLY through the calling
+path that needs the change (do not extend to all callers).
+
+**Why**: surgical scope discipline; found during M6-B.
