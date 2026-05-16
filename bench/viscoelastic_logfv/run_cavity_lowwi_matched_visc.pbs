@@ -1,0 +1,80 @@
+#!/bin/bash -l
+#PBS -N krk_cavity_lowwi_matched
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB
+#PBS -l walltime=03:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M7b low-Wi cavity sanity with matched effective viscosity.
+# Three cases at lambda_phys=0.001 (Wi ~ 0.001):
+#   A: nu_s=0.1 nu_p=0.1 (current polymer_on, nu_total=0.2, Re_LU=1.6)
+#   B: nu_s=0.2 nu_p=0.0 (matched nu_total=0.2, Re_LU=1.6, polymer silent)
+#   C: nu_s=0.1 nu_p=0.0 (Re_LU=3.2 reference, kept for sanity)
+# Decision rule: if ||A - B|| ~= 0, polymer machinery is silent at Wi=0
+# and the cavity gap is NOT a Wi-independent coupling bug. If ||A - B||
+# is significant, smoking gun for Wi-independent coupling bug.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+
+export KRAKEN_N_LIST="${KRAKEN_N_LIST:-64}"
+export KRAKEN_END_TIME="${KRAKEN_END_TIME:-8.0}"
+export KRAKEN_U_MAX="${KRAKEN_U_MAX:-0.005}"
+export KRAKEN_BSD_FRACTION="${KRAKEN_BSD_FRACTION:-0.75}"
+export KRAKEN_POLYMER_MODEL="${KRAKEN_POLYMER_MODEL:-oldroydb}"
+export KRAKEN_L_MAX="${KRAKEN_L_MAX:-10.0}"
+export KRAKEN_MAX_POLYMER_SUBSTEPS="${KRAKEN_MAX_POLYMER_SUBSTEPS:-4096}"
+export KRAKEN_DIAGNOSTIC_STRIDE="${KRAKEN_DIAGNOSTIC_STRIDE:-2000}"
+export KRAKEN_RHEOTOOL_CASE="${KRAKEN_RHEOTOOL_CASE:-bench/rheotool/cavity_oldroydb_log_re001_de1_b05}"
+export KRAKEN_LAMBDA_PHYS="${KRAKEN_LAMBDA_PHYS:-0.001}"
+
+SWEEP_ROOT="${KRAKEN_SWEEP_ROOT:-results/viscoelastic_logfv/cavity_lowwi_matched_visc}"
+mkdir -p "$SWEEP_ROOT"
+
+nvidia-smi || true
+echo "=== M7b matched-viscosity low-Wi cavity sanity at $(date) ==="
+echo "cases: A (nu_s=0.1 nu_p=0.1, Re=1.6), B (nu_s=0.2 nu_p=0, Re=1.6 matched), C (nu_s=0.1 nu_p=0, Re=3.2)"
+echo "N=$KRAKEN_N_LIST t=$KRAKEN_END_TIME lambda_phys=$KRAKEN_LAMBDA_PHYS"
+echo "sweep_root=$SWEEP_ROOT"
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+
+# Case A: polymer_on, nu_total = 0.2, Re_LU = 1.6
+export KRAKEN_NU_S=0.1
+export KRAKEN_NU_P=0.1
+export KRAKEN_OUTPUT_DIR="${SWEEP_ROOT}/A_polymer_on_nus0.1_nup0.1"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo
+echo "--- Case A: nu_s=$KRAKEN_NU_S nu_p=$KRAKEN_NU_P -> $KRAKEN_OUTPUT_DIR ---"
+julia --project=. bench/viscoelastic_logfv/run_cavity_oldroydb_vs_rheotool.jl
+
+# Case B: matched effective viscosity, polymer silent, Re_LU = 1.6
+export KRAKEN_NU_S=0.2
+export KRAKEN_NU_P=0.0
+export KRAKEN_OUTPUT_DIR="${SWEEP_ROOT}/B_matched_nus0.2_nup0"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo
+echo "--- Case B: nu_s=$KRAKEN_NU_S nu_p=$KRAKEN_NU_P -> $KRAKEN_OUTPUT_DIR ---"
+julia --project=. bench/viscoelastic_logfv/run_cavity_oldroydb_vs_rheotool.jl
+
+# Case C: original nu_p=0, Re_LU = 3.2 (kept as Re-doubling reference)
+export KRAKEN_NU_S=0.1
+export KRAKEN_NU_P=0.0
+export KRAKEN_OUTPUT_DIR="${SWEEP_ROOT}/C_re_ref_nus0.1_nup0"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo
+echo "--- Case C: nu_s=$KRAKEN_NU_S nu_p=$KRAKEN_NU_P -> $KRAKEN_OUTPUT_DIR ---"
+julia --project=. bench/viscoelastic_logfv/run_cavity_oldroydb_vs_rheotool.jl
+
+echo "=== Done at $(date) ==="
