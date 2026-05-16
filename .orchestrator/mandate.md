@@ -116,19 +116,18 @@ without breaking other validated benchmarks (channel, cylinder).
 
 ### M4b — BSD fraction sweep (decision experiment)
 
-- **Status**: planned 2026-05-16
-- **Goal**: re-run the cavity at fixed `N=64, t=8, De=1, beta=0.5,
-  u_max=0.005`, sweeping `bsd_fraction ∈ {0, 0.25, 0.5, 0.75}`.
-  Hypothesis (from M4): the 18-24 % profile L2 gap shrinks monotonically
-  as `bsd_fraction → 0` (which removes the BSD `−ζ·ν_p·∇²u` correction
-  responsible for the 54 % Guo/FD discrepancy).
-- **Allowed edit zones**:
-  `bench/viscoelastic_logfv/run_cavity_bsd_sweep.pbs` (NEW)
-- **Exit criterion**: PBS dry-run + post-run analysis by
-  `analyse_cavity_remismatch.jl` (already handles per-case dirs).
-- **Notes**: 4 cases × ~33 min A100 = 2h15 + precompile. Walltime 4h
-  budget. Uses existing `run_cavity_oldroydb_vs_rheotool.jl` harness
-  which already consumes `KRAKEN_BSD_FRACTION` env var.
+- **Status**: done 2026-05-16 — **HYPOTHESIS REFUTED**. L2 falls
+  *monotonically* as `bsd_fraction` increases (NOT decreases):
+  centerline 21.15 % → 17.97 %, psi_xy 27.41 % → 24.41 % over
+  `ζ ∈ {0, 0.25, 0.5, 0.75}`. The BSD correction is helping
+  rheoTool match, not hurting it. Aqua job `21385031.aqua`
+  (requeued overnight to `gpu0n008`; walltime 02:23:06,
+  Exit_status 0). Verdict file:
+  `bench/viscoelastic_logfv/CAVITY_BSD_M4B_VERDICT_20260516.md`.
+- **Implication**: M4's 54 % Guo-vs-FD discrepancy is the BSD term
+  operating as designed, not a defect. M5-B (kinetic BSD refactor)
+  remains valuable as infrastructure but cannot close the gap.
+  **Pivot to M6-B (wall-BC stencil match)** as the next lever.
 
 ### M6 — Polymer-stress wall BC alignment with rheoTool
 

@@ -124,3 +124,30 @@ parallelise; both could touch operators_2d.jl in a follow-up).
 **Why**: prevents over-committing to either fix; documents the
 "likely both needed" reasoning so future sessions don't relitigate
 M5 vs M6 as exclusive alternatives.
+
+## 2026-05-16 — M4b REFUTES BSD-is-driver hypothesis
+
+Cavity profile L2 vs rheoTool falls *monotonically* as
+`bsd_fraction` increases over `{0, 0.25, 0.5, 0.75}` at fixed
+`N=64, t=8, De=1, beta=0.5, u_max=0.005`. Centerline L2:
+21.15 % → 17.97 %. psi_xy L2: 27.41 % → 24.41 %. Current
+production choice `bsd_fraction=0.75` is the best of the swept set.
+
+**Re-interpretation of M4**: the 54 % Guo-vs-FD discrepancy
+reported by M4 is the magnitude of the BSD correction term
+operating *as designed*, not a defect. The BSD correction is doing
+useful work (improving rheoTool match); the operator-mismatch
+concern was a misreading of M4. M5-B kinetic kernel is a clean
+refactor with the right semantics but cannot close the cavity gap.
+
+**Implication for the mission**: the next lever is M6-B (wall-BC
+stencil match with rheoTool's `linearExtrapolation` on τ). The
+remaining 18 % centerline gap at `bsd=0.75` must come from a
+non-BSD source — the wall stencil is the most concrete candidate
+identified to date. No future mission should propose another BSD
+sweep or another BSD-flavour refactor; that lever has been measured
+and it points the wrong way.
+
+**Why**: prevents future Departments from chasing the BSD ghost
+again. The data is in the verdict file
+`bench/viscoelastic_logfv/CAVITY_BSD_M4B_VERDICT_20260516.md`.
