@@ -66,3 +66,36 @@ kernel). Do not assume one exists — `grep` will return nothing.
 **Why**: a future contributor browsing for "non-equilibrium" or
 "Pi_neq" will find nothing; this note documents the absence so the
 search is not repeated.
+
+## 2026-05-16 — Kraken vs rheoTool wall BC on polymer fields
+
+- `Ψ` (log-conformation): both Kraken and rheoTool use
+  **zeroGradient** at all cavity walls. Kraken's is implicit via the
+  upwind helper at `src/fvfd/operators_2d.jl:408-454` (returns
+  `phi[i,j]` at walls).
+- `τ` (polymer stress) at the wall row of the FD divergence used to
+  build the body force: Kraken uses an **implicit one-sided quadratic
+  3-point** extrapolation in `_fvfd_solid_bc_derivative_x_2d` and
+  `_y` at `src/fvfd/operators_2d.jl:24-26 / 50-52`. rheoTool uses
+  **linearExtrapolation** (2-point linear) on `τ` at the moving lid
+  patch. The two conventions disagree only at the wall row; centred
+  stencils in the bulk are identical.
+
+**Why**: this is the most likely source of the M4 "54 % Guo vs FD"
+discrepancy at cell (16, 63) (one row below the lid). Any future
+polymer-stress wall BC work must keep these conventions straight.
+
+## 2026-05-16 — `FVFDDomainBC2D` enum is trinary
+
+`src/fvfd/specs.jl` defines `FVFDDomainBC2D` as exactly three cases:
+`PERIODIC`, `OPEN`, `WALL`. The wall variant has no sub-flavours; the
+extrapolation stencil is hard-coded inside the FD helpers. Adding a
+new wall behaviour (e.g. linear vs quadratic extrapolation for the
+polymer FD divergence) is therefore NOT done by adding an enum value;
+it is done by adding a kwarg to the helper itself (e.g.
+`polymer_wall_extrap::Symbol = :quadratic` defaulting to current
+behaviour).
+
+**Why**: avoids a future Engineer proposing an `enum` extension that
+would be invasive across all drivers; the kwarg approach is the
+proper surgical path.

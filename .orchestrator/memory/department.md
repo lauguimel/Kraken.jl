@@ -119,3 +119,16 @@ wall, and the LBM ghost-correction would double-count.
 **Why**: this is the third frozen-replay harness in the project
 (cylinder, channel, now cavity). The pattern is identical modulo BC
 spec; future contraction / BFS replays can copy it directly.
+
+## 2026-05-16 — rheoTool 0/ initial-condition files are plain ASCII
+
+The `0/` time directory of a rheoTool case (e.g.
+`bench/rheotool/cavity_oldroydb_log_re001_de1_b05/0/`) stores
+boundary conditions as **plain ASCII OpenFOAM dictionaries**. The
+`.gz` extension appears only on persisted simulation snapshots
+(later time directories), NOT on the `0/` initial conditions. No
+`gunzip` step is needed to read the BC blocks for `theta`, `tau`,
+`U`, etc.
+
+**Why**: avoids spending a Department iteration on a wrong unzip
+path. Found during M6-A.

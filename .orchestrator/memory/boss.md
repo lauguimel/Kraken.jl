@@ -103,3 +103,24 @@ audit; not robust for parameter sweeps.
 **Why**: avoids spending a future Department iteration re-discovering
 this. If a future mission needs the body-force at the `f` level,
 extend the writer first.
+
+## 2026-05-16 — M6-A confirms wall-BC stencil mismatch as alternative
+
+M6-A audit found that Kraken's FD divergence at the wall row uses an
+implicit one-sided **quadratic** 3-point extrapolation, while rheoTool
+uses **linearExtrapolation** (2-point) on `τ` at the moving lid. The
+Ψ-side BC matches (both zeroGradient). Predicted impact of matching:
+54 % → ~15-30 % L2 at the M4 max-diff cell (16, 63).
+
+**Implication**: M6-B is a complementary fix to M5-B, not an
+alternative. M5-B fixes interior bit-exactness (Chapman-Enskog
+consistency). M6-B fixes the wall-row stencil. Both may be needed;
+either alone may not close the full 18-24 % profile gap. M4b
+verdict will help discriminate: if profile L2 falls fast with
+bsd→0, BSD operator is the dominant lever; if not, the wall
+stencil is. Sequencing: M5-B first (in flight), THEN M6-B (do not
+parallelise; both could touch operators_2d.jl in a follow-up).
+
+**Why**: prevents over-committing to either fix; documents the
+"likely both needed" reasoning so future sessions don't relitigate
+M5 vs M6 as exclusive alternatives.

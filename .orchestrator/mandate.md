@@ -130,6 +130,48 @@ without breaking other validated benchmarks (channel, cylinder).
   budget. Uses existing `run_cavity_oldroydb_vs_rheotool.jl` harness
   which already consumes `KRAKEN_BSD_FRACTION` env var.
 
+### M6 — Polymer-stress wall BC alignment with rheoTool
+
+#### M6-A — audit (done 2026-05-16)
+
+- **Status**: audit GREEN. Engineer produced
+  `bench/viscoelastic_audit/WALL_BC_POLYMER_STRESS_AUDIT_20260516.md`
+  (376 lines, all 8 sections).
+- **Key findings**:
+  - rheoTool moving-lid BC on `τ`: `linearExtrapolation` (2-point linear
+    extrap from the 2 nearest interior cells).
+  - rheoTool on `theta` (=`Ψ`): `zeroGradient`.
+  - Kraken on `Ψ`: implicit zeroGradient via `operators_2d.jl:408-454`
+    — **matches** rheoTool. ✓
+  - Kraken on `τ` FD-divergence at wall row: implicit one-sided
+    **quadratic** 3-point stencil in
+    `_fvfd_solid_bc_derivative_x_2d` / `_y`
+    (`src/fvfd/operators_2d.jl:24-26 / 50-52`), consumed by
+    `logfv_polymer_force_bc_aware_2d!`. Does NOT match rheoTool's
+    2-point linear extrapolation.
+  - Predicted impact of matching: 54 % → ~15-30 % interior L2 at the
+    M4 max-diff cell (16, 63); interior far from walls unchanged.
+- **Implication**: provides an alternative hypothesis to M5's BSD
+  operator mismatch. Could be the dominant source if M4b shows L2
+  flat across bsd_fraction. Likely complements rather than replaces
+  M5-B (interior bit-exactness + wall stencil alignment are
+  orthogonal fixes).
+
+#### M6-B — wall-BC matching (gated on M4b + Boss decision)
+
+- **Status**: pending. Do NOT run in parallel with M5-B; both could
+  touch `src/fvfd/operators_2d.jl`. Sequence: M5-B first (current
+  background), then M6-B if greenlit.
+- **Goal**: add `polymer_wall_extrap::Symbol = :quadratic` kwarg to
+  the relevant FD wall helpers, with `:linear` selecting the
+  rheoTool-style 2-point extrapolation. Default unchanged.
+- **Allowed edit zones** (when greenlit):
+  - `src/fvfd/operators_2d.jl` (surgical, ≤ 25 LOC)
+  - 2 callers (cited in the audit doc)
+- **Exit criterion**: re-run `analyse_cavity_guo_vs_fd_2d.jl` on a
+  cavity run with `polymer_wall_extrap=:linear`; expect
+  ~54 % → ~15-30 % interior L2.
+
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 
 #### M5-A — design (done 2026-05-16)
