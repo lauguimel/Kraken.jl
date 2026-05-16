@@ -41,3 +41,28 @@ absent on a fresh clone or CI.
 
 **Why**: ensures the self-test runs from a clean checkout; cleanup
 guaranteed even on assertion failure. Found during M1.
+
+## 2026-05-16 — Guo source / TRT collision entrypoints
+
+The fused TRT + LI-BB + Guo step for the 2D log-FV cavity driver
+lives at `src/kernels/li_bb_2d_v2.jl:115-127`
+(`fused_trt_libb_v2_guo_field_step!`). The per-cell Guo source brick
+is at `src/kernels/dsl/bricks.jl:145-199`, where the Guo prefactor is
+`guo_pref = 1 − s_plus/2` (TRT plus-rate convention; not a
+user-tunable knob). Any new BSD or body-force operator must reuse
+this prefactor to stay consistent with the existing collision path.
+
+**Why**: re-deriving the prefactor independently is a frequent
+source of off-by-factor bugs. Found during M5-A.
+
+## 2026-05-16 — No Π^{neq} accumulator exists yet in `src/`
+
+As of 2026-05-16, no kernel under `src/` extracts the LBM
+non-equilibrium momentum tensor `Π^{neq}_{αβ} = Σ_q c_qα c_qβ
+(f_q − f_q^eq)`. Phase B of M5 must add it from scratch (proposed
+location: `src/kernels/bsd_kinetic.jl` paired with the new BSD
+kernel). Do not assume one exists — `grep` will return nothing.
+
+**Why**: a future contributor browsing for "non-equilibrium" or
+"Pi_neq" will find nothing; this note documents the absence so the
+search is not repeated.

@@ -132,10 +132,42 @@ without breaking other validated benchmarks (channel, cylinder).
 
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 
-- **Status**: deferred (3-4 h, invasive)
-- **Goal**: extract rate-of-strain from LBM non-equilibrium moments
-  instead of FD-central laplacian. Architecturally clean; makes BSD/LBM
-  split exact. Only consider if M1-M4 don't close the gap.
+#### M5-A — design (done 2026-05-16)
+
+- **Status**: design GREEN. Engineer produced
+  `bench/viscoelastic_audit/BSD_KINETIC_MOMENT_DESIGN_20260516.md`
+  (439 lines, all 8 sections present).
+- **Key findings**:
+  - Proposed kernel: `compute_bsd_force_kinetic_2d!` in NEW
+    `src/kernels/bsd_kinetic.jl`, paired with a `compute_pi_neq_2d_kernel!`
+    that extracts `Π^{neq}_{αβ} = Σ_q c_qα c_qβ (f_q − f_q^eq)`.
+  - Correct denominator is `ν_eff = cs²·(1/s_plus − 1/2)`; Guo prefactor
+    correction `guo_pref = 1 − s_plus/2` is taken from the existing
+    `bricks.jl:168-171` convention (not a separate scalar to pass).
+  - Precision ceiling: **F64 interior ≤ 1e-6**, **F32 interior ≤ 1e-3**
+    (gating). Bit-equality NOT achievable due to LI-BB pre-phase on `f`
+    at walls — interior-only assertion is the working bar.
+  - Top risk: wall-adjacent cells where LI-BB perturbs `f` before
+    non-eq moments are read; mitigation = interior-only first.
+- **Phase B scope estimate**: 2 NEW files
+  (`src/kernels/bsd_kinetic.jl`, `bench/.../bsd_kinetic_audit_2d.jl`) +
+  2 MODIFIED (`src/Kraken.jl` export, cavity driver kwarg threading at
+  lines 865, 1073-1077). 3-5 h Codex impl + 2-3 h validation. Blast
+  radius: cavity driver only; `bsd_kind::Symbol=:fd` keeps unchanged
+  behaviour everywhere else.
+
+#### M5-B — prototype (gated on user decision)
+
+- **Status**: pending Boss decision (depends on whether M4b confirms
+  BSD as the profile-gap source).
+- **Goal**: implement the design as scoped above. Validate on cavity
+  driver with the M4 audit script extended to the kinetic path; bar:
+  `‖F_FD − F_Guo‖₂ / ‖F_FD‖₂ < 1e-6` on interior cells (F64).
+- **Allowed edit zones** (when greenlit):
+  - `src/kernels/bsd_kinetic.jl` (NEW)
+  - `src/Kraken.jl` (export)
+  - `src/drivers/viscoelastic_logfv_2d.jl` (surgical kwarg)
+  - `bench/viscoelastic_logfv/run_bsd_kinetic_audit_2d.jl` (NEW)
 
 ## 6. Mission dependency graph
 
