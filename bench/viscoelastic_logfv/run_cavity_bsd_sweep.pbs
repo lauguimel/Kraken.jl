@@ -1,0 +1,65 @@
+#!/bin/bash -l
+#PBS -N krk_cavity_bsd_sweep
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M4b decision experiment: sweep bsd_fraction at fixed cavity
+# (N=64, t=8, De=1, beta=0.5, u_max=0.005). Tests whether the cavity
+# profile L2 gap (18-24% in the original run) collapses monotonically
+# as bsd_fraction -> 0 (which removes the BSD -zeta*nu_p*laplacian(u)
+# correction that M4 identified as the dominant Guo-vs-FD discrepancy).
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+
+# Cavity parameters held fixed during the sweep. u_max=0.005 is the
+# original baseline; lambda_phys / nu_s / nu_p / polymer_model / De / beta
+# are all match-rheoTool defaults.
+export KRAKEN_N_LIST="${KRAKEN_N_LIST:-64}"
+export KRAKEN_END_TIME="${KRAKEN_END_TIME:-8.0}"
+export KRAKEN_U_MAX="${KRAKEN_U_MAX:-0.005}"
+export KRAKEN_LAMBDA_PHYS="${KRAKEN_LAMBDA_PHYS:-1.0}"
+export KRAKEN_NU_S="${KRAKEN_NU_S:-0.1}"
+export KRAKEN_NU_P="${KRAKEN_NU_P:-0.1}"
+export KRAKEN_POLYMER_MODEL="${KRAKEN_POLYMER_MODEL:-oldroydb}"
+export KRAKEN_L_MAX="${KRAKEN_L_MAX:-10.0}"
+export KRAKEN_MAX_POLYMER_SUBSTEPS="${KRAKEN_MAX_POLYMER_SUBSTEPS:-4096}"
+export KRAKEN_DIAGNOSTIC_STRIDE="${KRAKEN_DIAGNOSTIC_STRIDE:-2000}"
+export KRAKEN_RHEOTOOL_CASE="${KRAKEN_RHEOTOOL_CASE:-bench/rheotool/cavity_oldroydb_log_re001_de1_b05}"
+
+SWEEP_ROOT="${KRAKEN_SWEEP_ROOT:-results/viscoelastic_logfv/cavity_bsd_sweep}"
+mkdir -p "$SWEEP_ROOT"
+
+nvidia-smi || true
+echo "=== cavity BSD-fraction sweep at $(date) ==="
+echo "bsd sweep: 0.0 0.25 0.5 0.75 (skipping 1.0 — crashes at lid corner)"
+echo "N=$KRAKEN_N_LIST end_time=$KRAKEN_END_TIME u_max=$KRAKEN_U_MAX"
+echo "sweep_root=$SWEEP_ROOT"
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+
+for bsd in 0.0 0.25 0.5 0.75; do
+    export KRAKEN_BSD_FRACTION="$bsd"
+    # Strip the dot for the directory name so analysis can split cleanly.
+    safe="${bsd//./_}"
+    export KRAKEN_OUTPUT_DIR="${SWEEP_ROOT}/bsd${safe}"
+    mkdir -p "$KRAKEN_OUTPUT_DIR"
+    echo
+    echo "--- Case bsd_fraction=$bsd -> $KRAKEN_OUTPUT_DIR ---"
+    julia --project=. bench/viscoelastic_logfv/run_cavity_oldroydb_vs_rheotool.jl
+done
+
+echo "=== Done at $(date) ==="
