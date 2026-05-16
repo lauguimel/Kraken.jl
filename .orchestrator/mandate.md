@@ -79,28 +79,36 @@ without breaking other validated benchmarks (channel, cylinder).
 
 ### M2 — Wall gradient corner artifact (Candidate 2)
 
-- **Status**: pending M1 result
-- **Goal**: local CPU smoke at N=32, t=2 with corner cells in
-  `_logfv_cavity_apply_wall_gradient_correction_kernel!` stub-replaced
-  by no-op; check whether the psi_xy sign-flip near (1, Ny) disappears.
-- **Allowed edit zones**: cavity driver + new smoke script under
-  `bench/viscoelastic_logfv/`.
-- **Exit criterion**: TBD after M1 verdict.
+- **Status**: smoke done 2026-05-16 — **partial signal, inconclusive
+  at smoke scale**. Surgical `skip_top_corners::Bool=false` plumbed
+  through the cavity driver call chain. Smoke at N=32, t=2, Metal F32:
+  max |Δpsi_xy| = 5.57e-5 (corner region) vs 3.53e-5 (bulk) → ratio
+  1.58×. Real local effect but absolute magnitude too small at N=32 t=2
+  to compare to the 18-24% production gap. Bench script:
+  `bench/viscoelastic_logfv/run_cavity_corner_artifact_2d.jl` (has
+  `--full` mode for N=64 t=8 on Aqua).
 
 ### M3 — Polymer upwind diffusion (Candidate 3)
 
-- **Status**: pending M1 result
-- **Goal**: adapt existing `run_rheotool_frozen_replay_2d.jl` to cavity
-  geometry, freeze rheoTool U at t=8, run only the Kraken polymer
-  pipeline; compare with rheoTool polymer at the same time.
-- **Allowed edit zones**:
-  `bench/viscoelastic_logfv/run_rheotool_frozen_replay_cavity_2d.jl` (NEW).
+- **Status**: smoke done 2026-05-16 — **polymer pipeline refuted as
+  dominant source**. Standalone polymer pipeline (advection + source +
+  stress) on frozen rheoTool U at t=8 gives relative L2 = **4.08 %**
+  on `psi_xy(x, 0.75)` at N=32 (0.25 phys time, Metal F32), well below
+  the 18-24% coupled-driver gap. Pipeline is fine on a clean U; the
+  bug must originate in U itself (i.e. in the LBM solvent response to
+  the polymer force). Bench script:
+  `bench/viscoelastic_logfv/run_rheotool_frozen_replay_cavity_2d.jl`
+  (has `--full` mode for N=64 t≥1 confirmation run).
 
 ### M4 — Guo body-force vs FD divergence (Candidate 4)
 
-- **Status**: pending M1-M3 results
+- **Status**: PROMOTED to primary suspect after M3 (2026-05-16). The
+  upstream-in-U logic now points directly here.
 - **Goal**: compute integrated polymer drag two ways on the saved N=64
-  field, compare. Determine if Guo/FD discordance contributes.
+  field (already in `tmp/cavity_remismatch/u0.005/.../fields.jls`):
+  (a) FD divergence of `tau` then volume sum, (b) LBM-Guo moment
+  accumulator. If they differ by ~10-20 % the Guo/FD inconsistency
+  is the cavity gap source.
 
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 

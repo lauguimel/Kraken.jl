@@ -782,14 +782,15 @@ end
 @kernel function _logfv_cavity_wall_gradient_correction_kernel!(
     dudx, dudy, dvdx, dvdy,
     @Const(ux), @Const(uy), @Const(u_lid_profile),
-    inv_dx_half, inv_dy_half, Nx, Ny,
+    inv_dx_half, inv_dy_half, Nx, Ny, skip_top_corners,
 )
     i, j = @index(Global, NTuple)
     T = eltype(dudx)
     @inbounds begin
         if i <= Nx && j <= Ny
             # North wall (j == Ny): moving lid, tangential ux = u_lid(x), v = 0
-            if j == Ny
+            # Pattern A: opt out only the moving-lid correction at the two top corner cells.
+            if j == Ny && !(skip_top_corners && (i == 1 || i == Nx))
                 dudy[i, j] = (u_lid_profile[i] - ux[i, j]) * inv_dy_half
                 dvdy[i, j] = (zero(T) - uy[i, j]) * inv_dy_half
             end
@@ -814,6 +815,7 @@ end
 
 function _logfv_cavity_apply_wall_gradient_correction!(
     dudx, dudy, dvdx, dvdy, ux, uy, u_lid_profile, dx::Real, dy::Real;
+    skip_top_corners::Bool=false,
     sync::Bool=true,
 )
     backend = KernelAbstractions.get_backend(dudx)
@@ -822,7 +824,7 @@ function _logfv_cavity_apply_wall_gradient_correction!(
     kernel! = _logfv_cavity_wall_gradient_correction_kernel!(backend)
     kernel!(
         dudx, dudy, dvdx, dvdy, ux, uy, u_lid_profile,
-        T(2) / T(dx), T(2) / T(dy), Nx, Ny;
+        T(2) / T(dx), T(2) / T(dy), Nx, Ny, skip_top_corners;
         ndrange=(Nx, Ny),
     )
     sync && KernelAbstractions.synchronize(backend)
@@ -872,6 +874,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     sample_times::AbstractVector{<:Real}=Float64[1.0, 2.0, 4.0, 6.0, 8.0],
     ramp_start::Real=0.5,
     ramp_steepness::Real=8.0,
+    skip_top_corners::Bool=false,
     diagnostic_stride::Integer=0,
     backend=KernelAbstractions.CPU(),
     T=Float64,
@@ -1035,7 +1038,8 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
             dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy, logfv_bc; sync=false,
         )
         _logfv_cavity_apply_wall_gradient_correction!(
-            dudx, dudy, dvdx, dvdy, ux, uy, u_lid_profile, dx, dy; sync=false,
+            dudx, dudy, dvdx, dvdy, ux, uy, u_lid_profile, dx, dy;
+            skip_top_corners=skip_top_corners, sync=false,
         )
 
         # 4. Polymer source (substepped)

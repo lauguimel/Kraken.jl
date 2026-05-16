@@ -39,3 +39,37 @@ under Re_LU 6.4 → 1.3. See verdict file
 gap is dx-bound (spatial discretisation / coupling), not Re-bound.
 Next missions: M2 (wall-corner artifact) + M3 (frozen-replay polymer)
 in parallel per Mandate §6.
+
+## 2026-05-16 — M2 + M3 closed (smoke); M4 promoted to primary suspect
+
+M3 smoke: standalone polymer pipeline on frozen rheoTool U at t=8
+gives **4.08 %** L2 vs **18-24 %** for the coupled run. Polymer
+upwind / source / stress is NOT the dominant source. The bug
+originates upstream — in U itself, i.e. the LBM solvent response to
+the polymer force. This makes **M4 (Guo body-force vs FD divergence)
+the primary remaining candidate**.
+
+M2 smoke (N=32 t=2): corner kernel has a real but tiny effect (corner
+Δpsi_xy 1.58× bulk Δpsi_xy, both ~5e-5). Absolute magnitude too small
+at the smoke scale to bound how much of the 18-24% gap it would close
+at production N=64 t=8.
+
+**Implication**: prioritise M4 prep next. M2-full Aqua run is a
+secondary confirmation, not a gate. Department in M3 took the
+liberty of writing 4 entries directly into
+`memory/department.md` — keep the content (it is correct) but future
+Department briefs MUST explicitly state "do NOT write to memory; only
+suggest candidates in your report". Single-writer rule.
+
+## 2026-05-16 — Department reports may bypass single-writer memory rule
+
+If a Department's brief does not explicitly forbid memory writes, the
+sub-agent will sometimes write directly to `.orchestrator/memory/*.md`
+files instead of just suggesting candidates. Discovered with M3
+(2026-05-16). Mitigation: add an explicit forbidden line in every
+Department brief going forward:
+"You MUST NOT modify any file under `.orchestrator/memory/`. Suggest
+candidates in your report; the Boss decides what to persist."
+
+**Why**: maintains the audit trail; without this, memory accumulates
+content without the Boss filter and the audit log becomes ambiguous.
