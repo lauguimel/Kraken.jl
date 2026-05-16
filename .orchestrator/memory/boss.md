@@ -241,3 +241,50 @@ Kraken-vs-Kraken comparison delta above ~0.1 % is meaningful.
 
 **Why**: gives a quantitative threshold for "noise" vs "signal" in
 any future cavity sensitivity study.
+
+## 2026-05-16 — LLM-friendly file-size constraint adopted
+
+User directive (2026-05-16): files should be ≤500-700 LOC for LLM
+Departments to work effectively. Current worst case in cavity-relevant
+code: `src/drivers/viscoelastic_logfv_2d.jl` = 3429 LOC (5× the
+limit). Any future cavity-driver refactor must include a SPLIT into
+modules (see `.orchestrator/memory/engineer.md` for the proposed
+decomposition). This is a load-bearing engineering constraint, not
+optional cleanup — M11's small fix got lost in the monolith context.
+
+**Why**: prevents the next session from going straight into Option 3
+implementation without first making the codebase tractable for the
+Engineer. Splitting should be the FIRST mission of the next session,
+not bundled with the BSD fix.
+
+## 2026-05-16 — Kraken-Mandate modularity violation (user-flagged)
+
+The original Kraken architectural mandate is: **geometry ≠ BC ≠ solver
+≠ stencil ≠ physics** (separation of concerns). The current cavity
+driver `src/drivers/viscoelastic_logfv_2d.jl` at 3429 LOC violates
+this directly — it co-locates:
+- The cavity GEOMETRY (lid-driven cavity setup)
+- The wall-BC kernels (`_logfv_cavity_apply_wall_gradient_correction!`)
+- Solver bits (timestep loop, LBM step orchestration)
+- Stencil choices (BSD `:fd` / `:kinetic` branches)
+- Physics (Oldroyd-B BSD correction, Guo body force assembly)
+
+This is structurally why M11 broke: the 5-LOC BSD fix shared state
+(buffers, kwargs, line context) with the wall-correction kernel and
+the source-ODE D-capture in the same file, so the fix accidentally
+perturbed unrelated concerns.
+
+**Implication**: the cavity driver SPLIT (per the engineer.md
+proposed decomposition) is not just for LLM-friendliness — it
+restores the project's own architectural mandate. Future cavity
+work must NOT bundle "fix BSD" with "split driver"; the split goes
+first as a standalone refactor mission, then the fix targets the
+clean post-split module.
+
+The orchestrator skill itself has been updated 2026-05-16 to enforce
+this generally: ≤500 LOC soft / ≤700 LOC hard, one-file-one-concern,
+in SKILL.md §Engineering hygiene. Applies to every project using the
+pattern, not just Kraken.
+
+**Why**: this is THE load-bearing project-level constraint going
+forward. Any Department brief that does not respect it is a trap.

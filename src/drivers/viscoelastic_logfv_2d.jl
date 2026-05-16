@@ -61,6 +61,31 @@ function _logfv_first_nonfinite_field_2d(is_solid_h, fields::Pair{Symbol,<:Any}.
     return (finite=true, field=:none, i=0, j=0)
 end
 
+function _logfv_bsd_dual_path_relative_l2_2d(
+    fx_active, fy_active, fx_alt, fy_alt, is_solid_h, backend,
+)
+    KernelAbstractions.synchronize(backend)
+    fx_active_h = Array(fx_active)
+    fy_active_h = Array(fy_active)
+    fx_alt_h = Array(fx_alt)
+    fy_alt_h = Array(fy_alt)
+    Nx, Ny = size(fx_active_h)
+    active_sum = 0.0
+    delta_sum = 0.0
+    @inbounds for j in 2:(Ny - 1), i in 2:(Nx - 1)
+        is_solid_h[i, j] && continue
+        ax = Float64(fx_active_h[i, j])
+        ay = Float64(fy_active_h[i, j])
+        dx = ax - Float64(fx_alt_h[i, j])
+        dy = ay - Float64(fy_alt_h[i, j])
+        active_sum += ax * ax + ay * ay
+        delta_sum += dx * dx + dy * dy
+    end
+    active_l2 = sqrt(active_sum)
+    delta_l2 = sqrt(delta_sum)
+    return active_l2 > 0.0 ? delta_l2 / active_l2 : (delta_l2 == 0.0 ? 0.0 : Inf)
+end
+
 function _logfv_normalize_polymer_symbol(polymer_model)
     raw = lowercase(String(polymer_model))
     normalized = Symbol(replace(raw, '-' => '_'))
@@ -876,6 +901,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     ramp_steepness::Real=8.0,
     skip_top_corners::Bool=false,
     bsd_kind::Symbol = :fd,
+    diagnose_bsd_dual::Bool = false,
     polymer_wall_extrap::Symbol = :quadratic,
     diagnostic_stride::Integer=0,
     backend=KernelAbstractions.CPU(),
@@ -965,6 +991,10 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     fy_poly = KernelAbstractions.zeros(backend, T, Nx, Ny)
     fx_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
     fy_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    if diagnose_bsd_dual
+        fx_alt = KernelAbstractions.zeros(backend, T, Nx, Ny)
+        fy_alt = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    end
 
     ux_face = KernelAbstractions.zeros(backend, T, Nx + 1, Ny)
     uy_face = KernelAbstractions.zeros(backend, T, Nx, Ny + 1)
@@ -1007,6 +1037,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     sample_step_targets = Int[max(1, ceil(Int, ts / dt_phys)) for ts in sample_times_sorted]
     snapshots = Dict{Float64,NamedTuple}()
     kinetic_energy_history = Tuple{Float64,Float64,Float64}[]
+    bsd_dual_path_diagnostic = Tuple{Int,Float64,Float64}[]
 
     first_nonfinite_step = 0
     first_nonfinite_field = :none
@@ -1089,6 +1120,26 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
                 fx_total, fy_total, fx_poly, fy_poly, ux, uy, is_solid, bsd_t, nu_p_t, dx, dy,
                 logfv_bc; sync=false,
             )
+        end
+
+        if diagnose_bsd_dual
+            if bsd_kind === :fd
+                s_plus_t = T(trt_rates(nu_lbm_t)[1])
+                compute_bsd_force_kinetic_2d!(
+                    fx_alt, fy_alt, fx_poly, fy_poly,
+                    f_in, rho, ux, uy, is_solid,
+                    bsd_t, nu_p_t, s_plus_t, dx, dy; sync=false,
+                )
+            else
+                logfv_bsd_correct_force_bc_aware_2d!(
+                    fx_alt, fy_alt, fx_poly, fy_poly, ux, uy, is_solid, bsd_t, nu_p_t, dx, dy,
+                    logfv_bc; sync=false,
+                )
+            end
+            rel_l2 = _logfv_bsd_dual_path_relative_l2_2d(
+                fx_total, fy_total, fx_alt, fy_alt, is_solid_h, backend,
+            )
+            push!(bsd_dual_path_diagnostic, (step, Float64(t_phys), rel_l2))
         end
 
         # 8. LBM solvent step with Guo body force
@@ -1200,6 +1251,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
         tauyy=Array(tauyy),
         snapshots=snapshots,
         kinetic_energy_history=kinetic_energy_history,
+        bsd_dual_path_diagnostic=bsd_dual_path_diagnostic,
     )
 end
 

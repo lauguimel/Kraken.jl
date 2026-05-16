@@ -184,3 +184,30 @@ M11 rewires it.
 
 **Why**: avoids inventing a new BSD kernel — the right one is
 already in the codebase, just not connected.
+
+## 2026-05-16 — File-size architectural constraint: ≤500-700 LOC per file
+
+LLM Departments cannot work effectively on files much larger than
+500-700 LOC: Read tool calls become expensive, line numbers drift
+between sessions, and each architectural fix requires re-grepping
+the entire file context. As of 2026-05-16, the worst offender is
+`src/drivers/viscoelastic_logfv_2d.jl` at **3429 LOC** (5× over).
+Other big files: `src/kernels/logconformation_fv_2d.jl` (1278),
+`src/fvfd/operators_2d.jl` (1084).
+
+Any future driver-level refactor for cavity should include a SPLIT
+of `viscoelastic_logfv_2d.jl` into ≤700-LOC modules. Suggested
+split:
+- `cavity_driver_2d.jl` — `run_viscoelastic_logfv_cavity_coupled_2d`
+  itself (the timestep loop).
+- `cavity_wall_correction_2d.jl` — `_logfv_cavity_apply_wall_gradient_correction!`
+  and its kernel.
+- `cavity_bsd_assembly_2d.jl` — BSD path selection (FD / kinetic /
+  same-stencil Option 3) and the diagnostic dual-path machinery.
+- `cavity_init_2d.jl` — buffer allocation / IC setup.
+- `cavity_snapshot_2d.jl` — output / diagnostics writers.
+
+**Why**: M11's small 5-LOC fix got lost in a 3429-LOC context;
+M15's audit explicitly flagged line-anchor drift as a Department
+hazard. Splitting is itself a load-bearing engineering choice for
+LLM-driven debug efficiency, not optional cleanup.
