@@ -102,13 +102,33 @@ without breaking other validated benchmarks (channel, cylinder).
 
 ### M4 — Guo body-force vs FD divergence (Candidate 4)
 
-- **Status**: PROMOTED to primary suspect after M3 (2026-05-16). The
-  upstream-in-U logic now points directly here.
-- **Goal**: compute integrated polymer drag two ways on the saved N=64
-  field (already in `tmp/cavity_remismatch/u0.005/.../fields.jls`):
-  (a) FD divergence of `tau` then volume sum, (b) LBM-Guo moment
-  accumulator. If they differ by ~10-20 % the Guo/FD inconsistency
-  is the cavity gap source.
+- **Status**: audit done 2026-05-16 — **CONFIRMED as the primary
+  suspect**. Guo body-force differs from FD div(τ) by **53.5 % – 53.8 %
+  L2** on the saved N=64 cavity snapshots, structural across u_max
+  (consistent with M1's L2-flat finding). Difference is dominated by
+  the BSD `−ζ·ν_p·∇²u` correction. Max-diff cell at (16, 63) — second
+  row below moving lid, right-wall recirculation corner; this is also
+  the M2 corner-artifact region (M2 and M4 are coupled at this cell).
+  Analysis script:
+  `bench/viscoelastic_logfv/analyse_cavity_guo_vs_fd_2d.jl`. Prior in
+  the Mandate ("~10-20 % discrepancy expected") was conservative; the
+  actual gap is 2-3× larger.
+
+### M4b — BSD fraction sweep (decision experiment)
+
+- **Status**: planned 2026-05-16
+- **Goal**: re-run the cavity at fixed `N=64, t=8, De=1, beta=0.5,
+  u_max=0.005`, sweeping `bsd_fraction ∈ {0, 0.25, 0.5, 0.75}`.
+  Hypothesis (from M4): the 18-24 % profile L2 gap shrinks monotonically
+  as `bsd_fraction → 0` (which removes the BSD `−ζ·ν_p·∇²u` correction
+  responsible for the 54 % Guo/FD discrepancy).
+- **Allowed edit zones**:
+  `bench/viscoelastic_logfv/run_cavity_bsd_sweep.pbs` (NEW)
+- **Exit criterion**: PBS dry-run + post-run analysis by
+  `analyse_cavity_remismatch.jl` (already handles per-case dirs).
+- **Notes**: 4 cases × ~33 min A100 = 2h15 + precompile. Walltime 4h
+  budget. Uses existing `run_cavity_oldroydb_vs_rheotool.jl` harness
+  which already consumes `KRAKEN_BSD_FRACTION` env var.
 
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 

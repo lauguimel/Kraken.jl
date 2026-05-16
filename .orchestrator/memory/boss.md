@@ -73,3 +73,33 @@ candidates in your report; the Boss decides what to persist."
 
 **Why**: maintains the audit trail; without this, memory accumulates
 content without the Boss filter and the audit log becomes ambiguous.
+
+## 2026-05-16 — M4 confirms BSD as primary cavity-gap suspect
+
+Guo body-force on the LBM differs from FD div(τ) by **53.5-53.8 % L2**
+on the saved N=64 cavity fields, structurally across u_max. Difference
+is dominated by the BSD `−ζ·ν_p·∇²u` correction. Max-diff cell (16, 63)
+is in the right-wall recirculation under the moving lid — the same
+region as M2's corner-artifact suspicion. **M2 and M4 are coupled at
+this cell.**
+
+**Implication**: the Mandate's prior assumption that `bsd ∈ [0, 0.75]`
+has "<2 % sensitivity at N=32" applied to *profiles*, not the *force*.
+At N=64 the force discrepancy is 54 %, plausibly enough to drive the
+18-24 % profile gap. Next decision experiment: **M4b BSD-fraction
+sweep** at N=64 t=8 with `bsd ∈ {0, 0.25, 0.5, 0.75}` to test whether
+the profile L2 collapses as the BSD correction shrinks.
+
+## 2026-05-16 — `fields.jls` writer omits `f` and body-force fields
+
+The cavity comparison harness `run_cavity_oldroydb_vs_rheotool.jl`
+persists only the macro fields `ux, uy, psi*, tau*` — NOT the LBM
+distribution `f` nor the applied body-force `fx_total/fy_total`. Any
+future Guo-vs-FD audit at the `f` level would need the snapshot writer
+extended. M4 worked around this by reconstructing F_Guo from `tau`
+using the implementation's known formula. Acceptable for a one-shot
+audit; not robust for parameter sweeps.
+
+**Why**: avoids spending a future Department iteration re-discovering
+this. If a future mission needs the body-force at the `f` level,
+extend the writer first.
