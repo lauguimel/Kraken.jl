@@ -241,16 +241,46 @@ convergence) will further bound which sub-component.
   `bench/viscoelastic_logfv/CAVITY_LOWWI_M7B_VERDICT_20260516.md`.
 - **First concrete localisation** of the cavity-gap bug since M1.
 
-### M10 — BSD/Guo coupling Wi→0 audit (planned)
+### M10 — BSD/Guo coupling Wi→0 audit (done 2026-05-16 — BUG LOCALISED)
 
-- **Status**: open as the natural follow-up to M7b.
-- **Goal**: algebraically write out `F_Guo applied to the LBM =
-  div(τ_p) + BSD_correction` in the Wi=0 limit and verify that the
-  Kraken implementation actually achieves the design intent
-  `ν_LBM_eff = ν_s + ν_p` at the discrete level. Likely candidates
-  for the bug: BSD sign/factor, Guo prefactor mis-application, or
-  operator staggering. M5-B's `Π^{neq}` accumulator is a diagnostic
-  for the wall-region case.
+- **Status**: GREEN. Audit doc
+  `bench/viscoelastic_audit/BSD_GUO_WI0_AUDIT_20260516.md` (380
+  lines, 8 sections). **Bug pinned to a stencil mismatch.**
+- **Finding**: at Wi → 0, `div(τ_p)` is assembled by two successive
+  FD-central operations (`fvfd_velocity_gradient_2d!` → 
+  `fvfd_tensor_divergence_2d!`), producing a **wide 2dx-spacing
+  laplacian** acting on `u`. The BSD correction
+  `−ζ·ν_p·∇²u` uses a **narrow 3-point laplacian** in
+  `fvfd_bsd_force_2d_kernel!` (`src/fvfd/operators_2d.jl:886-915`).
+  The two laplacians converge to the same continuum operator but
+  are NOT the same discrete operator — they differ by
+  O(dx²·∂⁴u), with the wide stencil carrying 4× the leading
+  truncation error. The cancellation that should fold `ν_p` into
+  the LBM viscosity at Wi=0 is therefore broken at the discrete
+  level. This is the 3.42 % M7b residual.
+
+### M11 — BSD same-stencil fix (planned)
+
+- **Status**: open as the actionable follow-up to M10.
+- **Goal**: rewire the BSD body-force assembly in the cavity
+  driver to use the SAME wide-stencil divergence as `div(τ_p)`.
+  M10 identified that
+  `logfv_bsd_stress_from_gradient_2d!`
+  (`src/kernels/logconformation_fv_2d.jl:678-708`) already exists
+  and produces `τ_BSD = 2·ζ·ν_p·D` cell-centered; feeding it
+  through `fvfd_tensor_divergence_2d!` then makes `F_poly − F_BSD`
+  cancel cleanly at the discrete level.
+- **Allowed edit zones** (when greenlit):
+  - `src/drivers/viscoelastic_logfv_2d.jl:1088-1091` (~5 LOC
+    substitution) + ~5 persistent N×N buffer allocations at init.
+- **Exit criterion**: re-run M7b PBS after fix. PASS bar:
+  A-vs-B rel L2 < 0.1 % (well below the 3.42 % bug signal, well
+  above the 0.014 % Newtonian noise floor).
+- **Top risk** (per M10): cross-derivative terms `∂_y(∂_x v)` use
+  yet another stencil. Expected residual after the fix: 0.05-0.2 %
+  at N=64 — well below the bug signal but visible vs noise. If
+  exceeded, escalate to M5-B kinetic path
+  (`bsd_kind=:kinetic` default, 1-LOC change).
 
 ### M8 — Poiseuille polymer-pipeline analytical (done 2026-05-16)
 

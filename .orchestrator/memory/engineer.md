@@ -152,3 +152,35 @@ gradient extraction is sound — do NOT propose changes there as a
 fix for the cavity gap.
 
 **Why**: ratchets one more cavity suspect out; documented during M8.
+
+## 2026-05-16 — BSD wide-vs-narrow laplacian stencil mismatch
+
+The polymer body force `div(τ_p)` is built by chaining
+`fvfd_velocity_gradient_2d!` then `fvfd_tensor_divergence_2d!` — two
+central-difference passes that, in the Wi → 0 Newtonian-additive
+limit, collapse to a **wide 3-point laplacian with 2dx spacing**
+acting on `u`. The existing BSD correction in
+`fvfd_bsd_force_2d_kernel!`
+(`src/fvfd/operators_2d.jl:886-915`) uses a **narrow 3-point
+laplacian** with the standard `dx` spacing. The two laplacians
+converge to `∇²u` in the continuum but are NOT the same discrete
+operator (wide has 4× the leading truncation error). Any future BSD
+or polymer-force work must keep the SAME-stencil invariant on both
+sides of the cancellation — otherwise the implicit `(1 − ζ)·ν_p·∇²u`
+folding into the LBM viscosity leaves a Wi-independent residual.
+
+**Why**: this stencil mismatch is the root cause of the 3.42 %
+M7b smoking gun. Documented during M10.
+
+## 2026-05-16 — `logfv_bsd_stress_from_gradient_2d!` is the latent same-stencil BSD
+
+`src/kernels/logconformation_fv_2d.jl:678-708` already implements
+`τ_BSD = 2·ζ·ν_p·D` cell-centered. Feeding this through
+`fvfd_tensor_divergence_2d!` gives a BSD body force that uses the
+SAME wide stencil as `div(τ_p)`, restoring the discrete
+cancellation. The function existed for drag-reduction work but was
+never wired into the cavity coupled driver body-force assembly.
+M11 rewires it.
+
+**Why**: avoids inventing a new BSD kernel — the right one is
+already in the codebase, just not connected.

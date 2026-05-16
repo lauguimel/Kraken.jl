@@ -146,3 +146,20 @@ whole tree.
 
 **Why**: caused M7 to stop on its first run; was already an issue on
 earlier missions but only documented now. Affects every Department.
+
+## 2026-05-16 — Stale `.engineer_brief.md` silently wins for the runner
+
+`run-engineer.sh` defaults to `.engineer_brief.md` if no explicit path
+is passed. If a previous mission left that file in place (because the
+prior Department or Boss did not delete it), the new Engineer reads
+the STALE brief instead of the current one. Symptoms: Codex appears
+to work on the wrong mission or refuses to act on inputs the brief
+"already mentioned". Mitigation: always pass the absolute brief path
+explicitly (`bash run-engineer.sh <project> <mission> <abs_brief_path>`),
+and the Boss should `rm -f .engineer_brief*` between missions as part
+of the post-commit cleanup.
+
+**Why**: found during M10's first Codex invocation — the M5-B brief
+at `.engineer_brief.md` (left over from before .engineer_brief_M5B.md
+was added) was picked up silently. Costs an Engineer iteration each
+time.
