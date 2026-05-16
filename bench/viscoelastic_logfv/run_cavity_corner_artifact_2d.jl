@@ -122,7 +122,7 @@ function main()
         skip_top_corners=true,
     )
 
-    mktempdir() do dir
+    function emit(dir::AbstractString)
         default_path = write_profile_csv(
             joinpath(dir, "cavity_corner_default_psixy_y075.csv"),
             default.x, default.psi_xy,
@@ -146,6 +146,14 @@ function main()
         println("-------- | --------------")
         println("corner   | $(corner_dmax)")
         println("bulk     | $(bulk_dmax)")
+    end
+
+    if cfg.mode == :full
+        out_dir = mkpath(get(ENV, "KRAKEN_OUTPUT_DIR",
+                             joinpath("tmp", "cavity_corner_artifact_full")))
+        emit(out_dir)
+    else
+        mktempdir(emit)
     end
 end
 

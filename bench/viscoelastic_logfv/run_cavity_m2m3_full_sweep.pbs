@@ -1,0 +1,68 @@
+#!/bin/bash -l
+#PBS -N krk_cavity_m2m3_full
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M2 + M3 confirmation runs at production N=64, t=8 (and t=1 for the
+# polymer-only replay) on Aqua A100/H100. M2 toggles skip_top_corners
+# between false and true side-by-side; M3 runs the polymer pipeline
+# alone on a frozen rheoTool U field at t=8.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+
+# Shared cavity parameters (rheoTool match on De=1, beta=0.5).
+export KRAKEN_N="${KRAKEN_N:-64}"
+export KRAKEN_END_TIME="${KRAKEN_END_TIME:-8.0}"
+export KRAKEN_LAMBDA_PHYS="${KRAKEN_LAMBDA_PHYS:-1.0}"
+export KRAKEN_NU_S="${KRAKEN_NU_S:-0.1}"
+export KRAKEN_NU_P="${KRAKEN_NU_P:-0.1}"
+export KRAKEN_U_MAX="${KRAKEN_U_MAX:-0.005}"
+export KRAKEN_BSD_FRACTION="${KRAKEN_BSD_FRACTION:-0.75}"
+export KRAKEN_POLYMER_MODEL="${KRAKEN_POLYMER_MODEL:-oldroydb}"
+export KRAKEN_L_MAX="${KRAKEN_L_MAX:-10.0}"
+export KRAKEN_MAX_POLYMER_SUBSTEPS="${KRAKEN_MAX_POLYMER_SUBSTEPS:-4096}"
+export KRAKEN_DIAGNOSTIC_STRIDE="${KRAKEN_DIAGNOSTIC_STRIDE:-2000}"
+export KRAKEN_RHEOTOOL_CASE="${KRAKEN_RHEOTOOL_CASE:-bench/rheotool/cavity_oldroydb_log_re001_de1_b05}"
+
+SWEEP_ROOT="${KRAKEN_SWEEP_ROOT:-results/viscoelastic_logfv/cavity_m2m3_full}"
+mkdir -p "$SWEEP_ROOT"
+
+# Frozen-replay shorter physical horizon (≥ 1 polymer-relaxation time).
+export KRAKEN_REPLAY_END_TIME="${KRAKEN_REPLAY_END_TIME:-1.0}"
+
+nvidia-smi || true
+echo "=== M2+M3 full sweep at $(date) ==="
+echo "N=$KRAKEN_N end_time=$KRAKEN_END_TIME u_max=$KRAKEN_U_MAX bsd=$KRAKEN_BSD_FRACTION"
+echo "sweep_root=$SWEEP_ROOT"
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+
+# --- M2: corner-artifact full (cavity x2: with/without skip_top_corners) ---
+export KRAKEN_OUTPUT_DIR="${SWEEP_ROOT}/m2_corner"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo
+echo "--- M2: corner artifact --full (N=$KRAKEN_N, t=$KRAKEN_END_TIME) -> $KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cavity_corner_artifact_2d.jl --full
+
+# --- M3: frozen-replay full (polymer pipeline on frozen rheoTool U at t=8) ---
+export KRAKEN_OUTPUT_DIR="${SWEEP_ROOT}/m3_frozen_replay"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo
+echo "--- M3: frozen replay --full (N=$KRAKEN_N, replay t=$KRAKEN_REPLAY_END_TIME) -> $KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_rheotool_frozen_replay_cavity_2d.jl --full
+
+echo "=== Done at $(date) ==="
