@@ -232,6 +232,9 @@ function run_case(N::Int, output_dir::AbstractString, rheotool_case::AbstractStr
     L_max = parse(Float64, get(ENV, "KRAKEN_L_MAX", "10.0"))
     max_subs = parse(Int, get(ENV, "KRAKEN_MAX_POLYMER_SUBSTEPS", "64"))
     diag_stride = parse(Int, get(ENV, "KRAKEN_DIAGNOSTIC_STRIDE", "0"))
+    polymer_wall_extrap = Symbol(get(ENV, "KRAKEN_POLYMER_WALL_EXTRAP", "quadratic"))
+    polymer_wall_extrap in (:quadratic, :linear) ||
+        error("KRAKEN_POLYMER_WALL_EXTRAP must be 'quadratic' or 'linear'")
 
     target_t = 8.0
     rheotool_t, rheotool_dir = pick_rheotool_sample_dir(rheotool_case, target_t)
@@ -257,6 +260,7 @@ function run_case(N::Int, output_dir::AbstractString, rheotool_case::AbstractStr
         end_time=end_time,
         sample_times=Float64[end_time],
         diagnostic_stride=diag_stride,
+        polymer_wall_extrap=polymer_wall_extrap,
         backend=backend,
         T=T,
     )
