@@ -132,3 +132,17 @@ boundary conditions as **plain ASCII OpenFOAM dictionaries**. The
 
 **Why**: avoids spending a Department iteration on a wrong unzip
 path. Found during M6-A.
+
+## 2026-05-16 — Engineer brief git-status invariant must scope to diff
+
+When the working tree has pre-existing dirty state (very common on
+`dev-viscoelastic`), do NOT write "git status --short returns the
+only allowed-zone files" as a global invariant in the Engineer brief.
+Codex aborts because the pre-dirty files trip the check before it
+creates its own file. Phrase it as:
+"`git status --short <path-of-allowed-edit-zone>` returns only the
+allowed-zone files" — scoped to the Engineer's own diff, not the
+whole tree.
+
+**Why**: caused M7 to stop on its first run; was already an issue on
+earlier missions but only documented now. Affects every Department.

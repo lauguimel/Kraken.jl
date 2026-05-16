@@ -193,19 +193,59 @@ without breaking other validated benchmarks (channel, cylinder).
 Four of five originally-mandated candidates plus the user-suggested
 wall-BC alternative are refuted. The 18-24 % cavity profile gap
 remains unexplained. The original Mandate's "5 candidates" framing
-is exhausted. Remaining possibilities (not yet probed):
+is exhausted.
 
-1. M2-full N=64 t=8 (cheapest — wrapper exists)
-2. Grid convergence: Kraken N ∈ {64, 96, 128} vs rheoTool N=127
-3. Initial conditions / spin-up differences
-4. Time integration cadence / substep cumulative bias
-5. Coupling order / staggering between LBM step and polymer substep loop
-6. Second-pass audit of `Ψ` zeroGradient *implementation*
-   (one-sided vs reflective ghost fill)
+A diagnostic battery (M7-M9) was launched 2026-05-16 to localise the
+bug. **M8 ratchets the polymer pipeline out of suspicion**: an
+analytical Poiseuille frozen-velocity test of the FV polymer pipeline
+(advection + Oldroyd-B source + stress assembly + wall velocity-gradient
+extraction) yields first-order convergence in `dt_poly` with no spatial
+bias — at production `n_substeps=4096`, the source-discretization
+error is ~4e-6, negligible. The 18-24 % cavity gap therefore originates
+in the **LBM ↔ polymer coupling layer** (Guo body-force injection on
+`f`, BSD correction magnitude/sign, operator staggering, or `u`
+reconstruction after the Guo source). M7 (low-Wi sanity) and M9 (grid
+convergence) will further bound which sub-component.
 
-Boss recommendation: **M2-full + grid convergence sweep** in
-parallel. M2-full bounds the last named candidate; grid sweep
-bounds the gap as discretization-floor vs bug.
+### M7 — Low-Wi sanity (planned 2026-05-16)
+
+- **Status**: PBS written
+  (`bench/viscoelastic_logfv/run_cavity_lowwi_sanity.pbs`, 64 lines);
+  Aqua submit pending.
+- **Goal**: run cavity at `lambda_phys=0.001` (Wi ≈ 0.001) in two
+  cases — `polymer_on` (default `nu_p=0.1`) and `nu_p_zero`
+  (`nu_p=0.0`). At Wi → 0 the polymer stress is negligible, so the
+  two cases must give near-identical profiles. If they diverge, the
+  polymer-coupling layer has a Wi-independent bug.
+
+### M8 — Poiseuille polymer-pipeline analytical (done 2026-05-16)
+
+- **Status**: GREEN with substantive caveat. Bench script
+  `bench/viscoelastic_logfv/run_poiseuille_polymer_analytical_2d.jl`
+  (256 LOC) freezes an analytical Poiseuille velocity field, runs
+  the Kraken polymer pipeline only (no LBM), compares `τ_xy(y)` and
+  `N1(y)` to Oldroyd-B steady-shear closed form.
+- **Result**: τ_xy rel L2 = 1.95e-3 / N1 rel L2 = 1.92e-3 at the
+  smoke cadence (n_substeps=8); error is uniform across interior
+  (NO spatial bias) and converges first-order in `dt_poly`. At 16
+  substeps both pass < 1e-3; at production cadence
+  (`n_substeps=4096`) source error ~4e-6 → negligible.
+- **Implication**: polymer pipeline + wall-row velocity-gradient
+  stencil are SOUND. The cavity 18-24 % gap MUST be in the LBM ↔
+  polymer coupling.
+
+### M9 — Cavity grid convergence (planned 2026-05-16)
+
+- **Status**: PBS written
+  (`bench/viscoelastic_logfv/run_cavity_grid_convergence.pbs`,
+  62 lines), Aqua submit pending. PBS dumps running L2 to
+  `$SWEEP_ROOT/running_l2.txt` after each case for live monitoring.
+- **Goal**: sweep `N ∈ {32, 64, 96, 128}` at cavity defaults
+  (bsd=0.75, u_max=0.005, lambda_phys=1.0). If profile L2 shrinks
+  monotonically with `N`, the 18-24 % gap is partly a
+  discretization-floor against rheoTool's N=127 reference. If L2
+  stays flat or grows, the gap is structural and the coupling-layer
+  search (M10+) is the only path left.
 
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 

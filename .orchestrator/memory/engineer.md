@@ -131,3 +131,24 @@ preserving the existing behaviour, threaded ONLY through the calling
 path that needs the change (do not extend to all callers).
 
 **Why**: surgical scope discipline; found during M6-B.
+
+## 2026-05-16 — Production polymer-substep cadence is sound
+
+At `n_substeps=4096` per LBM step (the production cavity cadence),
+`dt_poly ≈ 2.4e-4` in LU. The Oldroyd-B source ODE integrator is
+first-order in `dt_poly`; the per-step bias at production is ~4e-6
+(verified empirically in M8 at four refinement levels with perfect
+halving). Do NOT propose increasing `n_substeps` as a fix for any
+profile gap — the cadence is already negligible-error.
+
+**Why**: prevents wasted effort on substep-cadence "fixes".
+
+## 2026-05-16 — `fvfd_velocity_gradient_2d!` wall stencil is bit-exact
+
+`fvfd_velocity_gradient_2d!` reproduces `du/dy` at wall rows
+(j=1, j=Ny) bit-exactly against an analytical Poiseuille profile
+under `logfv_periodicx_wally_bcspec_2d()`. The wall-row velocity-
+gradient extraction is sound — do NOT propose changes there as a
+fix for the cavity gap.
+
+**Why**: ratchets one more cavity suspect out; documented during M8.

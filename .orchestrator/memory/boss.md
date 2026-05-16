@@ -174,3 +174,41 @@ integration, coupling order).
 4 refuted candidates. The wall-stencil ghost-fill *implementation*
 is a separate possibility (one-sided vs reflective) and is NOT
 covered by M6-B's verdict — that would be M9 or similar if pursued.
+
+## 2026-05-16 — M8 ratchets the polymer pipeline OUT of suspicion
+
+Analytical Poiseuille frozen-velocity test of the FV polymer pipeline
+(advection + Oldroyd-B source + stress + wall velocity-gradient
+extraction) gives first-order convergence in `dt_poly` with NO spatial
+bias (ratio cell/analytical = 0.99805 uniformly across interior).
+At production `n_substeps=4096`, source-discretization error is ~4e-6.
+The `fvfd_velocity_gradient_2d!` wall stencil is bit-exact vs analytical.
+Combined with M3 (cavity frozen replay 4 % L2) and the 0D constitutive
+machine-epsilon audit, this fully exonerates the polymer pipeline.
+
+**Implication**: the 18-24 % cavity gap MUST be in the **LBM ↔ polymer
+coupling layer**:
+- Guo body-force injection on `f`
+- BSD correction magnitude/sign (BSD helps per M4b, so direction is
+  right but possibly amplitude is off)
+- Operator staggering / order between LBM step and polymer substeps
+- `u` reconstruction from `f` after Guo source
+
+**Why**: prevents any future Department from re-auditing the polymer
+ODE, the FV advection upwind, the stress reconstruction, or the wall
+velocity-gradient extraction — all ratcheted.
+
+## 2026-05-16 — Two-level polymer-pipeline regression ratchet established
+
+We now have a two-level testing ladder for the polymer pipeline:
+- **0D**: bit-exact (machine epsilon) at production substep cadence
+  (audit `bench/viscoelastic_logfv/CONSTITUTIVE_0D_AUDIT_20260515.md`).
+- **2D**: first-order in `dt_poly`, no spatial bias, at
+  `bench/viscoelastic_logfv/run_poiseuille_polymer_analytical_2d.jl`.
+
+Future polymer-pipeline regressions can be triaged against this
+two-level ratchet without re-running cavity. Cavity comparisons against
+rheoTool are NOT a fitness function for the polymer pipeline alone —
+they always carry the coupling-layer signal.
+
+**Why**: cleaner separation of concerns for future debugging sessions.
