@@ -177,11 +177,35 @@ without breaking other validated benchmarks (channel, cylinder).
   - `src/kernels/logconformation_fv_2d.jl` (+3 lines)
   - `src/drivers/viscoelastic_logfv_2d.jl` (+4 lines)
   - `bench/viscoelastic_logfv/run_wall_stencil_audit_2d.jl` (NEW)
-- **Next**: queue an Aqua N=64 t=8 production run with
-  `polymer_wall_extrap=:linear` to measure the actual `u(0.5, y)`
-  and `psi_xy(x, 0.75)` L2 drop. Prediction (M6-A): drop from
-  18-24 % toward single-digit % if the wall-stencil hypothesis is
-  the dominant remaining lever.
+- **Aqua confirmation done 2026-05-16 — HYPOTHESIS REFUTED**.
+  Aqua job `21397692.aqua` ran both `:quadratic` and `:linear` at
+  N=64 t=8 (walltime 01:13:54, Exit_status 0). Sanity baseline
+  (`:quadratic`) reproduces M1 baseline to 4 sig figs (0.1797 /
+  0.2441) — kwarg default preserves behaviour bit-for-bit. Test
+  case (`:linear`): centerline L2 = 0.1817 (+1.1 %), psi_xy L2 =
+  0.2433 (−0.3 %). **The 12 % wall-row local signal does NOT
+  propagate to the global profile.** Wall-stencil mismatch is not
+  the cavity-gap driver. Verdict file:
+  `bench/viscoelastic_logfv/CAVITY_M6B_CONFIRM_VERDICT_20260516.md`.
+
+### Mission status step-back (2026-05-16)
+
+Four of five originally-mandated candidates plus the user-suggested
+wall-BC alternative are refuted. The 18-24 % cavity profile gap
+remains unexplained. The original Mandate's "5 candidates" framing
+is exhausted. Remaining possibilities (not yet probed):
+
+1. M2-full N=64 t=8 (cheapest — wrapper exists)
+2. Grid convergence: Kraken N ∈ {64, 96, 128} vs rheoTool N=127
+3. Initial conditions / spin-up differences
+4. Time integration cadence / substep cumulative bias
+5. Coupling order / staggering between LBM step and polymer substep loop
+6. Second-pass audit of `Ψ` zeroGradient *implementation*
+   (one-sided vs reflective ghost fill)
+
+Boss recommendation: **M2-full + grid convergence sweep** in
+parallel. M2-full bounds the last named candidate; grid sweep
+bounds the gap as discretization-floor vs bug.
 
 ### M5 — Kinetic-moment BSD refactor (Candidate 5)
 

@@ -151,3 +151,26 @@ and it points the wrong way.
 **Why**: prevents future Departments from chasing the BSD ghost
 again. The data is in the verdict file
 `bench/viscoelastic_logfv/CAVITY_BSD_M4B_VERDICT_20260516.md`.
+
+## 2026-05-16 — M6-B REFUTES wall-stencil hypothesis at production
+
+Aqua confirmation job 21397692 ran cavity at N=64 t=8 with
+`polymer_wall_extrap` in {`:quadratic`, `:linear`}. Quadratic
+reproduced the M1 baseline (0.1797 / 0.2441) to 4 sig figs — sanity
+passed, kwarg default preserves behaviour. Linear gave 0.1817 /
+0.2433 — essentially unchanged (+1.1 % on centerline u, −0.3 % on
+psi_xy). The 12 % wall-row delta observed at the smoke does NOT
+propagate to the global profile.
+
+**Implication for the mission**: four of five originally-mandated
+candidates plus the user-suggested wall-BC alternative are refuted.
+The 18-24 % cavity profile gap remains unexplained. Need to
+step-back the Mandate and either close M2-full + grid-convergence
+sweep (cheap, bounds the gap as discretization-floor vs bug) or
+open M7-M9 for the remaining hypotheses (initial conditions, time
+integration, coupling order).
+
+**Why**: prevents future Departments from re-attempting any of the
+4 refuted candidates. The wall-stencil ghost-fill *implementation*
+is a separate possibility (one-sided vs reflective) and is NOT
+covered by M6-B's verdict — that would be M9 or similar if pursued.
