@@ -1,6 +1,6 @@
 # BSD Analytical Ladder - 2026-05-17
 
-Mission: M17-canary-analytical
+Mission: M17-canary-analytical (L0-L2) + M17-canary-A (L2b Option A test)
 
 Params: U_0 = 1.0, nu_p = 0.1, zeta = 0.75, N = (32, 64, 128).
 
@@ -32,9 +32,26 @@ L2 - F_total at walls (closed box, lid profile matches TG)
   kind=:fd_v2  interior rel_L2 = 3.20e-03 | wall rel_L2 = 3.03e+02 |
                max|F_BSD| ratio wall/interior = 1.58e+02
 
+L2b - Option A test: BSD reads D_uncorrected (closed box, walls)
+  kind=:fd          N=32  interior rel_L2 = 1.603e-02 | wall rel_L2 = 1.969e-01 | ratio = 9.809e-01
+               N=64  interior rel_L2 = 4.014e-03 | wall rel_L2 = 1.027e-01 | ratio = 9.952e-01  (interior order ~= 2.00)
+               N=128 interior rel_L2 = 1.004e-03 | wall rel_L2 = 5.188e-02 | ratio = 9.988e-01
+  kind=:fd_v2       N=32  interior rel_L2 = 1.270e-02 | wall rel_L2 = 7.682e+01 | ratio = 4.079e+01
+               N=64  interior rel_L2 = 3.203e-03 | wall rel_L2 = 3.026e+02 | ratio = 1.575e+02  (interior order ~= 2.00)
+               N=128 interior rel_L2 = 8.026e-04 | wall rel_L2 = 1.207e+03 | ratio = 6.244e+02
+  kind=:fd_v2_unc   N=32  interior rel_L2 = 1.270e-02 | wall rel_L2 = 3.173e-01 | ratio = 9.857e-01
+               N=64  interior rel_L2 = 3.203e-03 | wall rel_L2 = 1.631e-01 | ratio = 9.964e-01  (interior order ~= 2.00)
+               N=128 interior rel_L2 = 8.026e-04 | wall rel_L2 = 8.212e-02 | ratio = 9.991e-01
+  Wall drop factor :fd_v2 -> :fd_v2_unc at N=64 = 1.86e+03
+
 =========================================================
-VERDICT: :fd_v2 gives the tighter periodic cancellation, while :fd has the lower wall-band BSD spike; the M17 implication is to favor Option A D_uncorrected wall handling unless a separate kinetic default is validated.
+VERDICT (L2):  :fd_v2 gives the tighter periodic cancellation, while :fd has the lower wall-band BSD spike; the M17 implication is to favor Option A D_uncorrected wall handling unless a separate kinetic default is validated.
+VERDICT (L2b): [GREEN] implement Option A in cavity_driver_2d.jl as M17
 =========================================================
 ```
 
-Interpretation: At N=64, the periodic ladder identifies which BSD cancellation strategy matches the analytical Newtonian-limit force, while the closed-box wall band quantifies the penalty from applying cavity wall gradients to the BSD stress. The wall/interior BSD maxima are 9.95e-01 for :fd and 1.58e+02 for :fd_v2, so the M17 architecture should keep the BSD stabilizer on an uncorrected D path at walls unless a separately validated kinetic default replaces it.
+Interpretation (L0-L2): At N=64, the periodic ladder identifies which BSD cancellation strategy matches the analytical Newtonian-limit force, while the closed-box wall band quantifies the penalty from applying cavity wall gradients to the BSD stress. The wall/interior BSD maxima are 9.95e-01 for :fd and 1.58e+02 for :fd_v2, so the M17 architecture should keep the BSD stabilizer on an uncorrected D path at walls unless a separately validated kinetic default replaces it.
+
+## L2b - Option A test (D_uncorrected for BSD)
+
+L2b directly tests Option A: BSD reads D_uncorrected (centered FD only, no wall-correction overwrite) while keeping the wide-stencil :fd_v2 kernel path. At N=64 the :fd_v2_unc row gives interior rel L2 = 3.20e-03 (L1 :fd_v2 baseline 3.20e-03), wall band rel L2 = 1.63e-01 (down from :fd_v2's 3.03e+02 by factor 1.86e+03), and wall/interior |F_BSD| ratio = 9.96e-01 (vs :fd 9.95e-01, :fd_v2 1.58e+02). Verdict: [GREEN] implement Option A in cavity_driver_2d.jl as M17.

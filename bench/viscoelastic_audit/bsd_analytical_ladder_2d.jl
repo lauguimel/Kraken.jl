@@ -251,6 +251,40 @@ function run_L2(N)
             fd_v2=run_L2_kind_v2(N, ux, uy, is_solid, bc, fx_ref, fy_ref))
 end
 
+# L2b: closed-box wall scenario with three BSD-source variants. The new
+# :fd_v2_unc path is Option A — BSD reads D_uncorrected (centered FD only,
+# the wall-correction overwrite is SKIPPED). :fd and :fd_v2 are sanity
+# replicas of L2.
+
+function run_L2b_kind_v2_unc(N, ux, uy, is_solid, bc, fx_ref, fy_ref)
+    tauxx, tauxy, tauyy = tau_p_fields(N)
+    fx_poly, fy_poly = polymer_force_from_tau(N, tauxx, tauxy, tauyy, is_solid, bc)
+    fx_bsd, fy_bsd = bsd_v2_force(N, ux, uy, is_solid, bc; apply_wall_correction=false)
+    fx_total = fx_poly .- fx_bsd
+    fy_total = fy_poly .- fy_bsd
+    return (
+        interior=rel_l2_masked(fx_total, fy_total, fx_ref, fy_ref, interior_mask),
+        wall=rel_l2_masked(fx_total, fy_total, fx_ref, fy_ref, wall_band_mask),
+        ratio=max_mag_masked(fx_bsd, fy_bsd, wall_band_mask) /
+              max_mag_masked(fx_bsd, fy_bsd, interior_mask),
+    )
+end
+
+function run_L2b(N)
+    ux, uy = tg_fields(N)
+    is_solid = falses(N, N)
+    bc = Kraken.fvfd_wallxwally_bcspec_2d()
+    fx_ref = zeros(Float64, N, N)
+    fy_ref = zeros(Float64, N, N)
+    fill_force_ref!(fx_ref, fy_ref, ux, uy, (1.0 - ZETA) * NU_P)
+    return (
+        N=N,
+        fd=run_L2_kind_fd(N, ux, uy, is_solid, bc, fx_ref, fy_ref),
+        fd_v2=run_L2_kind_v2(N, ux, uy, is_solid, bc, fx_ref, fy_ref),
+        fd_v2_unc=run_L2b_kind_v2_unc(N, ux, uy, is_solid, bc, fx_ref, fy_ref),
+    )
+end
+
 function choose_verdict(l1_by_n, l2)
     fd64 = l1_by_n[64].fd
     v264 = l1_by_n[64].fd_v2
@@ -265,11 +299,46 @@ function choose_verdict(l1_by_n, l2)
     )
 end
 
-function build_table(l0, l1, l2)
+function choose_l2b_verdict(l1_by_n, l2b_by_n)
+    l2b64 = l2b_by_n[64]
+    interior_ok = l2b64.fd_v2_unc.interior <= 1.5 * l1_by_n[64].fd_v2
+    fd_wall = l2b64.fd.wall
+    unc_wall = l2b64.fd_v2_unc.wall
+    fd_ratio = l2b64.fd.ratio
+    unc_ratio = l2b64.fd_v2_unc.ratio
+    wall_close = unc_wall <= 5.0 * fd_wall
+    ratio_close = unc_ratio <= 5.0 * fd_ratio
+    drop_factor = l2b64.fd_v2.wall > 0.0 ? l2b64.fd_v2.wall / max(unc_wall, eps()) : NaN
+    color = (interior_ok && wall_close && ratio_close) ? "GREEN" :
+            (interior_ok && drop_factor >= 10.0) ? "YELLOW" : "RED"
+    rec = color == "GREEN" ?
+        "implement Option A in cavity_driver_2d.jl as M17" :
+        color == "YELLOW" ?
+        "escalate to Boss — wall partial improvement, decide go/no-go" :
+        "pivot to :kinetic canary"
+    return color, drop_factor, rec
+end
+
+function _l2b_kind_block!(lines, label, kind)
+    push!(lines, @sprintf("  kind=%-12s N=32  interior rel_L2 = %.3e | wall rel_L2 = %.3e | ratio = %.3e",
+                          label, kind[32].interior, kind[32].wall, kind[32].ratio))
+    order = convergence_order(kind[64].interior, kind[128].interior)
+    push!(lines, @sprintf("               N=64  interior rel_L2 = %.3e | wall rel_L2 = %.3e | ratio = %.3e  (interior order ~= %.2f)",
+                          kind[64].interior, kind[64].wall, kind[64].ratio, order))
+    push!(lines, @sprintf("               N=128 interior rel_L2 = %.3e | wall rel_L2 = %.3e | ratio = %.3e",
+                          kind[128].interior, kind[128].wall, kind[128].ratio))
+end
+
+function build_table(l0, l1, l2, l2b)
     l0_order = convergence_order(l0[64].rel, l0[128].rel)
     fd_order = convergence_order(l1[64].fd, l1[128].fd)
     v2_order = convergence_order(l1[64].fd_v2, l1[128].fd_v2)
     verdict = choose_verdict(l1, l2)
+    color, drop_factor, rec = choose_l2b_verdict(l1, l2b)
+    # Reshape L2b by kind for the table builder
+    fd_by_n   = Dict(N => l2b[N].fd        for N in NS)
+    v2_by_n   = Dict(N => l2b[N].fd_v2     for N in NS)
+    unc_by_n  = Dict(N => l2b[N].fd_v2_unc for N in NS)
     lines = String[]
     push!(lines, "=========================================================")
     push!(lines, "BSD analytical ladder - Taylor-Green vortex, CPU F64")
@@ -303,13 +372,20 @@ function build_table(l0, l1, l2)
     push!(lines, @sprintf("               max|F_BSD| ratio wall/interior = %.2e",
                           l2.fd_v2.ratio))
     push!(lines, "")
+    push!(lines, "L2b - Option A test: BSD reads D_uncorrected (closed box, walls)")
+    _l2b_kind_block!(lines, ":fd",          fd_by_n)
+    _l2b_kind_block!(lines, ":fd_v2",       v2_by_n)
+    _l2b_kind_block!(lines, ":fd_v2_unc",   unc_by_n)
+    push!(lines, @sprintf("  Wall drop factor :fd_v2 -> :fd_v2_unc at N=64 = %.2e", drop_factor))
+    push!(lines, "")
     push!(lines, "=========================================================")
-    push!(lines, "VERDICT: $(verdict)")
+    push!(lines, "VERDICT (L2):  $(verdict)")
+    push!(lines, "VERDICT (L2b): [$(color)] $(rec)")
     push!(lines, "=========================================================")
     return join(lines, "\n") * "\n"
 end
 
-function build_markdown(table, l2)
+function build_markdown(table, l1, l2, l2b)
     interpretation = string(
         "At N=$(l2.N), the periodic ladder identifies which BSD cancellation ",
         "strategy matches the analytical Newtonian-limit force, while the closed-box ",
@@ -320,9 +396,26 @@ function build_markdown(table, l2)
         "should keep the BSD stabilizer on an uncorrected D path at walls unless a ",
         "separately validated kinetic default replaces it.",
     )
+    color, drop_factor, rec = choose_l2b_verdict(l1, l2b)
+    l2b64 = l2b[64]
+    l2b_interp = string(
+        "L2b directly tests Option A: BSD reads D_uncorrected (centered FD only, ",
+        "no wall-correction overwrite) while keeping the wide-stencil :fd_v2 kernel ",
+        "path. At N=64 the :fd_v2_unc row gives interior rel L2 = ",
+        @sprintf("%.2e", l2b64.fd_v2_unc.interior),
+        " (L1 :fd_v2 baseline ", @sprintf("%.2e", l1[64].fd_v2),
+        "), wall band rel L2 = ", @sprintf("%.2e", l2b64.fd_v2_unc.wall),
+        " (down from :fd_v2's ", @sprintf("%.2e", l2b64.fd_v2.wall),
+        " by factor ", @sprintf("%.2e", drop_factor),
+        "), and wall/interior |F_BSD| ratio = ",
+        @sprintf("%.2e", l2b64.fd_v2_unc.ratio),
+        " (vs :fd ", @sprintf("%.2e", l2b64.fd.ratio),
+        ", :fd_v2 ", @sprintf("%.2e", l2b64.fd_v2.ratio),
+        "). Verdict: [$(color)] $(rec).",
+    )
     return string(
         "# BSD Analytical Ladder - 2026-05-17\n\n",
-        "Mission: M17-canary-analytical\n\n",
+        "Mission: M17-canary-analytical (L0-L2) + M17-canary-A (L2b Option A test)\n\n",
         "Params: U_0 = 1.0, nu_p = 0.1, zeta = 0.75, N = (32, 64, 128).\n\n",
         "Taylor-Green velocity: `Ux = U_0 sin(2*pi*x) cos(2*pi*y)`, ",
         "`Uy = -U_0 cos(2*pi*x) sin(2*pi*y)` on cell centers of `[0, 1]^2`. ",
@@ -330,7 +423,9 @@ function build_markdown(table, l2)
         "`tau_p = 2*nu_p*D`, `F_poly = nu_p*lap(U)`, and ",
         "`F_total = (1 - zeta)*nu_p*lap(U)`.\n\n",
         "```text\n", table, "```\n\n",
-        "Interpretation: ", interpretation, "\n",
+        "Interpretation (L0-L2): ", interpretation, "\n\n",
+        "## L2b - Option A test (D_uncorrected for BSD)\n\n",
+        l2b_interp, "\n",
     )
 end
 
@@ -338,9 +433,10 @@ function main()
     l0 = Dict(N => run_L0(N) for N in NS)
     l1 = Dict(N => run_L1(N) for N in NS)
     l2 = run_L2(L2_N)
-    table = build_table(l0, l1, l2)
+    l2b = Dict(N => run_L2b(N) for N in NS)
+    table = build_table(l0, l1, l2, l2b)
     print(table)
-    write(OUT_MD, build_markdown(table, l2))
+    write(OUT_MD, build_markdown(table, l1, l2, l2b))
     return nothing
 end
 
