@@ -527,18 +527,79 @@ convergence) will further bound which sub-component.
   Reuse the kernel call pattern from
   `bench/viscoelastic_audit/bsd_analytical_ladder_2d.jl`.
 
-### M21 — Velocity-gradient kernel cross-check (Open Q5) — PLANNED
+### M21 — Poiseuille BSD path matrix sweep — DONE 2026-05-18 (NEGATIVE)
 
-- **Status**: planned, gated on M20 outcome. Open Q5 (per next-session
-  prompt): the Poiseuille driver uses
-  `logfv_velocity_gradient_bc_aware_2d!` while the cavity uses
-  `fvfd_velocity_gradient_2d!`. Quantify the 2D wall-row response
-  difference on identical input fields; isolate how much of the 8×
-  cavity-vs-Poiseuille M7b ratio is kernel-difference vs corner.
-- **Allowed edit zones**: `bench/viscoelastic_audit/`, `bench/scratch/`.
-- **Exit criterion**: bench script comparing the two kernels on a
-  controlled Poiseuille profile + on a cavity lid-region patch
-  exits 0; produces a verdict markdown.
+- **Status**: GREEN with NEGATIVE result. Verdict
+  `bench/viscoelastic_audit/POISEUILLE_BSD_PATHMATRIX_VERDICT_20260518.md`.
+  Bench `bench/viscoelastic_audit/run_poiseuille_bsd_pathmatrix_2d.jl`
+  (426 LOC) ran 7 BSD variants × 2 cases = 14 runs in 9 min CPU F64.
+  **No variant beats `:baseline` (3.51 %) on smooth Poiseuille**:
+  `:fd_v2_unc` 50.9 %, `:fd_v2` 85.7 % (NaN at Wi=1), `:kinetic`
+  186 % (Π^neq overshoots BSD magnitude 30×), `:epsilon_force` NaN
+  both cases. Only `:no_bsd` (ζ=0 trivial reference) gives 0.50 %.
+- **Open Q5 REFUTED at root**: `logfv_velocity_gradient_bc_aware_2d!`
+  (lines 918-926 in `src/kernels/logconformation_fv_2d.jl`) is
+  literally `return fvfd_velocity_gradient_2d!(...)` — a thin
+  wrapper. The two kernels are bit-identical. The 8× cavity-vs-
+  Poiseuille M7b ratio CANNOT come from the kernel difference.
+- **Strategic implication**: the cavity bug is NOT operator-side.
+  All RED M11/M17 paths are RED on Poiseuille too (or worse). The
+  user's hypothesis "cavity-specific bug masks a working BSD fix"
+  is REFUTED. Cavity gap must live in the wall-corner gradient
+  correction overlay (`_logfv_cavity_wall_gradient_correction_kernel!`)
+  or the LBM-side flow response to the corner singularity (Zou-He
+  lid coupling, Guo source at corner cells).
+- **Original goal kept for posterity below**.
+- **Original goal**: (scope expanded per user directive
+  2026-05-18 "retestes toutes les pistes pour le BSD sur le poiseuille,
+  notamment la M21"). Hypothesis: a BSD formulation that was RED on
+  cavity (NaN at wall corner) may be GREEN on smooth Poiseuille — the
+  cavity bug is geometric (wall-corner), not algebraic. If any variant
+  gives F_total < 3.51 % AND remains stable, it becomes the candidate
+  to re-test on cavity after corner-bug isolation. (REFUTED above.)
+
+- **Status**: in-flight (scope expanded per user directive
+  2026-05-18 "retestes toutes les pistes pour le BSD sur le poiseuille,
+  notamment la M21"). Hypothesis: a BSD formulation that was RED on
+  cavity (NaN at wall corner) may be GREEN on smooth Poiseuille — the
+  cavity bug is geometric (wall-corner), not algebraic. If any variant
+  gives F_total < 3.51 % AND remains stable, it becomes the candidate
+  to re-test on cavity after corner-bug isolation.
+- **Goal**: implement 7 BSD/F_poly variants in a standalone Poiseuille
+  bench (no `src/` patch). For each: per-step NaN watcher on u/ψ; at
+  steady state, full u + τ + ψ checks vs analytical (Newtonian limit
+  at Wi=8e-4, full Oldroyd-B closed form at Wi=1).
+- **Variants** (all implementable via existing kernels in `src/`):
+  1. `:baseline` — current `:fd` (control, reproduces M20).
+  2. `:no_bsd` — `bsd_fraction=0` (control, reproduces M20 A_no_BSD).
+  3. `:fd_v2` — wide BSD via `logfv_bsd_stress_from_gradient_2d!` +
+     `fvfd_tensor_divergence_2d!` on `τ_BSD = 2·ζ·ν_p·D_corrected`.
+  4. `:fd_v2_unc` — `:fd_v2` Option A: BSD reads `D_uncorrected`
+     (re-call vel-grad WITHOUT wall-correction overlay).
+  5. `:kinetic` — M5 kinetic-BSD via Π^{neq} extraction
+     (`compute_bsd_force_kinetic_2d!`).
+  6. `:epsilon_force` — ε-split force-level: F_poly = NARROW
+     `ν_p·∇²u` + `div_wide(τ_p − 2·ν_p·D_cell)` ; F_BSD = NARROW
+     `ζ·ν_p·∇²u`. Same-stencil cancellation of Newtonian portion.
+  7. `:baseline_fvfd_grad` — Open Q5 cross-check: `:baseline` but
+     velocity gradient via `fvfd_velocity_gradient_2d!` instead of
+     `logfv_velocity_gradient_bc_aware_2d!`.
+- **Cases**: 2 per variant (Wi=8e-4 M7b-A baseline, Wi=1 finite-Wi).
+  14 runs total, ~3 min CPU F64 each = ~45 min total runtime.
+- **Allowed edit zones**:
+  - `bench/viscoelastic_audit/run_poiseuille_bsd_pathmatrix_2d.jl` (NEW, ≤500 LOC)
+  - `bench/viscoelastic_audit/poiseuille_bsd_variants_2d.jl` (NEW if needed for size, ≤500 LOC)
+  - `bench/viscoelastic_audit/POISEUILLE_BSD_PATHMATRIX_VERDICT_20260518.md` (NEW)
+  - `bench/scratch/`, `tmp/`, `.engineer_brief_M21.md`
+- **Exit criterion**: `julia --project=. bench/viscoelastic_audit/run_poiseuille_bsd_pathmatrix_2d.jl --self-test` exits 0 in ≤90 s (self-test runs Ny=16 max_steps=1000, 2-3 variants); Department's full mode produces per-variant ranking + verdict markdown.
+- **Per-variant required outputs** (all in CSV per case):
+  - u rel L2 vs analytical parabola (interior + wall rows separately)
+  - τ_xy rel L2 vs `ν_p·γ̇(y)` (Newtonian limit)
+  - τ_xx, N1 rel L2 vs `2·ν_p·λ·γ̇²(y)` (full Oldroyd-B closed form, exact at all Wi)
+  - min(λ_C) > 0 verification (SPD positivity)
+  - F_poly_wide / F_BSD / F_total per-y decomposition (M20 pattern)
+  - nan_step (= -1 if completed; else step at which NaN detected)
+- **Subsumes** the original M21 (Open Q5) as variant `:baseline_fvfd_grad`.
 
 ### M22 — Poiseuille finite-Wi analytical (angle c) — PLANNED
 
