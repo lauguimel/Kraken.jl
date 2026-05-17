@@ -399,14 +399,24 @@ convergence) will further bound which sub-component.
   3** (capture both BSD and source-ODE at the same pipeline step,
   route through the same divergence operator). M17 implements it.
 
-### M16 — SPLIT cavity driver (in-flight 2026-05-17)
+### M16 — SPLIT cavity driver (done 2026-05-17, commit `77956ad8`)
 
-- **Status**: BLOCKING M17. The cavity driver
-  `src/drivers/viscoelastic_logfv_2d.jl` is 3429 LOC and mixes 5
+- **Status**: GREEN. `viscoelastic_logfv_2d.jl` 3429 → 2934 LOC.
+  Cavity helpers (4 fns, 98 LOC) moved to
+  `src/drivers/cavity_wall_correction_2d.jl`. Cavity main driver
+  `run_viscoelastic_logfv_cavity_coupled_2d` (400 LOC) moved to
+  `src/drivers/cavity_driver_2d.jl`. `src/Kraken.jl`: +2 includes.
+  All three target files ≤700 LOC hard ceiling. Refactor pur:
+  zero semantic change; public API signature unchanged. Test
+  suite: 6 pre-existing failures + 4 broken canaries unchanged
+  vs HEAD (verified by Department on stashed baseline). M17 is
+  unblocked.
+- **Original framing kept for posterity**: BLOCKING M17. The cavity driver
+  `src/drivers/viscoelastic_logfv_2d.jl` was 3429 LOC and mixed 5
   concerns (geometry, BC, solver, stencil, physics). Per
   `feedback_orchestrator_discipline` + skill hygiene rules, no
   substantive BSD change targets the monolith. M11 destabilised
-  exactly because of this; the SPLIT is the prerequisite.
+  exactly because of this; the SPLIT was the prerequisite.
 - **Goal**: decompose the driver along its natural seams into
   ≤700-LOC modules. Refactor pur — zero behavioural change.
   Proposed targets (Engineer may adjust to natural seams):
@@ -442,24 +452,144 @@ convergence) will further bound which sub-component.
 - **Exit criterion**: M7b PBS A-vs-B centerline u rel L2 < 0.1 %
   (vs the 3.4 % bug, well above the 0.014 % noise floor).
 
-### M18 — Production validation (planned, gated on M17)
+### M18 — Production validation (PARKED 2026-05-18)
 
-- **Status**: gated. Re-run cavity Oldroyd-B comparison at N=64
-  t=8 De=1 β=0.5 with the M17 fix.
-- **Pass bars**: centerline u L2 drops from 18.0 % toward the M9
-  discretization floor; psi_xy L2 drops from 24.4 % similarly.
-  If gap closes to ~5-8 % combined with M9 N=128 trajectory →
-  cavity benchmark validated; mandate moves to "done".
+- **Status**: PARKED by user directive 2026-05-18. The M17 cluster
+  closure re-decomposed the cavity 3.4 % M7b signal into an
+  **inferred** mix (~0.4 % stencil + ~2.4 % corner amplification +
+  ~0.6 % BSD intrinsic) that has not been directly measured on
+  Poiseuille at controlled Wi. Before any production cavity
+  validation, the user wants Poiseuille investigated deeply to
+  understand what BSD actually does to the LBM↔FV coupling on the
+  simplest geometry. M18 unparks once M20-M24 produce a defended
+  decomposition.
+- **Original goal kept for posterity**: Re-run cavity Oldroyd-B
+  comparison at N=64 t=8 De=1 β=0.5 with the M17 fix. Pass bars:
+  centerline u L2 drops from 18.0 % toward the M9 discretization
+  floor; psi_xy L2 drops from 24.4 % similarly.
+
+### M19 — Corner regularisation (PARKED 2026-05-18)
+
+- **Status**: PARKED with M18. Cavity-side intervention; meaningless
+  to design without an established Poiseuille baseline for BSD
+  behaviour. Re-evaluate after M20-M24.
+
+### M20 — Poiseuille F_total trace (`:fd`, ζ=0.75) — DONE 2026-05-18
+
+- **Status**: GREEN. Verdict
+  `bench/viscoelastic_audit/POISEUILLE_BSD_TRACE_VERDICT_20260518.md`.
+  Bench `bench/viscoelastic_audit/run_poiseuille_bsd_trace_2d.jl`
+  (282 LOC). BSD operates as designed at the operator level on
+  Poiseuille; F_poly_wide and F_BSD_narrow each carry ~0.5 % rel
+  truncation residual vs analytical d²u/dy² (uniform across y, no
+  wall spike). The residuals are **same-sign and ADD algebraically**
+  in F_total (do not cancel), then the (1−ζ)⁻¹=4× normalisation
+  amplifies them to 3.51 % on F_total at ζ=0.75 Wi=8e-4. At Wi=1 both
+  collapse 380× because u_LBM rebalances close to analytical parabola.
+  **Smoking gun localisation**: the 8× cavity-vs-Poiseuille M7b ratio
+  is NOT in the BSD-subtraction chain itself (no wall amplification on
+  smooth geometry); it lives downstream in either (a) the
+  velocity-gradient kernel difference (Open Q5 → M21) or (b) the
+  LBM-side flow response to the force around the corner singularity.
+- **Original goal kept for posterity below.**
+- **Original goal**: First mission of the Poiseuille investigation
+  cluster opened by user directive 2026-05-18.
+- **Goal**: on the existing
+  `run_viscoelastic_logfv_poiseuille_coupled_2d` driver at the M7b
+  setup (Nx=8, Ny=32, F_body=1e-5, λ=1.0, max_steps=100k, CPU F64),
+  decompose `F_total` post-hoc into its three additive contributions
+  per y-row, and compare each against the analytical Newtonian-limit
+  target. Answers: **does the BSD `−ζ·ν_p·∇²u_narrow` correction
+  actually cancel the F_poly_wide `ν_p·∇²u_wide` portion to leave
+  `(1−ζ)·ν_p·∇²u` as designed, or does it leave a structured
+  residual?** Three cases: (i) ζ=0.0 baseline (F_total = F_poly_wide),
+  (ii) ζ=0.75 production, (iii) optional Wi=1.0 to surface elastic
+  contribution.
+- **Allowed edit zones**:
+  - `bench/viscoelastic_audit/run_poiseuille_bsd_trace_2d.jl` (NEW)
+  - `bench/viscoelastic_audit/POISEUILLE_BSD_TRACE_VERDICT_20260518.md` (NEW)
+  - `bench/scratch/` (one-off CSVs, plots)
+  - `tmp/` (large outputs)
+  - `<project>/.engineer_brief_M20.md` (single-use)
+- **Forbidden**: edits anywhere under `src/`, `.orchestrator/memory/`,
+  or `test/`; any commit/push; any modification of existing bench
+  scripts.
+- **Exit criterion**:
+  `julia --project=. bench/viscoelastic_audit/run_poiseuille_bsd_trace_2d.jl --self-test`
+  exits 0 (self-test mode runs Ny=16, max_steps=1000 under 60 s and
+  asserts the CSV contains all expected columns + monotone wall
+  decay). Department re-runs the full mode (Ny=32, max_steps=100k)
+  on host and writes the verdict markdown.
+- **Engineer runner**: `codex` (Codex CLI via `run-engineer.sh`).
+- **Notes**: the per-y profile for parabolic Poiseuille is uniform —
+  `ν_p · d²u_analytical/dy² = −ν_p · F_body / ν_total` everywhere in
+  interior. Wall rows quantify the discrete stencil residual cleanly.
+  Reuse the kernel call pattern from
+  `bench/viscoelastic_audit/bsd_analytical_ladder_2d.jl`.
+
+### M21 — Velocity-gradient kernel cross-check (Open Q5) — PLANNED
+
+- **Status**: planned, gated on M20 outcome. Open Q5 (per next-session
+  prompt): the Poiseuille driver uses
+  `logfv_velocity_gradient_bc_aware_2d!` while the cavity uses
+  `fvfd_velocity_gradient_2d!`. Quantify the 2D wall-row response
+  difference on identical input fields; isolate how much of the 8×
+  cavity-vs-Poiseuille M7b ratio is kernel-difference vs corner.
+- **Allowed edit zones**: `bench/viscoelastic_audit/`, `bench/scratch/`.
+- **Exit criterion**: bench script comparing the two kernels on a
+  controlled Poiseuille profile + on a cavity lid-region patch
+  exits 0; produces a verdict markdown.
+
+### M22 — Poiseuille finite-Wi analytical (angle c) — PLANNED
+
+- **Status**: planned, gated on M20. Extend the polymer-pipeline
+  ratchet beyond Wi → 0: compare Kraken Poiseuille at Wi=0.5, Wi=1.0
+  against analytical Oldroyd-B closed form (C_xx = 1 + 2·(λγ̇)²,
+  N1 = 2·ν_p·λ·γ̇²). If Kraken matches to machine precision on
+  stress at finite Wi, the polymer pipeline ratchet extends to finite
+  Wi. If it diverges, NEW pipeline crack is found.
+- **Allowed edit zones**: `bench/viscoelastic_audit/`, `bench/scratch/`.
+- **Exit criterion**: bench script + verdict markdown documenting
+  τ_xx, N1 rel L2 vs analytical at Wi ∈ {0.001, 0.5, 1.0} for both
+  ζ ∈ {0, 0.75}.
+
+### M23 — rheoTool planar Poiseuille cross-check (angle d) — PLANNED
+
+- **Status**: planned, gated on M20 and an existence check on
+  `bench/rheotool/` for a planar Poiseuille setup. If absent, defer.
+- **Exit criterion**: TBD when scope is decided.
+
+### M24 — BSD direction-inversion explanation (angle b) — SYNTHESIS
+
+- **Status**: planned synthesis mission. Why does ζ↑ help cavity but
+  hurt Poiseuille? Hypothesis (per next-session prompt): corner
+  singularity needs the smoothing BSD adds; smooth Poiseuille has
+  no singularity so BSD is pure overhead. Validate by combining
+  M20+M21+M22 outputs with a controlled-singularity test (e.g.
+  step geometry, BFS, or analytical singular forcing).
+- **Allowed edit zones**: `bench/viscoelastic_audit/`.
+- **Exit criterion**: verdict markdown synthesising M20-M23 +
+  predicted cavity behaviour from the established Poiseuille
+  baseline.
 
 ## 6. Mission dependency graph
 
 ```text
 M1..M10 ──► ratchet sequence (all closed; see entries above)
-M11 (RED, REVERTED)
-   └─► reframed as M17, gated on M16 SPLIT (architecture hygiene)
-M16 (SPLIT, in-flight) ──► M17 (Option 3) ──► M18 (production validate)
-                                          └─► escalate to other M15 faults if RED
-M9  N=128 ──► sets the discretization floor for M18 verdict
+M11 (RED, REVERTED) ──► reframed as M17 (also closed 2026-05-17)
+M16 SPLIT (DONE, 77956ad8) ──► M17 cluster (CLOSED, b995e304)
+
+# 2026-05-18 pivot: user directive "investigate Poiseuille deeply"
+M20 (in-flight) ──► judge ──► sequential triage:
+   ├─► M21 kernel cross-check (Open Q5)
+   ├─► M22 finite-Wi analytical (angle c)
+   ├─► M23 rheoTool cross-check (angle d, gated on existence)
+   └─► M24 direction-inversion synthesis (angle b)
+
+# Cavity side parked until Poiseuille baseline is established:
+M18 production (PARKED) ────► unparks when M20-M24 close
+M19 corner regularisation (PARKED)
+M16b driver split debt (TECHNICAL DEBT, low priority)
 ```
 
 ## 7. Open questions
