@@ -1,0 +1,85 @@
+/*---------------------------------------------------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  9
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+Build  : 9-b456138dc4bc
+Exec   : postProcess -func sampleDict
+Date   : May 17 2026
+Time   : 08:06:14
+Host   : "cc5ad580d661"
+PID    : 2381
+I/O    : uncollated
+Case   : //data
+nProcs : 1
+sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+--> FOAM Warning : 
+    From function void Foam::Time::setControls()
+    in file db/Time/Time.C at line 202
+    Increasing the timePrecision from 10 to 18 to support the formatting of the current time directory 11.9997084225790474
+
+Create mesh for time = 0
+
+Reading set description:
+    lineVert_x0.5
+    lineHorz_y0.75
+
+Time = 0
+
+Reading fields:
+    volVectorFields: UUsing dynamicCode for codedFixedValue movLid at line 25 in "//data/0/U/boundaryField/movingLid"
+
+    volSymmTensorFields: theta tau
+
+Executing functionObjects
+
+Time = 7.999786329655222
+
+Reading fields:
+    volVectorFields: U
+    volSymmTensorFields: tau theta
+
+Executing functionObjects
+
+Time = 8.999444318241414
+
+Reading fields:
+    volVectorFields: U
+    volSymmTensorFields: tau theta
+
+Executing functionObjects
+
+Time = 10.0000548662421131
+
+Reading fields:
+    volVectorFields: U
+    volSymmTensorFields: tau theta
+
+Executing functionObjects
+
+Time = 11.0006640362684927
+
+Reading fields:
+    volVectorFields: U
+    volSymmTensorFields: tau theta
+
+Executing functionObjects
+
+Time = 11.9997084225790474
+
+Reading fields:
+    volVectorFields: U
+    volSymmTensorFields: tau theta
+
+Executing functionObjects
+
+End
+

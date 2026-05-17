@@ -1,0 +1,6 @@
+# dynamicCode:
+# SHA1 = 47055371b99582edf0a773f6c3f3d331892f621c
+
+codedFixedValueFvPatchFieldTemplate.C
+
+LIB = $(PWD)/../platforms/$(WM_OPTIONS)/lib/libmovLid_47055371b99582edf0a773f6c3f3d331892f621c
