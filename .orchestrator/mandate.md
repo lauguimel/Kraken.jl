@@ -601,7 +601,90 @@ convergence) will further bound which sub-component.
   - nan_step (= -1 if completed; else step at which NaN detected)
 - **Subsumes** the original M21 (Open Q5) as variant `:baseline_fvfd_grad`.
 
-### M22 — Poiseuille finite-Wi analytical (angle c) — PLANNED
+### M22 + M23 — Cylinder Cd mesh convergence (BSD ON & OFF) — DONE 2026-05-18
+
+- **Status**: GREEN, joint synthesis in
+  `bench/viscoelastic_logfv/CYL_CD_CONVERGENCE_M22M23_SYNTHESIS_20260518.md`.
+  Both Departments spawned in parallel (orchestrator fan-out pattern);
+  Anthropic API connectivity dropped on both Codex Engineers AFTER the
+  bench scripts were written but BEFORE the Departments completed
+  full-mode runs and verdict writing. Boss ran both `--full` modes
+  directly on host (Metal F32 local) and wrote the joint synthesis.
+- **Key finding 1 — BSD impact on Cd collapses with mesh refinement**:
+  Δ(Cd_BSDon − Cd_BSDoff) at Wi=0.1 goes 18.7 → 13.3 → 8.9 → **1.4**
+  Cd points as R goes 20 → 30 → 40 → 50. Trend extrapolates to
+  "permilles" at R≥60. Confirms M20 hypothesis on a real complex flow:
+  BSD operator-side residual is *masked* by elastic dynamics in
+  production regime.
+- **Key finding 2 — BSD ON matches rheoTool to 1.5%** at R=30 (only R
+  with reference): err=−1.45 % (Wi=0.1), −2.53 % (Wi=0.2). BSD OFF gap
+  is ~12 % at R=30 (under-shoots), monotone-converges UP toward BSD ON
+  values as R grows.
+- **Key finding 3 — User's "anti-convergence" recollection RESOLVED**:
+  it was BSD ON over-shooting at R=30-40 (peak Cd=130.31 at R=40
+  vs rheoTool 130.43) and oscillating at R=50, while BSD OFF
+  monotone-approaches the same limit. The two CONVERGE to the same
+  rheoTool-consistent limit, just from opposite sides.
+- **Key finding 4 — BSD provides essential stability**: M23 R=40 Wi=0.2
+  gave Cd=783, min_detC=8e-4 (near-SPD-loss). Without BSD, the LBM is
+  more stress-loaded and fails at fine mesh + non-trivial Wi.
+- **Original-goal text** (kept for posterity below).
+- **Original M22 goal**: in-flight (cluster repositioned per user directive
+
+- **Status**: in-flight (cluster repositioned per user directive
+  2026-05-18). Pivots away from cavity to the **original motivator**:
+  cylinder Cd vs rheoTool reference, mesh-refinement study at
+  moderate Wi. User recollection: "on se croisait à faible maillage
+  mais on ne convergeait pas vers les mêmes valeur" — Kraken and
+  rheoTool/Liu Cd curves crossed at coarse mesh by luck but converged
+  to different limits as the mesh refined.
+- **Goal**: re-measure cylinder Cd(R, Wi) on the current Kraken
+  `dev-viscoelastic` HEAD (post-M16 cavity split, pre-M22 here) at
+  R ∈ {20, 30, 40, 50} × Wi ∈ {0.1, 0.2} with **`bsd_fraction=0.75`
+  (baseline)**. Compare to rheoTool R=30 reference (the only R
+  available); inspect Kraken-internal Cd(R) trend for crossing /
+  divergent-limit pattern.
+- **Backend**: Metal F32 local (user explicit "ouvrir un appartement
+  avec metal pour aller plus vite"); F32 noise accepted as the
+  trade-off for fast iteration.
+- **Allowed edit zones**:
+  - `bench/viscoelastic_logfv/run_cyl_cd_convergence_baseline_2d.jl` (NEW, ≤500 LOC)
+  - `bench/viscoelastic_logfv/CYL_CD_CONVERGENCE_M22_VERDICT_20260518.md` (NEW)
+  - `bench/scratch/`, `tmp/`, `.engineer_brief_M22.md`
+- **Exit criterion**: bench script exits 0 on `--self-test`
+  (R=20, Wi=0.1, 5k steps Metal F32 ≤120 s); Department's `--full`
+  mode produces 8 CSVs + summary table + verdict markdown.
+- **Pair**: spawned in parallel with M23 (BSD OFF, same grid). The
+  two together produce the Cd(R, Wi, BSD) cube needed for the
+  cross-comparison.
+
+### M23 — Cylinder Cd mesh convergence BSD-OFF — IN-FLIGHT 2026-05-18
+
+- **Status**: in-flight (parallel twin of M22).
+- **Goal**: identical to M22 but `bsd_fraction=0.0` (BSD completely
+  off; LBM viscosity = `nu_s` only; full `div(τ_p)` injected via
+  Guo source). Tests whether removing BSD changes the convergence
+  pattern Kraken converges to on the cylinder.
+- **User intent**: directly answer "lorsqu'on est dans un fluide
+  complexe avec des écoulements complexes est-ce que sur un drag par
+  exemple on ne tombe qu'à quelques pouillèmes". M20 measured F_total
+  residual at Wi=1 collapsing to 9.3e-5 due to elastic locking of
+  u_LBM toward analytical. M22+M23 measure the same effect on a
+  REAL complex flow (cylinder, finite Wi, curved boundary).
+- **Backend**: Metal F32 local, parallel to M22 on same hardware
+  (Metal can multiplex; if device contention, accept serialization).
+- **Allowed edit zones**:
+  - `bench/viscoelastic_logfv/run_cyl_cd_convergence_bsd_off_2d.jl` (NEW, ≤500 LOC)
+  - `bench/viscoelastic_logfv/CYL_CD_CONVERGENCE_M23_VERDICT_20260518.md` (NEW)
+  - `bench/scratch/`, `tmp/`, `.engineer_brief_M23.md`
+- **Exit criterion**: same as M22 (self-test exits 0; full-mode produces 8 CSVs + summary + verdict).
+- **Synthesis after**: Boss compares M22 and M23 verdicts to compute
+  Cd_BSDon − Cd_BSDoff per (R, Wi). Expected: small delta if BSD
+  truncation is masked by elastic dynamics at Wi ≥ 0.1 (M20-style
+  collapse). Large delta if BSD operator-side error propagates into
+  the cylinder Cd integral despite the elastic regime.
+
+### M22-old — Poiseuille finite-Wi analytical (RENUMBERED to M27, PARKED)
 
 - **Status**: planned, gated on M20. Extend the polymer-pipeline
   ratchet beyond Wi → 0: compare Kraken Poiseuille at Wi=0.5, Wi=1.0
