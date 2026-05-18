@@ -55,22 +55,56 @@ parse_list(name, default) =
     [parse(Float64, strip(x)) for x in split(get(ENV, name, default), ",")]
 parse_int_list(name, default) =
     [parse(Int, strip(x)) for x in split(get(ENV, name, default), ",")]
+parse_symbol_list(name, default) =
+    [Symbol(strip(x)) for x in split(get(ENV, name, default), ",")]
+
+function parse_bool_token(x)
+    s = lowercase(strip(x))
+    s in ("1", "true", "t", "yes", "y", "on") && return true
+    s in ("0", "false", "f", "no", "n", "off") && return false
+    throw(ArgumentError("invalid boolean token: $(x)"))
+end
+
+parse_bool_list(name, default) =
+    [parse_bool_token(x) for x in split(get(ENV, name, default), ",")]
+
+function zip_equal(name, lists...)
+    n = length(first(lists))
+    all(l -> length(l) == n, lists) ||
+        throw(ArgumentError("$(name) lists must have equal length"))
+    return collect(zip(lists...))
+end
 
 const BETA_LIST       = parse_list("KRAKEN_BETA_LIST",       "0.3,0.5,0.7")
 const WI_LIST         = parse_list("KRAKEN_WI_LIST",         "0.1,0.3,0.5")
 const RE_LIST         = parse_list("KRAKEN_RE_LIST",         "0.1,1.0")
 const R_LIST          = parse_int_list("KRAKEN_R_LIST",      "30,50,80")
 const BSD_LIST        = parse_list("KRAKEN_BSD_LIST",        "0.0,0.5,1.0")
+const L_UP_LIST       = parse_list("KRAKEN_L_UP_LIST",       "15.0")
+const L_DOWN_LIST     = parse_list("KRAKEN_L_DOWN_LIST",     "15.0")
+const EMBEDDED_GRADIENT_LIST  = parse_bool_list("KRAKEN_EMBEDDED_GRADIENT",  "0")
+const EMBEDDED_ADVECTION_LIST = parse_bool_list("KRAKEN_EMBEDDED_ADVECTION", "0")
+const EMBEDDED_FORCE_LIST     = parse_bool_list("KRAKEN_EMBEDDED_FORCE",     "0")
+const EMBEDDED_DRAG_LIST      = parse_bool_list("KRAKEN_EMBEDDED_DRAG",      "0")
+const EMBEDDED_GEOMETRY_LIST  = parse_symbol_list("KRAKEN_EMBEDDED_GEOMETRY", "qwall")
+all(g -> g in (:qwall, :circle), EMBEDDED_GEOMETRY_LIST) ||
+    throw(ArgumentError("KRAKEN_EMBEDDED_GEOMETRY values must be qwall or circle"))
+const GEOM_CONFIGS = zip_equal("KRAKEN_L_UP_LIST/KRAKEN_L_DOWN_LIST",
+                                L_UP_LIST, L_DOWN_LIST)
+const EMBEDDED_CONFIGS = zip_equal("KRAKEN_EMBEDDED_*",
+    EMBEDDED_GRADIENT_LIST, EMBEDDED_ADVECTION_LIST, EMBEDDED_FORCE_LIST,
+    EMBEDDED_DRAG_LIST, EMBEDDED_GEOMETRY_LIST)
 const U_MEAN          = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.005"))
 const MAX_STEPS_BASE  = parse(Int,     get(ENV, "KRAKEN_MAX_STEPS_BASE", "100000"))
 const AVG_WINDOW_FRAC = parse(Float64, get(ENV, "KRAKEN_AVG_WINDOW_FRAC", "0.2"))
-const L_UP, L_DOWN    = 15.0, 15.0
 const JOB_ID          = get(ENV, "PBS_JOBID", "manual")
 const OUTPUT_DIR      = get(ENV, "KRAKEN_OUTPUT_DIR",
                             "results/viscoelastic_logfv/cyl_bigsweep_v2_$(JOB_ID)")
 
 const CSV_COLUMNS = [
     :timestamp, :backend, :FT, :R, :Wi, :Re_R, :beta, :bsd_fraction,
+    :L_up, :L_down, :embedded_gradient, :embedded_advection,
+    :embedded_force, :embedded_drag, :embedded_geometry,
     :u_mean, :nu_total, :nu_s, :nu_p, :lambda, :max_steps, :avg_window,
     :polymer_substeps_used, :completed_steps,
     :Cd_kraken, :Cd_s, :Cd_p, :Cd_bsd, :min_det_C, :min_c_eig,
@@ -164,14 +198,20 @@ function c_n1_stats(psixx, psixy, psiyy, tauxx, tauyy, is_solid)
             det_min, false)
 end
 
-function case_tag(beta, wi, re, R, bsd)
+function case_tag(beta, wi, re, R, bsd, L_up, L_down, eg, ea, ef, ed, geom)
     fmt(x) = replace(@sprintf("%.4g", x), "." => "p", "-" => "m")
-    return "beta$(fmt(beta))_wi$(fmt(wi))_re$(fmt(re))_R$(R)_bsd$(fmt(bsd))"
+    b(x) = x ? "1" : "0"
+    return "beta$(fmt(beta))_wi$(fmt(wi))_re$(fmt(re))_R$(R)_bsd$(fmt(bsd))" *
+           "_Lup$(fmt(L_up))_Ldn$(fmt(L_down))_eg$(b(eg))_ea$(b(ea))" *
+           "_ef$(b(ef))_ed$(b(ed))_geom$(geom)"
 end
 
-function run_case(beta, wi, re_target, R, bsd, summary_path)
+function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary_path)
+    L_up, L_down = domain_cfg
+    embedded_gradient, embedded_advection, embedded_force, embedded_drag,
+        embedded_geometry = embedded_cfg
     H = 4 * R
-    Nx = ceil(Int, (L_UP + L_DOWN) * R)
+    Nx = ceil(Int, (L_up + L_down) * R)
     Ny = H
     # Re_R = u_mean * R / nu_total  ->  nu_total = u_mean * R / Re_R
     nu_total = U_MEAN * R / re_target
@@ -180,7 +220,9 @@ function run_case(beta, wi, re_target, R, bsd, summary_path)
     lambda = wi * R / U_MEAN
     max_steps = MAX_STEPS_BASE
     avg_window = max(1, round(Int, max_steps * AVG_WINDOW_FRAC))
-    tag = case_tag(beta, wi, re_target, R, bsd)
+    tag = case_tag(beta, wi, re_target, R, bsd, L_up, L_down,
+                   embedded_gradient, embedded_advection, embedded_force,
+                   embedded_drag, embedded_geometry)
     csv_path = joinpath(OUTPUT_DIR, "cyl_bigsweep_v2_$(tag).csv")
 
     row = Dict{Symbol,Any}(
@@ -188,6 +230,11 @@ function run_case(beta, wi, re_target, R, bsd, summary_path)
         :backend => BACKEND_LABEL, :FT => string(FT),
         :R => R, :Wi => wi, :Re_R => re_target, :beta => beta,
         :bsd_fraction => bsd, :u_mean => U_MEAN,
+        :L_up => L_up, :L_down => L_down,
+        :embedded_gradient => Int(embedded_gradient),
+        :embedded_advection => Int(embedded_advection),
+        :embedded_force => Int(embedded_force), :embedded_drag => Int(embedded_drag),
+        :embedded_geometry => string(embedded_geometry),
         :nu_total => nu_total, :nu_s => nu_s, :nu_p => nu_p,
         :lambda => lambda, :max_steps => max_steps, :avg_window => avg_window,
     )
@@ -202,7 +249,7 @@ function run_case(beta, wi, re_target, R, bsd, summary_path)
     result = nothing
     try
         result = Kraken.run_viscoelastic_logfv_cylinder_coupled_2d(;
-            radius=R, H=H, L_up=L_UP, L_down=L_DOWN,
+            radius=R, H=H, L_up=L_up, L_down=L_down,
             nu_s=FT(nu_s), nu_p=FT(nu_p), lambda=FT(lambda),
             polymer_model=:oldroydb, L_max=FT(10.0),
             u_mean=FT(U_MEAN), Fx_body=FT(0.0),
@@ -212,8 +259,9 @@ function run_case(beta, wi, re_target, R, bsd, summary_path)
             max_memory_deformation_increment=FT(0.07),
             max_polymer_substeps=64, max_steps=max_steps,
             avg_window=avg_window, drag_stride=200, diagnostic_stride=0,
-            embedded_geometry=:qwall, embedded_gradient=false,
-            embedded_advection=false, embedded_force=false, embedded_drag=false,
+            embedded_geometry=embedded_geometry, embedded_gradient=embedded_gradient,
+            embedded_advection=embedded_advection, embedded_force=embedded_force,
+            embedded_drag=embedded_drag,
             embedded_circle_samples=32, force_boundary_fill=:bc_aware,
             backend=BACKEND, T=FT,
         )
@@ -277,20 +325,23 @@ end
 function main()
     println("=== cyl_bigsweep_v2 backend=$(BACKEND_LABEL) FT=$(FT) ===")
     println("beta=$BETA_LIST | Wi=$WI_LIST | Re=$RE_LIST | R=$R_LIST | bsd=$BSD_LIST")
+    println("domains=$GEOM_CONFIGS | embedded=$EMBEDDED_CONFIGS")
     println("output_dir=$OUTPUT_DIR")
     mkpath(OUTPUT_DIR)
     summary_path = joinpath(OUTPUT_DIR, "SUMMARY.csv")
     n_total = length(BETA_LIST) * length(WI_LIST) * length(RE_LIST) *
-              length(R_LIST) * length(BSD_LIST)
+              length(R_LIST) * length(BSD_LIST) *
+              length(GEOM_CONFIGS) * length(EMBEDDED_CONFIGS)
     println("$n_total cases total")
     flush(stdout)
     n_done = 0
     for beta in BETA_LIST, wi in WI_LIST, re in RE_LIST,
-        R in R_LIST, bsd in BSD_LIST
+        R in R_LIST, bsd in BSD_LIST, domain_cfg in GEOM_CONFIGS,
+        embedded_cfg in EMBEDDED_CONFIGS
         n_done += 1
         @printf("\n[%d/%d] starting case at %s\n", n_done, n_total, string(now()))
         flush(stdout)
-        run_case(beta, wi, re, R, bsd, summary_path)
+        run_case(beta, wi, re, R, bsd, domain_cfg, embedded_cfg, summary_path)
     end
     println("\n=== cyl_bigsweep_v2 DONE at $(now()) ===")
 end
