@@ -31,23 +31,37 @@ function detect_backend()
     if (req == "auto" || req == "cuda")
         try
             @eval using CUDA
-            CUDAMod = getfield(Main, :CUDA)
-            if Base.invokelatest(getfield(CUDAMod, :functional))
-                return CUDAMod.CUDABackend(), "cuda", FT
+            cuda_mod = Base.invokelatest(getfield, Main, :CUDA)
+            functional = Base.invokelatest(getfield(cuda_mod, :functional))
+            if functional
+                backend_ctor = Base.invokelatest(getfield, cuda_mod, :CUDABackend)
+                return Base.invokelatest(backend_ctor), "cuda", FT
+            else
+                @warn "CUDA loaded but CUDA.functional() returned false (req=$req); trying next backend."
             end
-        catch end
+        catch e
+            @warn "CUDA detection failed (req=$req): $(sprint(showerror, e))"
+        end
     end
     if (req == "auto" || req == "metal") && Sys.isapple()
         try
             @eval using Metal
-            MetalMod = getfield(Main, :Metal)
-            if Base.invokelatest(getfield(MetalMod, :functional))
-                return MetalMod.MetalBackend(), "metal", FT == Float64 ? Float32 : FT
+            metal_mod = Base.invokelatest(getfield, Main, :Metal)
+            functional = Base.invokelatest(getfield(metal_mod, :functional))
+            if functional
+                backend_ctor = Base.invokelatest(getfield, metal_mod, :MetalBackend)
+                return Base.invokelatest(backend_ctor), "metal", FT == Float64 ? Float32 : FT
+            else
+                @warn "Metal loaded but Metal.functional() returned false (req=$req); trying next backend."
             end
-        catch end
+        catch e
+            @warn "Metal detection failed (req=$req): $(sprint(showerror, e))"
+        end
     end
     if req != "auto" && req != "cpu"
         @warn "Requested KRAKEN_BACKEND=$req but detection failed; falling back to CPU."
+    elseif req == "auto"
+        @warn "KRAKEN_BACKEND=auto and no GPU backend usable; falling back to CPU."
     end
     return KernelAbstractions.CPU(), "cpu", FT
 end
