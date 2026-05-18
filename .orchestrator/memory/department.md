@@ -163,3 +163,210 @@ of the post-commit cleanup.
 at `.engineer_brief.md` (left over from before .engineer_brief_M5B.md
 was added) was picked up silently. Costs an Engineer iteration each
 time.
+
+## 2026-05-17 — runtests baseline carries pre-existing failures on dev-viscoelastic
+
+`julia --project=. test/runtests.jl` on `dev-viscoelastic` HEAD exits
+with status 1 and prints "169194 passed, 6 failed, 0 errored, 4 broken".
+The 6 failures live in "Pure shear Oldroyd-B steady state, fully
+periodic"; the 4 broken are LI-BB canary + P18b2c. Verified pre-M16
+by stashing the M16A diff and re-running on bare HEAD. **A refactor
+mission's exit criterion must therefore not be "runtests exits 0" but
+"failure count and identity are PRESERVED" vs HEAD baseline.** Brief
+the Engineer/Department accordingly: capture the pass/fail/broken
+summary line and compare it byte-for-byte, not the exit code.
+
+**Why**: M16 nearly got reported RED by exit-code; the Department's
+own pre-flight stash baseline saved it. Save the next mission from
+the same trap.
+
+## 2026-05-17 — cmp byte-equality smoke is infeasible on dirty trees
+
+The "stash the diff → re-run smoke on HEAD → cmp the CSVs" pattern
+in `~/.claude/skills/orchestrator/department_brief_template.md`
+breaks on `dev-viscoelastic` because the working tree carries ~150
+M-unrelated dirty files; `git stash push -- <paths>` fails when the
+new (untracked) file isn't indexed (`error: Entry … not uptodate.
+Cannot merge`). Workaround attempted by M16: `mv newfile /tmp/.bak`
+then `git stash push -- <edited>`. For refactor-pur missions, the
+runtests baseline-preservation check + symbol-grep relocation +
+diff-stat scoping are sufficient evidence; the full byte-equality
+smoke can be deferred to the next production validation step (e.g.
+the Aqua N=64 t=8 reproduction before M17).
+
+**Why**: documented to spare M16b/M16c/M16d (future SPLITs of the
+remaining drivers in `viscoelastic_logfv_2d.jl`) from the same dead
+end. Defer cmp, lean on runtests + symbol-grep.
+
+## 2026-05-17 — Test invocation: julia direct, NOT Pkg.test()
+
+`test/Project.toml` on `dev-viscoelastic` is intentionally minimal
+(only `Test` dependency). `Pkg.test()` activates THAT environment,
+so `using Kraken` succeeds but Kraken's internal
+`using KernelAbstractions` (and Metal/CUDA when applicable) fails to
+resolve, resulting in a near-empty test pass (~58 tests instead of
+the real 169194/6/0/4 baseline).
+
+**Rule for all future Departments**: the test invocation MUST be:
+
+```bash
+\
+julia --project=. test/runtests.jl
+```
+
+NOT `julia --project=. -e 'using Pkg; Pkg.test()'` and NOT
+`julia --project=test test/runtests.jl`. Both of those use the
+near-empty `test/Project.toml` and silently report wrong test counts.
+
+The Boss is aware `test/Project.toml` is incomplete; fixing it is a
+separate maintenance mission (would need the full dep list from the
+main `Project.toml`, plus a decision on GPU-backend deps). Until that
+mission lands, Departments MUST use the direct-script invocation.
+
+**Why**: M17-pre v2 reported "test drift 169194 → 58" between
+missions; investigation showed the v1/M16 Department used the direct
+script and the v2 Department used `Pkg.test()`. The number drift was
+purely the invocation difference, not a code regression. Save the
+next Department from re-discovering this.
+
+## 2026-05-18 — Post-hoc F_total decomposition pattern (M20-style)
+
+For any coupled viscoelastic driver that returns `fx_total` (BSD-
+corrected body force) + `psi*` (log-conformation) + `ux, uy` in its
+result tuple, the three additive contributions to `F_total` can be
+recovered post-hoc using existing kernels — NO driver patch needed:
+
+```julia
+# Step 1: rebuild τ_p from ψ (same prefactor as in driver)
+prefactor = nu_p / lambda
+logfv_stress_from_log_2d!(tauxx, tauxy, tauyy, psixx, psixy, psiyy, prefactor)
+
+# Step 2: rebuild F_poly_wide from τ_p (same BC spec as driver)
+fx_poly_wide = zeros(...); fy_poly_wide = zeros(...)
+logfv_polymer_force_bc_aware_2d!(
+    fx_poly_wide, fy_poly_wide, tauxx, tauxy, tauyy, is_solid, dx, dy, logfv_bc
+)
+
+# Step 3: extract F_BSD_narrow by algebraic identity from the driver chain
+#   F_total = Fx_body + F_poly_wide − F_BSD_narrow
+fx_total_no_body = fx_total .- Fx_body
+fx_BSD_narrow = fx_poly_wide .- fx_total_no_body
+```
+
+Cells with `is_solid == true` should be excluded from any residual
+analysis (kernels leave undefined values there). For 1D-in-y problems
+(Poiseuille, channel) row-mean across x collapses the per-x noise.
+
+Reusable for cavity, step, BFS, contraction, or any future
+viscoelastic geometry that uses the same BSD-via-correction-step
+chain. The pattern requires NO modification of `src/` — it is pure
+instrumentation through public kernel APIs.
+
+**Why**: avoids the next Department drafting a Codex brief that asks
+for driver patching ("instrument F_total step-by-step inside the
+loop") when the steady-state decomposition is sufficient and can be
+extracted from the existing return tuple. M20 used this exact
+pattern in 282 LOC; the cavity equivalent would be ~350 LOC with the
+embedded geometry path.
+
+## 2026-05-18 — Wrap variant sweeps in try/catch with sentinel nan_step
+
+For any multi-variant sweep bench (M21-style: N variants in a single
+script), wrap each variant call in `try / catch DomainError` and use
+`nan_step = 0` as the sentinel for crash-before-first-NaN-watcher-tick
+(typically caused by `logfv_log_spd_sym2_2d` raising DomainError when
+C goes non-SPD inside a substep, before the per-5000-step NaN watcher
+fires). Without this, a single variant's mid-substep DomainError
+truncates the whole sweep and leaves the later variants unmeasured.
+M21 found `:epsilon_force` at Wi=1 crashes this way (substep DomainError
+at step 0); the try/catch with sentinel let the remaining variants
+finish so the verdict could rank everything.
+
+Pattern:
+```julia
+for variant in variants
+    nan_step, result = try
+        run_variant(variant)
+    catch e
+        e isa DomainError ? (0, nothing) : rethrow(e)
+    end
+    record!(variant, nan_step, result)
+end
+```
+
+**Why**: M21 was almost truncated by `:epsilon_force` Wi=1; the
+Department patched the try/catch wrapping post-hoc. Future matrix-sweep
+bench briefs MUST include this pattern from the start, not as a
+recovery after the first crash.
+
+## 2026-05-18 — Cylinder `embedded_drag` only affects Cd_p and Cd_bsd
+
+Driver kwarg `embedded_drag::Bool` in the viscoelastic cylinder
+v2 driver toggles `drag_p` (= polymer-force drag integral, driver
+line ~470) and `drag_bsd` (= BSD-correction drag integral, driver
+line ~485) between LBM cut-link momentum exchange (OFF, `:qwall`
+geometry) and FVFD traction integration on the embedded quadrature
+(ON, `:circle` geometry). It does **NOT** affect `drag_s = compute_
+drag_libb_mei_2d(...)` (`src/drivers/cylinder_libb.jl:98-163`)
+which is always sourced from the LBM Mei MEA. Therefore `Cd_s` is
+invariant under `embedded_drag` flip in ALL regimes; only the
+composite `Cd_kraken = Cd_s + Cd_p − Cd_bsd` changes.
+
+**Implication for Cd-related briefs**: never say "Cd_s changes
+with embedded_drag" — always specify which component. The handoff
+2026-05-18 (next-session prompt) said "+8.8 Cd_s ghost drag" but
+the correct attribution is "+8.8 Cd_kraken with embedded ON" —
+loose wording that misled the initial hypothesis. Future Department
+briefs touching Cd MUST specify the component (`Cd_s`, `Cd_p`,
+`Cd_bsd`, `Cd_kraken`) when discussing flag effects.
+
+**Why**: prevents the next Department from mis-attributing a polymer-
+pipeline bug to the LBM solvent side. Found during M26-impl
+2026-05-18.
+
+## 2026-05-18 — Phase 0 cylinder DoE matrix gaps
+
+Job `21563085.aqua` Phase 0 Liu-match runs only 4 of 16 possible
+embedded tuples: `0000_qwall`, `1000_qwall`, `0001_qwall`,
+`1100_qwall`. Missing for full H1/H2/H3 disambiguation:
+- `0010_qwall` (force-only) — isolates H2.
+- `0100_qwall` (advection-only) — would isolate the M17-canary-A
+  family wall-ghost effect specifically.
+- `0011_qwall`, `0101_qwall`, etc. — pairwise interactions.
+
+If Phase 0 results show `0001_qwall` ≈ `0000_qwall` (drag flag
+isolated → no ghost), the +8.8 must come from `embedded_force` and/
+or `embedded_advection` (which can be cross-checked against
+`1100_qwall`). Phase 0 alone cannot fully disambiguate H2 from H3
+without a Phase 0b that adds `0010_qwall`. Worth adding ~3 more
+runs (~30 min A100) to the next sweep if Phase 0 doesn't pin the
+bug to a single flag.
+
+**Why**: Phase 0 was tuned for Liu-reference reproduction, not for
+embedded-flag DoE. The DoE+Liu-match goals partially conflict;
+future cylinder briefs should explicitly state which is primary.
+
+## 2026-05-18 — Boss-level adversarial dual-spawn pattern validates
+
+Boss-level dual-spawn (Department-A pure-analysis Claude general-
+purpose, Department-B pure-impl Codex via run-engineer.sh) for the
+M26 embedded_drag bug hunt produced **complementary** verdicts that
+each ruled out a hypothesis the other could not. M26-analysis
+identified the mechanism (cell-fraction divisor + half-cell ghost
+coupling). M26-impl ratcheted the polymer-coupling localisation
+(Newtonian-clean → bug must be in polymer-only paths). Together
+they fully scoped M26b without needing a third spawn.
+
+**When to use Boss-level dual**: when ONE Department alone risks
+echo-chamber (e.g. math-Claude alone might over-attribute to a
+known pathology like the M17-canary-A pattern; impl-Codex alone
+might mis-attribute to a flag it didn't isolate from the polymer
+pipeline). The dual gives independent triangulation. Cost: 2× spawn
++ Boss synthesis (~5-10 min of Boss time). Worth it for any
+mission where the symptom has 3+ candidate mechanisms (per the
+H1/H2/H3 structure of M26).
+
+**Why**: this is the 5th validation of the adversarial pattern this
+project (after M17-epsilon Claude+Codex, S7' multi-Department, and
+the M21 BSD path-matrix). Locks in as the default for any
+multi-hypothesis bug hunt going forward.

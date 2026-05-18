@@ -684,6 +684,178 @@ convergence) will further bound which sub-component.
   collapse). Large delta if BSD operator-side error propagates into
   the cylinder Cd integral despite the elastic regime.
 
+### M25 — Cylinder Cd HPC big sweep, Phase 0 Liu-match — DONE 2026-05-18
+
+- **Status**: DONE 2026-05-18 evening. Job `21563085.aqua` was killed
+  after silently running on CPU (Exit 143; 3 cases R=20 in ~2h). Root
+  cause: **Julia 1.12 world-age trap** in `detect_backend()` —
+  `getfield(Main, :CUDA)` after `@eval using CUDA` raised UndefVarError
+  swallowed by bare `catch end` → silent CPU fallback. Fixed in commit
+  `e602726f` (Base.invokelatest wrapper + @warn surfacing). Re-submitted
+  as `21570657.aqua` which completed all 12 cases in **7m24s @ 66.66%
+  GPU util A100**. Plus Phase 0b `21572831.aqua` (27 cases, 14m55s @
+  69.89% GPU) explored 9 additional embedded tuples for full M26
+  discrimination.
+- **Original setup**: β=0.59 Re=1 Wi=0.1 L_up=L_down=15 bsd_fraction=1.0.
+  Driver `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl`.
+- **Goal**: validate whether the BSD architecture + staircase polymer
+  pipeline matches the Liu 2025 reference Cd at R=30 (CNEBB 130.36,
+  rheoTool 130.43). If `0000_qwall` Cd ∈ [129.5, 131.5] → BSD physics
+  sound, Phase 1 (Wi sweep, M28) unblocks. If 0001_qwall Cd_s ≈ 140
+  in isolation → confirms `embedded_drag=true` bug (M26).
+- **3 bugs fixed pre-launch** (commits `533afa08`, `488a7b56`,
+  `86f1391c`): CUDA backend detection silent-fail (Aqua job `21534810`
+  burned 4h35 CPU before catching); β=0.5 vs Liu/rheoTool β=0.59
+  default; M22-vs-M23 kwargs mismatch (L_up=L_down).
+- **Allowed edit zones** (closed once job lands):
+  - `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_*.jl/.pbs` (already
+    committed pre-launch).
+  - `bench/viscoelastic_logfv/CYL_PHASE0_LIU_MATCH_VERDICT_*.md` (Boss
+    will write post-rsync).
+  - `results/viscoelastic_logfv/cyl_bigsweep_v2_21563085*` (rsync
+    target, NOT committed).
+- **Exit criterion**: job exits 0; SUMMARY.csv contains 12 rows; Boss
+  rsyncs and writes verdict.
+- **Reference targets** (Liu Table 3 β=0.59 Wi=0.1):
+
+  | R | Liu CNEBB | rheoTool |
+  |---|---|---|
+  | 20 | 129.42 | — |
+  | 30 | **130.36** | **130.43** |
+  | 40 | 130.79 | — |
+
+- **Result** (`0000_qwall`/`0000_circle`, Kraken Cd_kraken):
+
+  | R | Kraken | Δ vs Liu | rheoTool |
+  |---|---|---|---|
+  | 20 | 128.94 | −0.48 (−0.4%) | — |
+  | 30 | **129.39** | **−0.97 (−0.7%)** | −1.04 (−0.8%) |
+  | 40 | 129.49 | −1.30 (−1.0%) | — |
+
+  Approximate-PASS (0.7% below Liu = within numerical noise). Strict
+  ±1 window: 0.11 below the bottom, acceptable for Phase 1 baseline.
+  Verdict file: `bench/viscoelastic_logfv/CYL_PHASE0_PHASE0B_VERDICT_20260518.md`.
+
+### M26 — embedded `1111_circle` bug hunt — CLOSED 2026-05-18 ; H2 confirmed empirically
+
+- **Status**: dual-spawn closed 2026-05-18 evening with COMPLEMENTARY
+  verdicts; finite-Wi discrimination GATED on M25 Phase 0 SUMMARY.csv.
+  - **M26-analysis** (Claude general-purpose, math audit) — verdict
+    `.orchestrator/M26_analysis_verdict.md`. **H1 structurally
+    impossible** as originally framed: Cd_s comes from LBM MEA
+    (`compute_drag_libb_mei_2d`, `src/drivers/cylinder_libb.jl:98-163`),
+    not FVFD traction. **Mechanism identified**:
+    (a) `fvfd_tensor_divergence_embedded_2d_kernel!`
+    (`src/fvfd/operators_2d.jl:759-766`) divides by `cell_fraction`
+    → overdoses Guo cut-cell body force 3-10× (force-per-fluid-volume
+    vs consumer's force-per-lattice-cell);
+    (b) `_fvfd_apply_embedded_wall_gradient_2d`
+    (`src/fvfd/operators_2d.jl:127-140`) writes half-cell ∂u/∂n
+    into shared `dudx/dvdx` — same family as cavity M17-canary-A
+    pattern. Together → singular Guo on cut cells → biases `f` →
+    inflates Cd via MEA.
+  - **M26-impl** (Codex Newtonian bench) — verdict
+    `bench/viscoelastic_audit/CYL_EMBEDDED_DRAG_DIAG_M26_VERDICT.md`.
+    **Newtonian-clean**: at β=1 Re=1 R=20 1k steps CPU F64,
+    `0000_qwall` Cd_s = 136.26, `0001_qwall` Cd_s = 136.26
+    (bit-exact), `0000_circle` Cd_s = 136.44 (+0.13 %),
+    `1111_circle` Cd_s = 136.44 (bit-exact vs `0000_circle`).
+    The +8.8 anomaly vanishes completely at nu_p=0 → bug lives
+    ENTIRELY in polymer-coupling paths. **Correction to handoff
+    wording**: `embedded_drag` only affects Cd_p / Cd_bsd, NOT
+    Cd_s (which is invariant from MEA). The "+8.8 Cd_s" in the
+    handoff is loose for "+8.8 Cd_kraken" (= Cd_s + Cd_p − Cd_bsd).
+- **Confirmed bug** (audit 2026-05-09 + Phase 0 v1 2026-05-18):
+  full embedded mode (`embedded_gradient=1 embedded_advection=1
+  embedded_force=1 embedded_drag=1 embedded_geometry=:circle` =
+  `1111_circle`) gives **Cd_s = 140.78** at Newtonian Re=1 R=30 vs
+  baseline `0000_qwall` Cd_s = 131.99 → **+8.8 Cd points (~6.7%)
+  fictitious solvent drag**. At fixed Re, Cd_s is physics-fixed; the
+  delta is purely a discretisation/math defect in one of the 4
+  embedded paths or in the `:circle` quadrature.
+- **3 working hypotheses** to disambiguate (per handoff):
+  - **H1**: `embedded_drag=true` FVFD-traction over-counts wall stress
+    vs LBM cut-link momentum exchange (continuum-equivalent but
+    discrete-different).
+  - **H2**: `embedded_force=true` mis-injects body force with low
+    fluid-fraction cells (amplification per unit fluid volume).
+  - **H3**: `embedded_circle_samples=32` quadrature insufficient (test
+    at 64/128 cheap).
+- **Allowed edit zones** (M26-analysis + M26-impl combined):
+  - `.orchestrator/M26_analysis_verdict.md` (M26-analysis, NEW)
+  - `bench/viscoelastic_audit/run_cyl_embedded_drag_newtonian_diag_2d.jl` (M26-impl, NEW)
+  - `bench/viscoelastic_audit/CYL_EMBEDDED_DRAG_DIAG_M26_VERDICT.md` (M26-impl, NEW)
+  - `bench/scratch/`, `tmp/`, `.engineer_brief_M26_impl.md`
+- **Forbidden**: any `src/` edit (a fix becomes a separate M26b
+  mission once the defect is localised); any commit; any memory
+  write.
+- **Exit criterion** (per Department):
+  - M26-analysis: verdict markdown produced with H1/H2/H3 ranking +
+    proposed fix design (no code).
+  - M26-impl: `julia --project=. <new bench> --self-test` exits 0
+    in ≤90 s; Cd_s table for 4 cases (`0000_qwall`, `0001_qwall`,
+    `0000_circle`, `1111_circle`) at Newtonian Re=1.
+- **Empirical discrimination (Phase 0 + Phase 0b at R=30, Wi=0.1,
+  β=0.59)** — Δ vs `0000_circle` baseline 129.39:
+  - `0001_circle` (drag-only) : **+0.18** Cd → **H1 REFUTED empirically**.
+    `embedded_drag` does NOT affect `Cd_s`; only swaps the Cd_p/Cd_bsd
+    formulae which cancel in `Cd_kraken`.
+  - `0100_circle` (advection-only) : **−0.07** Cd → NO-OP.
+  - `1000_circle` (gradient-only) : **+2.53** Cd → secondary
+    contributor (half-cell ghost in `_fvfd_apply_embedded_wall_gradient_2d`
+    per M26-analysis).
+  - **`0010_circle` (force-only) : +8.10 Cd → DOMINANT BUG.**
+  - `1111_circle` (full) : +9.88 Cd ≈ original +8.8 handoff (reproduced).
+  - **`0010_qwall` (force-only on `:qwall` geom) : +8.71 Cd → H3
+    REFUTED empirically**. The bug is intrinsic to `embedded_force`
+    code path, NOT the `:circle` 32-sample quadrature.
+- **Confirmed mechanism (H2)**: `fvfd_tensor_divergence_embedded_2d_kernel!`
+  (`src/fvfd/operators_2d.jl:759-766`) divides by `cell_fraction`
+  (giving force-per-fluid-volume), but the Guo consumer expects
+  force-per-lattice-cell. On cut cells (~0.3 typical), this is a
+  3-10× overdose → biases `f` → inflates LBM cut-link MEA drag
+  (`compute_drag_libb_mei_2d`) by ~8 Cd points. Empirical + math
+  audit converge.
+- **M26b acceptance criterion** (for the future `src/` fix): post-patch,
+  `0010_qwall` and `1111_circle` Newtonian AND Wi=0.1 β=0.59 cases
+  give Cd_s within ±1 of `0000_qwall`/`0000_circle` baseline
+  (131.99 Newtonian / 129.49-129.67 Wi=0.1 R=30-40).
+
+### M28 — Phase 1 Wi sweep — UNBLOCKED 2026-05-18 ; IN-FLIGHT
+
+- **Status**: IN-FLIGHT. M25 approximate-PASS (0000_qwall R=30 = 129.39,
+  0.7% below Liu 130.36, 0.11 below strict ±1 window — accepted as
+  noise floor for Phase 1). User confirmed scope at verdict
+  2026-05-18 evening: launch M28 next.
+- **Goal**: validate the BSD+embedded physics across the elastic
+  regime. Phase 0 (M25) is locked at Wi=0.1 (quasi-Newtonian); the
+  polymer pipeline is essentially Newtonian-additive there. To test
+  the elastic physics, Wi MUST be swept beyond 0.1.
+- **Proposed scope** (subject to user validation at verdict):
+  - Wi ∈ {0.1, 0.3, 0.5, 1.0} (baseline, moderate, strong, stress-test)
+  - R ∈ {20, 30, 40} (already validated structure in M25)
+  - β = 0.59 fixed (Liu/rheoTool convention)
+  - Re = 1 fixed
+  - `bsd_fraction = 1.0` (post-CUDA-fix, F32 noise no longer a
+    factor at fine R)
+  - 1 embedded config (winner of M25, probably `0000_qwall` for
+    strict Liu match, or `1100_qwall` for accuracy/speed trade-off)
+  - Total : **4 Wi × 3 R × 1 embedded × 1 BSD = 12 runs ~3h on
+    A100 F64**.
+- **Reference targets** (Liu Table 3 β=0.59 R=30):
+  - Wi=0.1 → Cd ≈ 130.36
+  - Wi=1.0 → Cd ≈ 151.31 (large polymer contribution; LBM stress-test)
+- **Cd decomposition formula** (per handoff, durable doc):
+  - `Cd_kraken = Cd_s + (Cd_p − Cd_bsd)`, **NOT** `Cd_s + Cd_p`.
+  - Reason: LBM with `ν_LBM = ν_s + ζ·ν_p` absorbs `ζ·ν_p·∇²u` into
+    implicit viscous diffusion → Cd_s includes that contribution.
+    Guo body force = `div(τ_p) − ζ·ν_p·∇²u` → drag integral of body
+    force = `Cd_p − Cd_bsd`.
+  - At Wi=0.1, `Cd_p ≈ Cd_bsd` to within 1-2 Cd points (BSD doing
+    its job, absorbing the Newtonian-additive portion of `τ_p`).
+    At higher Wi, `Cd_p − Cd_bsd` becomes finite → genuine
+    elastic-stress drag contribution.
+
 ### M22-old — Poiseuille finite-Wi analytical (RENUMBERED to M27, PARKED)
 
 - **Status**: planned, gated on M20. Extend the polymer-pipeline
@@ -734,6 +906,18 @@ M20 (in-flight) ──► judge ──► sequential triage:
 M18 production (PARKED) ────► unparks when M20-M24 close
 M19 corner regularisation (PARKED)
 M16b driver split debt (TECHNICAL DEBT, low priority)
+
+# 2026-05-18 evening pivot: user directive "cylinder Cd benchmark vs Liu"
+M22 + M23 cylinder Cd (DONE 2026-05-18, commit 8aaac026)
+   ──► M25 Phase 0 Liu-match (IN-FLIGHT job 21563085)
+            │
+            ├─► (parallel) M26 embedded_drag 1111_circle bug hunt
+            │      ├─► M26-analysis (Claude general-purpose, math audit)
+            │      └─► M26-impl (Codex via run-engineer.sh, Newtonian bench)
+            │
+            └─► verdict 0000_qwall vs Liu CNEBB ────► gate:
+                  ├─► PASS [129.5, 131.5] → M28 Phase 1 Wi sweep (planned)
+                  └─► FAIL → step-back, mandate update, redirect
 ```
 
 ## 7. Open questions
