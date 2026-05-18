@@ -6,7 +6,7 @@
 #          rolling summary at $KRAKEN_OUTPUT_DIR/SUMMARY.csv
 #
 # Env-var configurable (defaults match the user-directive 2026-05-18 plan):
-#   KRAKEN_BETA_LIST        "0.3,0.5,0.7"        (beta = nu_s / nu_total)
+#   KRAKEN_BETA_LIST        "0.59"               (Liu 2025/rheoTool match; beta = nu_s/nu_total)
 #   KRAKEN_WI_LIST          "0.1,0.3,0.5"
 #   KRAKEN_RE_LIST          "0.1,1.0"
 #   KRAKEN_R_LIST           "30,50,80"
@@ -31,8 +31,8 @@ function detect_backend()
     if (req == "auto" || req == "cuda")
         try
             @eval using CUDA
-            if Base.invokelatest(getfield(Main, :CUDA), :functional)
-                CUDAMod = getfield(Main, :CUDA)
+            CUDAMod = getfield(Main, :CUDA)
+            if Base.invokelatest(getfield(CUDAMod, :functional))
                 return CUDAMod.CUDABackend(), "cuda", FT
             end
         catch end
@@ -45,6 +45,9 @@ function detect_backend()
                 return MetalMod.MetalBackend(), "metal", FT == Float64 ? Float32 : FT
             end
         catch end
+    end
+    if req != "auto" && req != "cpu"
+        @warn "Requested KRAKEN_BACKEND=$req but detection failed; falling back to CPU."
     end
     return KernelAbstractions.CPU(), "cpu", FT
 end
@@ -75,7 +78,7 @@ function zip_equal(name, lists...)
     return collect(zip(lists...))
 end
 
-const BETA_LIST       = parse_list("KRAKEN_BETA_LIST",       "0.3,0.5,0.7")
+const BETA_LIST       = parse_list("KRAKEN_BETA_LIST",       "0.59")
 const WI_LIST         = parse_list("KRAKEN_WI_LIST",         "0.1,0.3,0.5")
 const RE_LIST         = parse_list("KRAKEN_RE_LIST",         "0.1,1.0")
 const R_LIST          = parse_int_list("KRAKEN_R_LIST",      "30,50,80")
