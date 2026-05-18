@@ -170,9 +170,10 @@ drag contribution.
 4. `bench/viscoelastic_audit/CYLINDER_DOE_PLAN_CODEX_20260518.md`
    (DoE plan with 3 tiers)
 5. `bench/viscoelastic_audit/CYLINDER_DOE_PLAN_CODEX_20260518.md` —
-   the hybrid plan combining Codex tier structure with Claude's PB-8
-   screening + statistical power analysis was validated by user 2026-
-   05-18 but the Claude DoE document itself was in-chat only, not on
+   the hybrid plan combining Codex tier structure with the cloud-
+   reasoning agent's PB-8 screening + statistical power analysis was
+   validated by user 2026-05-18 but the reasoning agent's DoE document
+   itself was in-chat only, not on
    disk. Re-derive if needed; the Codex plan + this prompt are
    sufficient context.
 6. `bench/viscoelastic_audit/liu_2025.txt` — Section 4.3 (line 2498+)
@@ -249,7 +250,7 @@ Per user directive, this debug MUST use the **adversarial dual-spawn
 pattern** that has been validated 4× this session (M17 cluster, DoE,
 CUDA fix). Spawn in parallel:
 
-- **Agent A (Claude cloud)** — reasoning-heavy: read the relevant
+- **Agent A (cloud-reasoning)** — reasoning-heavy: read the relevant
   `src/fvfd/operators_2d.jl` traction routines (`fvfd_embedded_wall_
   traction_2d!`, `fvfd_bsd_force_2d!` embedded variant, etc.), the
   cut-link drag computation in the LBM (probably in
@@ -267,8 +268,8 @@ CUDA fix). Spawn in parallel:
   bug is clearly localised.
 
 The Boss then evaluates both, picks the merged fix, applies, smoke-
-tests, and commits. The 4× validated pattern: Claude finds the math
-flaw, Codex provides the runnable diagnostic + patch.
+tests, and commits. The 4× validated pattern: the reasoning agent
+finds the math flaw, Codex provides the runnable diagnostic + patch.
 
 ### Acceptance criterion for the fix
 
