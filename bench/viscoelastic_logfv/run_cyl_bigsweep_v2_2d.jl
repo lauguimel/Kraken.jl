@@ -1,0 +1,298 @@
+#!/usr/bin/env julia
+# Big-sweep cylinder Cd + trace(C) + N1 convergence study for Aqua A100 F64.
+#
+# Sweeps:  beta x Wi x Re x R x bsd_fraction
+# Output:  CSV per case at $KRAKEN_OUTPUT_DIR/cyl_bigsweep_v2_<tag>.csv
+#          rolling summary at $KRAKEN_OUTPUT_DIR/SUMMARY.csv
+#
+# Env-var configurable (defaults match the user-directive 2026-05-18 plan):
+#   KRAKEN_BETA_LIST        "0.3,0.5,0.7"        (beta = nu_s / nu_total)
+#   KRAKEN_WI_LIST          "0.1,0.3,0.5"
+#   KRAKEN_RE_LIST          "0.1,1.0"
+#   KRAKEN_R_LIST           "30,50,80"
+#   KRAKEN_BSD_LIST         "1.0"                (user directive: use 1.0, not 0.75)
+#   KRAKEN_U_MEAN           "0.005"              (controls Re via Re_R = u_mean*R/nu_total)
+#   KRAKEN_MAX_STEPS_BASE   "100000"             (scales with R^2 implicitly via dx)
+#   KRAKEN_AVG_WINDOW_FRAC  "0.2"                (last 20% averaged for Cd)
+#   KRAKEN_BACKEND          "cuda" | "metal" | "cpu"  (auto-selected if not set)
+#   KRAKEN_FT               "float64" | "float32"
+#   KRAKEN_OUTPUT_DIR       "results/viscoelastic_logfv/cyl_bigsweep_<jobid>"
+
+using Kraken
+using Printf
+using Dates
+using KernelAbstractions
+
+function detect_backend()
+    req = lowercase(get(ENV, "KRAKEN_BACKEND", "auto"))
+    ft  = lowercase(get(ENV, "KRAKEN_FT", "float64"))
+    FT  = ft in ("f32", "float32", "single") ? Float32 : Float64
+
+    if (req == "auto" || req == "cuda")
+        try
+            @eval using CUDA
+            if Base.invokelatest(getfield(Main, :CUDA), :functional)
+                CUDAMod = getfield(Main, :CUDA)
+                return CUDAMod.CUDABackend(), "cuda", FT
+            end
+        catch end
+    end
+    if (req == "auto" || req == "metal") && Sys.isapple()
+        try
+            @eval using Metal
+            MetalMod = getfield(Main, :Metal)
+            if Base.invokelatest(getfield(MetalMod, :functional))
+                return MetalMod.MetalBackend(), "metal", FT == Float64 ? Float32 : FT
+            end
+        catch end
+    end
+    return KernelAbstractions.CPU(), "cpu", FT
+end
+
+const BACKEND, BACKEND_LABEL, FT = detect_backend()
+
+parse_list(name, default) =
+    [parse(Float64, strip(x)) for x in split(get(ENV, name, default), ",")]
+parse_int_list(name, default) =
+    [parse(Int, strip(x)) for x in split(get(ENV, name, default), ",")]
+
+const BETA_LIST       = parse_list("KRAKEN_BETA_LIST",       "0.3,0.5,0.7")
+const WI_LIST         = parse_list("KRAKEN_WI_LIST",         "0.1,0.3,0.5")
+const RE_LIST         = parse_list("KRAKEN_RE_LIST",         "0.1,1.0")
+const R_LIST          = parse_int_list("KRAKEN_R_LIST",      "30,50,80")
+const BSD_LIST        = parse_list("KRAKEN_BSD_LIST",        "0.0,0.5,1.0")
+const U_MEAN          = parse(Float64, get(ENV, "KRAKEN_U_MEAN", "0.005"))
+const MAX_STEPS_BASE  = parse(Int,     get(ENV, "KRAKEN_MAX_STEPS_BASE", "100000"))
+const AVG_WINDOW_FRAC = parse(Float64, get(ENV, "KRAKEN_AVG_WINDOW_FRAC", "0.2"))
+const L_UP, L_DOWN    = 15.0, 15.0
+const JOB_ID          = get(ENV, "PBS_JOBID", "manual")
+const OUTPUT_DIR      = get(ENV, "KRAKEN_OUTPUT_DIR",
+                            "results/viscoelastic_logfv/cyl_bigsweep_v2_$(JOB_ID)")
+
+const CSV_COLUMNS = [
+    :timestamp, :backend, :FT, :R, :Wi, :Re_R, :beta, :bsd_fraction,
+    :u_mean, :nu_total, :nu_s, :nu_p, :lambda, :max_steps, :avg_window,
+    :polymer_substeps_used, :completed_steps,
+    :Cd_kraken, :Cd_s, :Cd_p, :Cd_bsd, :min_det_C, :min_c_eig,
+    :u_max_abs, :tau_xx_max_abs, :tau_xy_max_abs, :tau_yy_max_abs,
+    :trace_C_max, :trace_C_mean, :N1_max_abs, :N1_mean_abs,
+    :first_nonfinite_step, :first_nonfinite_field, :nan_flag,
+    :walltime_s, :MLUPS,
+]
+
+function csv_cell(x)
+    x === nothing && return ""
+    if x isa AbstractFloat
+        isnan(x) && return "NaN"
+        return @sprintf("%.16g", Float64(x))
+    end
+    s = string(x)
+    if any(c in s for c in (',', '"', '\n'))
+        return "\"" * replace(s, "\"" => "\"\"") * "\""
+    end
+    return s
+end
+
+function write_csv(path, row; append_summary::Bool=false)
+    open(path, "w") do io
+        println(io, join(string.(CSV_COLUMNS), ","))
+        println(io, join((csv_cell(get(row, c, "")) for c in CSV_COLUMNS), ","))
+    end
+end
+
+function append_summary!(summary_path, row)
+    new_file = !isfile(summary_path)
+    open(summary_path, "a") do io
+        if new_file
+            println(io, join(string.(CSV_COLUMNS), ","))
+        end
+        println(io, join((csv_cell(get(row, c, "")) for c in CSV_COLUMNS), ","))
+    end
+end
+
+function max_abs_fluid(field, is_solid)
+    found = false; best = 0.0
+    for idx in CartesianIndices(is_solid)
+        is_solid[idx] && continue
+        v = abs(Float64(field[idx]))
+        isfinite(v) || return NaN
+        best = found ? max(best, v) : v
+        found = true
+    end
+    return found ? best : NaN
+end
+
+function max_speed_fluid(ux, uy, is_solid)
+    found = false; best = 0.0
+    for idx in CartesianIndices(is_solid)
+        is_solid[idx] && continue
+        v = hypot(Float64(ux[idx]), Float64(uy[idx]))
+        isfinite(v) || return NaN
+        best = found ? max(best, v) : v
+        found = true
+    end
+    return found ? best : NaN
+end
+
+function c_n1_stats(psixx, psixy, psiyy, tauxx, tauyy, is_solid)
+    found = false; bad = false
+    trace_max = -Inf; trace_sum = 0.0
+    n1_max = 0.0; n1_sum = 0.0; det_min = Inf; n_fluid = 0
+    try
+        for idx in CartesianIndices(is_solid)
+            is_solid[idx] && continue
+            cxx, cxy, cyy = Kraken.logfv_exp_sym2_2d(
+                psixx[idx], psixy[idx], psiyy[idx])
+            tr_c = Float64(cxx) + Float64(cyy)
+            det_c = Float64(cxx) * Float64(cyy) - Float64(cxy)^2
+            n1 = Float64(tauxx[idx]) - Float64(tauyy[idx])
+            if !(isfinite(tr_c) && isfinite(det_c) && isfinite(n1))
+                bad = true; break
+            end
+            trace_max = found ? max(trace_max, tr_c) : tr_c
+            trace_sum += tr_c
+            det_min = found ? min(det_min, det_c) : det_c
+            n1_max = found ? max(n1_max, abs(n1)) : abs(n1)
+            n1_sum += abs(n1); n_fluid += 1; found = true
+        end
+    catch err
+        err isa DomainError || rethrow()
+        bad = true
+    end
+    bad || !found && return (NaN, NaN, NaN, NaN, NaN, true)
+    return (trace_max, trace_sum / n_fluid, n1_max, n1_sum / n_fluid,
+            det_min, false)
+end
+
+function case_tag(beta, wi, re, R, bsd)
+    fmt(x) = replace(@sprintf("%.4g", x), "." => "p", "-" => "m")
+    return "beta$(fmt(beta))_wi$(fmt(wi))_re$(fmt(re))_R$(R)_bsd$(fmt(bsd))"
+end
+
+function run_case(beta, wi, re_target, R, bsd, summary_path)
+    H = 4 * R
+    Nx = ceil(Int, (L_UP + L_DOWN) * R)
+    Ny = H
+    # Re_R = u_mean * R / nu_total  ->  nu_total = u_mean * R / Re_R
+    nu_total = U_MEAN * R / re_target
+    nu_s = beta * nu_total
+    nu_p = (1.0 - beta) * nu_total
+    lambda = wi * R / U_MEAN
+    max_steps = MAX_STEPS_BASE
+    avg_window = max(1, round(Int, max_steps * AVG_WINDOW_FRAC))
+    tag = case_tag(beta, wi, re_target, R, bsd)
+    csv_path = joinpath(OUTPUT_DIR, "cyl_bigsweep_v2_$(tag).csv")
+
+    row = Dict{Symbol,Any}(
+        :timestamp => string(now()),
+        :backend => BACKEND_LABEL, :FT => string(FT),
+        :R => R, :Wi => wi, :Re_R => re_target, :beta => beta,
+        :bsd_fraction => bsd, :u_mean => U_MEAN,
+        :nu_total => nu_total, :nu_s => nu_s, :nu_p => nu_p,
+        :lambda => lambda, :max_steps => max_steps, :avg_window => avg_window,
+    )
+    for c in CSV_COLUMNS
+        haskey(row, c) || (row[c] = NaN)
+    end
+    row[:first_nonfinite_field] = "none"
+    row[:nan_flag] = true
+
+    t0 = time()
+    status = :ok
+    result = nothing
+    try
+        result = Kraken.run_viscoelastic_logfv_cylinder_coupled_2d(;
+            radius=R, H=H, L_up=L_UP, L_down=L_DOWN,
+            nu_s=FT(nu_s), nu_p=FT(nu_p), lambda=FT(lambda),
+            polymer_model=:oldroydb, L_max=FT(10.0),
+            u_mean=FT(U_MEAN), Fx_body=FT(0.0),
+            bsd_fraction=FT(bsd), polymer_substeps=:auto,
+            subcycle_relative_tolerance=FT(0.01),
+            max_deformation_increment=FT(0.05),
+            max_memory_deformation_increment=FT(0.07),
+            max_polymer_substeps=64, max_steps=max_steps,
+            avg_window=avg_window, drag_stride=200, diagnostic_stride=0,
+            embedded_geometry=:qwall, embedded_gradient=false,
+            embedded_advection=false, embedded_force=false, embedded_drag=false,
+            embedded_circle_samples=32, force_boundary_fill=:bc_aware,
+            backend=BACKEND, T=FT,
+        )
+    catch err
+        if err isa DomainError || err isa BoundsError
+            status = :spd_or_bounds_error
+        else
+            rethrow(err)
+        end
+    end
+    dt_s = time() - t0
+    row[:walltime_s] = dt_s
+
+    if status == :ok && result !== nothing
+        tr_max, tr_mean, n1_max, n1_mean, det_min, bad = c_n1_stats(
+            result.psixx, result.psixy, result.psiyy,
+            result.tauxx, result.tauyy, result.is_solid)
+        row[:completed_steps] = result.completed_steps
+        row[:polymer_substeps_used] = result.polymer_substeps
+        row[:Cd_kraken] = Float64(result.Cd)
+        row[:Cd_s]      = isdefined(result, :Cd_s) ? Float64(result.Cd_s) : NaN
+        row[:Cd_p]      = isdefined(result, :Cd_p) ? Float64(result.Cd_p) : NaN
+        row[:Cd_bsd]    = isdefined(result, :Cd_bsd) ? Float64(result.Cd_bsd) : NaN
+        row[:min_det_C] = det_min
+        row[:min_c_eig] = Float64(result.min_c_eig)
+        row[:u_max_abs] = max_speed_fluid(result.ux, result.uy, result.is_solid)
+        row[:tau_xx_max_abs] = max_abs_fluid(result.tauxx, result.is_solid)
+        row[:tau_xy_max_abs] = max_abs_fluid(result.tauxy, result.is_solid)
+        row[:tau_yy_max_abs] = max_abs_fluid(result.tauyy, result.is_solid)
+        row[:trace_C_max]  = tr_max
+        row[:trace_C_mean] = tr_mean
+        row[:N1_max_abs]   = n1_max
+        row[:N1_mean_abs]  = n1_mean
+        row[:first_nonfinite_step]  = result.first_nonfinite_step
+        row[:first_nonfinite_field] = string(result.first_nonfinite_field)
+        row[:nan_flag] = bad || result.first_nonfinite_step > 0 ||
+            !isfinite(Float64(result.Cd))
+        row[:MLUPS] = dt_s > 0 ?
+            Float64(Nx) * Float64(Ny) * Float64(result.completed_steps) /
+            dt_s / 1e6 : NaN
+    else
+        row[:first_nonfinite_step] = 0
+        row[:first_nonfinite_field] = "spd_or_bounds"
+    end
+
+    write_csv(csv_path, row)
+    append_summary!(summary_path, row)
+
+    @printf("[%s] beta=%.2f Wi=%.2f Re=%.2f R=%d bsd=%.2f: Cd=%s min_detC=%s tr_C_max=%s N1_mean=%s dt=%.0fs nan=%s\n",
+        string(now()),
+        beta, wi, re_target, R, bsd,
+        isfinite(Float64(row[:Cd_kraken])) ? @sprintf("%.4f", row[:Cd_kraken]) : "NaN",
+        isfinite(Float64(row[:min_det_C]))  ? @sprintf("%.3g", row[:min_det_C]) : "NaN",
+        isfinite(Float64(row[:trace_C_max])) ? @sprintf("%.3g", row[:trace_C_max]) : "NaN",
+        isfinite(Float64(row[:N1_mean_abs])) ? @sprintf("%.3g", row[:N1_mean_abs]) : "NaN",
+        dt_s, string(row[:nan_flag]))
+    flush(stdout)
+    return row
+end
+
+function main()
+    println("=== cyl_bigsweep_v2 backend=$(BACKEND_LABEL) FT=$(FT) ===")
+    println("beta=$BETA_LIST | Wi=$WI_LIST | Re=$RE_LIST | R=$R_LIST | bsd=$BSD_LIST")
+    println("output_dir=$OUTPUT_DIR")
+    mkpath(OUTPUT_DIR)
+    summary_path = joinpath(OUTPUT_DIR, "SUMMARY.csv")
+    n_total = length(BETA_LIST) * length(WI_LIST) * length(RE_LIST) *
+              length(R_LIST) * length(BSD_LIST)
+    println("$n_total cases total")
+    flush(stdout)
+    n_done = 0
+    for beta in BETA_LIST, wi in WI_LIST, re in RE_LIST,
+        R in R_LIST, bsd in BSD_LIST
+        n_done += 1
+        @printf("\n[%d/%d] starting case at %s\n", n_done, n_total, string(now()))
+        flush(stdout)
+        run_case(beta, wi, re, R, bsd, summary_path)
+    end
+    println("\n=== cyl_bigsweep_v2 DONE at $(now()) ===")
+end
+
+main()

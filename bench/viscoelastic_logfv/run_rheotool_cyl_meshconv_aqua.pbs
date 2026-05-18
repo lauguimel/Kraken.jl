@@ -1,0 +1,119 @@
+#!/bin/bash -l
+#PBS -N rheotool_cyl_mc
+#PBS -l select=1:ncpus=8:mem=16GB
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -m ae
+
+# rheoTool cylinder mesh-convergence study on Aqua.
+#
+# Goal: quantify rheoTool's OWN discretization error on the cylinder
+#       Oldroyd-B benchmark by running rheoFoam at multiple mesh resolutions.
+#       Currently we only have ONE rheoTool point (Cd=130.43 at Wi=0.1,
+#       Cd=126.84 at Wi=0.2) and assume it is the "true" reference for
+#       Kraken comparison; without a rheoTool convergence study this
+#       assumption is unjustified.
+#
+# Strategy: for each Wi (0.1 and 0.2), clone the existing case to
+#   {Wi}_meshA (original mesh)         - ~14k cells (control re-run)
+#   {Wi}_meshB (1x refineMesh)         - ~56k cells
+#   {Wi}_meshC (2x refineMesh)         - ~224k cells (heaviest)
+# Each runs rheoFoam to t=6 (steady state per existing Cd.txt traces).
+#
+# Total: 2 Wi x 3 mesh = 6 rheoFoam runs sequential CPU.
+# Rough cost estimate:
+#   meshA: ~30 min/case   (control, should reproduce Cd.txt)
+#   meshB: ~2-4h/case     (4x cells)
+#   meshC: ~10-20h/case   (16x cells)   <-- may need to skip on first iteration
+# 24h walltime fits A+B for both Wi; C may need separate jobs.
+#
+# Skip levels via env: SKIP_MESHC=1, SKIP_MESHB=1.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+# Adjust to your local OpenFOAM/rheoTool installation on Aqua
+# (per HPC docs - rheoTool is built on top of OpenFOAM v9 typically)
+RHEOTOOL_BASHRC="${RHEOTOOL_BASHRC:-$HOME/OpenFOAM/OpenFOAM-9/etc/bashrc}"
+if [ -f "$RHEOTOOL_BASHRC" ]; then
+    # shellcheck source=/dev/null
+    source "$RHEOTOOL_BASHRC"
+else
+    echo "ERROR: OpenFOAM bashrc not found at $RHEOTOOL_BASHRC"
+    echo "Set RHEOTOOL_BASHRC env var to the correct path."
+    exit 1
+fi
+
+which rheoFoam blockMesh refineMesh mirrorMesh
+
+CASES_ROOT="bench/rheotool"
+RESULTS_ROOT="${KRAKEN_RHEOTOOL_RESULTS:-results/rheotool/cyl_meshconv_${PBS_JOBID:-manual}}"
+mkdir -p "$RESULTS_ROOT"
+echo "=== rheoTool cylinder mesh-convergence starting at $(date) ==="
+echo "Results dir: $RESULTS_ROOT"
+
+run_one() {
+    local source_case="$1"
+    local mesh_label="$2"   # meshA / meshB / meshC
+    local refine_levels="$3"  # 0 / 1 / 2
+
+    local dest="$RESULTS_ROOT/$(basename "$source_case")_$mesh_label"
+    echo "--- $(date) | $dest (refine_levels=$refine_levels) ---"
+    rm -rf "$dest"
+    cp -r "$source_case" "$dest"
+    pushd "$dest" > /dev/null
+
+    # Clean previous time directories (keep only 0/)
+    rm -rf 0.* 1.* 2.* 3.* 4.* 5.* 6.* processor* constant/polyMesh log.* Cd.txt
+
+    # Build base mesh + mirror
+    blockMesh   2>&1 | tee log.blockMesh > /dev/null
+    mirrorMesh -noFunctionObjects -overwrite \
+                2>&1 | tee log.mirrorMesh > /dev/null
+
+    # Apply refineMesh refine_levels times (each subdivides all cells in 2D)
+    for ((i=0; i<refine_levels; i++)); do
+        echo "[refineMesh pass $((i+1)) of $refine_levels]"
+        refineMesh -all -overwrite \
+            2>&1 | tee "log.refineMesh.$i" > /dev/null
+    done
+
+    # Report cell count
+    checkMesh -allTopology -allGeometry 2>&1 | grep -i "cells:" | head -1 \
+        | tee log.cell_count
+
+    # Run rheoFoam
+    echo "Starting rheoFoam at $(date)"
+    rheoFoam 2>&1 | tee log.rheoFoam > /dev/null
+    echo "rheoFoam finished at $(date)"
+
+    # Extract Cd time series (custom hook expected in case's writeData)
+    if [ -f system/writeData ]; then
+        echo "Cd.txt present:"
+        ls -la Cd.txt 2>&1 || echo "(no Cd.txt produced)"
+        if [ -f Cd.txt ]; then
+            echo "Last 5 Cd values:"
+            tail -5 Cd.txt
+            cp Cd.txt "$RESULTS_ROOT/$(basename "$dest")_Cd.txt"
+        fi
+    fi
+    popd > /dev/null
+    echo "--- $(date) | $dest done ---"
+}
+
+for wi in 0.1 0.2; do
+    SRC="$CASES_ROOT/cylinder_wi$wi"
+    [ -d "$SRC" ] || { echo "WARN: $SRC does not exist; skipping"; continue; }
+
+    run_one "$SRC" "meshA" 0   # control: original mesh
+    if [ "${SKIP_MESHB:-0}" != "1" ]; then
+        run_one "$SRC" "meshB" 1   # 4x cells
+    fi
+    if [ "${SKIP_MESHC:-0}" != "1" ]; then
+        run_one "$SRC" "meshC" 2   # 16x cells (heavy)
+    fi
+done
+
+echo "=== rheoTool cylinder mesh-convergence DONE at $(date) ==="
+ls -la "$RESULTS_ROOT" | head -30
