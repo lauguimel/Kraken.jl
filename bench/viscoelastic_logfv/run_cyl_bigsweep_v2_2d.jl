@@ -22,6 +22,7 @@ using Kraken
 using Printf
 using Dates
 using KernelAbstractions
+using Serialization
 
 function detect_backend()
     req = lowercase(get(ENV, "KRAKEN_BACKEND", "auto"))
@@ -117,6 +118,10 @@ const AVG_WINDOW_FRAC = parse(Float64, get(ENV, "KRAKEN_AVG_WINDOW_FRAC", "0.2")
 const JOB_ID          = get(ENV, "PBS_JOBID", "manual")
 const OUTPUT_DIR      = get(ENV, "KRAKEN_OUTPUT_DIR",
                             "results/viscoelastic_logfv/cyl_bigsweep_v2_$(JOB_ID)")
+# M29-tau-compare: optional per-case field snapshot (.jls) for field-level
+# rheoTool vs Kraken diagnostics. Defaults OFF — adds ~5 MB per case at R=30.
+const SAVE_FIELDS     = lowercase(get(ENV, "KRAKEN_SAVE_FIELDS", "0")) in
+                        ("1", "true", "yes", "on")
 
 const CSV_COLUMNS = [
     :timestamp, :backend, :FT, :R, :Wi, :Re_R, :beta, :bsd_fraction,
@@ -326,6 +331,44 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
 
     write_csv(csv_path, row)
     append_summary!(summary_path, row)
+
+    if SAVE_FIELDS && status == :ok && result !== nothing
+        jls_path = joinpath(OUTPUT_DIR, "cyl_bigsweep_v2_$(tag)_fields.jls")
+        try
+            geom_x_center = Float64(L_up * R)
+            geom_y_center = Float64((Ny - 1) / 2)
+            serialize(jls_path, (;
+                tag,
+                # case parameters
+                R, Wi=wi, Re=re_target, beta, bsd_fraction=bsd,
+                L_up, L_down, embedded_gradient, embedded_advection,
+                embedded_force, embedded_drag,
+                embedded_geometry=string(embedded_geometry),
+                u_mean=U_MEAN, nu_total, nu_s, nu_p, lambda,
+                # grid (cells are 1..Nx × 1..Ny; LBM node centers at (i, j))
+                Nx, Ny, dx=1.0, dy=1.0,
+                cylinder_x_lbm=geom_x_center,
+                cylinder_y_lbm=geom_y_center,
+                radius_lbm=Float64(R),
+                # Cd outputs (already in row but redundant for self-contained file)
+                Cd_kraken=Float64(get(row, :Cd_kraken, NaN)),
+                Cd_s=Float64(get(row, :Cd_s, NaN)),
+                Cd_p=Float64(get(row, :Cd_p, NaN)),
+                Cd_bsd=Float64(get(row, :Cd_bsd, NaN)),
+                # fields (Array, CPU-side already by driver return)
+                ux=Array{Float64}(result.ux),
+                uy=Array{Float64}(result.uy),
+                tauxx=Array{Float64}(result.tauxx),
+                tauxy=Array{Float64}(result.tauxy),
+                tauyy=Array{Float64}(result.tauyy),
+                is_solid=Array{Bool}(result.is_solid),
+            ))
+            @printf("  saved fields to %s (%.1f MB)\n", jls_path,
+                    filesize(jls_path) / 1024^2)
+        catch err
+            @warn "field snapshot failed" tag exception=err
+        end
+    end
 
     @printf("[%s] beta=%.2f Wi=%.2f Re=%.2f R=%d bsd=%.2f: Cd=%s min_detC=%s tr_C_max=%s N1_mean=%s dt=%.0fs nan=%s\n",
         string(now()),

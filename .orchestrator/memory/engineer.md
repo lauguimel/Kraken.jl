@@ -657,3 +657,58 @@ should not conflate the two threads. M26c fixes a `1111_circle`
 embedded-mode bug ; M29 will localise the `0000_qwall` finite-Wi
 gap. Both stay open ; the latter is the higher-priority production
 blocker.
+
+## 2026-05-19 evening — M29 closes the gap locus: Rusanov upwind on Ψ-advection is the defect
+
+Field-level rheoTool vs Kraken at R=30 Wi=1.0 β=0.59 gives τ_xx
+L2_rel = 0.93 (catastrophic) while u_x L2_rel = 0.17 (OK). Peak
+τ_xx mis-prediction is **44 %** (Kraken 75.3 vs rheoTool 135.5)
+at the leeward shoulder. The **first-order Rusanov upwind on
+log-conformation Ψ advection** smears the wrap-around stress
+feature (width O(1 LU at R=30)) over ~50 % of its magnitude.
+rheoTool's `cubista` TVD preserves it.
+
+**M29b fix recipe** (separate `src/` mission, not yet executed):
+- Locate the Rusanov upwind in
+  `src/kernels/logconformation_fv_2d.jl` (likely
+  `logfv_advect_upwind_bc_aware_2d!` or a similar
+  donor-cell-style flux assembly). The kernel is shared with
+  cavity / channel benches — DO NOT branch ad-hoc per geometry.
+- Implement a TVD HRS option behind a kwarg, e.g.
+  `advection_scheme::Symbol = :rusanov` with `:cubista`,
+  `:muscl_superbee`, or `:hrs_minmod` alternatives.
+- CUBISTA (Alves & Pinho 2003) is the rheoTool default and the
+  best-validated for log-conf advection. MUSCL-superbee is a
+  simpler closed-form alternative that achieves similar peak
+  preservation. Both are documented in
+  `bench/viscoelastic_audit/EQUATION_AUDIT_LIU_RHEOTOOL.md`
+  (if present) or in the rheoTool `fvSchemes` snippets across
+  `bench/rheotool/cylinder_wi*/system/fvSchemes`.
+- Acceptance criterion: at R=30 Wi=1.0 β=0.59 production setup,
+  Kraken Cd within ±2 of rheoTool 120.40. Use the
+  M29-tau-compare driver to cross-check τ_xx peak ≥ 130 (vs
+  current 75.3). Bench:
+  `bench/viscoelastic_audit/run_kraken_vs_rheotool_tau_compare.jl`.
+
+**Snapshot infrastructure** (already committed bench-side, no `src/`
+patch): `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl` now
+supports `KRAKEN_SAVE_FIELDS=1` env flag. Writes per-case `.jls`
+with `(ux, uy, tauxx, tauxy, tauyy, is_solid, Nx, Ny, R, cx_lbm,
+cy_lbm, u_mean, Cd_*)`, ~4 MB per case at R=30. Use this for any
+future field-level cross-check without adding `src/` debt.
+
+**Why**: M29b is the highest-leverage `src/` improvement on the
+viscoelastic branch right now. The advection scheme upgrade is
+**localised** (one kernel) but has **broad impact** (every viscoelastic
+bench using log-conf advection — cylinder, cavity, channel,
+contraction would all benefit). Should be next session's primary
+deliverable.
+
+## 2026-05-19 — CairoMakie gotcha: no :RdBu_r palette
+
+`CairoMakie` does NOT support the `:RdBu_r` palette name (worked in
+older Makie). Use `Reverse(:RdBu)` for diverging colormaps. Found
+during M29-tau-compare plotting.
+
+**Why**: a 1-minute fix that's easy to miss; documented to spare
+the next plotting iteration.

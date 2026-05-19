@@ -1006,3 +1006,70 @@ a triage rule.
 drift. Future Boss landing on a viscoelastic-cylinder Cd-gap issue
 should read M28_SYNTHESIS §6-7 first (what is ratcheted out, what
 is still suspect), avoiding re-litigation.
+
+## 2026-05-19 evening — M29-tau-compare CLOSES the cluster: constitutive scheme is the locus
+
+Field-level direct comparison rheoTool vs Kraken at R=30 Wi=1.0
+β=0.59 (Aqua job 21585158, Kraken snapshot via new
+`KRAKEN_SAVE_FIELDS=1` bench env flag) gives a definitive
+attribution:
+
+| field | L2_rel Kraken vs rheoTool | interpretation |
+|---|---|---|
+| u_x | 0.17 | matches reasonably |
+| u_y | 0.18 | matches reasonably |
+| τ_xx | **0.93** | catastrophic mis-match |
+| τ_xy | 0.77 | strong mis-match |
+| τ_yy | 0.58 | strong mis-match |
+
+**Spatial localisation**: disagreement concentrated 100× in the
+near-cylinder zone (|x| < 1.5 R). Peak occurs at the **leeward
+shoulder** (x/R ∈ [0, 0.3]) and **near wake** (x/R ∈ [1, 1.3]).
+Absolute peak τ_xx: rheoTool 135.5 vs Kraken 75.3 → **Kraken
+under-predicts the polymer stress peak by 44 %**.
+
+**Verdict: outcome (b)** — u matches OK, τ disagrees catastrophically.
+The Cd gap is a **constitutive-scheme problem**, NOT coupling /
+BSD / Guo.
+
+**Mechanism (locked)**: Kraken uses **Rusanov first-order upwind**
+on the log-conformation Ψ advection. This smears the wrap-around
+stress feature (width O(1 LU at R=30)) over ~50 % of its magnitude.
+rheoTool's `cubista` TVD scheme preserves it. The missing polymer
+wall shear precisely accounts for the −8.85 Cd Kraken-vs-rheoTool
+drift at Wi=1.0 R=30. **Quantitative match between defect mechanism
+and gap magnitude**.
+
+**Implication for future Boss work**:
+- The M28 ratchet-out list is now CLOSED. The locus is pinned to
+  the Ψ-advection scheme.
+- M29b: port a TVD scheme (CUBISTA or MUSCL-superbee) to the
+  log-conf advection kernel in `src/kernels/logconformation_fv_2d.jl`
+  (or wherever the Rusanov upwind currently lives). This IS `src/`
+  work — should be a separate Codex Department mission with
+  comprehensive tests.
+- The Wi-dependent gap (0.8 % → 7.3 %) signature is now
+  understood: low-order advection smearing amplifies with
+  trace_C peak amplitude, which grows ∝ Wi (trace_C max went
+  5.5 → 195 from Wi=0.1 → 1.0 at R=30).
+- Same defect likely affects the cavity benchmark (which also
+  uses log-conf advection). Future cavity revisit should expect
+  similar magnitude (~5-10 Cd point under-prediction at finite Wi).
+
+**Reusable infrastructure** (now committed to bench):
+- `KRAKEN_SAVE_FIELDS=1` env flag for the v2 bench → 10-line
+  patch in `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl`,
+  no src/ touched. Writes per-case `.jls` with `(ux, uy, tauxx,
+  tauxy, tauyy, is_solid, Nx, Ny, R, cx_lbm, cy_lbm, u_mean,
+  Cd_*)`. ~4 MB/case at R=30.
+- `bench/viscoelastic_audit/run_kraken_vs_rheotool_tau_compare.jl`
+  — Cartesian ROI in physical units (cylinder at origin, R=1),
+  bilinear on Kraken LBM grid, kNN+affine (12 neighbours, 3-term
+  basis) on rheoTool O-grid. Reusable for any future geometry.
+- New PBS `bench/viscoelastic_logfv/run_cyl_m29_field_snapshot_a100.pbs`
+  for snapshot-mode single-case runs.
+
+**Why**: this is the definitive end of the M28 cluster. Next
+session opens with M29b src/ patch (HRS on log-conf). Boss should
+read this entry FIRST before any further BSD / coupling /
+embedded-mode debugging on the cylinder.

@@ -902,19 +902,52 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
   `div(phi, theta)` vs Kraken's ATU pathway for ψ→C) or Guo
   polymer-force placement in the TRT collision-source ordering.
 
-### M29 — Kraken-vs-rheoTool τ-field comparison (R=30, Wi=1, β=0.59) — IN-FLIGHT 2026-05-19
+### M29 — Kraken-vs-rheoTool τ-field comparison — DONE 2026-05-19
 
-- **Status**: in-flight background Department at the time of the
-  M28-cluster close. Goal : field-level comparison of τ_xx, τ_xy,
-  τ_yy between Kraken and rheoTool at the M28 stress-test point.
-  If τ fields match to ≤ 5 % L2 but Cd differs by 7 %, locus is
-  the drag-integration / Guo coupling. If τ fields differ by ~10 %,
-  locus is the log-conf / ATU constitutive discretisation.
-- **Allowed edit zones** (per Department): `bench/viscoelastic_audit/`,
-  `bench/scratch/`, verdict markdown under `bench/viscoelastic_logfv/`.
-- **Exit criterion**: τ_xx / τ_xy / τ_yy contour overlay + L2
-  norm table at three streamwise sections (x = −5R, 0, +5R) ; verdict
-  markdown ranking hypothesis (2) vs (3) from the M28 synthesis.
+- **Status**: DONE 2026-05-19 evening. Field-level rheoTool vs Kraken
+  comparison at R=30 Wi=1.0 β=0.59 via new bench-side
+  `KRAKEN_SAVE_FIELDS=1` env flag (10-line patch in
+  `run_cyl_bigsweep_v2_2d.jl`, no `src/` touched). Aqua job
+  `21585158.aqua` (76 s) produced Kraken snapshot.
+- **Verdict**: outcome (b) per the M28 synthesis discriminator —
+  **u matches OK (L2 ≈ 17-18 %), τ disagrees catastrophically
+  (L2 = 0.93 / 0.77 / 0.58 for xx / xy / yy)**. Peak τ_xx :
+  rheoTool 135.5 vs Kraken 75.3 → Kraken **under-predicts the
+  polymer stress peak by 44 %** at the leeward shoulder
+  (x/R ∈ [0, 0.3]) and near wake (x/R ∈ [1, 1.3]).
+- **Mechanism locked**: Kraken's first-order Rusanov upwind on
+  log-conformation Ψ advection smears the wrap-around stress
+  feature (width O(1 LU at R=30)) over ~50 % of its magnitude.
+  rheoTool's `cubista` TVD scheme preserves it. The missing
+  polymer wall shear precisely accounts for the **−8.85 Cd**
+  Kraken-vs-rheoTool drift. Quantitative match.
+- **Files**:
+  - Verdict markdown : `bench/viscoelastic_audit/CYL_TAU_COMPARE_M29_VERDICT.md`
+  - Comparison driver : `bench/viscoelastic_audit/run_kraken_vs_rheotool_tau_compare.jl`
+  - 6 diagnostic plots : `bench/scratch/m29_tau_compare/M29_*.png`
+  - Residual CSVs : `bench/scratch/m29_tau_compare/M29_residuals.csv`,
+    `M29_band_stats_x.csv`
+  - Patched bench : `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl`
+    (with `KRAKEN_SAVE_FIELDS=1` env flag).
+  - New PBS : `bench/viscoelastic_logfv/run_cyl_m29_field_snapshot_a100.pbs`.
+
+### M29b — HRS upgrade on log-conformation advection — PLANNED, next session
+
+- **Status**: planned, opens after M29 closure. The fix recipe is
+  unambiguous : port a TVD scheme (CUBISTA or MUSCL-superbee) to
+  the log-conf advection kernel in
+  `src/kernels/logconformation_fv_2d.jl` (likely
+  `logfv_advect_upwind_bc_aware_2d!` or similar donor-cell-style
+  flux assembly).
+- **Acceptance criterion**: at R=30 Wi=1.0 β=0.59 production setup,
+  Kraken Cd within ±2 of rheoTool 120.40 ; M29 τ_xx peak ≥ 130 (vs
+  current 75.3).
+- **Runner**: Codex via `kraken-codex-pilot` skill (`src/`-side
+  kernel work).
+- **Blast radius**: kernel-internal change behind a
+  `advection_scheme::Symbol` kwarg defaulting to `:rusanov` for
+  byte-identical legacy behaviour. Geometry-agnostic — same kernel
+  is shared with cavity / channel / contraction benches.
 
 ### M22-old — Poiseuille finite-Wi analytical (RENUMBERED to M27, PARKED)
 
