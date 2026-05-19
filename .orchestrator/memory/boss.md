@@ -1073,3 +1073,42 @@ and gap magnitude**.
 session opens with M29b src/ patch (HRS on log-conf). Boss should
 read this entry FIRST before any further BSD / coupling /
 embedded-mode debugging on the cylinder.
+
+## 2026-05-19 night — M29b PARTIAL : MUSCL-superbee closes 56 % of gap ; M29c needed
+
+M29b deployed MUSCL-superbee on log-conformation Ψ advection behind
+`advection_scheme::Symbol = :rusanov` kwarg (default = byte-identical
+legacy). At R=30 Wi=1.0 β=0.59 production setup:
+
+| metric | Rusanov | MUSCL-superbee | rheoTool target |
+|---|---|---|---|
+| Cd_kraken | 111.55 | **116.47** | 120.40 |
+| τ_xx peak | 75.3 | 80.3 | 135.5 |
+
+**Δ achieved = +4.92 Cd (56 % of gap)**. Acceptance window [118, 122]
+not met, but direction + magnitude correct. Root cause of remaining
+~4 Cd gap: **MUSCL boundary fall-back to 1st-order Rusanov within
+±2 cells of solid** prevents the limiter firing in the leeward
+shoulder — exactly the M29-localised stress-peak zone. M29c (1-sided
+3-point reconstruction at boundary) is the prescribed follow-up.
+
+**Pre-existing tech debt surfaced**: the entire `src/fvfd/` directory
+(4 files, ~1500 LOC, including the M29b-patched `operators_2d.jl`)
+**was never tracked** on this branch even though `src/Kraken.jl:64`
+includes it. The code was working locally but a fresh clone would
+fail. M29b's commit also initial-tracks the directory. Future Boss
+should run `git ls-files src/` periodically to detect orphaned-but-
+used files (one-line audit).
+
+**M26b WIP carries forward**: the partial `embedded_force=true`
+cell-fraction rescale patch in `src/drivers/viscoelastic_logfv_2d.jl`
+(closes 8 % of the +8 Cd ghost drag at R=30 Wi=0.1) is bundled into
+the M29b commit since both touch the same file. The M26b path is
+INACTIVE on the `0000_qwall` production mode (`embedded_force=false`)
+so it doesn't affect the M28/M29 results. M26c (deeper fix on
+wall-segment terms) remains a separate open mission.
+
+**Why**: M29b proves the M29 attribution mechanism (1st-order
+Rusanov smears polymer stress peak) is correct AND fixable. Future
+Boss inheriting cylinder work should head straight to M29c if a
+production-grade match to rheoTool is required.

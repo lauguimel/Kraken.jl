@@ -1160,6 +1160,7 @@ function logfv_advect_upwind_bc_aware_2d!(
     ux_face, uy_face, is_solid,
     dx, dy, bc::LogFVDomainBC2D, dt;
     sync::Bool=true,
+    advection_scheme::Symbol=:rusanov,
 )
     return fvfd_sym2_advect_upwind_2d!(
         psixx_out, psixy_out, psiyy_out,
@@ -1167,7 +1168,7 @@ function logfv_advect_upwind_bc_aware_2d!(
         FVFDFieldBC2D(west_xx, east_xx, south_xx, north_xx),
         FVFDFieldBC2D(west_xy, east_xy, south_xy, north_xy),
         FVFDFieldBC2D(west_yy, east_yy, south_yy, north_yy),
-        ux_face, uy_face, is_solid, dx, dy, bc, dt; sync,
+        ux_face, uy_face, is_solid, dx, dy, bc, dt; sync, advection_scheme,
     )
 end
 
@@ -1180,6 +1181,7 @@ function logfv_advect_upwind_bc_aware_2d!(
     north_xx, north_xy, north_yy,
     ux_face, uy_face, geometry::FVFDGeometry2D, dt;
     sync::Bool=true,
+    advection_scheme::Symbol=:rusanov,
 )
     return logfv_advect_upwind_bc_aware_2d!(
         psixx_out, psixy_out, psiyy_out,
@@ -1191,6 +1193,7 @@ function logfv_advect_upwind_bc_aware_2d!(
         ux_face, uy_face, geometry.is_solid,
         geometry.patch.dx, geometry.patch.dy, geometry.bc, dt;
         sync,
+        advection_scheme,
     )
 end
 
@@ -1204,6 +1207,7 @@ function logfv_advect_upwind_bc_aware_2d!(
     ux_face, uy_face, is_solid,
     bc::LogFVDomainBC2D, dt;
     sync::Bool=true,
+    advection_scheme::Symbol=:rusanov,
 )
     spacing = one(eltype(psixx_out))
     return logfv_advect_upwind_bc_aware_2d!(
@@ -1216,6 +1220,7 @@ function logfv_advect_upwind_bc_aware_2d!(
         ux_face, uy_face, is_solid,
         spacing, spacing, bc, dt;
         sync,
+        advection_scheme,
     )
 end
 
@@ -1228,13 +1233,14 @@ function logfv_advect_upwind_embedded_2d!(
     ux_bc::FVFDFieldBC2D, uy_bc::FVFDFieldBC2D,
     dt;
     sync::Bool=true,
+    advection_scheme::Symbol=:rusanov,
 )
     return fvfd_sym2_advect_upwind_embedded_2d!(
         psixx_out, psixy_out, psiyy_out,
         psixx, psixy, psiyy,
         psixx_bc, psixy_bc, psiyy_bc,
         ux_face, uy_face, ux, uy,
-        geometry, ux_bc, uy_bc, dt; sync,
+        geometry, ux_bc, uy_bc, dt; sync, advection_scheme,
     )
 end
 
@@ -1242,6 +1248,7 @@ function logfv_advect_upwind_solid_aware_2d!(
     psixx_out, psixy_out, psiyy_out,
     psixx, psixy, psiyy, ux_face, uy_face, is_solid, dt;
     sync::Bool=true,
+    advection_scheme::Symbol=:rusanov,
 )
     return logfv_advect_upwind_bc_aware_2d!(
         psixx_out, psixy_out, psiyy_out,
@@ -1253,6 +1260,7 @@ function logfv_advect_upwind_solid_aware_2d!(
         ux_face, uy_face, is_solid,
         logfv_periodicx_wally_bcspec_2d(), dt;
         sync,
+        advection_scheme,
     )
 end
 
@@ -1263,6 +1271,7 @@ function logfv_advect_upwind_openx_solid_aware_2d!(
     east_xx, east_xy, east_yy,
     ux_face, uy_face, is_solid, dt;
     sync::Bool=true,
+    advection_scheme::Symbol=:rusanov,
 )
     return logfv_advect_upwind_bc_aware_2d!(
         psixx_out, psixy_out, psiyy_out,
@@ -1274,5 +1283,6 @@ function logfv_advect_upwind_openx_solid_aware_2d!(
         ux_face, uy_face, is_solid,
         logfv_openx_wally_bcspec_2d(), dt;
         sync,
+        advection_scheme,
     )
 end

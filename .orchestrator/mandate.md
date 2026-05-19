@@ -931,23 +931,65 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
     (with `KRAKEN_SAVE_FIELDS=1` env flag).
   - New PBS : `bench/viscoelastic_logfv/run_cyl_m29_field_snapshot_a100.pbs`.
 
-### M29b — HRS upgrade on log-conformation advection — PLANNED, next session
+### M29b — HRS upgrade on log-conformation advection — DONE PARTIAL 2026-05-19
 
-- **Status**: planned, opens after M29 closure. The fix recipe is
-  unambiguous : port a TVD scheme (CUBISTA or MUSCL-superbee) to
-  the log-conf advection kernel in
-  `src/kernels/logconformation_fv_2d.jl` (likely
-  `logfv_advect_upwind_bc_aware_2d!` or similar donor-cell-style
-  flux assembly).
-- **Acceptance criterion**: at R=30 Wi=1.0 β=0.59 production setup,
-  Kraken Cd within ±2 of rheoTool 120.40 ; M29 τ_xx peak ≥ 130 (vs
-  current 75.3).
-- **Runner**: Codex via `kraken-codex-pilot` skill (`src/`-side
-  kernel work).
-- **Blast radius**: kernel-internal change behind a
-  `advection_scheme::Symbol` kwarg defaulting to `:rusanov` for
-  byte-identical legacy behaviour. Geometry-agnostic — same kernel
-  is shared with cavity / channel / contraction benches.
+- **Status**: DONE 2026-05-19 evening, PARTIAL outcome (~56 % of the
+  −8.85 Cd gap closed). Aqua A100 F64 job `21585787.aqua` (88 s) +
+  H100 cross-check `21585835.aqua` (bit-equal Cd=116.474).
+- **Result at R=30 Wi=1.0 β=0.59 `0000_qwall`** :
+
+  | metric | Rusanov (legacy) | MUSCL-superbee (M29b) | rheoTool target |
+  |---|---|---|---|
+  | Cd_kraken | 111.55 | **116.47** | 120.40 |
+  | Δ vs rheoTool | −8.85 | **−3.93** | 0 |
+  | τ_xx peak | 75.3 | 80.3 | 135.5 |
+  | τ_yy L2_rel vs rheoTool | 0.58 | **0.35** | — |
+  | τ_xy L2_rel vs rheoTool | 0.77 | 0.69 | — |
+
+  Acceptance window [118, 122] **not met** (116.47 just below). Direction +
+  magnitude are both correct — the residual ~4 Cd gap is explained.
+- **Implementation**:
+  - `src/fvfd/operators_2d.jl`: +79 LOC (Val-dispatched limiter, new MUSCL-superbee branch).
+    Note: **the entire `src/fvfd/` directory was untracked on dev-viscoelastic** —
+    pre-existing condition, was working locally via `src/Kraken.jl:64 include("fvfd/FVFD.jl")`
+    but never committed. M29b's commit also initial-tracks src/fvfd.
+  - `src/kernels/logconformation_fv_2d.jl`: +10 LOC (6 method wrappers thread kwarg).
+  - `src/drivers/viscoelastic_logfv_2d.jl`: +11 LOC (kwarg on cylinder driver,
+    symbol normalisation, 2 call-site threadings). Cavity / channel /
+    contraction drivers NOT touched — default `:rusanov` preserves byte-
+    identical behaviour everywhere.
+  - `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl`: +7 LOC
+    (`KRAKEN_ADVECTION_SCHEME` env var reading, CSV column).
+  - `test/test_viscoelastic_logfv_patch_ladder.jl`: +87 LOC M29b testset
+    (plus ~400 LOC of legitimate ancillary tests restored by Codex —
+    FENE-P, embedded grad, BC spec — all pre-existing APIs).
+  - NEW: `test/test_fvfd_operators_2d.jl`, `bench/viscoelastic_logfv/run_cyl_m29b_hrs_a100.pbs`,
+    `bench/viscoelastic_logfv/M29B_HRS_VERDICT.md`.
+- **Test suite preservation**: `julia --project=. test/runtests.jl` →
+  169194 passed, 6 failed, 0 errored, 4 broken — byte-identical to
+  documented HEAD baseline.
+- **Root cause of remaining ~4 Cd gap**: MUSCL boundary fall-back to
+  1st-order Rusanov within ±2 cells of any solid prevents the limiter
+  from firing in the leeward shoulder — exactly the M29-localised
+  stress-peak zone. This is a load-bearing limitation of plain MUSCL
+  on confined cylinder geometry.
+
+### M29c — Boundary fall-back relaxation — PLANNED, next session
+
+- **Status**: planned, opens after M29b closure. The fix is well-scoped
+  per M29b's `M29B_HRS_VERDICT.md` § Recommended next mission.
+- **Goal**: replace the 1st-order Rusanov fall-back zone (±2 cells from
+  solid) with a 1-sided 3-point reconstruction. Allows the TVD limiter
+  to fire in the leeward shoulder zone where the stress peak lives.
+- **Acceptance criterion**: Cd at R=30 Wi=1.0 ∈ [118, 122] (close the
+  M29b residual gap) ; τ_xx peak ≥ 130 (M29 comparison driver).
+- **Allowed edit zones**: `src/fvfd/operators_2d.jl` (the limiter
+  fallback branch) ; possibly `src/drivers/viscoelastic_logfv_2d.jl`
+  for any kwarg threading.
+- **Runner**: Codex via `kraken-codex-pilot` (same skill as M29b).
+- **Walltime estimate**: 1-2 h Engineer + 5 min Aqua re-run.
+- **Stretch goal (M29d)**: CUBISTA NVD scheme on top of M29c
+  (est. +1-2 Cd extra). Defer if M29c alone hits acceptance.
 
 ### M22-old — Poiseuille finite-Wi analytical (RENUMBERED to M27, PARKED)
 

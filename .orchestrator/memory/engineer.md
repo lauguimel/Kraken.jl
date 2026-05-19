@@ -712,3 +712,59 @@ during M29-tau-compare plotting.
 
 **Why**: a 1-minute fix that's easy to miss; documented to spare
 the next plotting iteration.
+
+## 2026-05-19 night — MUSCL boundary fall-back zone is LOAD-BEARING
+
+M29b deployed MUSCL-superbee on log-conf Ψ advection via
+`advection_scheme=:muscl_superbee` kwarg. The implementation falls
+back to 1st-order Rusanov within **±2 cells of any solid boundary**
+(safety band to avoid the 4-point stencil reading into the solid).
+This band DISABLES the limiter exactly where the Oldroyd-B stress
+peak lives at confined cylinder geometry (the leeward shoulder
+x/R ∈ [0, 0.3] and near wake x/R ∈ [1, 1.3] per M29-tau-compare).
+Empirically: M29b closes only **56 %** of the gap (Cd 111.55 →
+116.47 vs target 120.40 ; τ_xx peak 80.3 vs target 135.5).
+
+**Future M29c fix recipe**: replace the 1st-order fall-back with a
+**1-sided 3-point reconstruction** at boundary cells. The 3-point
+stencil reads (boundary, +1, +2) instead of (−1, 0, +1, +2),
+preserving slope-limiting at the wall row. Estimated additional
++2-3 Cd closure.
+
+**Implication for any future TVD/HRS porting**: do NOT assume that
+"limiter + safety band" is sufficient for confined geometries. The
+band MUST handle wall cells specially (1-sided reconstruction or
+ghost-cell extrapolation). Plain MUSCL is great in the bulk but
+LEAKS at walls if the band is too wide.
+
+## 2026-05-19 night — `KRAKEN_ADVECTION_SCHEME` env flag for cylinder bench
+
+`bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl` now reads
+`KRAKEN_ADVECTION_SCHEME` env var ∈ {`rusanov` (default),
+`muscl_superbee`}. The default preserves byte-identical legacy
+behaviour. New CSV column `advection_scheme` records the choice
+per case. Reusable for any future advection-scheme A/B testing.
+
+PBS launcher example: `qsub -l walltime=00:30:00 -v 'KRAKEN_R_LIST="30",...,KRAKEN_ADVECTION_SCHEME="muscl_superbee"' bench/.../run_cyl_bigsweep_v2_a100.pbs`.
+
+**Why**: keeps the A/B testing infrastructure in the bench (no `src/`
+patch) and the new CSV column auto-discriminates baseline runs from
+new-scheme runs in any future sweep.
+
+## 2026-05-19 night — `src/fvfd/` was UNTRACKED but used
+
+Pre-existing condition on dev-viscoelastic: `src/fvfd/` directory
+(`FVFD.jl`, `lowering_2d.jl`, `operators_2d.jl`, `specs.jl`) was
+**never tracked** in git despite being included via
+`src/Kraken.jl:64 include("fvfd/FVFD.jl")`. Local development
+worked because the files exist on disk, but a fresh clone would
+fail to load `Kraken`. Discovered during M29b commit prep.
+
+**Fix shipped in M29b commit**: bundled `src/fvfd/*` initial
+tracking into the M29b feat commit. Going forward, the dir is
+properly tracked.
+
+**Pattern for future Boss audit**: run `git ls-files src/ | wc -l`
+periodically (or `find src/ -name '*.jl' -not -path '*/.*' | xargs
+git ls-files --error-unmatch >/dev/null` to detect orphan files).
+Detects orphan-but-`include`-d files.

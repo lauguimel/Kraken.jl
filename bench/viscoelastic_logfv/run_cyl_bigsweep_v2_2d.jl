@@ -107,6 +107,9 @@ const EMBEDDED_DRAG_LIST      = parse_bool_list("KRAKEN_EMBEDDED_DRAG",      "0"
 const EMBEDDED_GEOMETRY_LIST  = parse_symbol_list("KRAKEN_EMBEDDED_GEOMETRY", "qwall")
 all(g -> g in (:qwall, :circle), EMBEDDED_GEOMETRY_LIST) ||
     throw(ArgumentError("KRAKEN_EMBEDDED_GEOMETRY values must be qwall or circle"))
+const ADVECTION_SCHEME = Symbol(lowercase(strip(get(ENV, "KRAKEN_ADVECTION_SCHEME", "rusanov"))))
+ADVECTION_SCHEME in (:rusanov, :muscl_superbee) ||
+    throw(ArgumentError("KRAKEN_ADVECTION_SCHEME must be rusanov or muscl_superbee"))
 const GEOM_CONFIGS = zip_equal("KRAKEN_L_UP_LIST/KRAKEN_L_DOWN_LIST",
                                 L_UP_LIST, L_DOWN_LIST)
 const EMBEDDED_CONFIGS = zip_equal("KRAKEN_EMBEDDED_*",
@@ -127,6 +130,7 @@ const CSV_COLUMNS = [
     :timestamp, :backend, :FT, :R, :Wi, :Re_R, :beta, :bsd_fraction,
     :L_up, :L_down, :embedded_gradient, :embedded_advection,
     :embedded_force, :embedded_drag, :embedded_geometry,
+    :advection_scheme,
     :u_mean, :nu_total, :nu_s, :nu_p, :lambda, :max_steps, :avg_window,
     :polymer_substeps_used, :completed_steps,
     :Cd_kraken, :Cd_s, :Cd_p, :Cd_bsd, :min_det_C, :min_c_eig,
@@ -257,6 +261,7 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
         :embedded_advection => Int(embedded_advection),
         :embedded_force => Int(embedded_force), :embedded_drag => Int(embedded_drag),
         :embedded_geometry => string(embedded_geometry),
+        :advection_scheme => string(ADVECTION_SCHEME),
         :nu_total => nu_total, :nu_s => nu_s, :nu_p => nu_p,
         :lambda => lambda, :max_steps => max_steps, :avg_window => avg_window,
     )
@@ -284,6 +289,7 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
             embedded_geometry=embedded_geometry, embedded_gradient=embedded_gradient,
             embedded_advection=embedded_advection, embedded_force=embedded_force,
             embedded_drag=embedded_drag,
+            advection_scheme=ADVECTION_SCHEME,
             embedded_circle_samples=32, force_boundary_fill=:bc_aware,
             backend=BACKEND, T=FT,
         )
@@ -344,6 +350,7 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
                 L_up, L_down, embedded_gradient, embedded_advection,
                 embedded_force, embedded_drag,
                 embedded_geometry=string(embedded_geometry),
+                advection_scheme=string(ADVECTION_SCHEME),
                 u_mean=U_MEAN, nu_total, nu_s, nu_p, lambda,
                 # grid (cells are 1..Nx × 1..Ny; LBM node centers at (i, j))
                 Nx, Ny, dx=1.0, dy=1.0,

@@ -42,6 +42,8 @@ function _oldroydb_source_c(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, λ)
     return Kraken.logfv_oldroydb_source_c_2d(cxx, cxy, cyy, dudx, dudy, dvdx, dvdy, λ)
 end
 
+_fenep_factor(cxx, cyy, L2) = (L2 - 2) / (L2 - (cxx + cyy))
+
 _oldroydb_simple_shear_stationary(γ, λ) = (1 + 2 * (λ * γ)^2, λ * γ, 1.0)
 
 function _poiseuille_shear(y, height, umax)
@@ -67,11 +69,15 @@ function _oldroydb_simple_shear_from_identity(γ, λ, t)
 end
 
 function _upwind_scalar_advective_rhs(φ, ux_face, uy_face, i, j)
-    return Kraken.logfv_upwind_scalar_advective_rhs_2d(φ, ux_face, uy_face, i, j)
+    return Kraken.logfv_interior_canary_upwind_scalar_advective_rhs_2d(
+        φ, ux_face, uy_face, i, j,
+    )
 end
 
 function _upwind_tensor_advective_rhs(ψxx, ψxy, ψyy, ux_face, uy_face, i, j)
-    return Kraken.logfv_upwind_tensor_advective_rhs_2d(ψxx, ψxy, ψyy, ux_face, uy_face, i, j)
+    return Kraken.logfv_interior_canary_upwind_tensor_advective_rhs_2d(
+        ψxx, ψxy, ψyy, ux_face, uy_face, i, j,
+    )
 end
 
 _periodic(i, n) = mod1(i, n)
@@ -246,6 +252,40 @@ end
         c_many = _sym2_exp(ψ...)
         c_once = _oldroydb_relax_c(c0..., λ, nsteps * dt)
         _assert_sym2_close(c_many, c_once; atol=2e-12, rtol=2e-12)
+    end
+
+    @testset "M1b FENE-P constitutive stress and relaxation are normalized" begin
+        λ = 3.0
+        G = 0.25
+        L_max = 10.0
+        L2 = L_max^2
+        code = Kraken.LOGFV_MODEL_FENEP
+
+        ψI = (0.0, 0.0, 0.0)
+        ψ_relaxed = Kraken.logfv_constitutive_relax_log_2d(ψI..., λ, 0.4, code, L2)
+        @test ψ_relaxed[1] ≈ 0.0 atol=LOGFV_ATOL
+        @test ψ_relaxed[2] ≈ 0.0 atol=LOGFV_ATOL
+        @test ψ_relaxed[3] ≈ 0.0 atol=LOGFV_ATOL
+        τI = Kraken.logfv_stress_from_log_2d(ψI..., G, code, L2)
+        @test τI[1] ≈ 0.0 atol=LOGFV_ATOL
+        @test τI[2] ≈ 0.0 atol=LOGFV_ATOL
+        @test τI[3] ≈ 0.0 atol=LOGFV_ATOL
+
+        c0 = (2.0, 0.15, 1.3)
+        ψ0 = _sym2_log(c0...)
+        f = _fenep_factor(c0[1], c0[3], L2)
+        τ = Kraken.logfv_stress_from_log_2d(ψ0..., G, code, L2)
+        @test τ[1] ≈ G * (f * c0[1] - 1) atol=LOGFV_ATOL rtol=LOGFV_RTOL
+        @test τ[2] ≈ G * f * c0[2] atol=LOGFV_ATOL rtol=LOGFV_RTOL
+        @test τ[3] ≈ G * (f * c0[3] - 1) atol=LOGFV_ATOL rtol=LOGFV_RTOL
+
+        c1 = Kraken.logfv_constitutive_relax_c_2d(c0..., λ, 0.5, code, L2)
+        @test c1[1] + c1[3] < c0[1] + c0[3]
+        @test _sym2_min_eig(c1...) > 0
+
+        c_ob = Kraken.logfv_oldroydb_relax_c_2d(c0..., λ, 0.5)
+        c_large_l = Kraken.logfv_constitutive_relax_c_2d(c0..., λ, 0.5, code, 1e12)
+        _assert_sym2_close(c_large_l, c_ob; atol=1e-10, rtol=1e-10)
     end
 
     @testset "M1 KA relaxation kernel matches exact local relaxation" begin
@@ -536,6 +576,82 @@ end
         end
     end
 
+    @testset "M2c embedded cut-link velocity gradient enforces no-slip normal derivative" begin
+        Nx, Ny = 6, 5
+        is_solid = falses(Nx, Ny)
+        bc = Kraken.logfv_openx_wally_bcspec_2d()
+
+        q_wall = zeros(Float64, Nx, Ny, 9)
+        q_wall[3, 3, 2] = 0.25
+        embedded_h = Kraken.logfv_embedded_boundary_from_qwall_2d(
+            q_wall; include_axis_aligned=true,
+        )
+        @test embedded_h.wall_nx[3, 3] ≈ -1.0 atol=LOGFV_ATOL
+        @test embedded_h.wall_ny[3, 3] ≈ 0.0 atol=LOGFV_ATOL
+        @test embedded_h.wall_distance[3, 3] ≈ 0.375 atol=LOGFV_ATOL
+        @test embedded_h.wall_inv_distance[3, 3] ≈ inv(0.375) atol=LOGFV_ATOL
+
+        ux = zeros(Float64, Nx, Ny)
+        uy = zeros(Float64, Nx, Ny)
+        ux[3, 3] = embedded_h.wall_distance[3, 3]
+        uy[3, 3] = 2 * embedded_h.wall_distance[3, 3]
+        dudx = zeros(Float64, Nx, Ny)
+        dudy = zeros(Float64, Nx, Ny)
+        dvdx = zeros(Float64, Nx, Ny)
+        dvdy = zeros(Float64, Nx, Ny)
+        embedded = Kraken.logfv_transfer_embedded_boundary_2d(
+            embedded_h, KernelAbstractions.CPU(), Float64,
+        )
+
+        Kraken.logfv_velocity_gradient_embedded_bc_aware_2d!(
+            dudx, dudy, dvdx, dvdy, ux, uy, is_solid, 1.0, 1.0, bc, embedded,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        @test dudx[3, 3] ≈ -1.0 atol=LOGFV_ATOL
+        @test dudy[3, 3] ≈ 0.0 atol=LOGFV_ATOL
+        @test dvdx[3, 3] ≈ -2.0 atol=LOGFV_ATOL
+        @test dvdy[3, 3] ≈ 0.0 atol=LOGFV_ATOL
+
+        q_wall .= 0.0
+        q_wall[3, 3, 6] = 0.37
+        embedded_h = Kraken.logfv_embedded_boundary_from_qwall_2d(q_wall)
+        ux .= 0.0
+        uy .= 0.0
+        ux[3, 3] = embedded_h.wall_distance[3, 3]
+        fill!(dudx, 0.0)
+        fill!(dudy, 0.0)
+        fill!(dvdx, 0.0)
+        fill!(dvdy, 0.0)
+        embedded = Kraken.logfv_transfer_embedded_boundary_2d(
+            embedded_h, KernelAbstractions.CPU(), Float64,
+        )
+
+        Kraken.logfv_velocity_gradient_embedded_bc_aware_2d!(
+            dudx, dudy, dvdx, dvdy, ux, uy, is_solid, 1.0, 1.0, bc, embedded,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        @test embedded_h.wall_nx[3, 3] ≈ -sqrt(2) / 2 atol=LOGFV_ATOL
+        @test embedded_h.wall_ny[3, 3] ≈ -sqrt(2) / 2 atol=LOGFV_ATOL
+        @test dudx[3, 3] ≈ -sqrt(2) / 2 atol=LOGFV_ATOL
+        @test dudy[3, 3] ≈ -sqrt(2) / 2 atol=LOGFV_ATOL
+        @test dvdx[3, 3] ≈ 0.0 atol=LOGFV_ATOL
+        @test dvdy[3, 3] ≈ 0.0 atol=LOGFV_ATOL
+
+        q_wall .= 0.0
+        q_wall[3, 3, 3] = 0.5
+        embedded_h = Kraken.logfv_embedded_boundary_from_qwall_2d(q_wall)
+        @test embedded_h.wall_inv_distance[3, 3] == 0.0
+
+        q_wall[3, 3, 6] = 0.51
+        q_wall[3, 3, 7] = 0.51
+        embedded_h = Kraken.logfv_embedded_boundary_from_qwall_2d(q_wall)
+        @test embedded_h.wall_nx[3, 3] ≈ 0.0 atol=LOGFV_ATOL
+        @test embedded_h.wall_ny[3, 3] ≈ -1.0 atol=LOGFV_ATOL
+        @test inv(embedded_h.wall_inv_distance[3, 3]) ≈ (0.5 + 0.51 + 0.51) / 3 atol=LOGFV_ATOL
+    end
+
     @testset "M3 divergence-corrected upwind preserves constant Psi" begin
         Nx, Ny = 9, 8
         ux_face = [0.17 + 0.021 * (i - 1) - 0.013 * (j - 1) for i in 1:(Nx + 1), j in 1:Ny]
@@ -573,6 +689,216 @@ end
         end
     end
 
+    @testset "M29b HRS advection keeps default and preserves sharp scalar pulses" begin
+        Nx, Ny = 12, 10
+        phi = [1.2 + 0.25 * i - 0.125 * j for i in 1:Nx, j in 1:Ny]
+        west_phi = [1.2 - 0.125 * j for j in 1:Ny]
+        east_phi = [1.2 + 0.25 * (Nx + 1) - 0.125 * j for j in 1:Ny]
+        south_phi = [1.2 + 0.25 * i for i in 1:Nx]
+        north_phi = [1.2 + 0.25 * i - 0.125 * (Ny + 1) for i in 1:Nx]
+        phi_bc = Kraken.FVFDFieldBC2D(west_phi, east_phi, south_phi, north_phi)
+        bc = Kraken.FVFDDomainBC2D(; west=:open, east=:open, south=:open, north=:open)
+        is_solid = falses(Nx, Ny)
+        ux_face = fill(0.27, Nx + 1, Ny)
+        uy_face = fill(-0.13, Nx, Ny + 1)
+        out_default = similar(phi)
+        out_rusanov = similar(phi)
+        out_hrs = similar(phi)
+
+        Kraken.fvfd_advect_upwind_2d!(
+            out_default, phi, phi_bc, ux_face, uy_face, is_solid, 1.0, 1.0, bc, 0.3,
+        )
+        Kraken.fvfd_advect_upwind_2d!(
+            out_rusanov, phi, phi_bc, ux_face, uy_face, is_solid, 1.0, 1.0, bc, 0.3;
+            advection_scheme=:rusanov,
+        )
+        Kraken.fvfd_advect_upwind_2d!(
+            out_hrs, phi, phi_bc, ux_face, uy_face, is_solid, 1.0, 1.0, bc, 0.3;
+            advection_scheme=:muscl_superbee,
+        )
+        @test out_default == out_rusanov
+        @test out_hrs ≈ out_rusanov atol=1e-12 rtol=1e-12
+
+        Nx2, Ny2 = 256, 8
+        periodic = Kraken.FVFDDomainBC2D(; west=:periodic, east=:periodic,
+                                         south=:periodic, north=:periodic)
+        zero_bc = Kraken.FVFDFieldBC2D(zeros(Ny2), zeros(Ny2), zeros(Nx2), zeros(Nx2))
+        ux_face2 = fill(1.0, Nx2 + 1, Ny2)
+        uy_face2 = zeros(Float64, Nx2, Ny2 + 1)
+        pulse0 = zeros(Float64, Nx2, Ny2)
+        pulse0[50:55, :] .= 1.0
+        pulse_upwind = copy(pulse0)
+        pulse_hrs = copy(pulse0)
+        scratch = similar(pulse0)
+        is_solid2 = falses(Nx2, Ny2)
+        for _ in 1:100
+            Kraken.fvfd_advect_upwind_2d!(
+                scratch, pulse_upwind, zero_bc, ux_face2, uy_face2, is_solid2,
+                1.0, 1.0, periodic, 0.5; advection_scheme=:rusanov,
+            )
+            pulse_upwind, scratch = scratch, pulse_upwind
+        end
+        for _ in 1:100
+            Kraken.fvfd_advect_upwind_2d!(
+                scratch, pulse_hrs, zero_bc, ux_face2, uy_face2, is_solid2,
+                1.0, 1.0, periodic, 0.5; advection_scheme=:muscl_superbee,
+            )
+            pulse_hrs, scratch = scratch, pulse_hrs
+        end
+        upwind_amp = maximum(pulse_upwind) - minimum(pulse_upwind)
+        hrs_amp = maximum(pulse_hrs) - minimum(pulse_hrs)
+        @test upwind_amp < 0.5
+        @test hrs_amp >= 0.7
+        @test hrs_amp > upwind_amp
+
+        psixx = [0.03 * sin(2π * i / Nx2) for i in 1:Nx2, j in 1:Ny2]
+        psixy = [0.01 * cos(2π * (i + j) / Nx2) for i in 1:Nx2, j in 1:Ny2]
+        psiyy = [-0.02 * sin(2π * j / Ny2) for i in 1:Nx2, j in 1:Ny2]
+        psixx_out = similar(psixx)
+        psixy_out = similar(psixy)
+        psiyy_out = similar(psiyy)
+        for _ in 1:10
+            Kraken.logfv_advect_upwind_bc_aware_2d!(
+                psixx_out, psixy_out, psiyy_out,
+                psixx, psixy, psiyy,
+                psixx, psixy, psiyy,
+                psixx, psixy, psiyy,
+                psixx, psixy, psiyy,
+                psixx, psixy, psiyy,
+                ux_face2, uy_face2, is_solid2, 1.0, 1.0, periodic, 0.2;
+                advection_scheme=:muscl_superbee,
+            )
+            psixx, psixx_out = psixx_out, psixx
+            psixy, psixy_out = psixy_out, psixy
+            psiyy, psiyy_out = psiyy_out, psiyy
+        end
+        for j in 1:Ny2, i in 1:Nx2
+            c = _sym2_exp(psixx[i, j], psixy[i, j], psiyy[i, j])
+            @test all(isfinite, c)
+            @test _sym2_min_eig(c...) > 0.0
+        end
+    end
+
+    @testset "M3 open-x wall rows advect tangential Psi" begin
+        Nx, Ny = 6, 5
+        dt = 0.25
+        psixx = [Float64(i) for i in 1:Nx, j in 1:Ny]
+        psixy = [2.0 * Float64(i) for i in 1:Nx, j in 1:Ny]
+        psiyy = [-Float64(i) for i in 1:Nx, j in 1:Ny]
+        outxx = similar(psixx)
+        outxy = similar(psixy)
+        outyy = similar(psiyy)
+        west_xx = fill(0.0, Ny)
+        west_xy = fill(0.0, Ny)
+        west_yy = fill(0.0, Ny)
+        east_xx = fill(Float64(Nx + 1), Ny)
+        east_xy = fill(2.0 * Float64(Nx + 1), Ny)
+        east_yy = fill(-Float64(Nx + 1), Ny)
+        ux_face = ones(Float64, Nx + 1, Ny)
+        uy_face = zeros(Float64, Nx, Ny + 1)
+        is_solid = falses(Nx, Ny)
+
+        Kraken.logfv_advect_upwind_openx_solid_aware_2d!(
+            outxx, outxy, outyy,
+            psixx, psixy, psiyy,
+            west_xx, west_xy, west_yy,
+            east_xx, east_xy, east_yy,
+            ux_face, uy_face, is_solid, dt,
+        )
+
+        for j in (1, Ny), i in 1:Nx
+            expected_xx = Float64(i) - dt
+            expected_xy = 2.0 * Float64(i) - 2.0 * dt
+            expected_yy = -Float64(i) + dt
+            @test outxx[i, j] ≈ expected_xx atol=LOGFV_ATOL rtol=LOGFV_RTOL
+            @test outxy[i, j] ≈ expected_xy atol=LOGFV_ATOL rtol=LOGFV_RTOL
+            @test outyy[i, j] ≈ expected_yy atol=LOGFV_ATOL rtol=LOGFV_RTOL
+        end
+    end
+
+    @testset "M3 modular FV BC spec controls face and advection boundaries" begin
+        Nx, Ny = 5, 4
+        is_solid = falses(Nx, Ny)
+        ux = [0.1 * i + 0.01 * j for i in 1:Nx, j in 1:Ny]
+        uy = [-0.02 * i + 0.03 * j for i in 1:Nx, j in 1:Ny]
+        ux_west = fill(-0.4, Ny)
+        ux_east = fill(0.6, Ny)
+        uy_south = fill(-0.7, Nx)
+        uy_north = fill(0.8, Nx)
+        ux_face = zeros(Float64, Nx + 1, Ny)
+        uy_face = zeros(Float64, Nx, Ny + 1)
+
+        open_wall = Kraken.LogFVDomainBC2D(; west=:inlet, east=:outlet, south=:wall, north=:wall)
+        Kraken.logfv_cell_velocity_to_faces_bc_aware_2d!(
+            ux_face, uy_face, ux, uy, is_solid,
+            ux_west, ux_east, uy_south, uy_north, open_wall,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        @test ux_face[1, :] ≈ ux_west
+        @test ux_face[Nx + 1, :] ≈ ux_east
+        @test all(uy_face[:, 1] .== 0.0)
+        @test all(uy_face[:, Ny + 1] .== 0.0)
+
+        periodic = Kraken.LogFVDomainBC2D(; west=:periodic, east=:periodic, south=:periodic, north=:periodic)
+        Kraken.logfv_cell_velocity_to_faces_bc_aware_2d!(
+            ux_face, uy_face, ux, uy, is_solid,
+            ux_west, ux_east, uy_south, uy_north, periodic,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny
+            @test ux_face[1, j] ≈ (ux[Nx, j] + ux[1, j]) / 2
+            @test ux_face[Nx + 1, j] ≈ (ux[Nx, j] + ux[1, j]) / 2
+        end
+        for i in 1:Nx
+            @test uy_face[i, 1] ≈ (uy[i, Ny] + uy[i, 1]) / 2
+            @test uy_face[i, Ny + 1] ≈ (uy[i, Ny] + uy[i, 1]) / 2
+        end
+
+        dudx = similar(ux); dudy = similar(ux); dvdx = similar(ux); dvdy = similar(ux)
+        Kraken.logfv_velocity_gradient_bc_aware_2d!(
+            dudx, dudy, dvdx, dvdy, ux, uy, is_solid, 1.0, 1.0, periodic,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+        @test dudx[1, 2] ≈ (ux[2, 2] - ux[Nx, 2]) / 2 atol=LOGFV_ATOL rtol=LOGFV_RTOL
+        @test dvdx[Nx, 3] ≈ (uy[1, 3] - uy[Nx - 1, 3]) / 2 atol=LOGFV_ATOL rtol=LOGFV_RTOL
+        @test dudy[3, 1] ≈ (ux[3, 2] - ux[3, Ny]) / 2 atol=LOGFV_ATOL rtol=LOGFV_RTOL
+        @test dvdy[4, Ny] ≈ (uy[4, 1] - uy[4, Ny - 1]) / 2 atol=LOGFV_ATOL rtol=LOGFV_RTOL
+
+        psixx = [10.0 * i + j for i in 1:Nx, j in 1:Ny]
+        psixy = [2.0 * psixx[i, j] for i in 1:Nx, j in 1:Ny]
+        psiyy = [-psixx[i, j] for i in 1:Nx, j in 1:Ny]
+        outxx = similar(psixx)
+        outxy = similar(psixy)
+        outyy = similar(psiyy)
+        fill!(ux_face, 0.0)
+        fill!(uy_face, 1.0)
+        west_xx = fill(0.0, Ny); west_xy = fill(0.0, Ny); west_yy = fill(0.0, Ny)
+        east_xx = fill(0.0, Ny); east_xy = fill(0.0, Ny); east_yy = fill(0.0, Ny)
+        south_xx = fill(0.0, Nx); south_xy = fill(0.0, Nx); south_yy = fill(0.0, Nx)
+        north_xx = fill(0.0, Nx); north_xy = fill(0.0, Nx); north_yy = fill(0.0, Nx)
+
+        Kraken.logfv_advect_upwind_bc_aware_2d!(
+            outxx, outxy, outyy,
+            psixx, psixy, psiyy,
+            west_xx, west_xy, west_yy,
+            east_xx, east_xy, east_yy,
+            south_xx, south_xy, south_yy,
+            north_xx, north_xy, north_yy,
+            ux_face, uy_face, is_solid,
+            periodic, 1.0,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            js = j == 1 ? Ny : j - 1
+            @test outxx[i, j] ≈ psixx[i, js] atol=LOGFV_ATOL rtol=LOGFV_RTOL
+            @test outxy[i, j] ≈ psixy[i, js] atol=LOGFV_ATOL rtol=LOGFV_RTOL
+            @test outyy[i, j] ≈ psiyy[i, js] atol=LOGFV_ATOL rtol=LOGFV_RTOL
+        end
+    end
+
     @testset "M3 CFL-one periodic upwind direction" begin
         Nx, Ny = 7, 6
         φ = [10i + j for i in 1:Nx, j in 1:Ny]
@@ -602,7 +928,9 @@ end
         outxy = similar(psixy)
         outyy = similar(psiyy)
 
-        Kraken.logfv_advect_upwind_2d!(outxx, outxy, outyy, psixx, psixy, psiyy, ux_face, uy_face, dt)
+        Kraken.logfv_advect_upwind_interior_canary_2d!(
+            outxx, outxy, outyy, psixx, psixy, psiyy, ux_face, uy_face, dt,
+        )
         KernelAbstractions.synchronize(KernelAbstractions.CPU())
 
         for j in 1:Ny, i in 1:Nx
@@ -786,6 +1114,28 @@ end
         end
     end
 
+    @testset "M4 BC-aware polymer force is exact at domain boundaries" begin
+        Nx, Ny = 8, 7
+        dx, dy = 0.3, 0.2
+        axx, axy = 0.07, -0.03
+        bxy, byy = 0.02, 0.05
+        tauxx = [0.1 + axx * ((i - 0.5) * dx) - 0.01 * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        tauxy = [-0.2 + axy * ((i - 0.5) * dx) + bxy * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        tauyy = [0.3 + 0.04 * ((i - 0.5) * dx) + byy * ((j - 0.5) * dy) for i in 1:Nx, j in 1:Ny]
+        is_solid = falses(Nx, Ny)
+        fx = similar(tauxx)
+        fy = similar(tauxx)
+        bc = Kraken.logfv_openx_wally_bcspec_2d()
+
+        Kraken.logfv_polymer_force_bc_aware_2d!(fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy, bc)
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        for j in 1:Ny, i in 1:Nx
+            @test fx[i, j] ≈ axx + bxy atol=5e-14 rtol=5e-14
+            @test fy[i, j] ≈ axy + byy atol=5e-14 rtol=5e-14
+        end
+    end
+
     @testset "M4 BSD force correction preserves continuum balance" begin
         Nx, Ny = 7, 21
         height = 1.0
@@ -831,6 +1181,37 @@ end
                 @test fx_total[i, j] ≈ expected_fx atol=1e-13 rtol=1e-13
                 @test fy_total[i, j] ≈ 0.0 atol=1e-13
             end
+        end
+    end
+
+    @testset "M4b BC-aware BSD force correction is exact at domain boundaries" begin
+        Nx, Ny = 8, 7
+        dx, dy = 0.3, 0.2
+        axx, axy = 0.04, -0.01
+        ayx, ayy = -0.06, 0.03
+        zeta = 0.75
+        nu_p = 0.09
+        is_solid = falses(Nx, Ny)
+        ux = [0.1 + axx * ((i - 0.5) * dx)^2 + axy * ((j - 0.5) * dy)^2
+              for i in 1:Nx, j in 1:Ny]
+        uy = [-0.2 + ayx * ((i - 0.5) * dx)^2 + ayy * ((j - 0.5) * dy)^2
+              for i in 1:Nx, j in 1:Ny]
+        fx_poly = [0.02 + 0.01 * (i - 0.5) * dx for i in 1:Nx, j in 1:Ny]
+        fy_poly = [-0.03 + 0.02 * (j - 0.5) * dy for i in 1:Nx, j in 1:Ny]
+        fx_total = similar(fx_poly)
+        fy_total = similar(fy_poly)
+        bc = Kraken.logfv_openx_wally_bcspec_2d()
+
+        Kraken.logfv_bsd_correct_force_bc_aware_2d!(
+            fx_total, fy_total, fx_poly, fy_poly, ux, uy, is_solid, zeta, nu_p, dx, dy, bc,
+        )
+        KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+        expected_lap_ux = 2 * axx + 2 * axy
+        expected_lap_uy = 2 * ayx + 2 * ayy
+        for j in 1:Ny, i in 1:Nx
+            @test fx_total[i, j] ≈ fx_poly[i, j] - zeta * nu_p * expected_lap_ux atol=5e-14 rtol=5e-14
+            @test fy_total[i, j] ≈ fy_poly[i, j] - zeta * nu_p * expected_lap_uy atol=5e-14 rtol=5e-14
         end
     end
 
@@ -1064,7 +1445,7 @@ end
         for zeta in (0.0, 0.5, 1.0)
             result = Kraken.run_viscoelastic_logfv_poiseuille_frozen_force_2d(;
                 Nx=Nx, Ny=Ny, nu_s=nu_s, nu_p=nu_p, Fx_body=Fx_body,
-                lambda=lambda, bsd_fraction=zeta, force_boundary_fill=:nearest,
+                lambda=lambda, bsd_fraction=zeta, force_boundary_fill=:bc_aware,
                 max_steps=8000, backend=KernelAbstractions.CPU(), T=Float64,
             )
             expected_force = Fx_body * (nu_s + zeta * nu_p) / (nu_s + nu_p)
@@ -1083,13 +1464,14 @@ end
         end
     end
 
-    @testset "M5c missing force boundary fill is a visible split-mode defect" begin
+    @testset "M5c BC-aware force boundary does not need nearest fill" begin
         result = Kraken.run_viscoelastic_logfv_poiseuille_frozen_force_2d(;
             Nx=6, Ny=16, nu_s=0.04, nu_p=0.06, Fx_body=1e-5,
             lambda=5.0, bsd_fraction=0.0, force_boundary_fill=:none,
             max_steps=4000, backend=KernelAbstractions.CPU(), T=Float64,
         )
-        @test result.max_rel_error > 0.1
+        @test result.max_rel_error < 2e-2
+        @test result.polymer_channel.max_total_force_error < 5e-13
     end
 
     @testset "M5d coupled Poiseuille source-force loop recovers total viscosity" begin
@@ -1125,6 +1507,34 @@ end
             @test result.max_uy < 1e-12
             @test all(isfinite, result.ux)
             @test all(isfinite, result.psixx)
+        end
+    end
+
+    @testset "M5e frozen-channel CDE preserves analytical steady channels" begin
+        for flow in (:couette, :poiseuille)
+            result = Kraken.run_viscoelastic_logfv_frozen_channel_cde_2d(;
+                Nx=8,
+                Ny=16,
+                flow,
+                height=1.0,
+                width=1.0,
+                umax=0.02,
+                uwall=0.02,
+                lambda=2.0,
+                prefactor=0.03,
+                bsd_fraction=1.0,
+                initial=:steady,
+                max_steps=1,
+                polymer_substeps=128,
+                backend=KernelAbstractions.CPU(),
+                T=Float64,
+            )
+
+            @test result.min_c_eig > 0.8
+            @test result.max_c_error < (flow === :poiseuille ? 1.5e-4 : 5.0e-5)
+            @test result.max_tau_error < (flow === :poiseuille ? 5.0e-6 : 1.5e-6)
+            @test result.max_transverse_force < 1.0e-12
+            @test result.max_total_force_error < (flow === :poiseuille ? 8.0e-6 : 1.0e-12)
         end
     end
 
@@ -1838,11 +2248,11 @@ end
         @test result.geometry.name === :cylinder
         @test count(fluid) > 0
         @test result.nu_lbm ≈ result.nu_total
-        @test result.force_boundary_fill === :nearest
+        @test result.force_boundary_fill === :bc_aware
         @test result.polymer_substeps >= 1
         @test !result.subcycle_estimate.clamped
-        @test result.fx_total[1, 1] ≈ result.fx_total[2, 2]
-        @test result.fy_total[1, 1] ≈ result.fy_total[2, 2]
+        @test all(isfinite, result.fx_total)
+        @test all(isfinite, result.fy_total)
         @test result.min_c_eig > 0.7
         @test result.max_abs_psi < 0.4
         @test result.max_abs_tau < 5e-4
@@ -1859,6 +2269,29 @@ end
         @test all(isfinite, result.ux[fluid])
         @test all(isfinite, result.uy[fluid])
         @test all(isfinite, result.psixx[fluid])
+        @test all(isfinite, result.fx_total[fluid])
+    end
+
+    @testset "M9a cylinder coupled log-FV accepts FENE-P model" begin
+        result = Kraken.run_viscoelastic_logfv_cylinder_coupled_2d(;
+            radius=3.0, H=14, L_up=4, L_down=6,
+            nu_s=0.08, nu_p=0.02, lambda=4.0,
+            polymer_model=:fenep, L_max=10.0,
+            u_mean=0.004, Fx_body=5e-8,
+            bsd_fraction=1.0, max_steps=12,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fluid = .!result.is_solid
+
+        @test result.polymer_model === :fenep
+        @test result.L_max ≈ 10.0
+        @test result.min_c_eig > 0
+        @test result.max_c_trace < result.L_max^2
+        @test result.min_fene_denom > 0
+        @test result.max_fene_factor >= 1
+        @test all(isfinite, result.ux[fluid])
+        @test all(isfinite, result.psixx[fluid])
+        @test all(isfinite, result.tauxx[fluid])
         @test all(isfinite, result.fx_total[fluid])
     end
 
@@ -1879,12 +2312,55 @@ end
         @test !result.subcycle_estimate.clamped
         @test result.completed_steps == 1
         @test result.diagnostic_stride == 1
-        @test result.force_boundary_fill === :nearest
+        @test result.embedded_gradient == false
+        @test result.force_boundary_fill === :bc_aware
         @test result.first_nonfinite_step == 0
         @test result.first_nonfinite_field === :none
         @test result.first_nonfinite_i == 0
         @test result.first_nonfinite_j == 0
         @test isfinite(result.Cd)
         @test result.min_c_eig > 0
+    end
+
+    @testset "M9c cylinder accepts coherent circle embedded FVFD force path" begin
+        result = Kraken.run_viscoelastic_logfv_cylinder_coupled_2d(;
+            radius=3.0, H=16, L_up=3, L_down=4,
+            nu_s=0.08, nu_p=0.02, lambda=5.0,
+            u_mean=0.005, Fx_body=1e-7,
+            bsd_fraction=1.0, max_steps=5, avg_window=1,
+            diagnostic_stride=1,
+            embedded_geometry=:circle,
+            embedded_advection=true,
+            embedded_gradient=true,
+            embedded_force=true,
+            embedded_drag=true,
+            backend=KernelAbstractions.CPU(), T=Float64,
+        )
+        fluid = .!result.is_solid
+
+        @test result.completed_steps == 5
+        @test result.embedded_geometry === :circle
+        @test result.embedded_advection == true
+        @test result.embedded_gradient == true
+        @test result.embedded_force == true
+        @test result.embedded_drag == true
+        @test result.embedded_cut_count > 0
+        @test result.embedded_wall_length ≈ 2π * 3.0 rtol=5e-3
+        @test result.embedded_min_fluid_cell_fraction > 0
+        @test result.embedded_zero_fluid_cell_fraction_count == 0
+        @test result.embedded_normal_radial_samples == result.embedded_cut_count
+        @test result.embedded_normal_radial_min > 0.95
+        @test result.embedded_normal_radial_mean > 0.98
+        @test result.force_boundary_fill === :bc_aware
+        @test result.first_nonfinite_step == 0
+        @test result.min_c_eig > 0
+        @test isfinite(result.Cd_p)
+        @test isfinite(result.Cd_bsd)
+        @test result.max_abs_poly_force > 0
+        @test result.max_abs_total_force > 0
+        @test all(isfinite, result.ux[fluid])
+        @test all(isfinite, result.psixx[fluid])
+        @test all(isfinite, result.fx_poly[fluid])
+        @test all(isfinite, result.fx_total[fluid])
     end
 end

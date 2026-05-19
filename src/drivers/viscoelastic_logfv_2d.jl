@@ -197,6 +197,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     embedded_geometry=:qwall,
     embedded_circle_samples::Integer=32,
     force_boundary_fill::Symbol=:bc_aware,
+    advection_scheme::Symbol=:rusanov,
     drag_cx::Union{Nothing,Real}=nothing,
     drag_cy::Union{Nothing,Real}=nothing,
     drag_radius::Union{Nothing,Real}=nothing,
@@ -219,6 +220,9 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         throw(ArgumentError("embedded_circle_samples must be positive"))
     force_boundary_fill in (:bc_aware, :nearest, :none) ||
         throw(ArgumentError("force_boundary_fill must be :bc_aware, :nearest, or :none"))
+    advection_scheme_symbol = Symbol(replace(lowercase(String(advection_scheme)), '-' => '_'))
+    advection_scheme_symbol in (:rusanov, :muscl_superbee) ||
+        throw(ArgumentError("advection_scheme must be :rusanov or :muscl_superbee"))
     if embedded_geometry_symbol === :circle &&
        (isnothing(drag_cx) || isnothing(drag_cy) || isnothing(drag_radius))
         throw(ArgumentError(
@@ -404,6 +408,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
             north_xx, north_xy, north_yy,
             ux_face, uy_face, is_solid, dx, dy, logfv_bc, one(T);
             sync=false,
+            advection_scheme=advection_scheme_symbol,
         )
         if embedded_gradient
             fvfd_velocity_gradient_embedded_2d!(
@@ -442,6 +447,11 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
             logfv_polymer_force_embedded_bc_aware_2d!(
                 fx_poly, fy_poly, tauxx, tauxy, tauyy, fvfd_geometry;
                 sync=false,
+            )
+            # Option-A rescale: the embedded kernel returns force per
+            # fluid volume; the LBM Guo source consumes force per lattice cell.
+            fvfd_scale_by_cell_fraction_2d!(
+                fx_poly, fy_poly, embedded, is_solid; sync=false,
             )
         else
             logfv_polymer_force_bc_aware_2d!(
@@ -639,6 +649,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
         embedded_normal_radial_mean=embedded_circle_normal_alignment.mean,
         embedded_normal_radial_samples=embedded_circle_normal_alignment.samples,
         force_boundary_fill,
+        advection_scheme=advection_scheme_symbol,
         first_nonfinite_step,
         first_nonfinite_field,
         first_nonfinite_i,
