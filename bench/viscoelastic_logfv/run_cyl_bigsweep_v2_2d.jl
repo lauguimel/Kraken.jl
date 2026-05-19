@@ -369,6 +369,12 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
                 tauxy=Array{Float64}(result.tauxy),
                 tauyy=Array{Float64}(result.tauyy),
                 is_solid=Array{Bool}(result.is_solid),
+                # M30 schema extension (2026-05-20): persist LBM density rho
+                # so wall-pressure azimuthal profile p(theta) = c_s^2 * rho(theta)
+                # is reconstructible from snapshots without re-running.
+                # Backward-compatible (Serialization NamedTuple): older
+                # analysis scripts that don't ask for :rho ignore this field.
+                rho=Array{Float64}(result.rho),
             ))
             @printf("  saved fields to %s (%.1f MB)\n", jls_path,
                     filesize(jls_path) / 1024^2)
