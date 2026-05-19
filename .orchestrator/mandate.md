@@ -974,22 +974,90 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
   stress-peak zone. This is a load-bearing limitation of plain MUSCL
   on confined cylinder geometry.
 
-### M29c — Boundary fall-back relaxation — PLANNED, next session
+### M29c — Boundary fall-back relaxation — FAIL 2026-05-19 (ROLLED BACK)
 
-- **Status**: planned, opens after M29b closure. The fix is well-scoped
-  per M29b's `M29B_HRS_VERDICT.md` § Recommended next mission.
-- **Goal**: replace the 1st-order Rusanov fall-back zone (±2 cells from
-  solid) with a 1-sided 3-point reconstruction. Allows the TVD limiter
-  to fire in the leeward shoulder zone where the stress peak lives.
-- **Acceptance criterion**: Cd at R=30 Wi=1.0 ∈ [118, 122] (close the
-  M29b residual gap) ; τ_xx peak ≥ 130 (M29 comparison driver).
-- **Allowed edit zones**: `src/fvfd/operators_2d.jl` (the limiter
-  fallback branch) ; possibly `src/drivers/viscoelastic_logfv_2d.jl`
-  for any kwarg threading.
-- **Runner**: Codex via `kraken-codex-pilot` (same skill as M29b).
-- **Walltime estimate**: 1-2 h Engineer + 5 min Aqua re-run.
-- **Stretch goal (M29d)**: CUBISTA NVD scheme on top of M29c
-  (est. +1-2 Cd extra). Defer if M29c alone hits acceptance.
+- **Status**: FAIL. Working tree patch reverted via `git checkout
+  src/fvfd/operators_2d.jl` on 2026-05-19 night. M29b remains the
+  production scheme.
+- **Attempt summary (v1 + v2)**: M29c-asis (CD2 fallback `(u+d)/2`)
+  was anti-TVD and produced Cd = −1571. M29c-v2 (1-line fix
+  `oneSided := upwind`) ran cleanly to step 80k then NaN'd on `rho`
+  at j=1 south wall at step 92,200 (Aqua F64) / 102,800 (Metal F32).
+- **Why ROLLED BACK** — wall-stress decomposition exposed misleading
+  improvement signature:
+
+  | contribution | rheoTool | M29b | M29c-v2 | gap rT−M29c-v2 |
+  |---|---|---|---|---|
+  | Cd_pressure | 85.77 | 75.64 | 75.56 | **+10.22** |
+  | Cd_solvent  | 19.78 | 21.19 | 20.34 | −0.56 |
+  | Cd_polymer  | 13.45 | **13.40** | **20.01** | **−6.55** |
+  | Cd_total    | 119.0 | 110.23 | 115.90 | +3.11 |
+
+  M29b matched Cd_polymer wall integral to 0.05 vs rheoTool ;
+  M29c-v2 **over-shot Cd_polymer by 50 %** with 45° azimuthal
+  offset (rT peak θ≈±0.6π front-shoulder, Kraken peak θ≈±0.35π
+  rear-shoulder, 3× too high at rear). The small M29c-v2-Cd_total
+  gain (+5.7 Cd vs M29b at step 30k) was a **cancellation of
+  opposite-sign errors**, not a real improvement.
+- **Meta-finding (re-frames M28+M29 attribution)**: the M28 cluster
+  verdict (`2945b198`) and M29 τ-compare verdict (`94f4b82d`) used
+  volume L2_rel(τ_p) and peak-τ_xx as the Cd-gap proxy. These are
+  **not** monotonic in Cd contribution. M29b Cd_polymer wall
+  integral was already correct ; the ~9 Cd residual gap of M29b is
+  primarily **Cd_pressure (+10 pts under-predicted)**, not
+  constitutive advection. The M28/M29 "constitutive scheme is the
+  locus" conclusion was structurally wrong on the wall integral.
+- **Verdict artefacts** (uncommitted):
+  - `bench/viscoelastic_audit/M29C_TAU_COMPARE_VERDICT.md`
+  - `bench/viscoelastic_audit/M29C_TAU_DECOMPOSE_VERDICT.md`
+  - `bench/viscoelastic_audit/M29C_WALLSTRESS_VERDICT.md` (the decisive one)
+  - `bench/viscoelastic_audit/M29C_V2_BC_AUDIT_VERDICT.md` (adversarial DIFF falsification)
+  - `bench/viscoelastic_audit/M29C_V2_LOCATE_VERDICT.md`
+  - `bench/viscoelastic_audit/M29C_V2_DIFF_VERDICT.md` (DIFF mechanism falsified by audit)
+- **No mission opens directly on M29c.** Future advection-scheme
+  upgrades on log-conf Ψ are GATED on Cd_pressure investigation
+  (M30) reaching a clear verdict — otherwise we risk chasing
+  numerical-cancellation artefacts again.
+
+### M30 — Cd_pressure investigation (front-shoulder gap) — PLANNED 2026-05-19
+
+- **Status**: PLANNED, opens after M29c rollback. **This is now the
+  primary cylinder-Cd mission** ; supersedes the M29d stretch goal.
+- **Goal**: characterise and reduce the +10 Cd front-shoulder
+  pressure-drag gap between Kraken `0000_qwall` and rheoTool at
+  R=30 Wi=1.0 β=0.59 Re=1. Per wall decomposition, Kraken's Cd_pressure
+  = 75.6 vs rheoTool 85.8.
+- **Open hypotheses** (to ratchet):
+  - H1. LBM ρ-BC at the cylinder wall (halfway-BB vs interpolated BB)
+    biases p_wall on the front-shoulder. Validate by reading `rho`
+    along the wall ring.
+  - H2. BSD body-force is dropping pressure at the front-shoulder
+    via the LBM coupling. Validate by re-running with BSD=0.5 or 0
+    (Guillaume-proposed experiment, now well-posed since polymer
+    wall integral is independent of advection scheme on M29b).
+  - H3. Pressure-gradient stencil near the wall (front-shoulder
+    curvature ≠ resolved enough at R=30). Validate by R=40 refinement
+    sweep ; compare per-azimuth pressure profile.
+  - H4. Embedded-mode (M26) tail effect on pressure ; check via
+    `1111_circle` mode at same R=30, Wi=1.0.
+- **Acceptance criterion**: Cd_pressure gap to rheoTool ≤ 3 Cd
+  (down from 10) AND mechanism understood (one of H1-H4 ratchets
+  IN, others OUT).
+- **Prerequisite — KRAKEN_SAVE_FIELDS extension**: snapshots must
+  store `rho` (currently they don't). Edit
+  `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl` to dump
+  `rho` alongside `(ux, uy, tauxx, tauxy, tauyy)`. Without `rho`
+  the wall-decomp must use residual = `Cd_total − Cd_solvent −
+  Cd_polymer` which gives a scalar but no azimuthal profile.
+- **Allowed edit zones**: `bench/viscoelastic_logfv/` (snapshot
+  schema), `bench/viscoelastic_audit/` (analysis), `bench/scratch/`.
+  No `src/` changes in Phase 0 ; Phase 1 may touch BC if H1/H2
+  ratchets IN.
+- **Runner**: Codex via `kraken-codex-pilot` for the snapshot-schema
+  extension ; Claude general-purpose Departments for the wall
+  decompositions and azimuthal analyses.
+- **Walltime estimate**: Phase 0 (snapshot extension + BSD=0 Aqua
+  smoke at Wi=1 R=30, both Kraken and rheoTool) = 1-2 sessions.
 
 ### M22-old — Poiseuille finite-Wi analytical (RENUMBERED to M27, PARKED)
 

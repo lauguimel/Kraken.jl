@@ -768,3 +768,49 @@ properly tracked.
 periodically (or `find src/ -name '*.jl' -not -path '*/.*' | xargs
 git ls-files --error-unmatch >/dev/null` to detect orphan files).
 Detects orphan-but-`include`-d files.
+
+## 2026-05-19 — viscoelastic_logfv snapshots LACK ρ ; wall-pressure needs schema extension
+
+`KRAKEN_SAVE_FIELDS=1` snapshot harness in
+`bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl` currently dumps
+only `(ux, uy, tauxx, tauxy, tauyy, is_solid, Nx, Ny, R, cx_lbm,
+cy_lbm, u_mean, Cd_s, Cd_p, Cd_bsd, Cd_kraken)`.
+
+It does NOT dump `rho` (LBM density). Consequence: wall-pressure
+integration in any audit script (e.g. `bench/scratch/m29c_wallstress/`)
+can only obtain `Cd_pressure` by residual = `Cd_total − Cd_solvent
+− Cd_polymer` — a scalar, **not** an azimuthal profile.
+
+For M30 (Cd_pressure front-shoulder mission) this is a blocker:
+without ρ on the wall ring, we cannot identify *where* on the
+cylinder the pressure deficit lives.
+
+**Fix** (planned for M30 Phase 0): add `rho = compute_rho_from_f(f)`
+or directly persist `rho` if already available in the macro pass.
+Patch is local to the bench script ; no `src/` touched.
+
+**Why**: 2026-05-19 M29c-wallstress mission flagged this as a memory
+candidate. Verified by inspection of three snapshot dirs
+(`tmp/m29c_v2_kraken/aqua_locate/{21588713,21588714,21588725}*`) —
+all three `.jls` files schema-check identical, ρ absent.
+
+## 2026-05-19 — `_fvfd_{x,y}face_average_or_zero_2d` zeros u_face at solid interfaces
+
+`src/fvfd/operators_2d.jl:142-146`. Any analysis claiming that a
+BC helper "leaks Ψ_solid into the fluid via `ue · phie`" must FIRST
+check whether `ue` itself is zero at the interface. For the M29b/v2
+log-FV advection path, all solid-fluid faces have `u_face = 0` ;
+the product `ue · phie` is identically zero regardless of `phie`.
+
+This is the load-bearing reason the M29c-v2 DIFF postmortem's
+proposed mechanism was algebraically wrong. Codex found this kill-
+shot during the adversarial audit (`M29C_V2_BC_AUDIT_VERDICT.md`,
+2026-05-19) ; Claude missed it on first pass.
+
+**Why**: any future BC-helper-leak hypothesis on the log-FV kernel
+must explicitly state and check the face-velocity multiplier first.
+
+**How to apply**: when reviewing a BC-leak hypothesis, the first
+question is "is the face velocity zero by construction?" If yes,
+the hypothesis dies before the algebra of the face-value reconstruction
+even matters.

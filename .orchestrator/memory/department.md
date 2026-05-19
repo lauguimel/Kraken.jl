@@ -466,3 +466,65 @@ manifestation.)
 
 **Why**: locks lessons that will recur for any future Aqua-backed
 viscoelastic Department cluster. Skip cycles by reading this first.
+
+## 2026-05-19 — Cd-gap missions must START with wall decomposition
+
+Any Department brief that aims to attribute a `Cd_kraken − Cd_reference`
+gap to a code component MUST include the following step BEFORE any
+volume-field comparison:
+
+1. **Extract wall ring** of fluid cells adjacent to the solid (Kraken:
+   `is_solid` neighbours ; rheoTool: cells at `radius ≈ R` or
+   boundary-patch values directly).
+2. **Build circumferential profiles** of `(p, τ_s, τ_p)` along
+   θ ∈ [0, 2π] with ~36-72 bins.
+3. **Integrate** to get `Cd_pressure + Cd_solvent + Cd_polymer` per
+   case (Kraken_M29b, Kraken_candidate, rheoTool_reference).
+4. **Compare component-by-component** and **azimuth-bin-by-bin**.
+
+Only after this is done may a volume L2_rel / peak comparison enter the
+analysis — as a corroborating signal, not as the primary one.
+
+**Why**: 2026-05-19 the M29c-v2 patch appeared to close 56% of the
+M29b residual gap (volume L2_rel(τ_p) −38%, peak τ_xx +68% toward
+rheoTool, Cd_total 110 → 116). The wall decomposition exposed this as
+a cancellation of opposite-sign errors: Cd_polymer over-shot by 50%
+(+6.55), Cd_pressure under-shot by 12% (+10.22), net +3 Cd. Six
+missions had been spent on the wrong attribution because the M28+M29
+verdicts used volume L2_rel as the Cd-gap proxy without ever
+integrating on the wall.
+
+**How to apply**: in any Cd-gap mission brief, the FIRST exit
+criterion is the wall-decomposition table, not the L2_rel table.
+The reusable harness lives at
+`bench/scratch/m29c_wallstress/run_wallstress.jl` (produced for
+this mission) and includes the rheoTool wall-patch parser, the
+Kraken wall-ring extractor with `is_solid` adjacency, and the
+72-bin azimuthal integrator. Copy + adapt, do not re-derive.
+
+## 2026-05-19 — Stream idle timeout warning ; verify outputs exist
+
+A Department mission that returns claiming success after a stream
+idle timeout may have **authored** a 800-line script but **never
+executed** it. Before accepting any "numbers" from a previous
+Department, the next Department MUST verify:
+
+- The output CSVs/files claimed by the brief exist on disk.
+- The `.engineer_logs/<mission>_*.log` exists with a successful
+  completion line.
+- The verdict markdown contains actual numbers, not pending
+  placeholders.
+
+If any of the three is missing, the prior mission's "numbers" are
+**not real**. Re-run the script (it's already written) ; do NOT
+trust tool-use count as evidence of execution.
+
+**Why**: 2026-05-19 M29c-tau-decompose Department wrote 862 LOC of
+post-processing then idled out. A follow-up mission found no CSVs,
+no log, no real numbers — the verdict file was an honest GAP marker.
+A second Department executed the prepared script in 3 s and one
+minimal bug fix.
+
+**How to apply**: Department brief should include a "verify-prior"
+preamble whenever a previous mission may have hit timeout. The check
+is three `ls` commands.

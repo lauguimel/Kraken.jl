@@ -1112,3 +1112,67 @@ wall-segment terms) remains a separate open mission.
 Rusanov smears polymer stress peak) is correct AND fixable. Future
 Boss inheriting cylinder work should head straight to M29c if a
 production-grade match to rheoTool is required.
+
+## 2026-05-19 night — M29c-v2 ROLLED BACK ; M28/M29 volume-locus attribution falsified by wall-stress decomposition
+
+After ratchet through M29c-asis (FAIL: anti-TVD CD2, Cd=−1571),
+M29c-v2 (1-line `oneSided := upwind` fix, NaN'd at step 92,200), and
+two contradictory postmortems (DIFF algebraically falsified by
+adversarial Claude+Codex audit ; LOCATE observationally valid but
+mechanism unproven), the **wall-stress decomposition** on the same
+30k snapshots (M29c-wallstress mission) inverted the entire M28/M29
+narrative:
+
+| | rheoTool | M29b | M29c-v2 | gap rT−M29c-v2 |
+|---|---|---|---|---|
+| Cd_pressure | 85.77 | 75.64 | 75.56 | **+10.22** |
+| Cd_solvent  | 19.78 | 21.19 | 20.34 | −0.56 |
+| Cd_polymer  | 13.45 | **13.40** | **20.01** | **−6.55** |
+| Cd_total    | 119.0 | 110.23 | 115.90 | +3.11 |
+
+Key findings:
+- M29b matched `Cd_polymer` wall integral to **0.05** vs rheoTool —
+  polymer wall stress on the cylinder was already correct.
+- M29c-v2 **over-shoots** `Cd_polymer` by 50 % with 45° azimuthal
+  offset (rT peak θ≈±0.6π front-shoulder, Kraken peak θ≈±0.35π
+  rear-shoulder, 3× too high at rear). The MUSCL-superbee 1-sided
+  near-wall reconstruction injects too much polymer stress at rear.
+- The +5.7 Cd `M29c-v2 − M29b` total-Cd "improvement" was a
+  **cancellation of opposite-sign errors** (−6.5 polymer overshoot
+  + +10.2 pressure under-prediction ≈ +3 net), not a real
+  improvement.
+- **The true Cd gap is in `Cd_pressure`** (+10 pts under-predicted at
+  front-shoulder), not in the constitutive advection.
+
+Process lessons:
+- The M28 ratchet-out "constitutive scheme is the locus" verdict
+  (commit `94f4b82d`) used **volume** L2_rel(τ_p) and peak-τ_xx on
+  a wake ROI. Neither is monotonic in Cd contribution. **This whole
+  attribution branch was structurally biased.**
+- The Boss spent ~6 missions (M29 → M29c-v2 → 2 postmortems → audit
+  → tau-decompose) before the user (Guillaume) re-asked the right
+  question: "donne les tau_p et tau_s SUR le cylindre permettant
+  de mesurer le Cd". 5 minutes of Department compute then closed
+  the question.
+- The DIFF postmortem and LOCATE postmortem were BOTH limited —
+  one was algebraically wrong (Codex found `ue=0` at solid faces
+  killing the proposed mechanism), the other was observationally
+  correct but its "elastic stiffness runaway" mechanism remained
+  speculative. Wall-decomposition leap-frogged both.
+
+Decisions taken:
+- `git checkout src/fvfd/operators_2d.jl` to revert M29c-v2 patch.
+  M29b remains production.
+- Mandate `M29c` block rewritten as FAIL + meta-finding.
+- **New mission M30** opens on `Cd_pressure` (front-shoulder gap),
+  supersedes the M29d stretch goal. Snapshots must be extended to
+  store `rho` (the LBM density) so pressure can be wall-integrated
+  directly instead of only via residual.
+- Future advection-scheme upgrades on log-conf Ψ are GATED on M30
+  reaching a verdict — otherwise we risk chasing numerical
+  cancellation artefacts again.
+
+**Why**: this entry is the project's strongest meta-correction so
+far. Future Boss inheriting cylinder work must read it BEFORE
+acting on any volume-field claim (peak τ_xx, L2_rel on ROI).
+**Cd gap attribution starts with wall decomposition. Always.**
