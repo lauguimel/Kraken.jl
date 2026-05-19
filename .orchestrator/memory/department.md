@@ -370,3 +370,99 @@ H1/H2/H3 structure of M26).
 project (after M17-epsilon Claude+Codex, S7' multi-Department, and
 the M21 BSD path-matrix). Locks in as the default for any
 multi-hypothesis bug hunt going forward.
+
+## 2026-05-19 — M28 cluster Department patterns (rheoTool sweep loader, PBS walltime trap, one-shot lifecycle)
+
+Three durable Department-level patterns from the M28 cluster
+(M28/b/c/d/e/f + rheoTool sweep + Liu-check + M26b + synthesis).
+
+### Pattern 1 — rheoTool Cd-sweep CSV conventions
+
+The new sweep aggregator `bench/viscoelastic_logfv/RHEOTOOL_CD_SWEEP_M28.csv`
+sets a column layout that any future rheoTool-vs-Kraken cross-check
+should reuse :
+
+```
+beta, Re, R, Wi, Cd_total, case_dir, n_cells, convective_terms_active,
+endTime_actual, residual_U_final, residual_p_final, residual_theta_final,
+steady_state_marker, notes
+```
+
+Key conventions :
+
+- `Cd_total` = pressure + viscous + polymer (cylinder surface
+  integral), NOT a Cd_s+Cd_p decomposition. rheoTool does not
+  natively split.
+- `steady_state_marker ∈ {flat, drifting}` is set by hand by the
+  Department after reading `Cd.txt` over the last decade. "flat" means
+  ≥ 9 digits stable ; "drifting" means visible motion at the 5th
+  decimal (typical for Wi ≥ 1 at endTime = 10).
+- `convective_terms_active = yes/no` documents `system/fvSchemes`
+  status of `div(phi, U)`, `div(phi, theta)`, `div(phi, tau)`. A
+  `none` on any of these falsely zeros the convective term and is the
+  #1 silent-failure mode for rheoTool reference runs.
+- `endTime_actual` is the converged endTime, NOT the
+  `controlDict::endTime` knob (may differ if the run was extended
+  after observation of slow drift). Always cross-check against
+  `log.rheoFoam` last `Time = ...`.
+
+The Wi=1.0 case is the only one that's not 12-digit-flat at
+endTime=10 ; document this and any future sweep should extend
+Wi=1.0 to endTime ≥ 20 if a < 0.1 Cd absolute target is needed.
+
+### Pattern 2 — Aqua PBS walltime trap before maintenance windows
+
+`gpu_batch_exec` queue defaults to 24 h walltime. The day before a
+scheduled maintenance, jobs requesting more than the remaining
+wall-clock are **held with no error** — `qstat` shows the job in Q
+indefinitely, no output until manually killed. Symptoms :
+
+- `qstat` shows `comment = Not Running: Job would cross dedicated
+  time boundary`.
+- The job sits in Q for hours despite empty queue.
+- No way to detect this from the PBS submission itself.
+
+**Mitigation** : explicit `qsub -l walltime=HH:MM:SS` per-job override
+that's SHORTER than time-to-maintenance. The M28c session burned
+30 minutes on this : jobs 21579942/943/944 had to be `qdel`'d and
+resubmitted as 21579957/958/959 with explicit 15/30/60 minute
+walltimes. Department briefs that wrap Aqua PBS scripts should
+include a sanity check (`qstat -u USER` + look for held jobs) BEFORE
+walking away from a submission. Better : check Aqua's maintenance
+schedule (`/etc/motd` or admin announcements) before submitting any
+job > 1 h.
+
+### Pattern 3 — Department one-shot lifecycle (no callback for background watchers)
+
+The M28-cluster session was orchestrated with **multiple Departments
+in flight simultaneously** (M28 main, M28b, M28d, M28e, M28f, M28c,
+rheoTool sweep, Liu-check, M26b, M28-synthesis, M29-tau-compare).
+Some of these depend on Aqua jobs returning, which can take 1-30
+min ; Department processes are one-shot — they execute their brief,
+write artefacts, return a report, and TERMINATE. There is no
+mechanism for a Department to "sleep until job lands, then continue".
+
+**Anti-pattern observed** : briefs that say "wait for the job to
+land then write the verdict". The Department finishes the prose
+plan, exits, and the job lands later with no one to write the
+verdict. Two costs : a re-spawn is required (extra context window),
+and inter-Department artefacts get out of order.
+
+**Pattern** : structure briefs as either
+
+1. **Synchronous in-Department** : fetch the data WITHIN the brief
+   (via `ssh aqua cat ...` on already-finished jobs), do the analysis,
+   write verdict. M28-synthesis (this one) used this pattern.
+2. **Two-stage Boss orchestration** : Department A SUBMITS the job,
+   Boss waits at top-level (via Bash polling or qstat watch), Boss
+   spawns Department B with the SUMMARY.csv path baked into the brief.
+   M28c used this pattern.
+
+Never write a brief that has a Department do BOTH the submission AND
+the verdict — the qsub returns immediately and the Department exits
+before the job lands. (This is in addition to the discipline gate of
+[[feedback_orchestrator_discipline]] — same root cause, different
+manifestation.)
+
+**Why**: locks lessons that will recur for any future Aqua-backed
+viscoelastic Department cluster. Skip cycles by reading this first.

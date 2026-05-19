@@ -924,3 +924,85 @@ Boss inheriting the embedded-mode work knows exactly which paths are
 ratcheted (H1, H3) and which is the load-bearing fix target (H2 in
 operators_2d.jl:759-766). No need to re-litigate the 1111_circle
 mystery.
+
+## 2026-05-19 — M28 cluster synthesis ; Liu Table 3 column mis-read ; geometry isn't the gap ; Wi-DEPENDENT defect
+
+End of multi-Department session on β=0.59 cylinder Cd. Cluster
+M28/b/c/d/e/f + rheoTool sweep + Liu Table 3 verification + M26b
+fix attempt. Three durable lessons :
+
+### Lesson 1 — Liu Table 3 column mis-read
+
+Liu 2025 Table 3 columns at fixed R are ordered Wi=1.0 / 0.5 / 0.1
+(descending), not ascending. The M25 verdict "Kraken 129.39 = 0.7 %
+below Liu 130.36" was a **Newtonian coincidence** : Kraken was running
+Wi=0.1 and the brief had Kraken Wi=0.1 matched against Liu's Wi=1.0
+column (both close to Hulsen Newtonian Cd ≈ 132). At the correct Wi
+columns :
+
+- Liu Wi=0.1 R=30 = **151.31** (BUT Sc-sweep shows this is contaminated
+  by artificial diffusion : 151.31 / 149.74 / 147.14 across Sc =
+  1e4 / 1e5 / 1e6 — Wi=0.1 column is NOT converged in Liu's own data).
+- Liu Wi=1.0 R=30 = **130.36** (this IS converged in Sc).
+
+**Rule for future viscoelastic-cylinder briefs** : do NOT use Liu
+Wi=0.1 as a reference target. Use rheoTool (130.43 at Wi=0.1, full
+sweep available `bench/viscoelastic_logfv/RHEOTOOL_CD_SWEEP_M28.csv`).
+For Wi=1.0 Liu 130.36 is reliable, but the Liu trend (151.31 → 126.31
+→ 130.36 across Wi=0.1/0.5/1.0) is non-monotone in a way that reflects
+Liu's own BC instability at Wi=0.1, not physics. See
+`.orchestrator/M28_liu_table_verification.md`.
+
+### Lesson 2 — Geometry / domain is NOT the gap (Kraken-vs-rheoTool)
+
+The Kraken-vs-rheoTool gap at R=30 grows with Wi : 0.8 % (Wi=0.1)
+→ 3.2 % (Wi=0.5) → 7.3 % (Wi=1.0). At any time during this session
+the "obvious" hypothesis was wake-truncation / domain asymmetry /
+mesh resolution. ALL THREE were systematically REFUTED :
+
+- M28f matched-domain L_up=20 L_down=60 (Liu/rheoTool spec) : Δ vs
+  M28 baseline = **+0.38 Cd CONSTANT across Wi**. Domain length
+  doesn't fix the Wi-dependent gap.
+- M28e mesh sweep R ∈ {20, 30, 40} at Wi=1 : Cd plateaus at 111.4,
+  monotone DECREASING in R (away from rheoTool 120.40, not toward).
+  Mesh refinement doesn't close the gap.
+- M28c integration time 100k → 1M : Δ < 3e-7 Cd. 100k IS converged.
+  Under-integration not the gap.
+
+**Rule for future Boss-level brief framing** : when a Δ to an
+external reference grows monotonically with a physical parameter
+(Wi here), do NOT spend cycles on geometry / mesh / time-integration
+hypotheses. Spend them on physics-internal coupling (constitutive
+discretisation, source-injection ordering, prefactor placement).
+M28f burned a Department-day on this and got +0.38 Cd in return.
+
+### Lesson 3 — M28-cluster ratcheting pattern
+
+Eight Departments ran in serial-parallel to ratchet the gap location
+(M28 baseline, M28b BSD-off, M28c time-conv, M28d force-on, M28e
+mesh, M28f domain, rheoTool sweep, Liu Table verification). Each
+ratcheted out one hypothesis ; **the result is the Boss now knows
+WHAT it is NOT, not WHAT it is**. M29-tau-compare (in-flight) is the
+next ratchet. Acceptable for a research session ; **document the
+fact that the gap is now bracketed to two hypotheses** (log-conf
+source discretisation vs Guo coupling ordering) so the next session
+doesn't re-run the eight ratchet-out Departments.
+
+**Rule for future Boss-level multi-Department clusters** : after
+each Department closes, update an EXPLICIT "ratcheted out" list
+(M28 synthesis §6) so the same Department isn't accidentally
+re-spawned by a future session. Inheritor reads §6 first, knows
+where NOT to look.
+
+### Lesson 4 — Wi-dependent Δ is a signature
+
+A Δ that GROWS with Wi (here 0.8 % → 7.3 %) is the signature of a
+**polymer-coupling defect**, NOT a discretisation noise floor. Constant-%
+offset would be discretisation. Wi-amplifying offset rules in
+**constitutive / source / drag-integration physics**. Memorise this as
+a triage rule.
+
+**Why**: locks the M28 cluster outcome in Boss memory before context
+drift. Future Boss landing on a viscoelastic-cylinder Cd-gap issue
+should read M28_SYNTHESIS §6-7 first (what is ratcheted out, what
+is still suspect), avoiding re-litigation.

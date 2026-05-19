@@ -573,3 +573,87 @@ a function. Grep for `@eval using` + `getfield` pairs.
 **Why**: this trap is now Julia 1.12 baseline; older code that worked
 on 1.10 may fail silently. Any future bench script copying the
 `detect_backend()` pattern MUST use `Base.invokelatest` wrapping.
+
+## 2026-05-19 — `KRAKEN_MAX_STEPS_BASE` is straight assignment, NOT R²-scaled
+
+The bench `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl` has a
+misleading comment near line 15 hinting at R²-scaling for max_steps.
+The actual code is :
+
+```julia
+max_steps = parse(Int, get(ENV, "KRAKEN_MAX_STEPS_BASE", "100000"))
+```
+
+i.e. a **straight assignment**. No R² (or any other) scaling
+applied. M28c (jobs 21579957/8/9) verified empirically that 100 000
+steps at λ = 6000 LU R = 30 Wi = 1 is converged to F64 round-off vs
+1 000 000 steps (Δ Cd = 3e-7). At λ ≤ 6000 LU and Wi ≤ 1, the M28c
+configuration (`KRAKEN_MAX_STEPS_BASE = 100000`, `KRAKEN_AVG_WINDOW_FRAC
+= 0.2` = last 20 000 steps averaged) is the validated production
+operating point.
+
+For higher λ (R ≳ 60 ⇒ λ ≳ 12 000 LU), an audit will be needed
+because M28e showed step-0 NaN at R = 60 / 80 — likely an
+initialisation / ψ→C exponentiation stability issue, NOT a
+max_steps issue. Don't conflate.
+
+**Why**: any future bench script copy-pasting from
+`run_cyl_bigsweep_v2_2d.jl` will inherit this comment; do NOT
+re-add R²-scaling without explicit calibration. The flat 100 k
+default is the validated number.
+
+## 2026-05-19 — M26b residual : wall-segment term is the dominant +Cd amplifier
+
+M26b Option-A (consumer-side rescale by `cell_fraction` in the
+cylinder `embedded_force` branch) closes only ~8 % of the +8 Cd
+overdose at R=20 Wi=0.1 β=0.5 (delta +7.92 → +7.27). The
+`1/cell_fraction` divisor inside
+`fvfd_tensor_divergence_embedded_2d_kernel!`
+(`src/fvfd/operators_2d.jl:759-766`) is **NOT** the dominant
+amplifier. Per M26b verdict §"Recommended next mission" the
+load-bearing residual is :
+
+- The **wall-segment surface-flux term** `wall_x_length * tauxx[i, j] +
+  wall_y_length * tauxy[i, j]` (and the analogous `_y_length * tauxy /
+  tauyy` for the y-component) added at the cell center.
+
+This term contributes a surface-delta of magnitude
+`(west_fraction − east_fraction) * τ`, which is the **embedded
+surface traction** at the cut segment. Geometrically that integral
+belongs to the LBM cut-link MEA loop (`compute_drag_libb_mei_2d`),
+NOT to the FVFD body-force source. **Hypothesis** : the
+`fvfd_tensor_divergence_embedded_2d_kernel!` wall-segment term
+double-counts the LBM-side cut-link traction. The Option-A
+cell-fraction rescale does NOT fix this because the rescale acts on
+the WHOLE divergence output `(F_volume + F_wall) / V_cell`, both
+the body and the surface part ; only zeroing `wall_x_length /
+wall_y_length` in the kernel would isolate the surface contribution.
+
+**Recommended M26c kernel patch** : add a kwarg
+`_drop_wall_segment_term :: Bool = false` to
+`fvfd_tensor_divergence_embedded_2d_kernel!`. When `true`, set
+`wall_x_length = wall_y_length = 0` in the per-cell sum. Re-run
+the M26b smoke ; if Δ drops to < 1 Cd, the wall-segment term IS
+the residual amplifier and the kernel should be split into
+"body-only divergence" + "surface-only contribution" (the latter
+disabled for LBM consumers that already integrate the surface via
+MEA).
+
+Production gate (per M26b verdict) : `0010_circle` and `1111_circle`
+Cd within ±1 of `0000_circle` baseline at R=30 Wi=0.1 β=0.59.
+
+**Phase 1 mesh-refinement evidence** (M28e, job 21580646) for the
+`0000_qwall` Liu-mode path : Cd at Wi=1 plateaus at 111.4 across R ∈
+{20, 30, 40}, NOT approaching rheoTool 120.40. The M28-cluster
+synthesis (`bench/viscoelastic_logfv/CYL_SESSION_M28_SYNTHESIS_20260519.md`)
+concludes the residual +7 % Wi=1 gap is in the polymer-coupling
+internals (constitutive log-conf discretisation OR Guo source
+ordering), NOT in the embedded force kernel (which is INACTIVE on
+the `0000_qwall` Liu path). M26c remains a real bug but is
+ORTHOGONAL to the M28 production gap.
+
+**Why**: future engineer working on either M26c or M29-tau-compare
+should not conflate the two threads. M26c fixes a `1111_circle`
+embedded-mode bug ; M29 will localise the `0000_qwall` finite-Wi
+gap. Both stay open ; the latter is the higher-priority production
+blocker.

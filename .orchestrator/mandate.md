@@ -821,12 +821,29 @@ convergence) will further bound which sub-component.
   give Cd_s within ±1 of `0000_qwall`/`0000_circle` baseline
   (131.99 Newtonian / 129.49-129.67 Wi=0.1 R=30-40).
 
-### M28 — Phase 1 Wi sweep — UNBLOCKED 2026-05-18 ; IN-FLIGHT
+### M28 — Phase 1 Wi sweep — UNBLOCKED 2026-05-18 ; DONE 2026-05-19 (cluster M28/b/c/d/e/f)
 
-- **Status**: IN-FLIGHT. M25 approximate-PASS (0000_qwall R=30 = 129.39,
-  0.7% below Liu 130.36, 0.11 below strict ±1 window — accepted as
-  noise floor for Phase 1). User confirmed scope at verdict
-  2026-05-18 evening: launch M28 next.
+- **Status**: DONE. M28 cluster (M28/b/c/d/e/f + rheoTool reference +
+  Liu-check) closed 2026-05-19 ; gap to rheoTool located but not
+  fixed (gated on M29-tau-compare in-flight). M25 approximate-PASS
+  (0000_qwall R=30 = 129.39, 0.7% below Liu 130.36, 0.11 below strict
+  ±1 window — accepted as noise floor for Phase 1).
+
+**CORRECTION 2026-05-19** : the "0.7 % below Liu 130.36" M25 verdict
+is FORTUITOUS. Liu Table 3 column order is Wi=1.0/0.5/0.1
+(descending), not ascending. Liu's actual Wi=0.1 R=30 value is
+**151.31** (non-converged in Liu's own data per Sc sweep); Liu's
+Wi=1.0 R=30 value is **130.36**. Kraken `0000_qwall` Wi=0.1 R=30 =
+129.39 was thus matched against Liu's Wi=1.0 column — a Newtonian
+coincidence (both close to the Hulsen Cd ≈ 132). The "M25 PASS"
+needs re-aiming : at the correct Wi=0.1 column (Liu 151.31) Kraken
+is −14 % low ; at Wi=1.0 (Liu 130.36) Kraken Wi=1.0 (111.55) is
+−14 % low. Independent rheoTool reference Wi=0.1 = 130.43 closely
+matches Kraken Wi=0.1 (0.8 % low) ; Wi=1.0 rheoTool = 120.40 vs
+Kraken 111.55 = −7.3 %. Liu Wi=0.1 column is contaminated by
+artificial diffusion (per Liu §4.3 Sc sweep). Treat rheoTool as
+the cleaner reference. See `.orchestrator/M28_liu_table_verification.md`
+and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
 - **Goal**: validate the BSD+embedded physics across the elastic
   regime. Phase 0 (M25) is locked at Wi=0.1 (quasi-Newtonian); the
   polymer pipeline is essentially Newtonian-additive there. To test
@@ -842,9 +859,16 @@ convergence) will further bound which sub-component.
     strict Liu match, or `1100_qwall` for accuracy/speed trade-off)
   - Total : **4 Wi × 3 R × 1 embedded × 1 BSD = 12 runs ~3h on
     A100 F64**.
-- **Reference targets** (Liu Table 3 β=0.59 R=30):
-  - Wi=0.1 → Cd ≈ 130.36
-  - Wi=1.0 → Cd ≈ 151.31 (large polymer contribution; LBM stress-test)
+- **Reference targets** (CORRECTED 2026-05-19 ; column order
+  Wi=1.0/0.5/0.1 in Liu Table 3, not ascending) :
+  - ~~Wi=0.1 → Cd ≈ 130.36~~   ← was Wi=1.0 column entry
+  - ~~Wi=1.0 → Cd ≈ 151.31~~   ← was Wi=0.1 column entry (non-converged)
+  - Wi=0.1 → Liu CNEBB Cd ≈ 151.31 (BUT contaminated by artificial
+    diffusion in Liu's own Sc sweep ; rheoTool gives 130.43 here)
+  - Wi=0.5 → Liu CNEBB Cd = 126.31, rheoTool 119.71
+  - Wi=1.0 → Liu CNEBB Cd = **130.36**, rheoTool **120.40**
+  - **Primary reference is rheoTool** ; Liu Wi=0.1 column is
+    unreliable.
 - **Cd decomposition formula** (per handoff, durable doc):
   - `Cd_kraken = Cd_s + (Cd_p − Cd_bsd)`, **NOT** `Cd_s + Cd_p`.
   - Reason: LBM with `ν_LBM = ν_s + ζ·ν_p` absorbs `ζ·ν_p·∇²u` into
@@ -855,6 +879,42 @@ convergence) will further bound which sub-component.
     its job, absorbing the Newtonian-additive portion of `τ_p`).
     At higher Wi, `Cd_p − Cd_bsd` becomes finite → genuine
     elastic-stress drag contribution.
+
+- **M28 cluster outcomes (DONE 2026-05-19)** — full synthesis in
+  `bench/viscoelastic_logfv/CYL_SESSION_M28_SYNTHESIS_20260519.md`.
+
+  | Run  | Aqua job   | Config (R=30 unless noted)                          | Headline result                                                                |
+  |------|------------|------------------------------------------------------|---------------------------------------------------------------------------------|
+  | M28  | `21575466` | bsd=1, `0000_qwall`, Wi ∈ {0.1, 0.3, 0.5, 1.0}, R ∈ {20, 30, 40} | Cd(R=30) : 129.39 / 121.25 / 115.93 / 111.55 — monotone drag REDUCTION         |
+  | M28b | `21580009` | bsd=0, same tuples                                   | Cd(R=30) : 120.97 / 114.72 / 110.51 / 106.79 — gap to rheoTool WORSENS without BSD; not the cause |
+  | M28c | `21579957/8/9` | bsd=1, `0000_qwall`, R=30 Wi=1.0, 100k/300k/1M  | Δ to 1M = 3e-7 Cd → 100k IS converged ; under-integration REFUTED              |
+  | M28d | `21580531` | bsd=1, `0010_qwall` (force-on), same Wi/R tuples     | Δ vs M28 : Wi=0.1 +8.71 → Wi=1.0 +4.72 (Wi-DECREASING) ; embedded_force bug is real but Wi-diluted |
+  | M28e | `21580646` | bsd=1, `0000_qwall`, R ∈ {20, 30, 40, 60, 80}, Wi=1  | Cd ≈ 111.4 plateau at R ∈ {20, 40} ; R=60, 80 → NaN (step 0 at λ ≳ 12 000 LU) ; mesh refinement does NOT close gap to rheoTool 120.40 |
+  | M28f | `21580724` | bsd=1, `0000_qwall`, L_up=20 L_down=60, R=30        | Δ vs M28 = +0.38 CONSTANT across Wi ∈ {0.1, 0.3, 0.5, 1.0} ; wake truncation NOT the gap |
+  | rheoTool sweep | n/a  | β=0.59, R=30, Wi ∈ {0.05, 0.1, 0.2, 0.5, 1.0}      | Cd : 131.81 / 130.43 / 126.84 / 119.71 / 120.40 ; trough at Wi=0.5 + uptick at Wi=1.0 |
+
+- **Where the gap lives** (M28 cluster verdict, gated on M29-tau-compare) :
+  Δ Kraken vs rheoTool at R=30 grows monotonically with Wi
+  (0.8 % / 3.2 % / 7.3 % at Wi = 0.1 / 0.5 / 1.0). The gap is
+  NOT in BSD architecture, NOT in time-integration, NOT in wake
+  truncation, NOT in mesh resolution. Most likely locus :
+  log-conformation source-discretisation (rheoTool `cubista` on
+  `div(phi, theta)` vs Kraken's ATU pathway for ψ→C) or Guo
+  polymer-force placement in the TRT collision-source ordering.
+
+### M29 — Kraken-vs-rheoTool τ-field comparison (R=30, Wi=1, β=0.59) — IN-FLIGHT 2026-05-19
+
+- **Status**: in-flight background Department at the time of the
+  M28-cluster close. Goal : field-level comparison of τ_xx, τ_xy,
+  τ_yy between Kraken and rheoTool at the M28 stress-test point.
+  If τ fields match to ≤ 5 % L2 but Cd differs by 7 %, locus is
+  the drag-integration / Guo coupling. If τ fields differ by ~10 %,
+  locus is the log-conf / ATU constitutive discretisation.
+- **Allowed edit zones** (per Department): `bench/viscoelastic_audit/`,
+  `bench/scratch/`, verdict markdown under `bench/viscoelastic_logfv/`.
+- **Exit criterion**: τ_xx / τ_xy / τ_yy contour overlay + L2
+  norm table at three streamwise sections (x = −5R, 0, +5R) ; verdict
+  markdown ranking hypothesis (2) vs (3) from the M28 synthesis.
 
 ### M22-old — Poiseuille finite-Wi analytical (RENUMBERED to M27, PARKED)
 
