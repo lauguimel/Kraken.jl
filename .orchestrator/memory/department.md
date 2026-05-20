@@ -528,3 +528,59 @@ minimal bug fix.
 **How to apply**: Department brief should include a "verify-prior"
 preamble whenever a previous mission may have hit timeout. The check
 is three `ls` commands.
+
+## 2026-05-20 — Wall-ring integrator frame consistency check
+
+Any Department brief that computes a wall integral on a rasterised
+cylinder MUST verify the index↔physical convention BEFORE trusting
+the resulting Cd decomposition. Specifically:
+
+- The Kraken `precompute_q_wall_cylinder` rasterises using
+  **`(i−1, j−1) ↔ physical`** (`src/kernels/li_bb_2d.jl:277`).
+- A snapshot stores `cx_lbm, cy_lbm` in **physical** units.
+- Therefore the **rasterised cylinder centre in lattice indices**
+  is `(cx_phys + 1, cy_phys + 1)`.
+- A ring integrator that sets `dx = i − cx_phys` (the `:phys` frame)
+  is **1 LU off** in EVERY ring cell. For per-component Cd this
+  produces a systematic +24 % bias on Cd_polymer (polymer stress is
+  steepest in the wall layer) and a −2.2 % bias on Cd_total. The
+  bias on Cd_pressure is small (0.03 %).
+- The correct formula is `dx = (i−1) − cx_phys` (the `:idx` frame).
+
+**Why**: 2026-05-20 the M30 Phase 0c verdict (front/rear K/rT
+asymmetry 0.58 vs 0.28) was correct in DIRECTION but its absolute
+per-component numbers were biased. The retrospective fix flipped
+the "M29b matches Cd_polymer rheoTool to 0.05" claim into "M29b
+under-predicts Cd_polymer by 15-20 %", which re-ranked H2/H3 from
+DEMOTED to co-secondary.
+
+**How to apply**: any wall-decomp brief must list a sanity check
+of "compute `Cd_total_x` by ring integration and reconcile within
+0.5 % of the driver's stored `Cd_kraken`". If reconciliation fails
+by more than 1 %, the frame is off — debug before trusting the
+per-component decomposition. The driver itself is the ground truth
+(`xw = (i−1) + q_w·c_q` is the correct convention).
+
+## 2026-05-20 — Adversarial Claude+Codex pattern: 3rd documented win
+
+The M31 frame audit was the 3rd documented case where the Department's
+first-pass Claude analysis would have shipped the wrong conclusion
+without Codex's independent vote on the critical question (Q4: which
+frame is physically correct). All three wins follow the same shape:
+
+1. First pass (Claude alone) finds an "obvious" answer that aligns
+   with surface evidence (here: snapshot stores `:phys` coordinates,
+   so `:phys` must be correct).
+2. Codex on same brief finds a deeper invariant from the source code
+   (here: rasterisation uses `(i−1, j−1)` ↔ physical, so the
+   physically meaningful centre in indices is `cx_phys + 1`).
+3. Synthesis reveals Claude reversed; Codex's reasoning lands.
+
+When the next Department mission involves: (a) hypothesis ranking,
+(b) algebraic verification of a published formula in code,
+(c) frame/convention question, or (d) anything where two engineers
+might "obviously" reach different answers — invoke the adversarial
+pattern by default ([[feedback_adversarial_default_uncertain]]).
+The cost is one extra `bash run-engineer.sh` invocation and ~5
+minutes of compute. The benefit is shipping the correct
+interpretation 100 % of the time so far.

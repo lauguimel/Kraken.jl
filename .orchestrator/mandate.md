@@ -1058,6 +1058,102 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
   decompositions and azimuthal analyses.
 - **Walltime estimate**: Phase 0 (snapshot extension + BSD=0 Aqua
   smoke at Wi=1 R=30, both Kraken and rheoTool) = 1-2 sessions.
+- **Status update 2026-05-20**:
+  - **Phase 0a** (rheoTool wall p(θ) extraction) — DONE. Cd_pressure
+    rheoTool = 85.77. 93.6 % concentrated in ±22.5° front-pole band.
+    Strong sign-cancellation (|abs|/net = 3.34×). Verdict:
+    `bench/viscoelastic_audit/M30_RHEOTOOL_P_PROFILE_VERDICT.md`.
+  - **Phase 0b** (KRAKEN_SAVE_FIELDS extension for ρ) — DONE,
+    committed at `46bb9ad2`. PBS prepared but Aqua under maintenance
+    8-17h 2026-05-20 → ran the case locally on Metal F32 100k steps
+    instead, output at `tmp/m30_rho_metal/run01/`.
+  - **Phase 0c** (Kraken wall p(θ) extraction + side-by-side) — DONE
+    with caveat. K/rT amplitude ratio 0.58 front-arc vs 0.28 rear-arc
+    (factor-2 asymmetric damping). Ranked H1 (LBM ρ-BC) PRIMARY,
+    H3 SECONDARY, H2 DEMOTED, H4 EXCLUDED. Verdict:
+    `bench/viscoelastic_audit/M30_PHASE_0C_VERDICT.md`.
+  - **Centering audit** — Cl_pressure flagged 0.27 by user;
+    full Cl_total (3 components) re-extracted via index-frame ring.
+    Geometry is centered to machine precision (solid-cell parity
+    1410/1410, Δy/R = 0). Cl_total real = 0.05 % of Cd_total.
+    Verdict: `bench/viscoelastic_audit/M30_CENTERING_AUDIT_VERDICT.md`.
+  - **CRITICAL ERRATUM (from M31 frame audit, committed entry below)**:
+    Phase 0c and M29c-wallstress integrated wall ring in `:phys`
+    frame (`dx = i − cx_phys`), which is 1 LU off from the rasterised
+    cylinder centre. Driver Kraken itself uses the correct frame
+    (`xw = (i−1) + q_w·c_q, cx = cx_phys`) so stored `Cd_kraken`
+    values are valid. But the **wall decomposition** in M29c-wallstress
+    + Phase 0c is mis-framed → Cd_polymer drift +24 %, Cd_total
+    drift −2.2 %. Corrected frame gives:
+
+    | quantity | `:phys` (M29c/0c) | `:idx` (correct) | rheoTool |
+    |---|---|---|---|
+    | Cd_p_x   | 13.46 | **10.82** | 13.45 |
+    | Cd_s_x   | 21.10 | 21.19 | 19.78 |
+    | Cd_p_x (pressure) | 76.64 | 76.62 | 85.77 |
+    | Cd_total | 111.20 | 108.63 | 119.0 |
+
+    → Cd_polymer M29b is genuinely **−19.5 % under-predicted**, not
+    matched as M29c-wallstress claimed. The gap +9 Cd_total decomposes
+    as ~+10 pressure (H1 still primary) AND ~+2.6 polymer (H2/H3
+    **promoted from DEMOTED to co-secondary**).
+- **Re-ranked hypotheses** (post-M31):
+  - **H1** (LBM ρ-BC near-wall): PRIMARY, +10 Cd_pressure.
+  - **H2** (BSD body-force) or **H3** (advection scheme):
+    co-secondary, +2.6 Cd_polymer under-prediction. The earlier
+    "BSD=0 experiment" plan stays well-posed and now informs both
+    H1 and H2 simultaneously.
+  - **H4**: still excluded (qwall mode, embedded_* OFF).
+
+### M31 — Frame-convention audit of wall-ring integration — DONE 2026-05-20
+
+- **Status**: DONE 2026-05-20. Adversarial Claude+Codex audit
+  (3rd documented cross-engine win since [[feedback_adversarial_codex_claude]]).
+  Claude-Department initially voted A (`:phys`); Codex voted B
+  (`:idx`); synthesis adopted B. Without the adversarial pattern,
+  the wrong frame would have shipped.
+- **Goal**: determine which physical frame the Kraken viscoelastic
+  driver uses for `Cd_kraken/Cd_s/Cd_p/Cd_bsd`, and whether
+  post-processing wall-decomp scripts (M29c-wallstress, Phase 0c)
+  are on the same basis.
+- **Result**:
+  - Driver `_run_viscoelastic_logfv_step_channel_coupled_2d`
+    (`src/drivers/viscoelastic_logfv_2d.jl:591-604` final assembly,
+    `:515-521` per-step accumulation) computes `Cd_kraken` correctly:
+    `xw = (i−1) + q_w·c_q, cx = cx_phys`. Stored `Cd_kraken` is
+    physically valid.
+  - Post-processing scripts in M29c-wallstress + M30 Phase 0c used
+    `dx = i − cx_phys` (mixing raw lattice index `i` with physical
+    centre). Correct form: `dx = (i−1) − cx_phys`. 1 LU offset.
+  - Rasterisation convention confirmed: `precompute_q_wall_cylinder`
+    uses `(i−1, j−1) ↔ physical` (`src/kernels/li_bb_2d.jl:277`).
+  - Cd_polymer impact: +24 % drift between `:phys` and `:idx`
+    (polymer stress steep in wall layer); Cd_pressure impact:
+    negligible (0.03 %); Cd_total impact: −2.2 %.
+- **Implications retroactive**:
+  - All `Cd_kraken` values stored since M28 are valid.
+  - All wall decompositions (M29c-wallstress, M30 Phase 0c)
+    must be re-read in `:idx` frame. The 4 verdict files
+    (M29C_WALLSTRESS_VERDICT, M30_PHASE_0C_VERDICT,
+    M30_CENTERING_AUDIT_VERDICT, M31_FRAME_AUDIT_VERDICT)
+    are the canonical reference for future Cd-attribution work
+    until the post-processing scripts are corrected.
+  - The "M29b matches rheoTool Cd_polymer to 0.05" claim from
+    yesterday's mandate update (commit `1059ab10` M29c-FAIL entry)
+    was based on the mis-framed `:phys` integration. It is hereby
+    falsified. Cd_polymer M29b is actually **−15 to −20 %** of
+    rheoTool, not matched.
+- **Verdict artefacts**:
+  - `bench/viscoelastic_audit/M31_FRAME_AUDIT_CLAUDE.md`
+  - `bench/viscoelastic_audit/M31_FRAME_AUDIT_CODEX.md`
+  - `bench/viscoelastic_audit/M31_FRAME_AUDIT_VERDICT.md` (synthesis)
+- **Follow-up (LOW priority, deferrable)**: fix the post-processing
+  harnesses `bench/scratch/m29c_wallstress/run_wallstress.jl` and
+  `bench/scratch/m30_kraken_p_profile/run_kraken_p_profile.jl` to
+  use `dx = (i−1) − cx_phys`. Until done, Phase 0c verdict's H1
+  ranking still holds (the asymmetry pattern is invariant under
+  the 1 LU shift), but the absolute Cd_polymer numbers reported
+  there are off by ~24 %.
 
 ### M22-old — Poiseuille finite-Wi analytical (RENUMBERED to M27, PARKED)
 

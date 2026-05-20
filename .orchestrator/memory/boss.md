@@ -1176,3 +1176,81 @@ Decisions taken:
 far. Future Boss inheriting cylinder work must read it BEFORE
 acting on any volume-field claim (peak τ_xx, L2_rel on ROI).
 **Cd gap attribution starts with wall decomposition. Always.**
+
+## 2026-05-20 — M31 frame audit ; 3rd adversarial win ; Cd_polymer M29b actually under by ~19%
+
+Sequence: (i) M30 Phase 0a extracted rheoTool wall p(θ), 93.6 % at
+front pole; (ii) Metal F32 100k M29b case ran locally (Aqua under
+maintenance) producing the first snapshot with `:rho` persisted;
+(iii) Phase 0c found Kraken/rT amplitude ratio 0.58 front-arc vs
+0.28 rear-arc → H1 (LBM ρ-BC) ranked PRIMARY; (iv) user flagged
+Cl_pressure=0.27 as non-negligible; (v) centering audit confirmed
+geometry is centered (parity 1410/1410) but exposed a 1 LU offset
+between snapshot's `cx_phys` and rasterised cylinder centre
+`(cx_phys+1, cy_phys+1)`; (vi) M31 adversarial Claude+Codex
+identified the post-processing scripts (Phase 0c, M29c-wallstress)
+as mis-framed in `:phys` (`dx = i − cx_phys`) when they should use
+`:idx` (`dx = (i−1) − cx_phys`).
+
+### What is RIGHT (driver Kraken)
+- `_run_viscoelastic_logfv_step_channel_coupled_2d`
+  (`src/drivers/viscoelastic_logfv_2d.jl:591-604` final, `:515-521`
+  accumulation) uses `xw = (i−1) + q_w·c_q, cx = cx_phys`. Correct.
+- All `Cd_kraken` values stored since M28 are physically valid.
+
+### What is WRONG (post-processing harnesses)
+- `bench/scratch/m29c_wallstress/run_wallstress.jl`
+- `bench/scratch/m30_kraken_p_profile/run_kraken_p_profile.jl`
+- Both used `dx = i − cx_phys` → 1 LU off → Cd_polymer drift +24 %
+  (polymer stress steep in wall layer), Cd_total drift −2.2 %.
+
+### Retroactive corrections to prior verdicts
+- M29c-wallstress claim "M29b matches Cd_polymer rheoTool to 0.05":
+  **falsified**. Real Cd_polymer M29b = 10.82 (ring `:idx`) or 11.49
+  (driver Cd_p stored) vs rT 13.45 → −15 to −20 % under-predicted.
+- Mandate `M29c FAIL` entry from yesterday (`1059ab10`): the
+  "meta-finding" that the M28/M29 constitutive-locus attribution
+  was wrong remains correct in SPIRIT — volume L2_rel(τ_p) ≠ Cd
+  contribution — but its specific number (Cd_polymer M29b matched
+  rheoTool) was itself a frame artefact. The truer statement is:
+  "Cd_polymer is moderately under-predicted across all three
+  schemes (Rusanov 19 %, MUSCL-superbee unknown, all wrt rT 13.45);
+  the dominant gap remains Cd_pressure at front-shoulder."
+
+### Re-ranked M30 hypotheses (post-M31)
+- **H1** (LBM ρ-BC near-wall, +10 pressure): PRIMARY.
+- **H2/H3** (BSD coupling, polymer advection scheme): co-secondary,
+  ~+2.6 Cd_polymer under-prediction. The "BSD=0 experiment" plan
+  is now even better posed since it would simultaneously test the
+  pressure-BC pathway (H1) AND the polymer-coupling pathway (H2).
+- **H4**: still excluded.
+
+### Process lesson (3rd adversarial win)
+Without Codex's independent vote on Q4 (which frame is physically
+correct?), the Department's first-pass Claude analysis would have
+shipped the wrong conclusion (vote A `:phys`). The discrepancy
+was resolved by reading the M30 centering audit harness side-by-side
+with the driver's `xw = (i−1) + q_w·c_q` formula. **The pattern of
+"Claude derives FIRST, then Codex on same brief, then compare"
+([[feedback_adversarial_codex_claude]]) is now load-bearing**:
+3 documented wins, no documented losses on hypothesis-ranking
+or formal-derivation missions.
+
+### Files
+- `bench/viscoelastic_audit/M31_FRAME_AUDIT_{CLAUDE,CODEX,VERDICT}.md`
+- `bench/viscoelastic_audit/M30_PHASE_0C_VERDICT.md` (caveat: read in `:idx`)
+- `bench/viscoelastic_audit/M30_CENTERING_AUDIT_VERDICT.md`
+
+### What this changes for M30 Phase 1
+- Re-do the BSD=0 experiment in BOTH `:phys` and `:idx` integration
+  to ensure the verdict is frame-independent.
+- Fix the post-processing harnesses first (LOW priority but should
+  be done before any Phase 1 conclusions are committed).
+
+**Why**: this is the 4th major project-level meta-correction in 4
+days (M28 volume-locus falsified → M29c rolled back → polymer-match
+artefact identified → frame offset). Future Boss reading the cylinder
+work should treat any pre-M31 absolute Cd_component number as
+suspect until re-integrated in `:idx`. The TOTAL `Cd_kraken` values
+remain valid (driver is correct); only the per-component
+decomposition is biased.

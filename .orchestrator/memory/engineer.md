@@ -814,3 +814,35 @@ must explicitly state and check the face-velocity multiplier first.
 question is "is the face velocity zero by construction?" If yes,
 the hypothesis dies before the algebra of the face-value reconstruction
 even matters.
+
+## 2026-05-20 — Rasterised cylinder index↔physical convention
+
+`precompute_q_wall_cylinder` in `src/kernels/li_bb_2d.jl:277` uses
+the convention `x_phys = i − 1, y_phys = j − 1`. Consequence:
+
+- Snapshot `cx_lbm, cy_lbm` are stored in **physical** units.
+- The rasterised cylinder centre in **lattice indices** is
+  `(cx_lbm + 1, cy_lbm + 1)`, NOT `(cx_lbm, cy_lbm)`.
+- Driver `_run_viscoelastic_logfv_step_channel_coupled_2d`
+  (`src/drivers/viscoelastic_logfv_2d.jl:591-604` final assembly)
+  uses `xw = (i−1) + q_w·c_q, cx = cx_phys` — correctly accounting
+  for the convention. Stored `Cd_kraken`, `Cd_s`, `Cd_p`, `Cd_bsd`
+  are all physically valid.
+
+For any **wall-ring post-processing** (bench/scratch analysis,
+verification harness, comparison script): the integration arm
+must be `dx = (i−1) − cx_phys` (`:idx` frame), NEVER
+`dx = i − cx_phys` (`:phys` frame). The latter is 1 LU off and
+biases Cd_polymer by +24 %, Cd_total by −2.2 %. Cd_pressure is
+nearly invariant (0.03 %).
+
+**Sanity check before trusting any wall-ring decomposition**:
+recover Cd_total_x by ring integration and reconcile within 0.5 %
+of the driver's stored `Cd_kraken`. If off by more than 1 %,
+the frame is wrong.
+
+**Why**: M31 frame audit 2026-05-20 (adversarial Claude+Codex)
+caught both M29c-wallstress and M30 Phase 0c using `:phys`.
+Cd_polymer "match" claim from M29c-wallstress (M29b 13.40 vs rT
+13.45) was actually a frame artefact; corrected value is 10.82
+(under by 19.5 %).
