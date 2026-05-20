@@ -1178,6 +1178,87 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
   advection for the rear-shoulder Wi-coupled signal (~2.6 Cd
   residual after Phase 2b). Distinct mission, defer until 2b lands.
 
+- **Phase 2b PARKED 2026-05-21** — port landed (commit pending) +
+  Pkg.test bit-identical on default, BUT R=30 Wi=1 Metal F32 100k
+  NaN'd at step 36500, AND Newtonian β=1.0 at same setup NaN'd at
+  step 40000 (cross-β reproduces). Adversarial audit Claude+Codex
+  identified lag-mismatch on `x_ff` (q ≤ 0.5 branch reads `f_in`
+  lag-1 vs Phase 2a reference lag-0). Single-pass GPU kernel forced
+  the lag-1 choice but breaks canonical formula.
+  Proposed fix: two-pass kernel split (collision + BC bricks).
+  **Parked pending M32 methodology overhaul** (current verdict
+  doesn't trust the 9-Cd gap diagnosis enough to keep investing
+  effort on a possibly-spurious target).
+
+### M32 — Setup audit + matrix test methodology — 2026-05-21
+
+- **Mandate**: re-establish a rigorous methodology for Kraken vs
+  rheoTool comparison BEFORE any more BC/scheme port work. Audit
+  setup mismatches, build matrix of redundant Wi × R points so
+  resolution and physics confounders separate, ensure rT itself is
+  time-converged.
+- **Trigger**: user step-back after 6+ phases of empilage. Plain
+  sight check exposed multiple HARD mismatches that invalidate
+  the single-point comparison narrative.
+
+- **Phase 1 — DONE 2026-05-21** (setup audit):
+  HARD mismatches identified between rT and Kraken cases at the
+  same nominal (R=30, Wi=1, β=0.59):
+  - **L_downstream**: rT 60·R vs Kraken 15·R (4× shorter; wake
+    truncated on Kraken)
+  - **L_upstream**: rT 20·R vs Kraken 15·R
+  - **Stabilisation**: rT `coupling` (NO BSD) vs Kraken `BSD=1.0`
+  - **Cylinder discretisation**: rT body-fitted O-grid arcs
+    (conformal) vs Kraken halfway-BB staircase
+  - **Mesh near-wall**: rT 0.005·R vs Kraken 1/R LU resolution
+    (Kraken coarser by ~7×)
+  - **Time convergence**: rT Wi=1 NOT converged at endTime=10
+    (Cd drifts 116.99 → 120.40 over Δt=2; Wi=0.1 and Wi=0.5 are
+    converged)
+  - **Cd convention**: rT uses `K = ∫(τ + 2η_s·D − p·I)·n_x dA /
+    (η_s + η_p)` (Hulsen K, no factor 2, no ρU²D in denominator).
+    Kraken `Cd_kraken` formula not yet verified bit-for-bit
+    identical → C1 audit pending.
+  Verdict: `bench/viscoelastic_audit/M32_PHASE1_SETUP_AUDIT_VERDICT.md`.
+
+- **Phase 2 — IN-FLIGHT 2026-05-21** (canonical setup + matrix):
+  - **Kraken side** (PBS prep done, submitted on Aqua F64 CUDA):
+    - Job `21597933.aqua` (M32_newtonian_sanity, R=30 β=1.0): G3
+      gate Newtonian Cd parity check vs rT Newtonian shrunk.
+    - Job `21597934.aqua` (M32_matrix, R ∈ {30, 60} × Wi ∈ {0.1,
+      1.0} × β=0.59): 4 cases, BSD=1.0, :rusanov, max_steps=100k.
+      Walltime 4h budget; ~50-150 min expected. R=60 Wi=1 may NaN
+      (Metal F32 already did) — F64 may extend stability.
+    Verdict: `bench/viscoelastic_audit/M32_PHASE2_KRAKEN_PREP_VERDICT.md`.
+  - **rheoTool side** (Docker local, running in background, ~2-3h):
+    - Shrunk case dirs:
+      - `bench/rheotool/cylinder_newtonian_re1_shrunk15R/`
+      - `bench/rheotool/cylinder_wi0.1_shrunk15R/`
+      - `bench/rheotool/cylinder_wi1.0_shrunk15R/` (endTime=20 for convergence)
+    - L_up=L_down=15·R now matches Kraken. Mesh shrunk 24894 →
+      20494 cells (-17.7%, all from upstream + far-wake; near-cyl
+      blocks 1-6 O-grid unchanged at 0.005·R resolution).
+    - Run: `bash bench/rheotool/run_shrunk_matrix.sh all`.
+    Verdict: `bench/viscoelastic_audit/M32_PHASE2_RHEOTOOL_PREP_VERDICT.md`.
+
+- **Phase 3 — PLANNED** (cross-code comparison):
+  - C1 sub-mission (in parallel with runs): verify Cd_kraken
+    normalisation matches rT Hulsen K bit-for-bit.
+  - Once Kraken matrix + rT shrunk results both land:
+    - Newtonian gate G3: Kraken vs rT Newtonian Cd parity <2 %
+      required. If fail → setup or normalisation still mismatched
+      → re-audit before viscoelastic.
+    - Viscoelastic matrix Cd table: 2×2 (R, Wi), Kraken vs rT
+      side-by-side. Acceptance: same trend with Wi at each R, and
+      consistent R-resolution direction.
+    - Re-evaluate the 9-Cd "gap" once setups match. May shrink or
+      vanish entirely.
+
+- **Out of scope for M32**: BC ports (Bouzidi-FL Phase 2b stays
+  parked), polymer scheme alternatives (M29d-like), any src/
+  optimisation. M32 is methodology only. Production decisions
+  resume once Phase 3 verdict lands.
+
 ### M31 — Frame-convention audit of wall-ring integration — DONE 2026-05-20
 
 - **Status**: DONE 2026-05-20. Adversarial Claude+Codex audit

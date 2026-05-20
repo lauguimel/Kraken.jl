@@ -1,0 +1,233 @@
+/*---------------------------------------------------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  9
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+Build  : 9-b456138dc4bc
+Exec   : rheoFoam
+Date   : May 20 2026
+Time   : 23:47:02
+Host   : "edbe0616313d"
+PID    : 473
+I/O    : uncollated
+Case   : //data
+nProcs : 1
+sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0
+
+
+SIMPLE: No convergence criteria found
+
+
+SIMPLE: No convergence criteria found
+
+
+SIMPLE: Operating solver in transient mode with 1 outer corrector
+SIMPLE: Operating solver in PISO mode
+
+
+Reading field p
+
+Reading field U
+
+Using dynamicCode for codedFixedValue parabolicMeanU1 at line 24 in "//data/0/U/boundaryField/inlet"
+Creating new library in "dynamicCode/parabolicMeanU1/platforms/linux64GccDPInt32Opt/lib/libparabolicMeanU1_a25f6bf266688079c452d1d88fd3dc60f3f12bf6.so"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFixedValueFvPatchFieldTemplate.C" "//data/dynamicCode/parabolicMeanU1/codedFixedValueFvPatchFieldTemplate.C"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFixedValueFvPatchFieldTemplate.H" "//data/dynamicCode/parabolicMeanU1/codedFixedValueFvPatchFieldTemplate.H"
+Invoking "wmake -s libso //data/dynamicCode/parabolicMeanU1"
+wmake libso //data/dynamicCode/parabolicMeanU1
+    ln: ./lnInclude
+    wmkdep: codedFixedValueFvPatchFieldTemplate.C
+    Ctoo: codedFixedValueFvPatchFieldTemplate.C
+    ld: //data/dynamicCode/parabolicMeanU1/../platforms/linux64GccDPInt32Opt/lib/libparabolicMeanU1_a25f6bf266688079c452d1d88fd3dc60f3f12bf6.so
+Reading/calculating face flux field phi
+
+Selecting constitutive equation Oldroyd-BLog
+Selecting thermoFunction: Constant
+Selecting thermoFunction: Constant
+No MRF models present
+
+No fvModels present
+No fvConstraints present
+Courant Number mean: 0.00034229406649 max: 0.00792320317083
+
+Starting time loop
+
+Using dynamicCode for coded outputCd at line 58 in "//data/system/controlDict/functions/outputCd"
+Creating new library in "dynamicCode/outputCd/platforms/linux64GccDPInt32Opt/lib/liboutputCd_8ab66f9aaf8e23a872e706b9c7d002d0a00278d2.so"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFunctionObjectTemplate.C" "//data/dynamicCode/outputCd/codedFunctionObjectTemplate.C"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFunctionObjectTemplate.H" "//data/dynamicCode/outputCd/codedFunctionObjectTemplate.H"
+Invoking "wmake -s libso //data/dynamicCode/outputCd"
+wmake libso //data/dynamicCode/outputCd
+    ln: ./lnInclude
+    wmkdep: codedFunctionObjectTemplate.C
+    Ctoo: codedFunctionObjectTemplate.C
+    ld: //data/dynamicCode/outputCd/../platforms/linux64GccDPInt32Opt/lib/liboutputCd_8ab66f9aaf8e23a872e706b9c7d002d0a00278d2.so
+Courant Number mean: 0.00034229406649 max: 0.00792320317083
+Time = 0.02
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 1, Final residual = 4.4231993013e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0, Final residual = 0, No Iterations 0
+DILUPBiCG:  Solving for thetayy, Initial residual = 0, Final residual = 0, No Iterations 0
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 1, Final residual = 1.59503156295e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 1, Final residual = 5.07748552244e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 1, Final residual = 0.962962420524, No Iterations 1
+time step continuity errors : sum local = 0.000569152899267, global = -1.18844693935e-16, cumulative = -1.18844693935e-16
+ExecutionTime = 6.41 s  ClockTime = 69 s
+
+Courant Number mean: 0.146197894829 max: 2.81871245592
+Time = 0.04
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.588204341737, Final residual = 5.1060200636e-11, No Iterations 7
+DILUPBiCG:  Solving for thetaxy, Initial residual = 1, Final residual = 1.1908276594e-11, No Iterations 2
+DILUPBiCG:  Solving for thetayy, Initial residual = 1, Final residual = 9.56928354512e-11, No Iterations 7
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 2.8961377148e-05, Final residual = 1.6821548904e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.341531574875, Final residual = 3.99701630205e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.968986184266, Final residual = 9.75797419411e-14, No Iterations 1
+time step continuity errors : sum local = 0.0004734201235, global = -6.71645683443e-18, cumulative = -1.25561150769e-16
+ExecutionTime = 10.44 s  ClockTime = 73 s
+
+Courant Number mean: 0.147884949356 max: 2.85204244693
+Time = 0.06
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.240959583768, Final residual = 1.93235018272e-11, No Iterations 7
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.955334279597, Final residual = 8.86196755985e-12, No Iterations 7
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.302129214772, Final residual = 1.67232701992e-11, No Iterations 7
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 0.000138315145645, Final residual = 2.01585514975e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.0565704717843, Final residual = 3.30024954434e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.211312191556, Final residual = 2.15984446408e-14, No Iterations 1
+time step continuity errors : sum local = 8.57018522584e-05, global = -6.73798156072e-19, cumulative = -1.26234948925e-16
+ExecutionTime = 14.49 s  ClockTime = 77 s
+
+Courant Number mean: 0.146291660104 max: 2.82840568037
+Time = 0.08
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.159990475638, Final residual = 9.90636518446e-12, No Iterations 7
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.282027791108, Final residual = 6.34822395997e-11, No Iterations 6
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.173473314415, Final residual = 1.15248026201e-11, No Iterations 7
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 0.000341317707888, Final residual = 1.79576408049e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.016304696316, Final residual = 3.27522855557e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.0715098177004, Final residual = 3.09414575921e-14, No Iterations 1
+time step continuity errors : sum local = 9.24766598481e-06, global = -3.72155095235e-19, cumulative = -1.26607104021e-16
+ExecutionTime = 18.52 s  ClockTime = 81 s
+
+Courant Number mean: 0.14646249959 max: 2.82432081322
+Time = 0.1
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0797464388429, Final residual = 4.27472335677e-11, No Iterations 6
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.150698125636, Final residual = 3.37415752742e-12, No Iterations 7
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.086611880787, Final residual = 4.87604360015e-11, No Iterations 6
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 2.74940496524e-05, Final residual = 1.82559617222e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.0113061650491, Final residual = 3.23794939301e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.050092113642, Final residual = 3.54714217643e-14, No Iterations 1
+time step continuity errors : sum local = 5.6402529962e-06, global = -3.3496185267e-18, cumulative = -1.29956722547e-16
+ExecutionTime = 22.63 s  ClockTime = 85 s
+
+Courant Number mean: 0.146741701331 max: 2.82280729963
+Time = 0.12
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0448916773567, Final residual = 1.48884639152e-11, No Iterations 6
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0958794076924, Final residual = 2.2122501059e-12, No Iterations 7
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0494296064753, Final residual = 3.18627285429e-11, No Iterations 6
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 1.69159402361e-05, Final residual = 1.83193963903e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.00950156124492, Final residual = 3.1534888245e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.0204660665197, Final residual = 3.44589865799e-14, No Iterations 1
+time step continuity errors : sum local = 9.34522933424e-07, global = 4.10946050041e-18, cumulative = -1.25847262047e-16
+ExecutionTime = 26.71 s  ClockTime = 90 s
+
+Courant Number mean: 0.147002496842 max: 2.82121576827
+Time = 0.14
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.028634555625, Final residual = 8.73153052997e-12, No Iterations 6
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0661225266869, Final residual = 1.74536388354e-12, No Iterations 7
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0315236421614, Final residual = 3.16256688216e-11, No Iterations 6
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 3.63911244671e-06, Final residual = 1.86564173656e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.00785187953129, Final residual = 3.16197881453e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.0170290597664, Final residual = 3.44642172759e-14, No Iterations 1
+time step continuity errors : sum local = 1.15152075667e-06, global = 6.41715180421e-19, cumulative = -1.25205546866e-16
+ExecutionTime = 30.73 s  ClockTime = 94 s
+
+Courant Number mean: 0.147237108023 max: 2.820041997
+Time = 0.16
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.019883055025, Final residual = 5.86130750144e-12, No Iterations 6
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0479033732132, Final residual = 1.29834187278e-12, No Iterations 7
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0219238245102, Final residual = 2.48094457506e-11, No Iterations 6
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 2.32646837076e-06, Final residual = 1.84577605911e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.00658210032671, Final residual = 3.10378027635e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.0126461133803, Final residual = 3.31708407238e-14, No Iterations 1
+time step continuity errors : sum local = 7.2211511672e-07, global = -1.50313101539e-18, cumulative = -1.26708677882e-16
+ExecutionTime = 34.83 s  ClockTime = 98 s
+
+Courant Number mean: 0.14744306351 max: 2.81931905575
+Time = 0.18
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0145728459008, Final residual = 5.0604307021e-12, No Iterations 6
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.035996793017, Final residual = 9.48615006437e-13, No Iterations 7
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0161542007859, Final residual = 1.76225390134e-11, No Iterations 6
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 1.55563458432e-06, Final residual = 1.77723723189e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.00563200174014, Final residual = 3.21273898401e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.010274830836, Final residual = 3.19338323221e-14, No Iterations 1
+time step continuity errors : sum local = 4.9614283755e-07, global = 1.18710721069e-19, cumulative = -1.26589967161e-16
+ExecutionTime = 38.89 s  ClockTime = 102 s
+
+Courant Number mean: 0.147625092317 max: 2.81891609018
+Time = 0.2
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.011068773379, Final residual = 3.34478359389e-11, No Iterations 6
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0278462575223, Final residual = 5.47417266964e-11, No Iterations 6
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0123519367285, Final residual = 1.22995882797e-11, No Iterations 6
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+Coupled system: p, U
+Petsc:preonly:lu: Solving coupled for p, Initial residual = 1.07256896873e-06, Final residual = 1.82060774711e-16, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Ux, Initial residual = 0.00488583658105, Final residual = 3.18956290672e-15, No Iterations 1
+Petsc:preonly:lu: Solving coupled for Uy, Initial residual = 0.00871935146451, Final residual = 3.09997204345e-14, No Iterations 1
+time step continuity errors : sum local = 3.99072502167e-07, global = 3.70751349077e-18, cumulative = -1.2288245367e-16
+ExecutionTime = 43.04 s  ClockTime = 106 s
+

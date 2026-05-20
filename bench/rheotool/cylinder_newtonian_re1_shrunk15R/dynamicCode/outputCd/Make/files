@@ -1,0 +1,6 @@
+# dynamicCode:
+# SHA1 = 8ab66f9aaf8e23a872e706b9c7d002d0a00278d2
+
+codedFunctionObjectTemplate.C
+
+LIB = $(PWD)/../platforms/$(WM_OPTIONS)/lib/liboutputCd_8ab66f9aaf8e23a872e706b9c7d002d0a00278d2
