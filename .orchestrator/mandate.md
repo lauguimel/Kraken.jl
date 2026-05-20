@@ -1105,6 +1105,79 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
     H1 and H2 simultaneously.
   - **H4**: still excluded (qwall mode, embedded_* OFF).
 
+- **Phase 1 done 2026-05-20 (Metal F32, since Aqua in maintenance)**:
+  - **Phase 1a — BSD sweep** ∈ {0.0, 0.5, 1.0} at R=30 Wi=1.0:
+    Cd_kraken = 106.40 / 111.32 / 111.09. Cd_p strictly invariant
+    (11.46 / 11.46 / 11.49). **H2 DEMOTED** — BSD aide à
+    s'approcher de rT, l'augmenter sature autour de BSD ≥ 0.5.
+    `:idx` p(θ) decomposition (Phase 1c-like) at Wi=1 shows
+    front-pole K/rT ratio 0.583/0.594/0.589 (BSD=0/0.5/1.0,
+    saturated at BSD ≥ 0.5). Verdict:
+    `bench/viscoelastic_audit/M30_PHASE_1_VERDICT.md`.
+  - **Phase 1b — R sweep** ∈ {20, 30, 40, 60} at Wi=1.0 BSD=1.0:
+    R=60 NaN (Wi=1 too loaded at high R). At R ∈ {20, 30, 40}:
+    Cd_total 111.82/111.09/110.76 (essentially flat),
+    Cd_p 9.33/11.49/12.10 (converges toward rT 13.45 with R),
+    Cd_pressure scalar 78.60/76.62/76.46 (gap rT−K **GROWS** from
+    +7.17 → +9.31, NOT converging). **front-pole K/rT plateau 0.59
+    across R; rear-pole K/rT REGRESSES 0.177→0.144 with R.**
+    Verdict (adversarial Claude+Codex AGREE):
+    **structural-BC, not resolution-limited.**
+    `bench/viscoelastic_audit/M30_PHASE1_R_SWEEP_VERDICT.md`.
+  - **Phase 1c — Wi sweep** ∈ {0.1, 0.5, 1.0} at R=30 BSD=1.0:
+    Cd_kraken 129.48/115.89/111.09 vs rheoTool 130.43/119.71/120.40.
+    gap = −0.95 / −3.82 / −9.31 (gap GROWS with Wi).
+    **Pole bands invariant in Wi**:
+    - Front pole K/rT 0.628 → 0.607 → 0.589 (Δ=0.038, <0.05 threshold)
+    - Rear pole K/rT 0.184 → 0.188 → 0.159 (Δ=0.028)
+    **Rear shoulder Wi-coupled** (K/rT 0.272→0.329→0.345, Δ=0.074).
+    Adversarial Claude+Codex AGREE bit-identical.
+    Verdict: **H1 pure-BC at poles CONFIRMED, polymer-coupling
+    localised at rear shoulder (H3 territory).**
+    `bench/viscoelastic_audit/M30_PHASE1C_WI_SWEEP_VERDICT.md`.
+  - **Misleading Cd_total match at low Wi caveat**: Kraken Cd_total
+    matches rT at Wi=0.1 to 0.7 %, but the K/rT azimuthal structure
+    is already broken (poles K/rT 0.628 / 0.184). The total matches
+    by coincidence of opposite-sign error cancellations
+    (pole under-prediction + equator over-prediction). At Wi=1.0
+    this coincidence breaks because rear-shoulder magnitude grows
+    +21% in rT but Kraken under-captures it. **Never trust a scalar
+    Cd match without azimuthal decomposition** — added as memory.
+
+- **Phase 2a done 2026-05-20** (analytical-bench BC prototype):
+  - **Setup**: standalone D2Q9 SRT 64×64 LU, concentric Couette
+    annulus R_in=10, R_out=25, two ω ∈ {0.001, 0.005}. Analytical
+    closed-form `u_θ(r), p(r)`. 5000 steps from analytical
+    equilibrium initial condition. Independent standalone Julia in
+    `bench/scratch/m30_phase2a_interpBB_{claude,codex}/`.
+  - **Adversarial Claude+Codex**: both engines independently
+    implement halfway-BB and Bouzidi-Firdaouss-Lallemand
+    interpolated BB on inner cylinder ring. AGREE on GO verdict.
+  - **Result**:
+    - halfway-BB max wall-p rel err: 1.09 (ω=0.005) / 5.19 (ω=0.001)
+    - **Bouzidi-FL** max wall-p rel err: 0.29 / 0.87 → **−74 % / −83 %**
+    - halfway-BB torque rel err: 1.85e−2 (both ω, bit-identical engines)
+    - **Bouzidi-FL** torque rel err: 1.0e−4 / 3.5e−3 → **−99 % / −79 %**
+  - **Caveat**: Couette analytical drag = 0 → does NOT test
+    front-pole stagnation peak. The GO motivates the src/ port,
+    but final closure validation = cylinder Wi=1 R=30 vs rheoTool.
+  - Verdict: `bench/viscoelastic_audit/M30_PHASE2A_VERDICT.md`.
+
+- **Phase 2b PLANNED** — port Bouzidi-Firdaouss-Lallemand interpolated
+  BB to `src/kernels/li_bb_2d.jl` behind a `wall_bc::Symbol = :halfwayBB`
+  kwarg with `:bouzidi_fl` option (default unchanged, zero regression).
+  Runner: Codex via `kraken-codex-pilot`. Validation cascade:
+  - Smoke: cavity newtonian + viscoelastic regression (byte-identical
+    on default `:halfwayBB`).
+  - Cylinder R=30 Wi=1.0 β=0.59 with `:bouzidi_fl`: target front-pole
+    K/rT > 0.85 (closes ~6-7 Cd of the 9-Cd gap).
+  - Multi-Wi cylinder {0.1, 0.5, 1.0} cross-check: K/rT pôles should
+    all improve uniformly (Phase 1c established they're Wi-invariant).
+
+- **Phase 2c LATER** — polymer-aware BC or higher-order log-conf
+  advection for the rear-shoulder Wi-coupled signal (~2.6 Cd
+  residual after Phase 2b). Distinct mission, defer until 2b lands.
+
 ### M31 — Frame-convention audit of wall-ring integration — DONE 2026-05-20
 
 - **Status**: DONE 2026-05-20. Adversarial Claude+Codex audit
