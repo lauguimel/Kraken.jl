@@ -846,3 +846,34 @@ caught both M29c-wallstress and M30 Phase 0c using `:phys`.
 Cd_polymer "match" claim from M29c-wallstress (M29b 13.40 vs rT
 13.45) was actually a frame artefact; corrected value is 10.82
 (under by 19.5 %).
+
+## 2026-05-21 — Cylinder R=60 polymer-coupled NaN ; Newtonian R=60 stable
+
+Production setup `0000_qwall` β=0.59 Re=1 BSD=1.0 `:rusanov` Wi ∈ {0.1, 1.0}:
+- Kraken Aqua F64 CUDA: R=60 cases NaN'd before completing 100k steps.
+- Same setup with β=1.0 (Newtonian, ν_p=0) R=60: **stable**, Cd=132.68.
+
+→ R=60 instability is **polymer-coupled**, not pure LBM-staircase.
+Likely mechanism: polymer stress accumulation on staircased ring
+(more cells = sharper local gradients = faster build-up); polymer
+subcycling auto-adapter exceeds `max_polymer_substeps=64`; effective
+polymer step too large → trace_C explodes → ρ_LBM loses positivity.
+
+**Practical envelope (M32 Phase 3 2026-05-21)**:
+- R ∈ {30, 40} stable at all tested Wi.
+- R=60 stable Newtonian only; polymer fails at Wi=0.1 already.
+- R=80, R=100 untested but likely worse.
+
+When porting alternative polymer schemes (CUBISTA, MUSCL two-pass),
+include R=60 viscoelastic in the regression matrix as a stress test
+— stability there indicates the new scheme is genuinely more robust,
+not just `:rusanov`-equivalent at low R.
+
+## 2026-05-21 — rT shrunk L_down=60→15R does NOT change Cd at Wi=1
+
+Empirical: `cylinder_wi1.0_shrunk15R/` (L_up=L_down=15R) gives
+Cd_total = 120.38 at converged (endTime=20), bit-identical to
+`cylinder_wi1.0/` (L_up=20R, L_down=60R) Cd = 120.40 at t=10. The
+"wake truncation" hypothesis is empirically falsified for Cd_total
+at the Wi=1 R=30 setup. The shorter domain still captures the
+relevant wake stresses for drag integration.

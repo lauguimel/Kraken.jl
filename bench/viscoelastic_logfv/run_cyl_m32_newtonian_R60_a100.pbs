@@ -1,0 +1,96 @@
+#!/bin/bash -l
+#PBS -N M32_newtonian_R60
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M32 Phase 2 — Newtonian sanity check (Kraken vs rheoTool Newtonian)
+#
+# Single Kraken case at strict-Newtonian limit (beta=1.0, nu_p=0). The
+# polymer pipeline is dormant: tau_p = 0 everywhere, Cd_p = Cd_bsd = 0.
+# Cd_kraken = Cd_s only (LBM cut-link Mei-Yu MEA on staircased cylinder).
+#
+# Purpose: M32 Phase 1 audit (bench/viscoelastic_audit/
+# M32_PHASE1_SETUP_AUDIT_VERDICT.md) identified HARD mismatches between
+# Kraken and rheoTool (L_down 15R vs 60R, BSD vs coupling, staircase vs
+# O-grid). Before any further Bouzidi-FL or polymer-scheme attempts,
+# we need a Newtonian gate: Kraken Cd_s vs rheoTool Newtonian Cd at the
+# same R=30 Re=1 must agree within <2% to validate the geometry/mesh
+# alone. If this fails, no viscoelastic comparison is meaningful (H3
+# staircase or H1 domain dominate the polymer effect).
+#
+# Single case parameters:
+#   R = 30 (LU)
+#   beta = 1.0 (nu_p = 0, Oldroyd-B reduces to Newtonian)
+#   Re_R = 1
+#   Wi = 1.0 (numerically irrelevant: lambda set but nu_p=0 disables
+#             the polymer source; chosen as a non-zero placeholder so
+#             the driver's lambda kwarg is well-defined)
+#   bsd_fraction = 1.0 (irrelevant at nu_p=0; BSD correction degenerates
+#                       to zero)
+#   L_up = L_down = 15 (Kraken canonical domain — see H1 verdict)
+#   Geometry: qwall (no embedded force/advection/drag — M29b production)
+#   Advection scheme: rusanov (M29b production default, irrelevant at
+#                              nu_p=0 since psi is never evolved)
+#
+# Diagnostic output: KRAKEN_SAVE_FIELDS=1 persists (ux, uy, tauxx,
+# tauxy, tauyy, is_solid, rho) for wall decomposition analysis. With
+# beta=1.0, tau_p == 0 and the only useful fields are (ux, uy, rho,
+# is_solid). rho enables the azimuthal p(theta) = c_s^2 * rho(theta)
+# wall-pressure profile.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Newtonian limit: single case.
+export KRAKEN_BETA_LIST="1.0"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_R_LIST="60"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+
+# M29b production scheme (irrelevant at nu_p=0; psi never evolved).
+export KRAKEN_ADVECTION_SCHEME="rusanov"
+
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_MAX_STEPS_BASE="100000"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+export KRAKEN_OUTPUT_DIR="${KRAKEN_OUTPUT_DIR:-tmp/m32_newtonian_R60/${PBS_JOBID:-manual}}"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo "=== cyl_m32_newtonian_R60 starting at $(date) ==="
+echo "Target: beta=1.0 (Newtonian limit) Re=1 R=30 bsd=1.0 (qwall, no embedded)"
+echo "Scheme: $KRAKEN_ADVECTION_SCHEME (M29b production; irrelevant at nu_p=0)"
+echo "Output dir: $KRAKEN_OUTPUT_DIR"
+echo "Save fields: $KRAKEN_SAVE_FIELDS (includes rho for wall p(theta))"
+echo "Gate: Cd_s vs rheoTool Newtonian Re=1 must agree <2%"
+
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== cyl_m32_newtonian_R60 done at $(date) ==="
+ls -la "$KRAKEN_OUTPUT_DIR"

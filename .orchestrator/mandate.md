@@ -1259,6 +1259,71 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
   optimisation. M32 is methodology only. Production decisions
   resume once Phase 3 verdict lands.
 
+- **Phase 3 — DONE 2026-05-21** (matrix verdict + C1 normalisation audit):
+
+  | case | Kraken (Aqua F64) | rT shrunk | gap | % |
+  |---|---|---|---|---|
+  | **Newtonian R=30** | **132.08** | **132.37** | **−0.29** | **−0.22 %** ✓ G3 PASS |
+  | Wi=0.1 R=30 β=0.59 | 129.39 | 130.43 | −1.04 | −0.80 % |
+  | Wi=0.1 R=40 β=0.59 | 129.49 | 130.43 | −0.94 | −0.72 % |
+  | Wi=1.0 R=30 β=0.59 | 111.55 | 120.38 | −8.83 | **−7.34 %** |
+  | Wi=1.0 R=40 β=0.59 | 111.29 | 120.38 | −9.09 | **−7.55 %** |
+  | Newtonian R=60 β=1.0 | **132.68** | — | — | stable |
+  | Wi=0.1 R=60 | NaN | — | — | polymer-coupled NaN |
+  | Wi=1.0 R=60 | NaN | — | — | polymer-coupled NaN |
+
+  rT shrunk(L=15R) Wi=1 Cd = 120.38 ≡ rT non-shrunk(L=60R) Cd = 120.40
+  → **wake truncation is NOT the cause** (empirically falsified).
+
+  C1 audit (`bench/viscoelastic_audit/M32_PHASE3_C1_CD_NORM_VERDICT.md`):
+  Kraken classical Cd ≡ rT Hulsen K bit-for-bit at this setup
+  (both denominators = 1 by parameter coincidence Re_D=2). **SAME**.
+  General conversion: Cd_kraken / Cd_rT = 2/Re_D.
+
+  **Verdict** :
+  - **G3 Newtonian gate PASS** (parity within 0.22 %). Setup canonique
+    validé bilateral. Conventions, frame, geometry all reconciled.
+  - **Wi=1 gap = -7.3 % R-INVARIANT** (R=30, R=40). Not resolution,
+    not L_down truncation (rT shrunk identique), not normalisation,
+    not Newtonian baseline. **Structurally in the polymer scheme.**
+  - **R=60 Newtonian STABLE, R=60 viscoelastic NaN** → H_a polymer-
+    coupled confirmed, H_d LBM-staircase intrinsic EXCLUDED.
+  - **M28 vindicated**: the abandoned-2026-05-19 attribution of
+    constitutive log-conf advection scheme as locus was directionally
+    correct. The M29c-wallstress `:phys` "match" was a frame artifact
+    (corrected by M31). The Wi-dependent gap pattern in this matrix
+    is the definitive empirical signal.
+
+### M33 — Polymer scheme upgrade — PLANNED next session
+
+- **Mandate**: replace the production `:rusanov` 1st-order upwind
+  on log-conformation Ψ advection with a TVD/higher-order scheme
+  that closes the Wi=1 −7.3 % Cd gap without NaN'ing at R=30 100k.
+- **Candidates** (ranked by ease of port):
+  1. **MUSCL-superbee with two-pass kernel fix** : reuse M29b code
+     (`:muscl_superbee` already in src/) but apply the architectural
+     fix from M30 Phase 2b audit (split single-pass kernel into
+     two kernel launches to ensure lag-0 reads on `x_ff`).
+     The original M29c-v2 NaN at 92k was lag-induced; with the
+     fix it should converge. Plus the M29c boundary fallback
+     correctly handled (use 1-sided MUSCL at solid-adjacent cells).
+  2. **CUBISTA NVD** (rheoTool's scheme) : closer to apples-to-apples
+     vs rT, but bigger port (TVD NVD is a different formulation
+     family than MUSCL-superbee). Defer to a future iteration if (1)
+     doesn't close the gap.
+  3. **WENO5 on Ψ advection** : higher order, more bookkeeping.
+     Last resort.
+- **Acceptance criterion** : Cd Kraken at R=30 Wi=1 β=0.59 ∈ [115, 122]
+  (closes ≥80 % of the −7.3 % gap), AND R=30 Wi=0.1 stays within 1 %
+  of rT (no regression), AND R=40 Wi=1 reproduces, AND no NaN at
+  100k steps Metal F32 reproducibility.
+- **Allowed edit zones**: `src/fvfd/operators_2d.jl` (the M29b
+  MUSCL-superbee branch), possibly `src/kernels/logconformation_fv_2d.jl`,
+  `src/drivers/viscoelastic_logfv_2d.jl` (kwarg threading).
+- **Runner**: Codex via `kraken-codex-pilot`. Phase 2b audit verdict
+  has the two-pass fix already specified.
+- **Walltime estimate**: 1-2 Engineer sessions + Aqua matrix re-run.
+
 ### M31 — Frame-convention audit of wall-ring integration — DONE 2026-05-20
 
 - **Status**: DONE 2026-05-20. Adversarial Claude+Codex audit

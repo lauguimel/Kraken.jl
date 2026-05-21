@@ -1254,3 +1254,105 @@ work should treat any pre-M31 absolute Cd_component number as
 suspect until re-integrated in `:idx`. The TOTAL `Cd_kraken` values
 remain valid (driver is correct); only the per-component
 decomposition is biased.
+
+## 2026-05-21 — M32 methodology validation : G3 PASS, gap Wi=1 is R-invariant polymer-scheme problem (M28 vindicated)
+
+After 6+ phases of empilage on Bouzidi-FL BC port (port landed, NaN'd
+at Wi=1 100k, audit identified lag bug), user step-back triggered
+M32 methodology overhaul. Setup audit + canonical matrix:
+
+### M32 Phase 1 (setup audit) — HARD mismatches found
+- rT L_down=60R vs Kraken 15R (4× longer wake on rT)
+- rT body-fitted O-grid vs Kraken halfway-BB staircase
+- rT `coupling` (no BSD) vs Kraken BSD=1.0
+- rT Wi=1.0 NOT time-converged at endTime=10 (drift +3.4 over Δt=2)
+
+### M32 Phase 2 (canonical setup)
+- rT cases shrunk to L_up=L_down=15R, endTime=20 for Wi=1.
+- Kraken matrix R ∈ {30, 40, 60} × Wi ∈ {0.1, 1.0} + Newtonian sanity
+  ran on Aqua F64 CUDA.
+
+### M32 Phase 3 (cross-code matrix) — definitive
+
+| case | Kraken | rT shrunk | gap |
+|---|---|---|---|
+| Newtonian R=30 | 132.08 | 132.37 | -0.22 % ✓ G3 PASS |
+| Wi=0.1 R=30 | 129.39 | 130.43 | -0.80 % ✓ |
+| Wi=0.1 R=40 | 129.49 | 130.43 | -0.72 % ✓ |
+| Wi=1.0 R=30 | 111.55 | 120.38 | -7.34 % ✗ |
+| Wi=1.0 R=40 | 111.29 | 120.38 | -7.55 % ✗ |
+| Newtonian R=60 | 132.68 | n/a | stable |
+| Wi=0.1 R=60 | NaN | n/a | polymer-coupled NaN |
+| Wi=1.0 R=60 | NaN | n/a | polymer-coupled NaN |
+
+Also: rT Wi=1 shrunk (L=15R) Cd = 120.38 ≡ rT Wi=1 non-shrunk Cd = 120.40
+to 0.02%. **L_down=60→15 shrink does NOT change Cd.** Wake truncation
+was a false suspect.
+
+### Definitive findings
+
+1. **G3 Newtonian gate PASSES** (Kraken vs rT shrunk: gap -0.22% < 2%
+   threshold). Setup canonique validé bilateral. Conventions identiques.
+   Frame issue closed by M31.
+2. **R-convergence within Kraken** OK at R=30 → R=40 (Cd
+   essentially R-invariant for both Wi values, Δ < 0.3 %).
+3. **R=60 NaN is polymer-coupled** (Newtonian R=60 stable Cd=132.68).
+   H_d "LBM-staircase intrinsic" EXCLUDED. H_a "polymer-coupled at
+   high R" confirmed.
+4. **Wi=1 gap R-invariant** at -7.34 % (R=30) and -7.55 % (R=40) →
+   the gap is structurally in the polymer scheme, NOT resolution,
+   NOT L_down truncation, NOT BC convention, NOT Cd normalisation
+   (C1 audit confirmed SAME), NOT Newtonian baseline (G3 PASS).
+5. **M28 vindicated**: the constitutive scheme `:rusanov` 1st-order
+   upwind on log-conformation Ψ advection is the locus. M28's initial
+   diagnosis was abandoned 2026-05-19 because M29c-wallstress in
+   `:phys` frame falsely "matched" Cd_polymer to 0.05; M31 falsified
+   that match, and the multi-Wi matrix now confirms M28's direction.
+6. **Bouzidi-FL Phase 2b parked** : Bouzidi-FL targets the pole K/rT
+   pressure deficit (BC structural, Wi-invariant) — that contribution
+   is small in Cd_total (azimuthal cancellation masks it at Wi=0.1).
+   At Wi=1, dominant contribution is the polymer wake (rear shoulder,
+   Wi-coupled), which Bouzidi-FL does NOT address.
+
+### Process lesson (the deeper one)
+
+5 days of session yielded the wrong narrative twice (M28 attribution
+→ M29c rollback → polymer match falsified by M31 → Bouzidi-FL
+attempted → finally back to M28 with a clean matrix). The path
+through was:
+- Volume L2_rel(τ_p) metric (M28/M29) → directionally right, gave
+  the polymer-scheme answer.
+- Wall decomposition `:phys` frame (M29c-wallstress) → numerically
+  wrong (frame artifact), said "polymer matches rT".
+- Frame audit `:idx` (M31) → corrected the wall decomposition,
+  but the conclusion was misread as "polymer matters more than thought"
+  (it does, by ~15-20% L2_rel on wall) instead of acknowledging
+  the volume verdict was already correct.
+- BC pole K/rT 0.59 / 0.16 (Phase 0c, Phase 1c) → real (Wi-invariant)
+  but DOES NOT dominate Cd_total at Wi=1 (the cancellation pattern
+  makes pole contribution sub-dominant).
+- Multi-Wi cross-code matrix (M32 Phase 3) → cleanest signal:
+  gap R-invariant, Wi-coupled, exits the BC narrative and lands on
+  polymer.
+
+### Boss-level memory candidate
+- **Always run cross-code multi-(Wi, R) matrix FIRST** when comparing
+  to a reference code. A single-point disagreement at one (Wi, R) is
+  uninterpretable — pole-vs-wake-vs-baseline contributions cancel
+  in scalars. Pattern: Newtonian gate + 2×R × 2×Wi = 5 cases is the
+  minimum viable signal. Anything less leads to volume vs wall vs
+  frame side-quests for days.
+
+**Why**: this is the *most expensive* meta-lesson of the session.
+Future Boss inheriting any cross-code comparison must start from
+multi-Wi multi-R matrix, NOT single-point wall decomposition.
+
+### Decisions taken
+- M32 Phase 3 closes the cluster M28/M29/M30/M31/M32 (initial gap
+  attribution sequence). Verdict: **polymer scheme is the locus**.
+- Bouzidi-FL Phase 2b stays parked. May be picked up later as a
+  secondary improvement to azimuthal K/rT structure, but it does
+  not close the dominant Cd gap.
+- Next cluster opens: **polymer scheme upgrade** (CUBISTA proper /
+  MUSCL-superbee with two-pass fix from Phase 2b audit / WENO).
+  Distinct mission, fresh session.
