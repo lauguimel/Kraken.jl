@@ -60,10 +60,23 @@ const _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_SPEC = LBMSpec(
     WriteMoments(),
 )
 
-# Two-pass Bouzidi-FL: pass-1 reuses _TRT_LIBB_V2_GUO_FIELD_SPEC (collision +
-# halfwayBB writes f_out, ρ_out). Pass-2 launches ONLY the Bouzidi-FL overwrite
-# brick — by then pass-1 has globally synchronised, so f_out and ρ_out are
-# lag-0 everywhere. Closes the lag-1 x_ff defect identified in M30 Phase 2b.
+# Two-pass Bouzidi-FL pass-1 RAW spec: PullHalfwayBB + SolidInert + Moments +
+# CollideTRTDirectGuoField + WriteMoments. CRITICALLY OMITS `ApplyLiBBPrePhase`.
+# Reusing `_TRT_LIBB_V2_GUO_FIELD_SPEC` for pass-1 stacks pre-phase Bouzidi-FL
+# on top of pass-2's post-collision Bouzidi-FL — the V2-motivating double-BC
+# bug. See bench/viscoelastic_audit/M34_DEBUG_VERDICT.md and
+# M34_SPEC_AUDIT_VERDICT.md (M34-fix, 2026-05-22).
+const _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC = LBMSpec(
+    PullHalfwayBB(), SolidInert(),
+    Moments(), CollideTRTDirectGuoField(),
+    WriteMoments(),
+)
+
+# Two-pass Bouzidi-FL: pass-1 uses _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC (collision +
+# halfwayBB writes f_out, ρ_out, NO pre-phase BC). Pass-2 launches ONLY the
+# Bouzidi-FL overwrite brick — by then pass-1 has globally synchronised, so
+# f_out and ρ_out are lag-0 everywhere. Closes the lag-1 x_ff defect identified
+# in M30 Phase 2b.
 const _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS2_SPEC = LBMSpec(
     ApplyBouzidiFLPostCollideTwoPass(),
 )
@@ -191,10 +204,15 @@ function _fused_trt_libb_v2_guo_field_step!(::Val{:bouzidi_fl_twopass},
     backend = KernelAbstractions.get_backend(f_in)
     ET = eltype(f_in)
     s_plus, s_minus = trt_rates(ν; Λ=Λ)
-    # Pass 1: existing collide + halfwayBB + WriteMoments, writes f_out, ρ_out.
-    pass1! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_SPEC)
+    # Pass 1: RAW collide + halfwayBB + WriteMoments (NO pre-phase BC), writes
+    # f_out, ρ_out. The RAW spec drops `ApplyLiBBPrePhase` from
+    # `_TRT_LIBB_V2_GUO_FIELD_SPEC` to avoid stacking pre-phase + post-collision
+    # Bouzidi-FL — i.e. the double-BC trap (see M34_DEBUG_VERDICT.md).
+    # Canonical arg order for the RAW spec drops :q_wall, :uw_link_x,
+    # :uw_link_y (no pre-phase brick referencing them).
+    pass1! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC)
     pass1!(f_out, ρ, ux, uy, f_in, is_solid,
-           q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field,
+           Fx_field, Fy_field,
            Nx, Ny, ET(s_plus), ET(s_minus);
            ndrange=(Nx, Ny))
     KernelAbstractions.synchronize(backend)

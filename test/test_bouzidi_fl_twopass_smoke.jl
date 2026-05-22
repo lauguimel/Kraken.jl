@@ -26,7 +26,11 @@ using Test
 using KernelAbstractions
 using Kraken
 
-@testset "Bouzidi-FL two-pass — smoke" begin
+@testset "Bouzidi-FL two-pass — halfwayBB-degenerate regression" begin
+    # Closed bounce-back box + grid-aligned cylinder edges (q_w ≈ 0.5).
+    # Confirms the trivial collapse case: with q_w == 0.5 everywhere the
+    # _libb_branch reduces to halfway-BB, so even the (now-removed) double-BC
+    # trap was invisible here. Kept as a regression sentinel.
     FT = Float64
     Nx, Ny = 60, 40
     radius = 8.0
@@ -150,4 +154,98 @@ using Kraken
           drift_halfwayBB = drift_hw,
           ρmin_two_pass = minimum(ρ_tp[fluid_mask]),
           ρmax_two_pass = maximum(ρ_tp[fluid_mask]))
+end
+
+# =====================================================================
+# Cut-link cylinder smoke (M34-fix).
+#
+# Newtonian cylinder Re=1 with parabolic Zou-He inlet + Zou-He pressure
+# outlet, halfway-BB top/bottom channel walls, R=8 cylinder embedded
+# with q ∈ (0, 1] cut-links (mostly q ≠ 0.5 → exercises the actual
+# Bouzidi-FL post-collision branch, not the degenerate halfway-BB).
+#
+# This is the test that catches the double-BC trap predicted by
+# `[[feedback_smoke_must_exercise_cutlinks]]`: pre-phase + post-collision
+# Bouzidi-FL stacked on cut links over-bounces stagnation pops and
+# either NaNs or pumps Cd far above the analytical envelope. With the
+# M34-fix RAW pass-1 spec applied, this smoke must produce finite ρ
+# and Cd within a generous envelope.
+#
+# R=8 is undersized vs Schaefer-Turek convergence (R≥20) but the cut-link
+# path IS exercised — that's the diagnostic.
+# =====================================================================
+@testset "Bouzidi-FL two-pass — cut-link cylinder R=8 Newtonian Re=1" begin
+    FT = Float64
+    Nx, Ny = 160, 40
+    radius = 8.0
+    cx = FT(Nx ÷ 4)
+    cy = FT((Ny - 1) / 2)
+    u_max = FT(0.04)
+    u_ref = (FT(2) / FT(3)) * u_max
+    D = FT(2) * radius
+    Re_target = FT(1.0)
+    ν = u_ref * D / Re_target
+
+    q_wall_h, is_solid_h = Kraken.precompute_q_wall_cylinder(Nx, Ny, cx, cy, radius; FT=FT)
+
+    # Parabolic inlet profile (Schaefer-Turek 2D convention).
+    u_prof = [FT(4) * u_max * FT(j - 1) * FT(Ny - j) / FT(Ny - 1)^2 for j in 1:Ny]
+
+    f_in  = zeros(FT, Nx, Ny, 9)
+    f_out = similar(f_in)
+    for j in 1:Ny, i in 1:Nx, q in 1:9
+        ux0 = is_solid_h[i, j] ? zero(FT) : u_prof[j]
+        f_in[i, j, q] = Kraken.equilibrium(D2Q9(), one(FT), ux0, zero(FT), q)
+    end
+
+    ρ   = ones(FT, Nx, Ny)
+    ux  = zeros(FT, Nx, Ny)
+    uy  = zeros(FT, Nx, Ny)
+    uwx = zeros(FT, Nx, Ny, 9)
+    uwy = zeros(FT, Nx, Ny, 9)
+    fx  = zeros(FT, Nx, Ny)
+    fy  = zeros(FT, Nx, Ny)
+
+    bc = Kraken.BCSpec2D(; west = Kraken.ZouHeVelocity(u_prof),
+                          east = Kraken.ZouHePressure(one(FT)))
+
+    n_steps = 200
+    for _ in 1:n_steps
+        Kraken.fused_trt_libb_v2_guo_field_step!(
+            f_out, f_in, ρ, ux, uy, is_solid_h, q_wall_h,
+            uwx, uwy, fx, fy, Nx, Ny, ν;
+            wall_bc=:bouzidi_fl_twopass,
+        )
+        # Pre-collision Zou-He rebuild at i=1 (velocity) and i=Nx (pressure).
+        Kraken.apply_bc_rebuild_2d!(f_out, f_in, bc, ν, Nx, Ny; Λ=FT(3/16))
+        f_in, f_out = f_out, f_in
+    end
+    KernelAbstractions.synchronize(KernelAbstractions.CPU())
+
+    fluid_mask = .!is_solid_h
+
+    # (i) No NaN in the fluid region.
+    @test all(isfinite, ρ[fluid_mask])
+    @test all(isfinite, ux[fluid_mask])
+    @test all(isfinite, uy[fluid_mask])
+
+    # (ii) Density bounded — generous envelope (Re=1, transient, 200 steps).
+    @test minimum(ρ[fluid_mask]) > 0.5
+    @test maximum(ρ[fluid_mask]) < 1.5
+
+    # (iii) Cd within generous 50% envelope of Schaefer-Turek Re=1 ~131.
+    # R=8 is undersized so we don't expect tight match — the test is that the
+    # double-BC trap is GONE (with the trap, Cd diverges or blows past 1000).
+    drag = Kraken.compute_drag_libb_mei_2d(f_in, q_wall_h, uwx, uwy, Nx, Ny)
+    Cd = FT(2) * drag.Fx / (u_ref^2 * D)
+    @test isfinite(Cd)
+    @test 60.0 ≤ Cd ≤ 200.0
+
+    @info("M34-fix cut-link cylinder smoke",
+          Nx, Ny, radius, Re_target,
+          ν, u_ref,
+          Cd = Cd,
+          Fx = drag.Fx,
+          ρmin = minimum(ρ[fluid_mask]),
+          ρmax = maximum(ρ[fluid_mask]))
 end
