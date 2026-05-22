@@ -110,6 +110,11 @@ all(g -> g in (:qwall, :circle), EMBEDDED_GEOMETRY_LIST) ||
 const ADVECTION_SCHEME = Symbol(lowercase(strip(get(ENV, "KRAKEN_ADVECTION_SCHEME", "rusanov"))))
 ADVECTION_SCHEME in (:rusanov, :muscl_superbee) ||
     throw(ArgumentError("KRAKEN_ADVECTION_SCHEME must be rusanov or muscl_superbee"))
+# M34: wall BC (halfwayBB default; bouzidi_fl / bouzidi_fl_twopass available)
+const WALL_BC = Symbol(lowercase(strip(get(ENV, "KRAKEN_WALL_BC", "halfwayBB"))))
+WALL_BC in (:halfwaybb, :halfwayBB, :bouzidi_fl, :bouzidi_fl_twopass) ||
+    throw(ArgumentError("KRAKEN_WALL_BC must be halfwayBB, bouzidi_fl, or bouzidi_fl_twopass"))
+const WALL_BC_NORMALIZED = WALL_BC === :halfwaybb ? :halfwayBB : WALL_BC
 const GEOM_CONFIGS = zip_equal("KRAKEN_L_UP_LIST/KRAKEN_L_DOWN_LIST",
                                 L_UP_LIST, L_DOWN_LIST)
 const EMBEDDED_CONFIGS = zip_equal("KRAKEN_EMBEDDED_*",
@@ -125,6 +130,11 @@ const OUTPUT_DIR      = get(ENV, "KRAKEN_OUTPUT_DIR",
 # rheoTool vs Kraken diagnostics. Defaults OFF — adds ~5 MB per case at R=30.
 const SAVE_FIELDS     = lowercase(get(ENV, "KRAKEN_SAVE_FIELDS", "0")) in
                         ("1", "true", "yes", "on")
+const NAN_PROBE        = haskey(ENV, "KRAKEN_NAN_PROBE")
+const PROBE_EVERY_N    = parse(Int, get(ENV, "KRAKEN_NAN_PROBE_EVERY", "50"))
+const PROBE_BUFFER_LEN = parse(Int, get(ENV, "KRAKEN_NAN_PROBE_BUFFER", "5"))
+PROBE_EVERY_N > 0 || throw(ArgumentError("KRAKEN_NAN_PROBE_EVERY must be positive"))
+PROBE_BUFFER_LEN >= 0 || throw(ArgumentError("KRAKEN_NAN_PROBE_BUFFER must be non-negative"))
 
 const CSV_COLUMNS = [
     :timestamp, :backend, :FT, :R, :Wi, :Re_R, :beta, :bsd_fraction,
@@ -140,6 +150,29 @@ const CSV_COLUMNS = [
     :walltime_s, :MLUPS,
 ]
 
+const NAN_PROBE_COLUMNS = [
+    :step,
+    :max_abs_psixx, :argmax_i_psixx, :argmax_j_psixx,
+    :max_abs_psixy, :argmax_i_psixy, :argmax_j_psixy,
+    :max_abs_psiyy, :argmax_i_psiyy, :argmax_j_psiyy,
+    :max_tr_tau, :argmax_i_tau, :argmax_j_tau,
+    :max_div_u, :argmax_i_div, :argmax_j_div,
+]
+
+struct KrakenNanProbeStop <: Exception
+    path::String
+    step::Int
+    field::Symbol
+    i::Int
+    j::Int
+end
+
+Base.showerror(io::IO, err::KrakenNanProbeStop) =
+    print(
+        io,
+        "KrakenNanProbeStop($(err.path), step=$(err.step), field=$(err.field), i=$(err.i), j=$(err.j))",
+    )
+
 function csv_cell(x)
     x === nothing && return ""
     if x isa AbstractFloat
@@ -151,6 +184,18 @@ function csv_cell(x)
         return "\"" * replace(s, "\"" => "\"\"") * "\""
     end
     return s
+end
+
+function write_nan_probe_header(path)
+    open(path, "w") do io
+        println(io, join(string.(NAN_PROBE_COLUMNS), ","))
+    end
+end
+
+function append_nan_probe_row!(path, row)
+    open(path, "a") do io
+        println(io, join((csv_cell(get(row, c, "")) for c in NAN_PROBE_COLUMNS), ","))
+    end
 end
 
 function write_csv(path, row; append_summary::Bool=false)
@@ -192,6 +237,188 @@ function max_speed_fluid(ux, uy, is_solid)
         found = true
     end
     return found ? best : NaN
+end
+
+function nan_probe_max_abs_arg(field, is_solid)
+    found = false
+    best = 0.0
+    best_i = 0
+    best_j = 0
+    @inbounds for j in axes(is_solid, 2), i in axes(is_solid, 1)
+        is_solid[i, j] && continue
+        v = abs(Float64(field[i, j]))
+        isfinite(v) || return (value=NaN, i=0, j=0)
+        if !found || v > best
+            found = true
+            best = v
+            best_i = i
+            best_j = j
+        end
+    end
+    return found ? (value=best, i=best_i, j=best_j) : (value=NaN, i=0, j=0)
+end
+
+function nan_probe_max_trace_tau_arg(tauxx, tauyy, is_solid)
+    found = false
+    best = -Inf
+    best_i = 0
+    best_j = 0
+    @inbounds for j in axes(is_solid, 2), i in axes(is_solid, 1)
+        is_solid[i, j] && continue
+        v = Float64(tauxx[i, j]) + Float64(tauyy[i, j])
+        isfinite(v) || return (value=NaN, i=0, j=0)
+        if !found || v > best
+            found = true
+            best = v
+            best_i = i
+            best_j = j
+        end
+    end
+    return found ? (value=best, i=best_i, j=best_j) : (value=NaN, i=0, j=0)
+end
+
+function nan_probe_max_div_arg(dudx, dvdy, is_solid)
+    found = false
+    best = 0.0
+    best_i = 0
+    best_j = 0
+    @inbounds for j in axes(is_solid, 2), i in axes(is_solid, 1)
+        is_solid[i, j] && continue
+        v = abs(Float64(dudx[i, j]) + Float64(dvdy[i, j]))
+        isfinite(v) || return (value=NaN, i=0, j=0)
+        if !found || v > best
+            found = true
+            best = v
+            best_i = i
+            best_j = j
+        end
+    end
+    return found ? (value=best, i=best_i, j=best_j) : (value=NaN, i=0, j=0)
+end
+
+function nan_probe_snapshot(step, fields)
+    return (;
+        step=Int(step),
+        rho=deepcopy(Array(fields.rho)),
+        ux=deepcopy(Array(fields.ux)),
+        uy=deepcopy(Array(fields.uy)),
+        psixx=deepcopy(Array(fields.psixx)),
+        psixy=deepcopy(Array(fields.psixy)),
+        psiyy=deepcopy(Array(fields.psiyy)),
+        tauxx=deepcopy(Array(fields.tauxx)),
+        tauxy=deepcopy(Array(fields.tauxy)),
+        tauyy=deepcopy(Array(fields.tauyy)),
+        fx_poly=deepcopy(Array(fields.fx_poly)),
+        fy_poly=deepcopy(Array(fields.fy_poly)),
+        fx_total=deepcopy(Array(fields.fx_total)),
+        fy_total=deepcopy(Array(fields.fy_total)),
+        dudx=deepcopy(Array(fields.dudx)),
+        dudy=deepcopy(Array(fields.dudy)),
+        dvdx=deepcopy(Array(fields.dvdx)),
+        dvdy=deepcopy(Array(fields.dvdy)),
+        is_solid=deepcopy(Array(fields.is_solid_h)),
+    )
+end
+
+function nan_probe_first_nonfinite(fields)
+    return Kraken._logfv_first_nonfinite_field_2d(
+        fields.is_solid_h,
+        :rho => fields.rho,
+        :ux => fields.ux,
+        :uy => fields.uy,
+        :psixx => fields.psixx,
+        :psixy => fields.psixy,
+        :psiyy => fields.psiyy,
+        :tauxx => fields.tauxx,
+        :tauxy => fields.tauxy,
+        :tauyy => fields.tauyy,
+        :fx_poly => fields.fx_poly,
+        :fy_poly => fields.fy_poly,
+        :fx_total => fields.fx_total,
+        :fy_total => fields.fy_total,
+        :dudx => fields.dudx,
+        :dudy => fields.dudy,
+        :dvdx => fields.dvdx,
+        :dvdy => fields.dvdy,
+    )
+end
+
+function append_nan_probe_metrics!(path, step, fields)
+    is_solid = fields.is_solid_h
+    psixx = Array(fields.psixx)
+    psixy = Array(fields.psixy)
+    psiyy = Array(fields.psiyy)
+    tauxx = Array(fields.tauxx)
+    tauyy = Array(fields.tauyy)
+    dudx = Array(fields.dudx)
+    dvdy = Array(fields.dvdy)
+
+    m_xx = nan_probe_max_abs_arg(psixx, is_solid)
+    m_xy = nan_probe_max_abs_arg(psixy, is_solid)
+    m_yy = nan_probe_max_abs_arg(psiyy, is_solid)
+    m_tau = nan_probe_max_trace_tau_arg(tauxx, tauyy, is_solid)
+    m_div = nan_probe_max_div_arg(dudx, dvdy, is_solid)
+
+    append_nan_probe_row!(path, Dict{Symbol,Any}(
+        :step => Int(step),
+        :max_abs_psixx => m_xx.value,
+        :argmax_i_psixx => m_xx.i,
+        :argmax_j_psixx => m_xx.j,
+        :max_abs_psixy => m_xy.value,
+        :argmax_i_psixy => m_xy.i,
+        :argmax_j_psixy => m_xy.j,
+        :max_abs_psiyy => m_yy.value,
+        :argmax_i_psiyy => m_yy.i,
+        :argmax_j_psiyy => m_yy.j,
+        :max_tr_tau => m_tau.value,
+        :argmax_i_tau => m_tau.i,
+        :argmax_j_tau => m_tau.j,
+        :max_div_u => m_div.value,
+        :argmax_i_div => m_div.i,
+        :argmax_j_div => m_div.j,
+    ))
+end
+
+function build_nan_probe_callback(case_parameters)
+    probe_csv = joinpath(OUTPUT_DIR, "nan_probe.csv")
+    event_path = joinpath(OUTPUT_DIR, "nan_event.jls")
+    write_nan_probe_header(probe_csv)
+    clean_snapshots = NamedTuple[]
+    event_ref = Ref{Any}(nothing)
+
+    callback = function (step, fields)
+        finite_diag = nan_probe_first_nonfinite(fields)
+        if !finite_diag.finite
+            event = (;
+                first_nonfinite_step=Int(step),
+                first_nonfinite_field=finite_diag.field,
+                first_nonfinite_i=Int(finite_diag.i),
+                first_nonfinite_j=Int(finite_diag.j),
+                clean_snapshots=copy(clean_snapshots),
+                nan_snapshot=nan_probe_snapshot(step, fields),
+                case_parameters,
+            )
+            serialize(event_path, event)
+            event_ref[] = event
+            throw(KrakenNanProbeStop(
+                event_path, Int(step), finite_diag.field,
+                Int(finite_diag.i), Int(finite_diag.j),
+            ))
+        end
+
+        if step % PROBE_EVERY_N == 0
+            append_nan_probe_metrics!(probe_csv, step, fields)
+            if PROBE_BUFFER_LEN > 0
+                push!(clean_snapshots, nan_probe_snapshot(step, fields))
+                while length(clean_snapshots) > PROBE_BUFFER_LEN
+                    popfirst!(clean_snapshots)
+                end
+            end
+        end
+        return nothing
+    end
+
+    return callback, event_ref
 end
 
 function c_n1_stats(psixx, psixy, psiyy, tauxx, tauyy, is_solid)
@@ -250,6 +477,59 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
                    embedded_gradient, embedded_advection, embedded_force,
                    embedded_drag, embedded_geometry)
     csv_path = joinpath(OUTPUT_DIR, "cyl_bigsweep_v2_$(tag).csv")
+    geom_x_center = Float64(L_up * R)
+    geom_y_center = Float64((Ny - 1) / 2)
+    max_polymer_substeps = 64
+    max_grad_norm_estimate = 4.0 * abs(U_MEAN) / Float64(H)
+    subcycle_estimate = Kraken.logfv_oldroydb_subcycle_estimate(
+        max_grad_norm_estimate,
+        Float64(lambda),
+        1.0;
+        relative_tolerance=0.01,
+        max_deformation_increment=0.05,
+        max_memory_deformation_increment=0.07,
+        min_substeps=1,
+        max_substeps=max_polymer_substeps,
+    )
+    selected_polymer_substeps = subcycle_estimate.recommended
+    case_parameters = (;
+        tag,
+        R=Int(R),
+        Wi=Float64(wi),
+        Re_R=Float64(re_target),
+        beta=Float64(beta),
+        bsd_fraction=Float64(bsd),
+        L_up=Float64(L_up),
+        L_down=Float64(L_down),
+        embedded_gradient,
+        embedded_advection,
+        embedded_force,
+        embedded_drag,
+        embedded_geometry=string(embedded_geometry),
+        advection_scheme=string(ADVECTION_SCHEME),
+        Nx=Int(Nx),
+        Ny=Int(Ny),
+        cylinder_x_lbm=geom_x_center,
+        cylinder_y_lbm=geom_y_center,
+        radius_lbm=Float64(R),
+        u_mean=Float64(U_MEAN),
+        nu_total=Float64(nu_total),
+        nu_s=Float64(nu_s),
+        nu_p=Float64(nu_p),
+        lambda=Float64(lambda),
+        max_steps=Int(max_steps),
+        avg_window=Int(avg_window),
+        polymer_substeps_used=Int(selected_polymer_substeps),
+        max_polymer_substeps=Int(max_polymer_substeps),
+        subcycle_estimate,
+        backend=BACKEND_LABEL,
+        FT=string(FT),
+    )
+    step_callback = nothing
+    probe_event_ref = Ref{Any}(nothing)
+    if NAN_PROBE
+        step_callback, probe_event_ref = build_nan_probe_callback(case_parameters)
+    end
 
     row = Dict{Symbol,Any}(
         :timestamp => string(now()),
@@ -270,6 +550,7 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
     end
     row[:first_nonfinite_field] = "none"
     row[:nan_flag] = true
+    row[:polymer_substeps_used] = selected_polymer_substeps
 
     t0 = time()
     status = :ok
@@ -290,11 +571,19 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
             embedded_advection=embedded_advection, embedded_force=embedded_force,
             embedded_drag=embedded_drag,
             advection_scheme=ADVECTION_SCHEME,
+            wall_bc=WALL_BC_NORMALIZED,
             embedded_circle_samples=32, force_boundary_fill=:bc_aware,
+            step_callback=step_callback,
             backend=BACKEND, T=FT,
         )
     catch err
-        if err isa DomainError || err isa BoundsError
+        if err isa KrakenNanProbeStop
+            status = :nan_probe_complete
+            row[:completed_steps] = err.step
+            row[:first_nonfinite_step] = err.step
+            row[:first_nonfinite_field] = string(err.field)
+            row[:nan_flag] = true
+        elseif err isa DomainError || err isa BoundsError
             status = :spd_or_bounds_error
         else
             rethrow(err)
@@ -330,6 +619,16 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
         row[:MLUPS] = dt_s > 0 ?
             Float64(Nx) * Float64(Ny) * Float64(result.completed_steps) /
             dt_s / 1e6 : NaN
+    elseif status == :nan_probe_complete
+        event = probe_event_ref[]
+        if event !== nothing
+            row[:completed_steps] = event.first_nonfinite_step
+            row[:first_nonfinite_step] = event.first_nonfinite_step
+            row[:first_nonfinite_field] = string(event.first_nonfinite_field)
+        end
+        row[:MLUPS] = dt_s > 0 && isfinite(Float64(row[:completed_steps])) ?
+            Float64(Nx) * Float64(Ny) * Float64(row[:completed_steps]) /
+            dt_s / 1e6 : NaN
     else
         row[:first_nonfinite_step] = 0
         row[:first_nonfinite_field] = "spd_or_bounds"
@@ -341,8 +640,6 @@ function run_case(beta, wi, re_target, R, bsd, domain_cfg, embedded_cfg, summary
     if SAVE_FIELDS && status == :ok && result !== nothing
         jls_path = joinpath(OUTPUT_DIR, "cyl_bigsweep_v2_$(tag)_fields.jls")
         try
-            geom_x_center = Float64(L_up * R)
-            geom_y_center = Float64((Ny - 1) / 2)
             serialize(jls_path, (;
                 tag,
                 # case parameters

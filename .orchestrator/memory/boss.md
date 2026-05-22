@@ -1494,3 +1494,67 @@ Verdict file: `bench/viscoelastic_audit/M32_PHASE4_MECHANISM_VERDICT.md`.
 - `bench/viscoelastic_audit/M32_PHASE4_*_VERDICT.md` — three
   verdict markdowns; canonical reference for future Boss reading.
 
+
+### 2026-05-22 evening — M34 Bouzidi-FL two-pass committed + Aqua matrix submitted
+
+- Commit `f380157a` — M34 implementation: new `ApplyBouzidiFLPostCollideTwoPass`
+  brick (lag-0 reads of `f_out` at both `x_f`/`x_ff` and `ρ_out` for `rho_w`)
+  + `:bouzidi_fl_twopass` dispatch with pass-1 → synchronize → pass-2 launch
+  pattern. Architectural guarantee: pass-2 `required_args` excludes `:f_in`
+  → lag-1 reads forbidden by construction. Smoke 10/10 PASS, drift 9% lower
+  than `:halfwayBB` baseline.
+- Commit (this one) — `KRAKEN_WALL_BC` env→kwarg plumbing in
+  `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl` (+7 LOC, additive,
+  default `:halfwayBB` for M32 bit-exact backcompat).
+
+### Aqua jobs in flight (check next session)
+
+| Job ID | Mission | Cases | Walltime |
+|---|---|---|---|
+| `21654012.aqua` | matrix | R∈{30, 40} × Wi∈{0.1, 1.0} `:bouzidi_fl_twopass` β=0.59 BSD=1.0 | 4 h |
+| `21654013.aqua` | R=60 NaN-elimination | R=60 Wi=0.1 β=0.59 BSD=1.0 `:bouzidi_fl_twopass` | 2 h |
+
+Submitted 2026-05-22T16:15:29+1000, queue `gpu_batch` (A100), state Q.
+
+**Check command for next session**:
+```bash
+ssh aqua 'qstat 21654012.aqua 21654013.aqua; tail -40 ~/Kraken.jl-viscoelastic-run/M34_bouzidi_fl_*.o*'
+```
+
+**Acceptance gates (mandate.md §M34 G4)** — ALL must pass for M34 to ship:
+
+1. Kraken R=30 Wi=1 β=0.59 `:bouzidi_fl_twopass` **Cd ∈ [118, 122]**
+   (closes ≥80 % of the −7.3 % gap toward rT 120.38) ← primary signal
+2. Kraken R=30 Wi=0.1 β=0.59 `:bouzidi_fl_twopass` **Cd within 1 % of
+   rT 130.43** (no regression vs `:halfwayBB` 129.39)
+3. Kraken R=40 Wi=1 β=0.59 `:bouzidi_fl_twopass` reproduces R=30 verdict
+   ±0.5 % (R-invariance preserved)
+4. Kraken R=60 Wi=0.1 β=0.59 `:bouzidi_fl_twopass` **no NaN at 100 k
+   steps** Aqua F64 CUDA
+
+If 1-4 PASS → M32-M34 cluster closes, M35 (Ψ-scheme upgrade) stays
+parked. If 1 FAILS by >2 % → M35 opens conditionally per mandate.
+
+### Session lessons (for next Boss)
+
+- **4× Department stall pattern** in this session (D2-original, D3-original,
+  M34-codex spinner, D2bis Phase B kwerr). Recurring root cause: too-long
+  Engineer briefs OR Monitor armed on infinite-wait conditions. Solution
+  applied: claude-subagent (no Codex) with tight brief (~5-8 KB),
+  artifact-gated success criterion (verdict file existence, NOT canary
+  pass), explicit Bash `timeout` instead of Monitor. Saved as
+  `[[feedback_monitor_antipattern]]` (auto-memory).
+- **Codex planning loop** (M34 first attempt) — Codex received a 26 KB brief
+  + write-first discipline, then spent 22 min writing PLAN.md 7+ times
+  without advancing to implementation. Killed via `kill -9 92202`,
+  re-spawned as claude-subagent with 5 KB brief; landed in 13 min.
+  Suggests `[[feedback_codex_write_first_discipline]]` works against you
+  when the brief itself is too detailed — write-first amplifies planning
+  paralysis instead of forcing action. Future: keep Codex briefs tight
+  AND tell Codex to skip planning (jump straight to file edits per the
+  spec). Or default to claude-subagent for missions where the spec is
+  cross-engine validated already.
+- **Boss-level meta-discipline check**: this session burned ~6 h on
+  4 stall pattern occurrences. Worth a `[[project_orchestrator_pattern_audit]]`
+  in a future session to fix the orchestrator pipeline itself before
+  scaling further.
