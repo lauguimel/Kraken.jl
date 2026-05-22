@@ -132,6 +132,7 @@ makedocs(;
         "Getting started" => "getting_started.md",
         "Concepts" => "concepts_index.md",
         "Capabilities" => "capabilities.md",
+        "Architecture" => "architecture.md",
         # v0.1.0 scope: single-phase LBM (2D/3D), thermal, grid refinement,
         # spatial BCs, .krk DSL. Out-of-scope pages (phasefield, VOF/PLIC,
         # rheology, viscoelastic, Shan-Chen, species) are excluded here.
