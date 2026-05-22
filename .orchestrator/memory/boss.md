@@ -1558,3 +1558,78 @@ parked. If 1 FAILS by >2 % → M35 opens conditionally per mandate.
   4 stall pattern occurrences. Worth a `[[project_orchestrator_pattern_audit]]`
   in a future session to fix the orchestrator pipeline itself before
   scaling further.
+
+## 2026-05-22 late — M34 v1 RED on Aqua, root cause identified via dual Department convergence
+
+**Aqua matrix result (jobs 21654012 + 21654013, M34 v1 :bouzidi_fl_twopass)**:
+
+| R | Wi | Cd | nan_flag |
+|---|---|---|---|
+| 30 | 0.1 | **117.59** | false |
+| 40 | 0.1 | NaN | true |
+| 30 | 1.0 | NaN | true |
+| 40 | 1.0 | NaN | true |
+
+All 4 cases ran 100k steps (no early bail-out). Only R=30 Wi=0.1
+survived, with Cd −12 units below `:halfwayBB` baseline 129.39 → wrong
+direction. G4 BC gate FAILED.
+
+### Convergent root cause (M34-debug + M34-spec-audit, parallel claude-subagent)
+
+**Pass-1 of `:bouzidi_fl_twopass` reuses `_TRT_LIBB_V2_GUO_FIELD_SPEC`
+which already contains `ApplyLiBBPrePhase` (a Bouzidi-FL pre-collision
+substitution). Pass-2 then applies a SECOND Bouzidi-FL post-collision
+overwrite. Result: BC fires twice per step → over-bounce pathology.**
+
+V2 docstring at `src/kernels/li_bb_2d_v2.jl:12-20` literally warns about
+this double-BC pathology (cites L2 ≈ 2.2 % drift). The single-pass
+`:bouzidi_fl` spec (`li_bb_2d_v2.jl:56-61`) correctly drops the
+pre-phase. M34 v1 `:bouzidi_fl_twopass` re-introduced it by reusing the
+pre-phase-containing SPEC name.
+
+### Empirical signatures (both Departments)
+
+- **Cd over-shoot pattern (R=30 Wi=0.1 finite)**: ΔCd_pres = +16.6 pts
+  vs `:halfwayBB` baseline, concentrated at front-pole (+7.55) and
+  shoulder (+6.18). Polymer/solvent components unchanged → pure pressure
+  over-bounce, BC family is the locus.
+- **NaN distribution (3 NaN cases)**: 97 % of domain NaN, **uniformly
+  distributed azimuthally** (front ≈ shoulder ≈ wake). NOT the D2bis
+  bilateral arcs front-shoulder fingerprint → diagnostic: uniform NaN =
+  BC over-bounce envelope crossing, bilateral arcs = polymer back-force
+  (saved as `[[feedback_nan_uniform_vs_arc_diagnostic]]`).
+
+### Why earlier validations missed it
+
+- **M30 P2b audit (adversarial Claude+Codex)**: referenced pass-1 by
+  SPEC NAME without enumerating its bricks. Both engines independently
+  wrote "pass 1 = existing `_TRT_LIBB_V2_GUO_FIELD_SPEC`" but neither
+  audited the brick list of that SPEC. Lesson: adversarial audits MUST
+  enumerate bricks in proposed SPECs (saved as
+  `[[feedback_double_bouzidi_two_pass_trap]]`).
+- **M34 v1 smoke test (closed-box R=8 Newtonian 100 steps)**: all
+  q_wall = 0.5 → `_libb_branch` collapses to halfway-BB → pre-phase
+  algebraically equivalent to post-collision overwrite → no
+  double-application observable. Lesson: smoke tests for cut-link-
+  dependent BCs MUST use a curved geometry that produces q ∈ (0, 1)
+  (saved as `[[feedback_smoke_must_exercise_cutlinks]]`).
+
+### Concrete fix (≤ 10 LOC, M34-fix mission)
+
+```julia
+# New spec in src/kernels/li_bb_2d_v2.jl
+const _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC = LBMSpec(
+    PullHalfwayBB(), SolidInert(), Moments(),
+    CollideTRTDirectGuoField(), WriteMoments()
+)
+
+# In :bouzidi_fl_twopass dispatch, swap pass-1:
+# _TRT_LIBB_V2_GUO_FIELD_SPEC → _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC
+```
+
+### Sub-pattern of session lessons (cumulative)
+
+5× Department/Engineer stalls + 1× cross-engine audit gap (brick
+enumeration) + 1× weak smoke test design. The orchestrator pipeline
+itself needs a hygiene pass before the next major mission cluster.
+Candidate session for `[[project_orchestrator_pattern_audit]]`.
