@@ -690,6 +690,42 @@ emit_code(::ApplyBouzidiFLPostCollideTwoPass) = quote
     end
 end
 
+"""
+Cut-link-only ρ recompute (pass-3 brick for `:bouzidi_fl_twopass`).
+
+After pass-2 has overwritten `f_out[i, j, qbar]` on flagged cut links, the
+stale `ρ_out` written by pass-1 (which summed the pre-Bouzidi-FL pops) is no
+longer consistent with `f_out` at those cells. Downstream readers — the
+log-FV polymer pipeline + the next step's Guo body force `f → ρ` chain — see
+a `rho_w` that contradicts the cut-link f-set, the inconsistency identified
+in `bench/viscoelastic_audit/M34_FIX_DIAG_VERDICT.md` as the residual cause
+of the +1.6 % Cd bias at R=30 Wi=0.1 and the divergence at R=60 Wi=0.1 / R=30
+Wi=1.0. This brick re-sums `f_out[i, j, 1..9]` and overwrites `ρ_out[i, j]`
+ONLY on cells with at least one cut link (`q_wall[i, j, q] > 0` for some
+q ∈ 2..9). Non-cut-link cells (including solids and pure-fluid bulk) keep
+the pass-1 `ρ_out` bit-exact. M34v3, 2026-05-22.
+"""
+struct ApplyCutLinkRhoRecompute <: LBMBrick end
+required_args(::ApplyCutLinkRhoRecompute) =
+    (:f_out, :ρ_out, :q_wall, :is_solid, :Nx, :Ny)
+phase(::ApplyCutLinkRhoRecompute) = :fluid
+emit_code(::ApplyCutLinkRhoRecompute) = quote
+    if !is_solid[i, j]
+        any_cut = false
+        @inbounds for qsrc in 2:9
+            if q_wall[i, j, qsrc] > zero(T)
+                any_cut = true
+                break
+            end
+        end
+        if any_cut
+            ρ_out[i, j] = f_out[i, j, 1] + f_out[i, j, 2] + f_out[i, j, 3] +
+                          f_out[i, j, 4] + f_out[i, j, 5] + f_out[i, j, 6] +
+                          f_out[i, j, 7] + f_out[i, j, 8] + f_out[i, j, 9]
+        end
+    end
+end
+
 "Bouzidi interpolated bounce-back (LI-BB) overwrite on flagged cut links. Reads fp*c + fp*, writes fp*_new for q=2..9."
 struct ApplyLiBB <: LBMBrick end
 required_args(::ApplyLiBB) = (:q_wall, :uw_link_x, :uw_link_y)

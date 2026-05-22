@@ -249,3 +249,84 @@ end
           ρmin = minimum(ρ[fluid_mask]),
           ρmax = maximum(ρ[fluid_mask]))
 end
+
+# =====================================================================
+# Wi=0.1 polymer-coupled cylinder smoke (M34v3).
+#
+# A Newtonian-only cut-link smoke is BLIND to the pass-2 `rho_w`
+# inconsistency that survived M34-fix: the inconsistency manifests
+# downstream via the log-FV polymer pipeline reading a stale `ρ` at
+# cut-link cells when computing the Guo body force `Fx_field, Fy_field`
+# of the next step. The Aqua matrix YELLOW outcome (+1.6 % Cd at
+# Wi=0.1 R=30 + NaN at R=60 Wi=0.1 / R=30 Wi=1.0) was driven by this
+# rho_w inconsistency. The cycle: cut-link f's overwritten by pass-2
+# → ρ_out NOT recomputed (still pass-1 value) → polymer back-force
+# reads stale ρ → polymer source mismatches f-field → drift.
+#
+# The M34v3 pass-3 cut-link ρ-recompute should close this. This smoke
+# drives a small cylinder (R=4, H=18, parabolic inlet via Fx_body
+# driving) at modest Wi=0.1 (λ chosen so λ·u_mean/R ≈ 0.1), 30 steps,
+# Oldroyd-B. Asserts (a) no NaN in any of ρ, ψ_xx, ψ_xy, ψ_yy; (b) Cd
+# finite; (c) ρ ∈ [0.5, 1.5]; (d) trace(C) max < 50 (stability).
+# =====================================================================
+@testset "Bouzidi-FL two-pass — Wi=0.1 polymer cylinder R=4" begin
+    radius = 4.0
+    H = 18
+    u_mean = 0.006
+    # λ chosen so Wi = λ * u_mean / R ≈ 0.1.
+    Wi_target = 0.1
+    lambda = Wi_target * radius / u_mean
+    @test isapprox(lambda * u_mean / radius, Wi_target; rtol=1e-12)
+
+    result = Kraken.run_viscoelastic_logfv_cylinder_coupled_2d(;
+        radius=radius, H=H, L_up=4, L_down=7,
+        nu_s=0.08, nu_p=0.02, lambda=lambda,
+        u_mean=u_mean, Fx_body=1e-7,
+        bsd_fraction=1.0, max_steps=30,
+        wall_bc=:bouzidi_fl_twopass,
+        backend=KernelAbstractions.CPU(), T=Float64,
+    )
+
+    fluid = .!result.is_solid
+
+    # (a) no NaN/Inf in ρ + ψ_xx + ψ_xy + ψ_yy on the fluid sub-domain.
+    @test all(isfinite, result.rho[fluid])
+    @test all(isfinite, result.psixx[fluid])
+    @test all(isfinite, result.psixy[fluid])
+    @test all(isfinite, result.psiyy[fluid])
+    @test all(isfinite, result.ux[fluid])
+    @test all(isfinite, result.uy[fluid])
+
+    # (b) Cd finite (R-undersized, value not asserted).
+    @test isfinite(result.Cd)
+    @test isfinite(result.Cd_s)
+    @test isfinite(result.Cd_p)
+
+    # (c) ρ bounded in [0.5, 1.5] over the fluid sub-domain — the very
+    # first symptom of a pass-2 rho_w inconsistency is ρ pumping at the
+    # cut-link ring (driver M34_FIX_DIAG_VERDICT showed 97 % NaN was a
+    # ρ blow-up well before ψ).
+    @test result.rho_min > 0.5
+    @test result.rho_max < 1.5
+    @test result.first_nonfinite_step == 0  # no nonfinite event flagged
+
+    # (d) trace(C_max) bounded — polymer-side stability. `max_c_trace` is
+    # max over the fluid sub-domain of (ψ_xx + ψ_yy + 2) in Oldroyd-B
+    # log-conformation form (Ψ = log C → C = exp Ψ has trace ≥ 2).
+    @test result.min_c_eig > 0
+    @test result.max_c_trace < 50.0  # generous: Wi=0.1 should stay near unity
+
+    @info("M34v3 Wi=0.1 polymer cylinder smoke",
+          radius = radius,
+          H = H,
+          Wi = lambda * u_mean / radius,
+          lambda = lambda,
+          Cd = result.Cd,
+          Cd_s = result.Cd_s,
+          Cd_p = result.Cd_p,
+          rho_min = result.rho_min,
+          rho_max = result.rho_max,
+          max_c_trace = result.max_c_trace,
+          min_c_eig = result.min_c_eig,
+          completed_steps = result.completed_steps)
+end

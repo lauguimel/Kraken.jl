@@ -81,6 +81,19 @@ const _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS2_SPEC = LBMSpec(
     ApplyBouzidiFLPostCollideTwoPass(),
 )
 
+# Pass-3 (M34v3): cut-link-only ρ recompute. After pass-2 overwrites
+# `f_out[i, j, qbar]` on flagged cut links, the `ρ_out` left by pass-1 is the
+# sum of the *pre-Bouzidi-FL* pops at those same cells — i.e. inconsistent
+# with the post-pass-2 f-set. Downstream readers (the log-FV polymer pipeline
+# at next step, plus the next step's Guo body-force `f → ρ` chain) need ρ
+# consistent with the f's they read. This brick re-sums `f_out[i, j, 1..9]`
+# and overwrites `ρ_out[i, j]` ONLY on cut-link cells, leaving non-cut-link
+# cells bit-exact. See `bench/viscoelastic_audit/M34_FIX_DIAG_VERDICT.md`
+# §"Candidate residual bugs" #1 (HIGH).
+const _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS3_SPEC = LBMSpec(
+    ApplyCutLinkRhoRecompute(),
+)
+
 """
     fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
                              q_wall, uw_x, uw_y, Nx, Ny, ν; Λ=3/16)
@@ -221,5 +234,17 @@ function _fused_trt_libb_v2_guo_field_step!(::Val{:bouzidi_fl_twopass},
     #   :f_out, :ρ_out, :is_solid, :q_wall, :uw_link_x, :uw_link_y, :Nx, :Ny
     pass2! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS2_SPEC)
     pass2!(f_out, ρ, is_solid, q_wall, uw_link_x, uw_link_y, Nx, Ny;
+           ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+    # Pass 3 (M34v3): cut-link-only ρ recompute. Re-sums f_out at cells with
+    # any q_wall[i,j,q] > 0 (q ∈ 2..9), overwriting `ρ_out` so downstream
+    # readers see ρ consistent with the post-pass-2 cut-link f-set. Non-cut-
+    # link cells stay bit-exact (pass-1 `ρ_out`). Fixes the rho_w
+    # inconsistency identified in M34_FIX_DIAG_VERDICT §"Candidate residual
+    # bugs" #1 (HIGH).
+    # Pass-3 arg order = canonical sort of the brick's required_args:
+    #   :f_out, :ρ_out, :is_solid, :q_wall, :Nx, :Ny
+    pass3! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS3_SPEC)
+    pass3!(f_out, ρ, is_solid, q_wall, Nx, Ny;
            ndrange=(Nx, Ny))
 end
