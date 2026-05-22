@@ -1,0 +1,20 @@
+┌ Warning: Replacing docs for `Kraken.OldroydB :: Union{}` in module `Kraken`
+└ @ Base.Docs docs/Docs.jl:249
+driver_step_entry
+  _run_viscoelastic_logfv_step_channel_coupled_2d(geom_h; shear_length, nu_s, nu_p, lambda, polymer_model, L_max, u_mean, Fx_body, bsd_fraction, polymer_substeps, subcycle_relative_tolerance, max_deformation_increment, max_memory_deformation_increment, max_polymer_substeps, max_steps, avg_window, drag_stride, diagnostic_stride, embedded_gradient, embedded_advection, embedded_force, embedded_drag, embedded_geometry, embedded_circle_samples, force_boundary_fill, advection_scheme, wall_bc, step_callback, drag_cx, drag_cy, drag_radius, drag_u_ref, backend, T) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/drivers/viscoelastic_logfv_2d.jl:173
+lbm_step
+  fused_trt_libb_v2_guo_field_step!(f_out, f_in, ρ, ux, uy, is_solid, q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field, Nx, Ny, ν; Λ, wall_bc) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/kernels/li_bb_2d_v2.jl:123
+lbm_step_halfwayBB
+  _fused_trt_libb_v2_guo_field_step!(::Val{:halfwayBB}, f_out, f_in, ρ, ux, uy, is_solid, q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field, Nx, Ny, ν; Λ) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/kernels/li_bb_2d_v2.jl:138
+lbm_step_bouzidiFL
+  _fused_trt_libb_v2_guo_field_step!(::Val{:bouzidi_fl}, f_out, f_in, ρ, ux, uy, is_solid, q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field, Nx, Ny, ν; Λ) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/kernels/li_bb_2d_v2.jl:154
+psi_advect
+  logfv_advect_upwind_bc_aware_2d!(psixx_out, psixy_out, psiyy_out, psixx, psixy, psiyy, west_xx, west_xy, west_yy, east_xx, east_xy, east_yy, south_xx, south_xy, south_yy, north_xx, north_xy, north_yy, ux_face, uy_face, is_solid, dx, dy, bc::FVFDDomainBC2D, dt; sync, advection_scheme) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/kernels/logconformation_fv_2d.jl:1154
+psi_sym2_advect
+  fvfd_sym2_advect_upwind_2d!(psixx_out, psixy_out, psiyy_out, psixx, psixy, psiyy, psixx_bc::FVFDFieldBC2D, psixy_bc::FVFDFieldBC2D, psiyy_bc::FVFDFieldBC2D, ux_face, uy_face, is_solid, dx, dy, bc::FVFDDomainBC2D, dt; sync, advection_scheme) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/fvfd/operators_2d.jl:648
+psi_advect_inner
+  fvfd_advect_upwind_2d!(phi_out, phi, phi_bc::FVFDFieldBC2D, ux_face, uy_face, is_solid, dx, dy, bc::FVFDDomainBC2D, dt; sync, advection_scheme) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/fvfd/operators_2d.jl:591
+vel_grad
+  fvfd_velocity_gradient_2d!(dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy, bc::FVFDDomainBC2D; sync) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/fvfd/operators_2d.jl:1127
+poly_force
+  logfv_polymer_force_bc_aware_2d!(fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy, bc::FVFDDomainBC2D; sync, polymer_wall_extrap) @ Kraken ~/Documents/Recherche/Kraken.jl-viscoelastic/src/kernels/logconformation_fv_2d.jl:649

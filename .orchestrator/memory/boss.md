@@ -1356,3 +1356,141 @@ multi-Wi multi-R matrix, NOT single-point wall decomposition.
 - Next cluster opens: **polymer scheme upgrade** (CUBISTA proper /
   MUSCL-superbee with two-pass fix from Phase 2b audit / WENO).
   Distinct mission, fresh session.
+
+## 2026-05-22 — M32 Phase 4 trifecta closes M28-M32 cluster (BC pole, NOT polymer scheme)
+
+Step-back from the M32 Phase 3 closure narrative. The user explicitly
+declined the "M33 polymer-scheme upgrade" handoff and asked the Boss
+to validate the premise before building the intervention. Three
+diagnostics ran (D1 + D2bis + D3-finalize) — all empirical, all
+agreeing: the locus is BC pole halfway-BB, not the constitutive
+`:rusanov` scheme. The M32 Phase 3 "M28 vindicated" claim is
+**empirically falsified**.
+
+### D1 — Wi=1 R=30 + R=40 wall decomposition (`:idx` frame)
+
+3×3 (component × region) bucket matrix on the existing Metal F32 .jls
+dumps (Kraken R=30 from `tmp/m30_rho_metal/run01/...`, R=40 from
+`tmp/m30_R_sweep_metal/...`; rT shrunk wi1.0 from `bench/rheotool/...`).
+
+ΔCd = rT − Kraken at R=30 Wi=1 (total gap 10.37):
+
+```
+component  | front_pole  shoulder  wake   row
+pressure   | +8.34      +1.67     −1.10   +8.90
+visc_solv  | +0.07      −1.34     +0.07   −1.20
+polymer    | +0.59      +3.14     −1.05   +2.67
+col        | +8.99      +3.47     −2.09  +10.37
+```
+
+- **Pressure × front-pole = 80.4 %** of the gap.
+- **Polymer × wake = −10 %** (opposite sign — M28/M33 target zone
+  is anti-correlated with the actual gap).
+- R=40 cross-check consistent (same dominant bucket, 71.4 %).
+- Verdict file: `bench/viscoelastic_audit/M32_PHASE4_WI1_GAP_LOCALIZATION_VERDICT.md`.
+- Collateral: `tmp/m29c_kraken/...R30_bsd1_*.jls` is the M29c
+  rolled-back catastrophe dump (`:muscl_superbee`, Cd=−1571,
+  no `rho`), NOT a `:rusanov` reference — D1 caught this and
+  switched dataset. Future briefs must validate `propertynames(snap)`,
+  `snap.advection_scheme`, `snap.Cd_kraken` before consuming any
+  `tmp/*.jls`.
+
+### D2bis — R=60 Wi=1 NaN spatial fingerprint (Metal F32 Phase A)
+
+NaN at step 29, cell (943, 72), field **`rho`** (not Ψ — `rho` is
+the moment integral, the first to saturate). 98 NaN cells form
+**bilateral arcs at θ ≈ ±(38°, 48°), r−R ∈ [0, 7] LU**, position
+**front-shoulder**. Near-NaN-front: max|Ψ_xx|=15.86, max|u|=554,
+max|F_total|=320, ρ ∈ [−1.13, +4.42]. Classification (with caveat):
+`logconf_singularity` triggered by F32 exp(Ψ) saturation; polymer
+back-force ∇·τ_p blows up → super-sonic velocities → moment integral
+saturates → ρ NaN.
+
+- **F32 vs F64 caveat**: F32 exp ceiling ≈ 3.4e38, F64 ≈ 1.8e308.
+  The Aqua F64 fingerprint was NOT obtained — Phase B job
+  21619886.aqua crashed at startup with a `kwerr` (D2-original
+  wired `step_callback` kwarg in runner, driver does NOT accept it).
+  Plumbing bug, fixable; deferred to M34 validation cascade.
+- Verdict file: `bench/viscoelastic_audit/M32_PHASE4_R60_NAN_TRACE_VERDICT.md`.
+
+### D3-finalize — kraken-trace provenance (200 steps R=30 Wi=1)
+
+The first kraken-trace mission on viscoelastic. Captured trace at
+`.engineer_logs/trace.jsonl` (167 KB; 8 distinct kernels × 200
+steps). Per-step ordering:
+`psi_advect → psi_sym2_advect → psi_advect_inner ×3 → vel_grad →
+poly_force → lbm_step → lbm_step_halfwayBB`. Cross-step:
+**halfwayBB(n) writes ρ,ux,uy → psi_advect(n+1) reads them ~0.55 ms
+later**.
+
+`which` dispatch points (validated for this case):
+- halfwayBB → `src/kernels/li_bb_2d_v2.jl:138`
+- vel_grad → `src/fvfd/operators_2d.jl:1127`
+- psi_advect → `src/kernels/logconformation_fv_2d.jl:1154`
+- poly_force → `src/kernels/logconformation_fv_2d.jl:649`
+- Brick spec: `_TRT_LIBB_V2_GUO_FIELD_SPEC` at `src/kernels/li_bb_2d_v2.jl:49-54`
+  contains BOTH `PullHalfwayBB` (BC) AND `WriteMoments` (writes
+  ρ, ux, uy that D2bis reports as first-NaN). Single args_hash per
+  kernel — no per-region dispatch separation.
+
+**Verdict**: SAME mechanism. D1 (pressure × front-pole) and D2bis
+(polymer × front-shoulder) share one upstream code path
+`_TRT_LIBB_V2_GUO_FIELD_SPEC` brick sequence.
+
+Verdict file: `bench/viscoelastic_audit/M32_PHASE4_MECHANISM_VERDICT.md`.
+
+### Decisions taken 2026-05-22
+
+- **M33 REDIRECTED** in mandate.md §5 — polymer-scheme upgrade
+  premise empirically falsified. Conditional on M34 residual,
+  re-opened as M35.
+- **M34 = Bouzidi-FL Phase 2b unpark** opened as primary mission.
+  One-line driver flip `wall_bc=:bouzidi_fl` at
+  `src/kernels/li_bb_2d_v2.jl:154` + lag-1 read fix from
+  M30 Phase 2b audit (split kernel into two passes so x_ff reads
+  are lag-0 = current step post-collision). Acceptance: Kraken
+  Cd R=30 Wi=1 ∈ [118, 122] + R=30 Wi=0.1 within 1 % of rT +
+  R=40 Wi=1 reproduces + R=60 Wi=0.1 no NaN at 100k Aqua F64.
+- **NOT in scope of M34**: any Ψ-scheme change (M35 conditional);
+  any BSD change; any other BC family.
+
+### Process lessons (boss-level memory)
+
+1. **3-axis empirical signal beats inference-by-elimination**:
+   the M28 → M29c rollback → polymer match falsified → BC-pole
+   sub-dominant claim → M33 mandate sequence took 5+ session-days
+   of inference-by-elimination on cross-code gap, all reaching
+   different conclusions. M32 Phase 4 cost ~1 day (D1 + D2bis
+   + D3-finalize in series) and produced a converged verdict.
+   Pattern: localize via (wall decomp spatial + NaN spatial +
+   kraken-trace dispatch) BEFORE choosing the intervention.
+2. **Department Monitor anti-pattern** — D2-original AND
+   D3-original both captured the data needed for their verdicts,
+   then armed Monitor and sat in standby 5h+ without writing
+   the verdict markdown. The Boss spawned thin "-finalize"
+   Departments to consume the existing artifacts. Saved to
+   auto-memory `[[feedback_monitor_antipattern]]`. Future
+   Department briefs must forbid Monitor for any wait > 30s
+   and gate validation on artifact existence, not on
+   "Monitor returned".
+3. **The M28 verdict was DIRECTIONALLY wrong** (not partially right):
+   the boss.md tail "M28 vindicated" was based on Wi-dependence of
+   the gap, but the matrix doesn't say "polymer-coupled" implies
+   "polymer-scheme is the locus" — the polymer pipeline reads from
+   the BC-written fields, so a BC pole produces a Wi-coupled gap
+   too. Future Boss attribution must distinguish "Wi-coupled signal"
+   from "polymer-scheme defect" via spatial localization, not
+   via Wi-dependence alone.
+
+### Reusable artifacts (now landed, see git status)
+
+- `src/diagnostics/trace.jl` — kraken-trace `@trace_enter` macro
+  + JSONL writer (Contract A: zero-cost when KRAKEN_TRACE unset).
+  First kraken-trace adoption in Kraken.jl. Future trace missions
+  reuse this as the project's diagnostics infrastructure.
+- `bench/scratch/m32_phase4_*` — wall decomp harness, NaN trace
+  analyzer, kraken-trace probe + canary. The Phase 4 mission template
+  is now reusable for future cross-code gap localization.
+- `bench/viscoelastic_audit/M32_PHASE4_*_VERDICT.md` — three
+  verdict markdowns; canonical reference for future Boss reading.
+

@@ -1294,10 +1294,26 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
     (corrected by M31). The Wi-dependent gap pattern in this matrix
     is the definitive empirical signal.
 
-### M33 — Polymer scheme upgrade — PLANNED next session
+### M33 — Polymer scheme upgrade — REDIRECTED 2026-05-22 by M32 Phase 4 trifecta
 
-- **Mandate**: replace the production `:rusanov` 1st-order upwind
-  on log-conformation Ψ advection with a TVD/higher-order scheme
+> **REDIRECTED 2026-05-22**. M32 Phase 4 (D1 + D2bis + D3-finalize)
+> empirically falsified the "polymer scheme is the locus" premise:
+> the Wi=1 Cd gap is 80 % pressure × front-pole (halfway-BB BC),
+> the R=60 NaN is polymer back-force divergence at front-shoulder
+> (first-NaN field = `rho`, written by `WriteMoments` of the SAME
+> halfway-BB brick), and kraken-trace provenance confirmed SAME
+> mechanism (the BC pollutes the polymer via the WriteMoments →
+> vel_grad → psi_advect → poly_force chain within one step).
+> Polymer × wake (M28/M33 hypothesized locus) is −10 % of the gap
+> (anti-correlated sign). M33 as written addresses < 10 % of the
+> gap and is **conditional on M34 residual**: re-opened as M35 IF
+> Bouzidi-FL Phase 2b unpark (M34) leaves a residual > 2 % gap.
+> See: `bench/viscoelastic_audit/M32_PHASE4_*_VERDICT.md` ×3,
+> `[[project_m32_phase4_verdicts]]` (auto-memory).
+
+- **Mandate (original, FROZEN, do not pursue without M35 gate)**:
+  replace the production `:rusanov` 1st-order upwind on
+  log-conformation Ψ advection with a TVD/higher-order scheme
   that closes the Wi=1 −7.3 % Cd gap without NaN'ing at R=30 100k.
 - **Candidates** (ranked by ease of port):
   1. **MUSCL-superbee with two-pass kernel fix** : reuse M29b code
@@ -1323,6 +1339,90 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
 - **Runner**: Codex via `kraken-codex-pilot`. Phase 2b audit verdict
   has the two-pass fix already specified.
 - **Walltime estimate**: 1-2 Engineer sessions + Aqua matrix re-run.
+
+### M34 — Bouzidi-FL Phase 2b unpark — PRIMARY 2026-05-22
+
+- **Mandate**: replace `wall_bc=:halfwayBB` with `wall_bc=:bouzidi_fl`
+  on the canonical Kraken viscoelastic 2D cylinder, applying the
+  lag-1 read fix specified in M30 Phase 2b audit (q ≤ 0.5 branch
+  reads `x_ff` as `f_in[i_ff, j_ff, q]` which is lag-1 post-swap;
+  canonical Bouzidi-FL formula requires lag-0 = current step
+  post-collision). Architectural fix: split single-pass kernel into
+  two kernel launches so the second pass reads `f_out` (lag-0).
+- **Empirical anchoring**: M32 Phase 4 trifecta (see
+  `[[project_m32_phase4_verdicts]]`):
+  - D1: −7.3 % Wi=1 Cd gap is 80 % pressure × front-pole
+    (halfway-BB staircase pole)
+  - D2bis: R=60 polymer-coupled NaN first-NaN field = `rho` at
+    bilateral arcs θ ≈ ±45°, r−R ∈ [0,7] LU front-shoulder
+    (i.e. the field written by `WriteMoments` at the wall ring)
+  - D3-finalize (kraken-trace): SAME mechanism — halfwayBB
+    `WriteMoments` → vel_grad → psi_advect → poly_force chain
+    within one step. BC pole pollutes polymer at shoulder.
+- **Source pointers** (verified by D3-finalize kraken-trace):
+  - `_bouzidi_fl_post_value` helper: `src/kernels/dsl/bricks.jl:404-419`
+  - `ApplyBouzidiFLPostCollide` brick: `src/kernels/dsl/bricks.jl:421-550`
+  - `_TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_SPEC`: `src/kernels/li_bb_2d_v2.jl:56-61`
+  - `wall_bc=:bouzidi_fl` dispatch: `src/kernels/li_bb_2d_v2.jl:123-134 + 152-164`
+  - Lag-1 defect: `src/kernels/dsl/bricks.jl:448, 462, 476, 490, 504, 518, 532, 546`
+    (q ≤ 0.5 branch reads `f_in[i_ff, j_ff, q]`)
+  - Audit reference: `bench/viscoelastic_audit/M30_PHASE2B_AUDIT_VERDICT.md`
+- **Allowed edit zones**:
+  - `src/kernels/dsl/bricks.jl` (split `ApplyBouzidiFLPostCollide` into
+    two passes: write-collide pass + post-BB pass; both pass `f_out`
+    explicitly so x_ff reads are lag-0)
+  - `src/kernels/li_bb_2d_v2.jl` (driver of the new two-pass spec)
+  - `src/drivers/viscoelastic_logfv_2d.jl` (kwarg threading: ensure
+    `wall_bc=:bouzidi_fl` reaches the new spec without regression
+    of default `:halfwayBB`)
+  - `bench/viscoelastic_logfv/` (new PBS + bench scripts for the
+    Aqua F64 validation matrix)
+  - `test/` (regression: default `:halfwayBB` bit-exact unchanged;
+    new `:bouzidi_fl` smoke test on R=20 Newtonian Wi=0)
+- **Acceptance criterion (G4 BC gate)** — ALL must pass:
+  - Kraken R=30 Wi=1 β=0.59 BSD=1 `:bouzidi_fl` Cd ∈ [118, 122]
+    (closes ≥ 80 % of the −7.3 % gap toward rT 120.38)
+  - Kraken R=30 Wi=0.1 β=0.59 `:bouzidi_fl` Cd within 1 % of rT 130.43
+    (no regression vs `:halfwayBB` 129.39)
+  - Kraken R=40 Wi=1 β=0.59 `:bouzidi_fl` reproduces R=30 verdict
+    (within 0.5 %)
+  - Kraken R=60 Wi=0.1 β=0.59 `:bouzidi_fl` no NaN at 100k steps
+    Aqua F64 CUDA
+  - Default `wall_bc=:halfwayBB` Pkg.test() bit-exact unchanged
+- **Validation cascade**:
+  1. Local Pkg.test() default path (bit-exact)
+  2. Local Metal F32 smoke (`:bouzidi_fl` Newtonian R=20, 200 steps,
+     no NaN, mass conserved to 1e-13)
+  3. Aqua F64 CUDA matrix re-run on canonical 4-case (R=30/40 ×
+     Wi=0.1/1.0) + R=60 Wi=0.1 NaN-elimination case
+- **Runner**: Codex via `kraken-codex-pilot`. M30 Phase 2b audit
+  has the two-pass fix already specified in adversarial-validated
+  form (Claude + Codex AGREED on the lag-1 defect and the split-
+  kernel fix).
+- **Walltime estimate**: 1 Engineer session for the two-pass split
+  + 1 Aqua matrix re-run (~4 h walltime, 4 cases × ~1 h each).
+- **NOT in scope**:
+  - Any Ψ-advection scheme upgrade (parked as M35 conditional)
+  - Any BSD coupling change
+  - Any other BC family (curved BB, IBM, IBB-LI variants)
+- **Step-back conditions**:
+  - If two passes do NOT remove the lag → audit M30 Phase 2b
+    architectural assumption (Codex + Claude may have missed a
+    third buffer)
+  - If `:bouzidi_fl` closes Wi=0.1 but NOT Wi=1 → M35 (Ψ-scheme)
+    is needed and worth opening
+  - If `:bouzidi_fl` introduces a NaN at R=30 Newtonian → roll
+    back, the lag fix interacts with the Newtonian path; not a
+    polymer-only intervention
+
+### M35 — Ψ-advection scheme upgrade — CONDITIONAL on M34 residual
+
+- **Status**: gated by M34 acceptance. Open ONLY IF M34 leaves a
+  residual > 2 % Cd gap at R=30 Wi=1.
+- **Mandate**: the original M33 mandate (MUSCL-superbee + two-pass
+  + 1-sided MUSCL at solid-adjacent cells), applied ON TOP of the
+  fixed Bouzidi-FL BC from M34.
+- See M33 section (frozen) for candidate ranking and acceptance.
 
 ### M31 — Frame-convention audit of wall-ring integration — DONE 2026-05-20
 
