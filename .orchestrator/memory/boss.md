@@ -1633,3 +1633,45 @@ const _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC = LBMSpec(
 enumeration) + 1× weak smoke test design. The orchestrator pipeline
 itself needs a hygiene pass before the next major mission cluster.
 Candidate session for `[[project_orchestrator_pattern_audit]]`.
+
+### 2026-05-22 night — M34-fix YELLOW: BC over-bounce reduced but not eliminated; M34v3 next
+
+**Aqua re-submission** (jobs 21664026 matrix + 21664027 R60, M34-fix RAW pass-1):
+
+| R | Wi | Cd | nan | Status |
+|---|---|---|---|---|
+| 30 | 0.1 | 132.51 (+1.6 % vs rT 130.43) | false | partial (over G4 1 % gate) |
+| 40 | 0.1 | 133.46 (+2.3 % vs rT) | false | partial |
+| 30 | 1.0 | NaN | true | FAIL |
+| 40 | 1.0 | NaN | true | FAIL |
+| 60 | 0.1 | NaN | true | FAIL |
+
+Double-BC fix (Wi=0.1 cases) WORKED: M34 v1 Cd=117.59 → M34-fix Cd=132.51,
+right direction, no NaN at Wi=0.1. But residual over-bounce persists.
+
+**M34-fix-diag triage** (`bench/viscoelastic_audit/M34_FIX_DIAG_VERDICT.md`):
+- 3 NaN cases all `classification=uniform`, rho_nan_frac ≈ 97.4 %
+- **Ψ stays FINITE everywhere** (psi_nan_frac = 0.0) — polymer field innocent
+- NaN distribution: wake + "other" (bulk channel) + FULL inlet + outlet columns
+- Recommendation: **M34-second-bug** (NOT M35-open)
+- Single coherent root cause: residual over-bounce at cut-link cells; +1.6 % Cd at Wi=0.1 R=30 survives; amplifies × R or × Wi → envelope crossed.
+
+**Top candidate residual bug** (HIGH confidence): pass-2 of
+`:bouzidi_fl_twopass` reads `ρ_out` from pass-1 (post-halfwayBB, NOT
+post-Bouzidi-FL). The `rho_w` in the Bouzidi-FL formula is therefore
+inconsistent with the post-pass-2 `f`. Fix: cut-link-only re-WriteMoments
+after pass-2.
+
+**Next session: M34v3** — implement the HIGH fix + add a Wi=0.1 polymer
+smoke (not just Newtonian) + re-submit Aqua matrix.
+
+**M35 stays parked**: Ψ-scheme upgrade is NOT the right intervention
+per triage (Ψ is the FINITE field, ρ NaN's).
+
+**Cumulative session stats**:
+- 7 commits today (71fb5f24 → c3fe5063 → dc57f373 + diag verdict next)
+- 6× Department stalls observed (Codex planning loop + Monitor + socket)
+- 2× Aqua matrix iterations, both with new failure modes
+- 3 new feedback memory entries
+- 1 new project memory entry
+- M28-M34 cluster STILL OPEN (BC family direction correct, implementation needs M34v3)
