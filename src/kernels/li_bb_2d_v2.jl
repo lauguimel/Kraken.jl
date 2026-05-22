@@ -53,6 +53,21 @@ const _TRT_LIBB_V2_GUO_FIELD_SPEC = LBMSpec(
     WriteMoments(),
 )
 
+const _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_SPEC = LBMSpec(
+    PullHalfwayBB(), SolidInert(),
+    Moments(), CollideTRTDirectGuoField(),
+    ApplyBouzidiFLPostCollide(),
+    WriteMoments(),
+)
+
+# Two-pass Bouzidi-FL: pass-1 reuses _TRT_LIBB_V2_GUO_FIELD_SPEC (collision +
+# halfwayBB writes f_out, ρ_out). Pass-2 launches ONLY the Bouzidi-FL overwrite
+# brick — by then pass-1 has globally synchronised, so f_out and ρ_out are
+# lag-0 everywhere. Closes the lag-1 x_ff defect identified in M30 Phase 2b.
+const _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS2_SPEC = LBMSpec(
+    ApplyBouzidiFLPostCollideTwoPass(),
+)
+
 """
     fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
                              q_wall, uw_x, uw_y, Nx, Ny, ν; Λ=3/16)
@@ -105,7 +120,8 @@ end
 """
     fused_trt_libb_v2_guo_field_step!(f_out, f_in, ρ, ux, uy, is_solid,
                                        q_wall, uw_x, uw_y, Fx, Fy,
-                                       Nx, Ny, ν; Λ=3/16)
+                                       Nx, Ny, ν; Λ=3/16,
+                                       wall_bc=:halfwayBB)
 
 Modular LI-BB V2 solvent step with a per-cell Guo force field. This keeps the
 same pull-stream, solid handling, and cut-link pre-phase as
@@ -115,7 +131,24 @@ TRT+Guo-field brick. It is intended for cell-centered log-FV polymer coupling.
 function fused_trt_libb_v2_guo_field_step!(f_out, f_in, ρ, ux, uy, is_solid,
                                             q_wall, uw_link_x, uw_link_y,
                                             Fx_field, Fy_field,
-                                            Nx, Ny, ν; Λ::Real=3/16)
+                                            Nx, Ny, ν; Λ::Real=3/16,
+                                            wall_bc::Symbol=:halfwayBB)
+    wall_bc in (:halfwayBB, :bouzidi_fl, :bouzidi_fl_twopass) ||
+        throw(ArgumentError("wall_bc must be :halfwayBB, :bouzidi_fl, or :bouzidi_fl_twopass"))
+    @trace_enter :lbm_step
+    return _fused_trt_libb_v2_guo_field_step!(
+        Val(wall_bc), f_out, f_in, ρ, ux, uy, is_solid,
+        q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field,
+        Nx, Ny, ν; Λ=Λ,
+    )
+end
+
+function _fused_trt_libb_v2_guo_field_step!(::Val{:halfwayBB},
+                                             f_out, f_in, ρ, ux, uy, is_solid,
+                                             q_wall, uw_link_x, uw_link_y,
+                                             Fx_field, Fy_field,
+                                             Nx, Ny, ν; Λ::Real=3/16)
+    @trace_enter :lbm_step_halfwayBB
     backend = KernelAbstractions.get_backend(f_in)
     ET = eltype(f_in)
     s_plus, s_minus = trt_rates(ν; Λ=Λ)
@@ -124,4 +157,51 @@ function fused_trt_libb_v2_guo_field_step!(f_out, f_in, ρ, ux, uy, is_solid,
             q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field,
             Nx, Ny, ET(s_plus), ET(s_minus);
             ndrange=(Nx, Ny))
+end
+
+function _fused_trt_libb_v2_guo_field_step!(::Val{:bouzidi_fl},
+                                             f_out, f_in, ρ, ux, uy, is_solid,
+                                             q_wall, uw_link_x, uw_link_y,
+                                             Fx_field, Fy_field,
+                                             Nx, Ny, ν; Λ::Real=3/16)
+    @trace_enter :lbm_step_bouzidiFL
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    kernel! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_SPEC)
+    kernel!(f_out, ρ, ux, uy, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field,
+            Nx, Ny, ET(s_plus), ET(s_minus);
+            ndrange=(Nx, Ny))
+end
+
+# Two-pass Bouzidi-FL dispatch. Pass-1 = the standard halfwayBB collide step
+# (writes f_out + ρ_out everywhere). We then explicitly synchronise the backend
+# so pass-2 sees fully-written f_out / ρ_out (no cross-thread race).
+# Pass-2 = a minimal kernel that overwrites f_out[i, j, qbar] on flagged cut
+# links, reading lag-0 f_out at both x_f and x_ff and lag-0 ρ_out for rho_w.
+# Closes the M30 Phase 2b lag mismatch (see
+# bench/viscoelastic_audit/M30_PHASE2B_AUDIT_VERDICT.md §"Proposed minimal fix").
+function _fused_trt_libb_v2_guo_field_step!(::Val{:bouzidi_fl_twopass},
+                                             f_out, f_in, ρ, ux, uy, is_solid,
+                                             q_wall, uw_link_x, uw_link_y,
+                                             Fx_field, Fy_field,
+                                             Nx, Ny, ν; Λ::Real=3/16)
+    @trace_enter :lbm_step_bouzidiFL_twopass
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    # Pass 1: existing collide + halfwayBB + WriteMoments, writes f_out, ρ_out.
+    pass1! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_SPEC)
+    pass1!(f_out, ρ, ux, uy, f_in, is_solid,
+           q_wall, uw_link_x, uw_link_y, Fx_field, Fy_field,
+           Nx, Ny, ET(s_plus), ET(s_minus);
+           ndrange=(Nx, Ny))
+    KernelAbstractions.synchronize(backend)
+    # Pass 2: Bouzidi-FL overwrite, lag-0 on x_f, x_ff, ρ_w.
+    # Pass-2 arg order = canonical sort of the brick's required_args:
+    #   :f_out, :ρ_out, :is_solid, :q_wall, :uw_link_x, :uw_link_y, :Nx, :Ny
+    pass2! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS2_SPEC)
+    pass2!(f_out, ρ, is_solid, q_wall, uw_link_x, uw_link_y, Nx, Ny;
+           ndrange=(Nx, Ny))
 end

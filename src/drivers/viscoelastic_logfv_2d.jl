@@ -198,6 +198,8 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     embedded_circle_samples::Integer=32,
     force_boundary_fill::Symbol=:bc_aware,
     advection_scheme::Symbol=:rusanov,
+    wall_bc::Symbol=:halfwayBB,
+    step_callback::Union{Nothing,Function}=nothing,
     drag_cx::Union{Nothing,Real}=nothing,
     drag_cy::Union{Nothing,Real}=nothing,
     drag_radius::Union{Nothing,Real}=nothing,
@@ -205,6 +207,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     backend=KernelAbstractions.CPU(),
     T=Float64,
 )
+    @trace_enter :driver_step_entry
     shear_length > 0 || throw(ArgumentError("shear_length must be positive"))
     nu_s > 0 || throw(ArgumentError("nu_s must be positive"))
     nu_p >= 0 || throw(ArgumentError("nu_p must be non-negative"))
@@ -223,6 +226,8 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     advection_scheme_symbol = Symbol(replace(lowercase(String(advection_scheme)), '-' => '_'))
     advection_scheme_symbol in (:rusanov, :muscl_superbee) ||
         throw(ArgumentError("advection_scheme must be :rusanov or :muscl_superbee"))
+    wall_bc in (:halfwayBB, :bouzidi_fl, :bouzidi_fl_twopass) ||
+        throw(ArgumentError("wall_bc must be :halfwayBB, :bouzidi_fl, or :bouzidi_fl_twopass"))
     if embedded_geometry_symbol === :circle &&
        (isnothing(drag_cx) || isnothing(drag_cy) || isnothing(drag_radius))
         throw(ArgumentError(
@@ -471,7 +476,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
 
         fused_trt_libb_v2_guo_field_step!(
             f_out, f_in, rho, ux, uy, is_solid, q_wall, uwx, uwy, fx_total, fy_total,
-            Nx, Ny, nu_lbm_t;
+            Nx, Ny, nu_lbm_t; wall_bc=wall_bc,
         )
         apply_bc_rebuild_2d!(f_out, f_in, bcspec, nu_lbm_t, Nx, Ny)
         if drag_enabled && step > drag_start &&
@@ -547,6 +552,13 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
                 first_nonfinite_j = finite_diag.j
                 break
             end
+        end
+        if step_callback !== nothing
+            KernelAbstractions.synchronize(backend)
+            step_callback(step, (; rho, ux, uy,
+                psixx, psixy, psiyy, tauxx, tauxy, tauyy,
+                fx_poly, fy_poly, fx_total, fy_total,
+                dudx, dudy, dvdx, dvdy, is_solid_h))
         end
         f_in, f_out = f_out, f_in
     end
