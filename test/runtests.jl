@@ -4,6 +4,7 @@ using Kraken
 @testset "Kraken.jl LBM" begin
     include("test_lbm_basic.jl")
     include("test_amr_d_ladder.jl")
+    include("test_amr_d_corner_nonregression_2d.jl")
     include("test_guo_convention_pairs.jl")
     include("test_poiseuille.jl")
     include("test_poiseuille_3d.jl")
