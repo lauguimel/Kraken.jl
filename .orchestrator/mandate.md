@@ -1340,7 +1340,59 @@ and `bench/viscoelastic_logfv/CYL_RHEOTOOL_REF_M28_VERDICT.md`.
   has the two-pass fix already specified.
 - **Walltime estimate**: 1-2 Engineer sessions + Aqua matrix re-run.
 
-### M34 — Bouzidi-FL Phase 2b unpark — PRIMARY 2026-05-22
+### M40 — V&V hierarchy + polymer-chain verdict — DONE 2026-05-23
+
+- **Status**: GREEN. The canonical viscoelastic V&V suite is at
+  `bench/viscoelastic_validation/` (L0 unit operators STUB → L1 Poiseuille
+  Oldroyd-B FULLY IMPLEMENTED → L2/L3a/L3b/L4 STUBs).
+- **Verdict (load-bearing)**: L1 Wi sweep {0.001, 0.01, 0.1, 0.5, 1.0}
+  ALL PASS on planar Poiseuille Oldroyd-B. Polymer chain at unit level
+  is correct up to Wi=1. This empirically REFUTES the M28/M33 "polymer
+  scheme is the locus" narrative.
+- **Implication for M28/M33/M34/M35**: the cylinder R=30 Wi=1 Cd deficit
+  is **strictly in the curved-coupling layer** (cut-link drag, BSD on
+  curved surface, vel_grad stencil on non-axis solid neighbours,
+  polymer wall BC on curved walls, MUSCL boundary fallback ±2 cells of
+  curved solid). All four prior missions had attribution errors;
+  none of their iterations was empirically attributable.
+- **Methodology lesson** (saved as `[[feedback_localize_via_vv_hierarchy]]`):
+  iterating fixes on the full L4 benchmark without a V&V hierarchy is
+  attribution-impossible due to ~15 simultaneous DOFs. Build L0→L4
+  hierarchy first; find first divergence; debug there.
+- **References established (rock-solid, committed)**:
+  - Bird-Armstrong-Hassager Vol 1 §3.4 (analytic steady Oldroyd-B
+    Poiseuille)
+  - Basilisk `src/test/poiseuille-oldroydb.c` .ref (153 rows, grid-
+    converged to <0.5 % at t/λ=10)
+  - Basilisk `src/test/lid-oldroydb.c` Fattal-Kupferman digitised
+    (52 kinetic + 49 ux points)
+  - Waters-King 1970 start-up Couette analytic series (formula
+    structure transcribed)
+- **Reference NOT yet collected**: rheoTool Channel τ profile
+  (`convergence_verified: false`, `values: TO_BE_FILLED`). Next mission
+  must run rT `Allrun` on the rheoTool Channel tutorial to populate.
+- **Recommended next missions**:
+  1. **L4-curved-wall isolation**: cylinder R=8 Newtonian Re=1 vs
+     Bouzidi-FL analytical reference from M30 Phase 2a. Tests curved
+     BC with zero polymer. PASS → curved BC OK, bug is polymer-curvature
+     coupling specifically. FAIL → curved BC itself is the problem.
+  2. **L2 Couette start-up Waters-King** at Wi=1 — complementary
+     transient validation. Lower priority since L1 already covers steady
+     Oldroyd-B unit response.
+  3. **rT Channel reference**: run `Allrun` on the rheoTool Channel
+     tutorial, extract τ profile, fill `ref/rheotool_channel_tau.json`.
+
+### M34 — Bouzidi-FL Phase 2b unpark — SUPERSEDED by M40 verdict 2026-05-23
+
+> **SUPERSEDED 2026-05-23**: M40 V&V verdict shows polymer unit chain is
+> CORRECT at Wi=1 on planar. M34's premise (BC + polymer coupling fix
+> via Bouzidi-FL) was on the right family (curved BC) but the wrong
+> specific intervention. The M34 v1 → M34-fix → M34v3 iterations all
+> RED/YELLOW on Aqua matrix, validating the V&V step-back. Future
+> curved-BC missions should start from L4-curved-wall isolation test,
+> not from another Bouzidi-FL variant.
+
+
 
 - **Mandate**: replace `wall_bc=:halfwayBB` with `wall_bc=:bouzidi_fl`
   on the canonical Kraken viscoelastic 2D cylinder, applying the

@@ -1675,3 +1675,107 @@ per triage (Ψ is the FINITE field, ρ NaN's).
 - 3 new feedback memory entries
 - 1 new project memory entry
 - M28-M34 cluster STILL OPEN (BC family direction correct, implementation needs M34v3)
+
+## 2026-05-23 — V&V hierarchy established + verdict: cylinder bug is geometric
+
+User forced a methodological step-back after 7+ failed iterations on
+cylinder L4 (M28 → M29b → M29c → M30 P2b → M31 → M32 Phase 4 → M34 v1
+→ M34-fix → M34v3, all RED or YELLOW). New approach: build V&V
+hierarchy L0→L4 with analytic/cross-code references, find first
+divergence.
+
+### Session arc
+
+- **M28-M34 audit (Codex+Claude adversarial, cross-engine)**: convergent
+  on "moment-field inconsistency at cut-link cells" as candidate root
+  cause for both Q1 (Cd_pressure deficit) and Q2 (NaN under
+  bouzidi_fl_twopass). Recommended fix: extend pass-3 brick to
+  recompute ρ + ux + uy at cut-link cells.
+- **User counterargument** (load-bearing): Newtonian Wi=0 matches rT to
+  0.22%. Same BC, same moment chain. If moment inconsistency were the
+  cause, Newtonian would also drift. Therefore moment chain is fine in
+  isolation; the Wi-dependent drift requires a Wi-dependent mechanism.
+- **M37 inventory**: 13 Kraken viscoelastic tests + 25 benches exist
+  but are scattered. rheoTool has `rheoTestFoam` (one-cell imposed-
+  velocity constitutive). Basilisk has `src/test/poiseuille-oldroydb.c`
+  + `.ref` regression artefacts (the discipline pattern). Kraken
+  already has imposed-velocity test (`test_logfv_frozen_channel_cde.jl`)
+  and inverse back-force test (`test_viscoelastic_force_accounting.jl`)
+  but ad-hoc, no canonical home.
+- **M38 architecture**: built `bench/viscoelastic_validation/` skeleton —
+  README + REFERENCES + INVENTORY + ref/ (Basilisk Poiseuille .ref 153
+  rows, Basilisk lid-oldroydb Fattal-Kupferman 52+49 pts, Waters-King
+  1970 formula, Bird-Armstrong-Hassager analytic) + L1 fully implemented
+  + STUBs for L0/L2/L3a/L3b/L4.
+- **M39 L1 first run**: 6/10 PASS at Wi≈3e-3. 4 FAIL all wall-sampling
+  artefacts in the reference (reference used CD at j=1 cell-center, but
+  HWBB wall is at j=0.5). Polymer chain in bulk is healthy.
+- **M40 stencil-fix + Wi-sweep**: stencil fix replaces ref γ̇ with HWBB-
+  aware quadratic one-sided (`(-3u₁+4u₂-u₃)/2`). M39 dump now 10/10.
+  Wi sweep {0.001, 0.01, 0.1, 0.5, 1.0} all PASS. Errors decrease with
+  Wi. min_eig_C matches Oldroyd-B steady-shear analytic
+  `(2+2Wi²−√(4Wi²+4Wi⁴))/2` to <0.1 %.
+
+### Verdict (2026-05-23, load-bearing)
+
+**Polymer unit chain CORRECT up to Wi=1.0 on planar Poiseuille
+Oldroyd-B.** The constitutive + Ψ-advection (`:rusanov`) + back-force +
+log-conformation + Hermite + BSD + Guo chain produces analytic-accurate
+results. M28/M33 "polymer scheme is the locus" hypothesis is
+**empirically refuted at the unit level**.
+
+The cylinder R=30 Wi=1 Cd deficit must therefore be in the **curved-
+coupling layer**:
+- Cut-link drag computation (q_wall integration)
+- BSD over curved surface
+- vel_grad stencil on non-axis-aligned solid neighbours
+- Polymer wall BC on curved walls (M29b limitation: MUSCL fallback
+  ±2 cells around solid)
+- Some coupling between BC and polymer not active at planar walls
+
+### Codex+Claude audit refined verdict
+
+The cross-engine audit's "moment-field inconsistency" hypothesis was
+not wrong per se, but applies ONLY in presence of curvature. The
+flat-channel moment chain works at Wi=1 (L1 PASS). The inconsistency at
+cut-link cells does matter at curved boundary, where the geometry
+forces it to interact with polymer back-force.
+
+### Methodology lesson
+
+Stored as `[[feedback_localize_via_vv_hierarchy]]`. Future Boss MUST
+NOT iterate fixes on L4 cylinder without first checking V&V hierarchy.
+If L1 (or any lower level) is broken, fixing it must come before any
+L4 iteration. If L1 is OK and L4 fails, the bug is strictly at the
+levels in between (geometry, curved coupling).
+
+### Acquired infrastructure
+
+- `bench/viscoelastic_validation/` — full V&V suite
+- 3 verdicts in `bench/viscoelastic_audit/M28_M34_AUDIT_*.md`
+- 1 inventory + 1 architecture + 2 results markdowns for L1
+- 6 diagnostic plots for L1 Wi=3e-3 case
+- 1 CSV Wi-sweep results table
+- 1 Wi-sweep error curve plot
+
+### Recommended next session
+
+Build **L4 curved-wall isolation test**: cylinder R=8 Newtonian Re=1
+(no polymer) vs Bouzidi-FL analytical reference from M30 Phase 2a.
+This tests the curved-BC layer **with zero polymer**. If Kraken matches
+to <1% at this level, the curved BC is OK and the bug is specifically
+in the polymer-coupling-at-curvature. If Kraken fails this level, the
+curved BC itself is the problem.
+
+Alternative L2 (Couette start-up Waters-King at Wi=1) gives transient
+polymer info but is redundant with L1 Wi-sweep on the constitutive
+question.
+
+### Memory candidates updated
+
+- `[[project_kraken_vv_suite]]` (NEW) — pointer to suite + verdict
+- `[[feedback_localize_via_vv_hierarchy]]` (NEW) — methodology
+- `[[project_m32_phase4_verdicts]]` (existing) — superseded by V&V on
+  the polymer attribution question; retained for the spatial localization
+  data (front-pole pressure deficit is still a valid empirical fact)
+
