@@ -11,3 +11,10 @@ output/
 # results/ at root only (top-level), NOT benchmarks/results/ which is
 # a versioned sync point for the doc figures.
 /results/
+
+# Engineer/orchestrator scratch (M-NEXT-V* mission ephemera)
+.engineer_logs/
+.engineer_brief*.md
+.codex_logs/
+tmp/M-NEXT-V*/scratch/
+tmp/M-NEXT-V*/.engineer_brief*.md
