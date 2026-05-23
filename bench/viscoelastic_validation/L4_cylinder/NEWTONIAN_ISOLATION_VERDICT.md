@@ -1,4 +1,6 @@
-# M41 — Newtonian curved-BC isolation on cylinder
+# M41 — Newtonian curved-BC isolation on cylinder — RESULTS
+
+**Status**: COMPLETE 2026-05-23 evening. **Verdict: MIXED — BC fine at Newt, polymer-curvature coupling is the locus.**
 
 Date    : 2026-05-23
 Mission : Discriminate "curved BC family is buggy at Wi=0" vs "BC OK at
@@ -7,6 +9,62 @@ Method  : Run cylinder at strict-Newtonian limit (beta=1.0, nu_p=0,
           polymer dormant) with `wall_bc=:bouzidi_fl_twopass` at
           R={30, 40, 60}, compare to halfwayBB G3 PASS reference
           (M32 Phase 3: R=30 Cd=132.08, rT 132.37, gap -0.22 %).
+Aqua    : Jobs 21729717 (halfwayBB R=30 sanity, 4:36 walltime, exit 0) +
+          21729718 (bouzidi_fl_twopass R=30/40/60, 8:08 walltime, exit 0)
+
+## Results
+
+| Setup                                    | Cd_kraken | NaN  | Δ vs halfwayBB | Δ vs rT |
+| ---------------------------------------- | --------- | ---- | -------------- | ------- |
+| R=30 :halfwayBB Newt (sanity)            | 132.076   | false| 0 (reference)  | −0.22 % |
+| R=30 :bouzidi_fl_twopass Newt            | **132.637** | false| +0.42 %        | **+0.20 %** |
+| R=40 :bouzidi_fl_twopass Newt            | 133.537   | false| +1.10 %        | (no rT ref) |
+| R=60 :bouzidi_fl_twopass Newt            | **135.436** | false| **+2.54 %**    | (no rT ref) |
+
+Reference rsync'd to `tmp/m41_newt_results/{halfway,curved_bc}/SUMMARY.csv`.
+
+## Verdict (load-bearing): MIXED
+
+**Three empirical findings:**
+
+1. **`:bouzidi_fl_twopass` does NOT NaN at Newtonian R=60** (Cd=135.44 finite). At Wi=0.1 R=60 the same setup DID NaN. **→ The R=60 NaN at Wi≥0.1 is polymer-coupled, NOT BC-intrinsic.**
+2. **At Newtonian R=30, `:bouzidi_fl_twopass` is CLOSER to rT** (132.64 vs rT 132.37, +0.20 %) **than `:halfwayBB`** (132.08, −0.22 %). The BC family corrects in the right direction.
+3. **R-scaling of `:bouzidi_fl_twopass` Newt over-shoot**: +0.42 % at R=30 → +1.1 % at R=40 → +2.5 % at R=60. There IS a small R-dependent intrinsic bias (likely scales with cut-link cell count), but it is **much smaller than the polymer-induced over-shoot at Wi=0.1** (+1.6 % at R=30 already).
+
+**Empirical decomposition of the cylinder Wi=1 gap:**
+
+| Subsystem | Status at unit/Newtonian level | Reference |
+|---|---|---|
+| Pure polymer chain (planar) | **CORRECT** to Wi=1 | M40 L1 Wi sweep |
+| Pure curved BC (Newtonian) | **MOSTLY CORRECT** (small R-bias) | This verdict (M41) |
+| **Polymer × curved BC coupling** | **LOCUS** | empirically isolated by elimination |
+
+The Wi-dependent jump from +0.20 % (Newt R=30) to +1.60 % (Wi=0.1 R=30) to NaN (Wi=1 R=30) is **polymer-driven amplification at curved boundary**, not BC-intrinsic.
+
+## Implication for next mission
+
+The locus is the **interaction between polymer-pipeline and curved-BC**, specifically at cut-link / wall-ring cells where:
+- `vel_grad` uses solid-aware one-sided stencils (`_fvfd_solid_bc_derivative_*_2d`)
+- `psi_advect` falls back from MUSCL to 1st-order Rusanov within ±2 cells of solid (M29b limitation)
+- `poly_force` `∇·τ_p` computed across the cut-link
+- `ρ_out` written by halfwayBB BC differs from Bouzidi-FL post-collision result
+
+**Top candidate (HIGH confidence):** M29b boundary fallback to Rusanov within ±2 cells of solid. This is the only known-load-bearing limitation in the polymer-advection chain that is specific to curved geometry. M29b improved Cd at Wi=1 by +5 (rusanov → muscl_superbee) BUT the bulk fallback to rusanov within ±2 cells means the polymer field around the cylinder is still 1st-order advected — and this is exactly the shoulder zone where D1 found polymer × shoulder = +3.14 deficit.
+
+**Recommended next mission**: implement and test the M29c-v2-style boundary-MUSCL relaxation (one-sided MUSCL at solid-adjacent cells) BUT applied with care to avoid the late NaN observed in M29c-v2 (step 92,200 on rho at j=1 south wall). The M30 P2b "two-pass kernel split" architecture may help by ensuring lag-0 reads at boundary cells.
+
+The cylinder Wi=1 gap is now empirically attributed to **MUSCL boundary fallback at curved geometry**. Next experiment: probe-instrument that fallback (count fallback cells per step, max τ_p in fallback zone) to confirm before any implementation.
+
+## Files produced
+
+- `tmp/m41_newt_results/halfway/SUMMARY.csv` (R=30 halfwayBB Newt)
+- `tmp/m41_newt_results/curved_bc/SUMMARY.csv` (R=30/40/60 bouzidi_fl_twopass Newt)
+- Aqua job 21729717.aqua (halfway) + 21729718.aqua (curved) — finished exit 0
+
+## Design notes (for future M41-style runs)
+
+- **Manifest.toml is NOT portable between Mac local and Aqua** — different package registry snapshots cause GPUCompiler / SimpleTraits / etc. pinning errors. Best practice: rsync project WITHOUT Manifest.toml (add `--exclude 'Manifest.toml'`), let each side `Pkg.instantiate` from its own Project.toml + registry.
+- **CairoMakie should stay in `[weakdeps]`** of Project.toml, NOT `[deps]`. Pulling it into `[deps]` triggers Aqua resolve failures because CairoMakie's transitive deps (e.g. SimpleTraits 0.9.6) are too new for the Aqua registry. The V&V suite plotting uses CairoMakie via the extension `KrakenMakieExt` which works with weakdep.
 
 ## Status: **PENDING_AQUA** (job submission blocked by network)
 

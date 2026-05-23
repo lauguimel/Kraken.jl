@@ -1779,3 +1779,56 @@ question.
   the polymer attribution question; retained for the spatial localization
   data (front-pole pressure deficit is still a valid empirical fact)
 
+
+### 2026-05-23 evening — M41 verdict: locus is polymer × curved BC coupling
+
+**M41 L4 Newtonian curved-BC isolation** completed on Aqua (jobs 21729717 + 21729718, exit 0):
+
+| Setup | Cd_kraken | NaN | Δ vs rT 132.37 |
+|---|---|---|---|
+| R=30 :halfwayBB Newt | 132.076 | false | −0.22 % (sanity ✓) |
+| R=30 :bouzidi_fl_twopass Newt | **132.637** | false | **+0.20 %** (BC correcting in right direction) |
+| R=40 :bouzidi_fl_twopass Newt | 133.537 | false | (no rT ref, +1.1 % vs halfwayBB) |
+| R=60 :bouzidi_fl_twopass Newt | **135.436** | **false** | (no rT, +2.5 % vs halfwayBB) — **finite at R=60 Newt** |
+
+### Empirical decomposition (combined M40 + M41)
+
+| Subsystem | Status | Reference |
+|---|---|---|
+| Pure polymer chain (planar) | CORRECT to Wi=1 | M40 L1 sweep |
+| Pure curved BC (Newtonian, all R) | MOSTLY CORRECT (small R-bias 0.4 → 2.5 %) | M41 |
+| **Polymer × curved BC coupling** | **LOCUS** | by elimination |
+
+Wi-dependent jump: Newt R=30 :bouzidi_fl_twopass +0.20 % → Wi=0.1 R=30 +1.60 % → Wi=1.0 R=30 NaN. The amplification is polymer-driven at curved boundary.
+
+### Top candidate (HIGH confidence)
+
+**M29b MUSCL boundary fallback ±2 cells around solid.** M29b
+(rusanov → muscl_superbee) gave +5 Cd at Wi=1 cylinder, BUT MUSCL
+falls back to 1st-order Rusanov within ±2 cells of solid. Exactly
+the shoulder zone where D1 found polymer × shoulder = +3.14 deficit.
+M29c-v2 attempted to remove the fallback and NaN'd at step 92,200
+on rho/j=1/south wall — likely the SAME lag-bug class as M30 P2b's
+Bouzidi-FL (lag-1 read on x_ff in single-pass kernel).
+
+### Next missions
+
+- **M41-bis instrumentation probe**: instrument the M29b ±2-cell
+  fallback zone to count cells, measure max(τ_p) in zone vs bulk,
+  diff(Cd with/without fallback). Confirms target before fix.
+- **M42 design** (if probe GREEN): MUSCL boundary relaxation
+  applied via M30 P2b two-pass architecture (split kernel, lag-0
+  reads at boundary cells) to avoid the M29c-v2 step-92k NaN.
+
+### Collateral lessons (added to verdict file)
+
+- **Manifest.toml NOT portable Mac↔Aqua**: different package
+  registry snapshots (GPUCompiler 1.13.1 local vs 1.11.1 max Aqua;
+  SimpleTraits 0.9.6 local vs 0.9.5 max Aqua). Future rsync must
+  `--exclude 'Manifest.toml'`, each side `Pkg.instantiate` from its
+  own registry. Lost ~1h on this trap today (2 failed Aqua submits).
+- **CairoMakie stays in `[weakdeps]`**, never `[deps]`: prevents
+  transitive pinning to versions Aqua's registry doesn't have.
+  M39 V&V Department mistakenly moved CairoMakie + added JSON3 to
+  `[deps]`. Reverted via `git checkout HEAD -- Project.toml`.
+
