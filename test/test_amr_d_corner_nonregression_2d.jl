@@ -4,8 +4,12 @@ using Kraken
 const AMR_D_CORNER_FIXTURE_DIR =
     joinpath(dirname(@__DIR__), "tmp", "M-H-ETA-DASHBOARD", "krk")
 
+const AMR_D_CORNER_NESTED_DIR =
+    joinpath(dirname(@__DIR__), "benchmarks", "krk", "amr_d_convergence_2d")
+
 const AMR_D_CORNER_THRESHOLD = 1.0e-4
 const AMR_D_CORNER_STEPS = 500
+const AMR_D_CORNER_NESTED_STEPS = 200
 
 function _corner_rho_route_native(result, volume_fine::Real)
     coarse = result.coarse_F
@@ -83,6 +87,28 @@ end
             path; steps_override=AMR_D_CORNER_STEPS, T=Float64)
         peak = _amr_d_corner_peak(result)
         @info "couette_H_nested1 corner peak |rho - 1|" peak
+        @test peak <= AMR_D_CORNER_THRESHOLD
+    end
+
+    @testset "couette_yband_h_full_nested2 (ratio=4, auto-cascade 2 levels)" begin
+        path = joinpath(AMR_D_CORNER_NESTED_DIR,
+                        "couette_yband_h_full_nested2.krk")
+        @test isfile(path)
+        result = run_conservative_tree_amr_d_case_from_krk_2d(
+            path; steps_override=AMR_D_CORNER_NESTED_STEPS, T=Float64)
+        peak = _amr_d_corner_peak(result)
+        @info "couette_yband_h_full_nested2 corner peak |rho - 1|" peak
+        @test peak <= AMR_D_CORNER_THRESHOLD
+    end
+
+    @testset "couette_yband_h_full_nested3 (ratio=8, auto-cascade 3 levels)" begin
+        path = joinpath(AMR_D_CORNER_NESTED_DIR,
+                        "couette_yband_h_full_nested3.krk")
+        @test isfile(path)
+        result = run_conservative_tree_amr_d_case_from_krk_2d(
+            path; steps_override=AMR_D_CORNER_NESTED_STEPS, T=Float64)
+        peak = _amr_d_corner_peak(result)
+        @info "couette_yband_h_full_nested3 corner peak |rho - 1|" peak
         @test peak <= AMR_D_CORNER_THRESHOLD
     end
 end
