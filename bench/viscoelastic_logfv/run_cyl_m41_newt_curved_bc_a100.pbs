@@ -1,0 +1,95 @@
+#!/bin/bash -l
+#PBS -N M41_newt_curved_bc
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M41 — Newtonian curved-BC isolation on cylinder
+#
+# Discriminates "curved BC family is buggy at Wi=0" vs "BC OK at Wi=0 but
+# polymer-curvature coupling buggy at Wi>0".
+#
+# Method: run cylinder at strict-Newtonian limit (beta=1.0, nu_p=0) with
+#   wall_bc = :bouzidi_fl_twopass at R={30,40,60}, then compare to known
+#   halfwayBB Newtonian G3 PASS reference (M32 Phase 3: R=30 Cd=132.08,
+#   rheoTool 132.37, gap -0.22 %).
+#
+# If bouzidi_fl_twopass Cd ~= 132 at Newtonian -> curved BC is fine,
+#   the +1.6 % over-shoot at Wi=0.1 is polymer-coupled.
+# If bouzidi_fl_twopass over-shoots at Newtonian too -> BC has intrinsic
+#   bias independent of polymer.
+# If bouzidi_fl_twopass NaN at R=60 even at Newtonian -> BC fundamentally
+#   unstable at high R (halfwayBB Newtonian R=60 IS finite per M32 Phase 3).
+#
+# Matrix (3 cases, single PBS, wall_bc fixed at :bouzidi_fl_twopass):
+#   R    in {30, 40, 60}
+#   beta = 1.0          (nu_p=0, Oldroyd-B reduces to Newtonian)
+#   Wi   = 1.0          (placeholder; lambda>0 required by driver but
+#                        polymer is dormant since nu_p=0)
+#   Re_R = 1
+#   bsd_fraction = 1.0  (irrelevant at nu_p=0; BSD correction degenerates
+#                        to zero)
+#   L_up = L_down = 15R (Kraken canonical)
+#   Geometry: qwall
+#   Advection: rusanov  (irrelevant at nu_p=0; psi never evolved)
+#
+# Companion: run_cyl_m41_newt_halfway_a100.pbs runs the R=30 halfwayBB
+# sanity case to reproduce the 132.08 reference under identical params.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Newtonian limit: beta=1.0, polymer dormant.
+export KRAKEN_BETA_LIST="1.0"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_R_LIST="30,40,60"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+
+# M29b production scheme (irrelevant at nu_p=0; psi never evolved).
+export KRAKEN_ADVECTION_SCHEME="rusanov"
+# M41 KEY: Bouzidi-FL two-pass curved-BC at Newtonian limit.
+export KRAKEN_WALL_BC="bouzidi_fl_twopass"
+
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_MAX_STEPS_BASE="100000"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+export KRAKEN_OUTPUT_DIR="${KRAKEN_OUTPUT_DIR:-tmp/m41_newt_curved_bc/${PBS_JOBID:-manual}}"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo "=== cyl_m41_newt_curved_bc starting at $(date) ==="
+echo "Matrix: beta=1.0 (Newtonian) Wi=1.0 (placeholder) Re=1 R in {30,40,60} bsd=1.0"
+echo "Scheme: $KRAKEN_ADVECTION_SCHEME"
+echo "Wall BC: $KRAKEN_WALL_BC (M41 KEY)"
+echo "Output dir: $KRAKEN_OUTPUT_DIR"
+echo "Reference: halfwayBB R=30 Newtonian Cd=132.08 (M32 Phase 3)"
+
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== cyl_m41_newt_curved_bc done at $(date) ==="
+ls -la "$KRAKEN_OUTPUT_DIR"
