@@ -48,6 +48,9 @@ end
         return false, zero(eltype(F))
     cell_id = conservative_tree_cell_id_2d(spec, level, ii, j)
     cell_id == 0 && return false, zero(eltype(F))
+    # M-H-ETA-8: inactive parent cells (refined to fine children) hold no
+    # valid F values; treat as missing for slope stencils.
+    spec.cells[cell_id].active || return false, zero(eltype(F))
     return true, F[cell_id, q]
 end
 
@@ -65,9 +68,23 @@ function _conservative_tree_limited_same_level_slope_x_2d(
         F, spec, src.level, src.i + 1, src.j, q; periodic_x=periodic_x)
     if has_left && has_right
         return _minmod(center - left_value, right_value - center)
-    elseif has_left
+    end
+    # M-H-ETA-8: order-2 decentred FD when the opposite same-level neighbour
+    # is refined (typical at 3-way vertex). Captures quadratic feq curvature
+    # exactly when the second cell on the available side is also same-level.
+    if has_left
+        has_left2, left2_value = _conservative_tree_same_level_Fq_2d(
+            F, spec, src.level, src.i - 2, src.j, q; periodic_x=periodic_x)
+        if has_left2
+            return (3 * center - 4 * left_value + left2_value) / 2
+        end
         return center - left_value
     elseif has_right
+        has_right2, right2_value = _conservative_tree_same_level_Fq_2d(
+            F, spec, src.level, src.i + 2, src.j, q; periodic_x=periodic_x)
+        if has_right2
+            return (-3 * center + 4 * right_value - right2_value) / 2
+        end
         return right_value - center
     end
     return zero(center)
@@ -86,9 +103,22 @@ function _conservative_tree_limited_same_level_slope_y_2d(
         F, spec, src.level, src.i, src.j + 1, q)
     if has_south && has_north
         return _minmod(center - south_value, north_value - center)
-    elseif has_south
+    end
+    # M-H-ETA-8: order-2 decentred FD when the opposite same-level neighbour
+    # is refined (typical at 3-way vertex).
+    if has_south
+        has_south2, south2_value = _conservative_tree_same_level_Fq_2d(
+            F, spec, src.level, src.i, src.j - 2, q)
+        if has_south2
+            return (3 * center - 4 * south_value + south2_value) / 2
+        end
         return center - south_value
     elseif has_north
+        has_north2, north2_value = _conservative_tree_same_level_Fq_2d(
+            F, spec, src.level, src.i, src.j + 2, q)
+        if has_north2
+            return (-3 * center + 4 * north_value - north2_value) / 2
+        end
         return north_value - center
     end
     return zero(center)
@@ -251,8 +281,28 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
             F, spec, route; alpha=alpha,
             coarse_to_fine_prolongation=coarse_to_fine_prolongation,
             periodic_x=periodic_x)
+    if _krk_c2f_runtime_trace_enabled() &&
+       ((route.src == 133 && route.q in (6, 7, 8, 9)) ||
+        route.dst in (343, 364, 405, 426))
+        _krk_c2f_runtime_log(
+            string("C2F_DEPOSIT src_id=", route.src,
+                   " src_level=", src.level,
+                   " q=", route.q,
+                   " dst_id=", route.dst,
+                   " dst_level=", child.level,
+                   " parent_id=", parent_id,
+                   " route_weight=", route.weight,
+                   " kind=", _krk_c2f_runtime_kind_name(route.kind),
+                   " packet=", packet,
+                   " per_substep=", packet / bank.schedule.ratio))
+    end
 
     @inbounds for substep in 1:bank.schedule.ratio
+        if _KRK_CFROUTE_TRACE
+            _krk_cfroute_log!(:split_deposit, src.level, route.kind,
+                              route.src, route.dst, qi, 0,
+                              packet / bank.schedule.ratio)
+        end
         pair.coarse_to_fine[ix, iy, qi, substep, slot] +=
             packet / bank.schedule.ratio
     end
@@ -267,6 +317,9 @@ function conservative_tree_subcycle_sync_down_level_native_phase_routes_F_2d!(
     parent_level = _check_subcycle_spatial_sync_down_event_2d(bank, event)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
     spec = bank.spec
+    _krk_c2f_runtime_log(
+        string("SYNC_DOWN_NATIVE_ENTRY parent_level=", parent_level,
+               " active_cells=", length(spec.active_cells)))
     pair = _conservative_tree_packed_ledger_pair_2d(bank, parent_level)
     child_level = parent_level + 1
     ratio = bank.schedule.ratio
@@ -309,6 +362,29 @@ function conservative_tree_subcycle_sync_down_level_native_phase_routes_F_2d!(
                         bank, parent_id)
                     ix, iy = _conservative_tree_child_index_in_parent_2d(
                         spec.cells[parent_id], child)
+                    if _KRK_CFROUTE_TRACE
+                        _krk_cfroute_log!(:split_native_phase, parent_level,
+                                          SPLIT_FACE, src_id, dst_id, qcur,
+                                          0, packet)
+                    end
+                    if _krk_c2f_runtime_trace_enabled() &&
+                       ((src_id == 133 && q in (6, 7, 8, 9)) ||
+                        dst_id in (343, 364, 405, 426))
+                        _krk_c2f_runtime_log(
+                            string("C2F_NATIVE_PHASE_DEPOSIT src_id=", src_id,
+                                   " src_level=", src.level,
+                                   " q_initial=", q,
+                                   " q_deposit=", qcur,
+                                   " dst_id=", dst_id,
+                                   " dst_level=", child.level,
+                                   " parent_id=", parent_id,
+                                   " si=", si,
+                                   " sj=", sj,
+                                   " substep=", substep,
+                                   " route_weight=NA",
+                                   " kind=SPLIT_NATIVE_PHASE",
+                                   " packet=", packet))
+                    end
                     pair.coarse_to_fine[ix, iy, qcur, substep, slot] += packet
                     break
                 end
@@ -335,8 +411,22 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
         periodic_x::Bool=false,
         phase_resolved_level_native::Bool=true)
     parent_level = _check_subcycle_spatial_sync_down_event_2d(bank, event)
+    if get(ENV, "KRK_TRACE_ENTER", "0") == "1"
+        let _krk_trace_out = get(ENV, "KRK_TRACE_OUT", joinpath(".engineer_logs", "trace.jsonl"))
+            mkpath(dirname(_krk_trace_out))
+            open(_krk_trace_out, "a") do io
+                println(io, """{"t_ns":$(time_ns()),"kernel":"cpu_sync_down_routes","file":"src/refinement/subcycling_explosion_2d.jl:373","extras":{"parent_level":$parent_level,"split_routes":$(length(table.split_route_ranges_by_parent_level[parent_level + 1]))}}""")
+            end
+        end
+    end
     _check_conservative_tree_subcycle_route_table_2d(table)
     _check_conservative_tree_subcycle_spatial_F_2d(F, bank)
+    _krk_c2f_runtime_log(
+        string("SYNC_DOWN_ROUTES_ENTRY parent_level=", parent_level,
+               " phase_resolved_level_native=", phase_resolved_level_native,
+               " interface_time_scaling=", interface_time_scaling,
+               " coarse_to_fine_prolongation=", coarse_to_fine_prolongation,
+               " alpha=", alpha))
     if phase_resolved_level_native &&
        interface_time_scaling == :level_native &&
        coarse_to_fine_prolongation == :flat &&
@@ -346,13 +436,29 @@ function conservative_tree_subcycle_sync_down_routes_F_2d!(
             bank, event, F; periodic_x=periodic_x)
     end
 
+    # M-H-ETA-7+8: for routes from coarse cells flagged at 3-way vertex
+    # topology, substitute :limited_linear prolongation for the default :flat.
+    # Combined with order-2 decentred FD on the slope (M-H-ETA-8, with the
+    # active-check fix), this captures the linear part of feq variation
+    # exactly. Residual ~O(α²·Δy²) ≈ 2e-4 for T8.
+    # Only active in mode 0 (:leaf_equivalent) where :flat is the production
+    # default. :level_native has its own corner_reflux machinery.
+    use_three_way_substitution =
+        interface_time_scaling == :leaf_equivalent &&
+        coarse_to_fine_prolongation == :flat &&
+        alpha == 1
     @inbounds for route_pos in table.split_route_ranges_by_parent_level[parent_level + 1]
         route_id = table.interface_routes[route_pos]
         route = table.routes[route_id]
+        per_route_prolongation = coarse_to_fine_prolongation
+        if use_three_way_substitution &&
+           _is_three_way_flagged_src_2d(table, route.src)
+            per_route_prolongation = :limited_linear
+        end
         conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
             bank, F, route; alpha=alpha,
             interface_time_scaling=interface_time_scaling,
-            coarse_to_fine_prolongation=coarse_to_fine_prolongation,
+            coarse_to_fine_prolongation=per_route_prolongation,
             periodic_x=periodic_x)
     end
     return bank

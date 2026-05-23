@@ -116,10 +116,22 @@ end
 function _amr_d_runtime_status_2d(flow::Symbol,
                                   geometry::Symbol,
                                   boundary_policy::Symbol,
-                                  max_level::Int)
-    max_level <= 1 &&
+                                  max_level::Int,
+                                  refine_count::Int=1)
+    if max_level <= 1
+        # M-H-ETA-DASHBOARD: multi-patch at max_level=1 (e.g. H layout)
+        # cannot go through the single-patch route-native runner; use the
+        # subcycled scheduler which handles arbitrary patch counts.
+        if max_level == 1 && refine_count > 1 &&
+                geometry == :channel &&
+                boundary_policy in (:periodic_x_wall_y,
+                                    :periodic_x_moving_wall_y)
+            return true, :subcycled_nested_channel,
+                   "multi-patch level-1 AMR-D routed through nested channel scheduler"
+        end
         return _amr_d_one_level_route_runtime_status_2d(
             flow, geometry, boundary_policy)
+    end
 
     if geometry == :channel &&
             boundary_policy in (:periodic_x_wall_y,
@@ -168,7 +180,8 @@ function conservative_tree_amr_d_case_from_krk_2d(source)
     runtime_reason = spec_reason
     if spec_supported
         runtime_supported, runtime_status, runtime_reason =
-            _amr_d_runtime_status_2d(flow, geometry, boundary_policy, max_level)
+            _amr_d_runtime_status_2d(flow, geometry, boundary_policy,
+                                     max_level, refine_count)
     end
 
     return ConservativeTreeAMRDKrkCase2D(

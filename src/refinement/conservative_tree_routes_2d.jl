@@ -3,6 +3,81 @@
 # This is still a static correctness layer. It builds packet routes for active
 # leaves, but it does not stream populations.
 
+const _KRK_CFROUTE_TRACE = get(ENV, "KRK_CFROUTE_TRACE", "0") == "1"
+const _KRK_CFROUTE_TRACE_IO = Ref{Union{Nothing,IO}}(nothing)
+
+@inline _krk_c2f_runtime_trace_enabled() =
+    get(ENV, "KRK_C2F_RUNTIME_TRACE", "0") == "1"
+
+function _krk_c2f_runtime_kind_name(kind)
+    if kind == DIRECT
+        return "DIRECT"
+    elseif kind == SPLIT_FACE
+        return "SPLIT_FACE"
+    elseif kind == SPLIT_CORNER
+        return "SPLIT_CORNER"
+    elseif kind == COALESCE_FACE
+        return "COALESCE_FACE"
+    elseif kind == COALESCE_CORNER
+        return "COALESCE_CORNER"
+    elseif kind == ROUTE_BOUNDARY
+        return "ROUTE_BOUNDARY"
+    end
+    return string(kind)
+end
+
+function _krk_c2f_runtime_route_table(dsts, weights, kinds)
+    parts = String[]
+    @inbounds for idx in eachindex(dsts)
+        push!(parts,
+              string(idx, ":dst=", dsts[idx],
+                     ":w=", Float64(weights[idx]),
+                     ":kind=", _krk_c2f_runtime_kind_name(kinds[idx])))
+    end
+    return join(parts, ";")
+end
+
+function _krk_c2f_runtime_log(msg::AbstractString)
+    _krk_c2f_runtime_trace_enabled() || return nothing
+    println(stderr, "KRK_C2F_RUNTIME_TRACE ", msg)
+    flush(stderr)
+    return nothing
+end
+
+function _krk_cfroute_kind_name(kind)
+    if kind == ROUTE_BOUNDARY
+        return "BOUNDARY"
+    elseif kind == SPLIT_FACE || kind == SPLIT_CORNER
+        return "SPLIT_FACE"
+    elseif kind == COALESCE_FACE || kind == COALESCE_CORNER
+        return "COALESCE_FACE"
+    elseif kind == DIRECT
+        return "DIRECT"
+    end
+    return string(kind)
+end
+
+function _krk_cfroute_log!(phase, level, kind, src_cell, dst_cell, q, opp, dpop)
+    _KRK_CFROUTE_TRACE || return nothing
+    Int(dst_cell) == 405 || return nothing
+    io = _KRK_CFROUTE_TRACE_IO[]
+    if io === nothing
+        path = get(ENV, "KRK_CFROUTE_TRACE_PATH",
+                   "tmp/M-CFROUTE-FREEZE-V1/per_route_405_step5.tsv")
+        mkpath(dirname(path))
+        io = open(path, "w")
+        _KRK_CFROUTE_TRACE_IO[] = io
+        println(io, "step\tphase\tlevel\tkind\tsrc_cell\tdst_cell\tq\topp\tdpop\tdRho_partial\tinfer_interface_y")
+    end
+    println(io,
+            get(ENV, "KRK_CFROUTE_TRACE_STEP", "5"), '\t',
+            phase, '\t', Int(level), '\t', _krk_cfroute_kind_name(kind), '\t',
+            Int(src_cell), '\t', Int(dst_cell), '\t', Int(q), '\t',
+            Int(opp), '\t', Float64(dpop), '\t', Float64(dpop), '\t', "")
+    flush(io)
+    return nothing
+end
+
 struct ConservativeTreeRouteTable2D
     links::Vector{ConservativeTreeLink2D}
     routes::Vector{ConservativeTreeRoute2D}
@@ -23,6 +98,13 @@ struct ConservativeTreeRouteTable2D
     direct_route_qs_by_level::Vector{Vector{Int}}
     direct_route_weights_by_level::Vector{Vector{Float64}}
     direct_route_unique_dsts_by_level::Vector{Bool}
+    boundary_route_srcs_by_level::Vector{Vector{Int}}
+    boundary_route_qs_by_level::Vector{Vector{Int}}
+    boundary_route_opposite_qs_by_level::Vector{Vector{Int}}
+    boundary_route_cys_by_level::Vector{Vector{Int}}
+    boundary_route_weights_by_level::Vector{Vector{Float64}}
+    boundary_route_volumes_by_level::Vector{Vector{Float64}}
+    sampling::Symbol
 end
 
 function _active_leaf_covering_sample_2d(spec::ConservativeTreeSpec2D,
@@ -367,11 +449,86 @@ function _apply_level_native_route_closure_2d!(
         q::Int,
         sample_level::Int;
         periodic_x::Bool=false)
+    src = spec.cells[src_id]
+    _krk_c2f_runtime_log(
+        string("ROUTE_ENTRY src_id=", src_id,
+               " src_level=", src.level,
+               " q=", q,
+               " sample_level=", sample_level,
+               " len=", length(kinds)))
     _level_native_diagonal_corner_closure_route_specs_2d!(
         dsts, weights, kinds, spec, src_id, q, sample_level;
         periodic_x=periodic_x) && return dsts, weights, kinds
     if _level_native_c2f_sampling_2d(spec, src_id, sample_level, :level_native)
-        _normalize_level_native_c2f_route_specs_2d!(dsts, weights, kinds)
+        if src.level == 0 && _is_diagonal_route_q_2d(q) &&
+           sample_level == src.level + 1 && length(kinds) == 4
+            direct_self_idx = 0
+            split_count = 0
+            split_weight = 0.0
+            @inbounds for idx in eachindex(kinds)
+                kind = kinds[idx]
+                if kind == DIRECT && dsts[idx] == src_id
+                    direct_self_idx = direct_self_idx == 0 ? idx : -1
+                elseif kind == SPLIT_CORNER
+                    split_count += 1
+                    split_weight += weights[idx]
+                end
+            end
+            fires = direct_self_idx > 0 && split_count == 3 && split_weight > 0.0
+            _krk_c2f_runtime_log(
+                string("OPTION_B_GATE src_id=", src_id,
+                       " src_level=", src.level,
+                       " q=", q,
+                       " sample_level=", sample_level,
+                       " len=", length(kinds),
+                       " direct_self_idx=", direct_self_idx,
+                       " split_count=", split_count,
+                       " split_weight=", split_weight,
+                       " FIRES=", fires,
+                       " table=", _krk_c2f_runtime_route_table(
+                           dsts, weights, kinds)))
+            if fires
+                _krk_c2f_runtime_log(
+                    string("OPTION_B_BEFORE src_id=", src_id,
+                           " q=", q,
+                           " table=", _krk_c2f_runtime_route_table(
+                               dsts, weights, kinds)))
+                write_idx = 0
+                @inbounds for idx in eachindex(kinds)
+                    kinds[idx] == SPLIT_CORNER || continue
+                    write_idx += 1
+                    dsts[write_idx] = dsts[idx]
+                    weights[write_idx] = weights[idx] / split_weight
+                    kinds[write_idx] = SPLIT_CORNER
+                end
+                resize!(dsts, write_idx)
+                resize!(weights, write_idx)
+                resize!(kinds, write_idx)
+                _krk_c2f_runtime_log(
+                    string("OPTION_B_AFTER src_id=", src_id,
+                           " q=", q,
+                           " table=", _krk_c2f_runtime_route_table(
+                               dsts, weights, kinds)))
+                return dsts, weights, kinds
+            end
+        end
+        # M-FIX-WALL-CORNER: only renormalize SPLITs when there is no DIRECT or
+        # ROUTE_BOUNDARY residual. If some leaf-equivalent samples landed on
+        # the source's own coarse cell (DIRECT) or hit a domain boundary, those
+        # routes carry physically real population at the coarse level and must
+        # be preserved alongside the SPLIT injections. Dropping them and
+        # rescaling SPLITs to sum to 1 inflates the SPLIT weights by exactly
+        # the missing DIRECT/BOUNDARY mass, producing the +1/16 surplus seen
+        # on the wall_level_corner family in the v42 audit.
+        all_split = true
+        @inbounds for kind in kinds
+            if !_is_split_route_kind_2d(kind)
+                all_split = false
+                break
+            end
+        end
+        all_split && _normalize_level_native_c2f_route_specs_2d!(
+            dsts, weights, kinds)
     end
     return dsts, weights, kinds
 end
@@ -553,6 +710,41 @@ function _compact_direct_routes_by_level_2d(
            unique_dsts_by_level
 end
 
+function _compact_boundary_routes_by_level_2d(
+        boundary_routes::Vector{Int},
+        boundary_ranges::Vector{UnitRange{Int}},
+        routes::Vector{ConservativeTreeRoute2D},
+        spec::ConservativeTreeSpec2D)
+    srcs_by_level = [Int[] for _ in boundary_ranges]
+    qs_by_level = [Int[] for _ in boundary_ranges]
+    opposite_qs_by_level = [Int[] for _ in boundary_ranges]
+    cys_by_level = [Int[] for _ in boundary_ranges]
+    weights_by_level = [Float64[] for _ in boundary_ranges]
+    volumes_by_level = [Float64[] for _ in boundary_ranges]
+    @inbounds for level_index in eachindex(boundary_ranges)
+        range = boundary_ranges[level_index]
+        n = length(range)
+        sizehint!(srcs_by_level[level_index], n)
+        sizehint!(qs_by_level[level_index], n)
+        sizehint!(opposite_qs_by_level[level_index], n)
+        sizehint!(cys_by_level[level_index], n)
+        sizehint!(weights_by_level[level_index], n)
+        sizehint!(volumes_by_level[level_index], n)
+        for route_pos in range
+            route = routes[boundary_routes[route_pos]]
+            push!(srcs_by_level[level_index], route.src)
+            push!(qs_by_level[level_index], route.q)
+            push!(opposite_qs_by_level[level_index], d2q9_opposite(route.q))
+            push!(cys_by_level[level_index], d2q9_cy(route.q))
+            push!(weights_by_level[level_index], route.weight)
+            push!(volumes_by_level[level_index],
+                  spec.cells[route.src].metrics.volume)
+        end
+    end
+    return srcs_by_level, qs_by_level, opposite_qs_by_level,
+           cys_by_level, weights_by_level, volumes_by_level
+end
+
 """
     create_conservative_tree_route_table_2d(spec; periodic_x=false,
                                             sampling=:leaf_equivalent)
@@ -632,12 +824,23 @@ function create_conservative_tree_route_table_2d(spec::ConservativeTreeSpec2D;
         direct_weights_by_level, direct_unique_dsts_by_level =
             _compact_direct_routes_by_level_2d(
             direct_routes, direct_ranges, routes)
+    boundary_srcs_by_level, boundary_qs_by_level,
+        boundary_opposite_qs_by_level, boundary_cys_by_level,
+        boundary_weights_by_level, boundary_volumes_by_level =
+            _compact_boundary_routes_by_level_2d(
+                boundary_routes, boundary_ranges, routes, spec)
 
-    return ConservativeTreeRouteTable2D(
+    table = ConservativeTreeRouteTable2D(
         links, routes, same_level_links, coarse_to_fine_links,
         fine_to_coarse_links, boundary_links, direct_routes, interface_routes,
         boundary_routes, direct_ranges, boundary_ranges,
         split_ranges, coalesce_ranges, source_q_has_split_route,
         direct_srcs_by_level, direct_dsts_by_level, direct_qs_by_level,
-        direct_weights_by_level, direct_unique_dsts_by_level)
+        direct_weights_by_level, direct_unique_dsts_by_level,
+        boundary_srcs_by_level, boundary_qs_by_level,
+        boundary_opposite_qs_by_level, boundary_cys_by_level,
+        boundary_weights_by_level, boundary_volumes_by_level,
+        sampling_mode)
+    return _register_three_way_corner_corrections_2d!(
+        table, spec; periodic_x=periodic_x)
 end
