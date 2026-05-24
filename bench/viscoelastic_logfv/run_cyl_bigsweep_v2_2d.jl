@@ -108,8 +108,8 @@ const EMBEDDED_GEOMETRY_LIST  = parse_symbol_list("KRAKEN_EMBEDDED_GEOMETRY", "q
 all(g -> g in (:qwall, :circle), EMBEDDED_GEOMETRY_LIST) ||
     throw(ArgumentError("KRAKEN_EMBEDDED_GEOMETRY values must be qwall or circle"))
 const ADVECTION_SCHEME = Symbol(lowercase(strip(get(ENV, "KRAKEN_ADVECTION_SCHEME", "rusanov"))))
-ADVECTION_SCHEME in (:rusanov, :muscl_superbee) ||
-    throw(ArgumentError("KRAKEN_ADVECTION_SCHEME must be rusanov or muscl_superbee"))
+ADVECTION_SCHEME in (:rusanov, :muscl_superbee, :muscl_superbee_relax) ||
+    throw(ArgumentError("KRAKEN_ADVECTION_SCHEME must be rusanov, muscl_superbee, or muscl_superbee_relax"))
 # M34: wall BC (halfwayBB default; bouzidi_fl / bouzidi_fl_twopass available)
 const WALL_BC = Symbol(lowercase(strip(get(ENV, "KRAKEN_WALL_BC", "halfwayBB"))))
 WALL_BC in (:halfwaybb, :halfwayBB, :bouzidi_fl, :bouzidi_fl_twopass) ||

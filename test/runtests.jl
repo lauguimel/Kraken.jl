@@ -58,4 +58,5 @@ using Kraken
     include("test_logfv_frozen_channel_cde.jl")
     include("test_contraction_libb.jl")
     include("test_bouzidi_fl_twopass_smoke.jl")
+    include("test_muscl_boundary_relax.jl")
 end

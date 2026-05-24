@@ -469,8 +469,8 @@ end
 
 function _fvfd_advection_scheme_val(advection_scheme::Symbol)
     scheme = Symbol(replace(lowercase(String(advection_scheme)), '-' => '_'))
-    scheme in (:rusanov, :muscl_superbee) ||
-        throw(ArgumentError("advection_scheme must be :rusanov or :muscl_superbee"))
+    scheme in (:rusanov, :muscl_superbee, :muscl_superbee_relax) ||
+        throw(ArgumentError("advection_scheme must be :rusanov, :muscl_superbee, or :muscl_superbee_relax"))
     return Val(scheme)
 end
 
@@ -594,9 +594,20 @@ function fvfd_advect_upwind_2d!(
     sync::Bool=true,
     advection_scheme::Symbol=:rusanov,
 )
+    @trace_enter :psi_advect_inner
     backend = KernelAbstractions.get_backend(phi_out)
     Nx, Ny = size(phi_out)
     fvfd_validate_field_bc_2d(phi_bc, Nx, Ny, bc; name=:phi_bc)
+    scheme_sym = Symbol(replace(lowercase(String(advection_scheme)), '-' => '_'))
+    # M42: :muscl_superbee_relax is a two-pass composite (pass-1 = full
+    # :muscl_superbee + pass-2 = cylinder-band one-sided MUSCL overwrite).
+    # The composite launcher itself recurses with :muscl_superbee.
+    if scheme_sym === :muscl_superbee_relax
+        return fvfd_advect_muscl_superbee_relax_2d!(
+            phi_out, phi, phi_bc,
+            ux_face, uy_face, is_solid, dx, dy, bc, dt; sync,
+        )
+    end
     scheme = _fvfd_advection_scheme_val(advection_scheme)
     kernel! = fvfd_advect_upwind_2d_kernel!(backend)
     kernel!(
@@ -652,6 +663,7 @@ function fvfd_sym2_advect_upwind_2d!(
     sync::Bool=true,
     advection_scheme::Symbol=:rusanov,
 )
+    @trace_enter :psi_sym2_advect
     fvfd_advect_upwind_2d!(
         psixx_out, psixx, psixx_bc, ux_face, uy_face, is_solid, dx, dy, bc, dt;
         sync=false, advection_scheme,
@@ -1127,6 +1139,7 @@ function fvfd_velocity_gradient_2d!(
     ux, uy, is_solid, dx, dy, bc::FVFDDomainBC2D;
     sync::Bool=true,
 )
+    @trace_enter :vel_grad
     backend = KernelAbstractions.get_backend(ux)
     Nx, Ny = size(ux)
     kernel! = fvfd_velocity_gradient_2d_kernel!(backend)

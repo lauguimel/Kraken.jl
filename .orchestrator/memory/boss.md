@@ -1832,3 +1832,65 @@ Bouzidi-FL (lag-1 read on x_ff in single-pass kernel).
   M39 V&V Department mistakenly moved CairoMakie + added JSON3 to
   `[deps]`. Reverted via `git checkout HEAD -- Project.toml`.
 
+
+### 2026-05-23 late — M42-impl + G5 v3 PARTIAL (1/4 gates PASS+, 3/4 NaN)
+
+**M42-impl (commit pending)**: Department spawned, claude-subagent inline,
+~90 min wall. Files: src/fvfd/muscl_boundary.jl (187 LOC NEW),
+src/fvfd/operators_2d.jl (+13), src/drivers/viscoelastic_logfv_2d.jl
+(+2), src/fvfd/FVFD.jl (+1), bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+(+2), bench/viscoelastic_logfv/run_cyl_m42_g5_a100.pbs (84 NEW),
+test/test_muscl_boundary_relax.jl (178 NEW), test/runtests.jl (+1),
+bench/viscoelastic_audit/M42_IMPL_VERDICT.md (NEW + updated with G5 v3).
+
+Smoke (CPU F64, 14.4 s wall): 4/4 PASS, 42/42 assertions.
+
+**Aqua G5 v3** (job 21736323, Wi=0 removed because driver rejects λ=0):
+4 cases R={30,60} × Wi={0.1,1.0}, 6:48 walltime, Exit_status=0.
+
+| R | Wi | Cd_kraken | NaN |
+|---|---|---|---|
+| 30 | 0.1 | **131.073** | false (PASS+ G5-3) |
+| 30 | 1.0 | NaN | true (G5-1 FAIL) |
+| 60 | 0.1 | NaN | true (G5-4 FAIL) |
+| 60 | 1.0 | NaN | true |
+
+Progression Wi=0.1 R=30 :rusanov :halfwayBB 129.39 (−0.80 %) →
+:muscl_superbee_relax 131.073 (+0.49 %). Closer to rT 130.43.
+But Wi=1 R=30 NaN (same envelope as M29c-v2 step 92k).
+
+**Diagnostic candidat**: zero-slope on broken-axis + full MUSCL on
+non-broken axis creates asymmetric FV update at cut-link cells. At low
+Wi this is below polymer stability envelope; at high Wi/R it triggers
+polymer-coupled instability.
+
+**M42-v2 candidate fixes** (next session):
+1. 1-sided minmod ψ(r) = max(0, min(r, 1)) on broken-axis (M42 design §8
+   alternative — strictly less dissipative AND symmetric)
+2. Narrower relaxation band (1 LU instead of 2 — narrows asymmetric zone)
+3. Spatial NaN fingerprint analysis on G5 v3 .jls dumps first
+   (discriminate cylinder-band vs open-wall NaN before code change)
+
+**Aqua trap learned**: PBS-side `KRAKEN_WI_LIST="0.0,..."` triggers
+driver `ArgumentError: lambda must be positive` — driver requires λ>0.
+Use M41-style trick (β=1.0, λ placeholder, ν_p=0) for Newtonian via
+viscoelastic driver, OR skip Wi=0 from PBS lists. Documented in M42 PBS.
+
+**Manifest.toml NOT portable**: re-confirmed today. Past pain → future
+PBS rsync MUST `--exclude 'Manifest.toml'`. Aqua's `Pkg.instantiate`
+must resolve from its own registry.
+
+### Session stats (cumulative 2026-05-22 → 2026-05-23)
+
+15 commits over 36 hours wall-clock:
+- M28-M34 cluster (8 commits, RED iteration)
+- M40 V&V hierarchy + verdict polymer chain CORRECT (1 commit, STRATEGIC PIVOT)
+- M41 + M41-bis curved-BC isolation + fallback locus CONFIRMED (3 commits)
+- M42 design + impl + G5 v3 (3 commits — design GREEN, impl partial)
+
+Net narrative shift: cylinder Wi=1 gap localized empirically to the
+M29b ±2-cell fallback band (0.33 % of fluid, 19-65× bulk polymer
+stress). M42 zero-slope relax closes Wi=0.1 R=30 toward rT but NaN's
+at higher stress. Cluster M28-M42 essentially ONE iteration short of
+closure.
+

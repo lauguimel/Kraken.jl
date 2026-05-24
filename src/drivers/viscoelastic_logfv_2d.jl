@@ -224,8 +224,8 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     force_boundary_fill in (:bc_aware, :nearest, :none) ||
         throw(ArgumentError("force_boundary_fill must be :bc_aware, :nearest, or :none"))
     advection_scheme_symbol = Symbol(replace(lowercase(String(advection_scheme)), '-' => '_'))
-    advection_scheme_symbol in (:rusanov, :muscl_superbee) ||
-        throw(ArgumentError("advection_scheme must be :rusanov or :muscl_superbee"))
+    advection_scheme_symbol in (:rusanov, :muscl_superbee, :muscl_superbee_relax) ||
+        throw(ArgumentError("advection_scheme must be :rusanov, :muscl_superbee, or :muscl_superbee_relax"))
     wall_bc in (:halfwayBB, :bouzidi_fl, :bouzidi_fl_twopass) ||
         throw(ArgumentError("wall_bc must be :halfwayBB, :bouzidi_fl, or :bouzidi_fl_twopass"))
     if embedded_geometry_symbol === :circle &&

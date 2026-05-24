@@ -1,0 +1,91 @@
+#!/bin/bash -l
+#PBS -N M42_G5
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M42 — G5 validation gate for :muscl_superbee_relax (two-pass MUSCL
+# boundary relaxation at the cylinder ring, open-wall band preserved as
+# :rusanov). See bench/viscoelastic_audit/M42_DESIGN.md §7 for the
+# full acceptance matrix.
+#
+# Matrix (6 cases):
+#   R       = {30, 60}             (resolution)
+#   Wi      = {0, 0.1, 1.0}        (low / mod / high elastic stress)
+#   beta    = 1.0 at Wi=0; 0.59 elsewhere (rheoTool match)
+#   wall_bc = :halfwayBB           (M29b production)
+#   scheme  = :muscl_superbee_relax (M42 new path)
+#   bsd     = 1.0
+#   L_up = L_down = 15R
+#   Geometry: qwall (M29b production)
+#
+# Acceptance interpretation (per design §7.2):
+#   G5-1 R=30 Wi=1.0 β=0.59 : Cd ∈ [122, 124]
+#     (rT 120.40 +2% margin ; closes the +5.5 Cd gap vs M29b 116.47)
+#   G5-2 R=30 Wi=0    β=1.0  : Cd within ±1% of M41 R=30 Newt 132.08
+#   G5-3 R=30 Wi=0.1  β=0.59 : Cd within ±1% of rT 130.43
+#   G5-4 R=60 Wi=0.1  β=0.59 : no NaN at 100k (R-doubling regression)
+#   bonus R=60 Wi=0 / Wi=1.0 : envelope of the scheme's R-scaling
+#
+# Cost estimate: ~6×85 s ≈ 9 min wall (per M29c-validate calibration).
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Matrix expansion: BETA × WI × R, with single-valued (Re, BSD, L_up,
+# L_down, geometry) → 1 × 2 × 3 × 1 = 6 cases. We include Wi=0 at
+# β=0.59 (a benign over-resolution; β only matters at Wi>0 in steady
+# state, and Wi=0 zeros the polymer pipeline regardless of β). The
+# Newtonian Wi=0 case acts as G5-2.
+export KRAKEN_BETA_LIST="0.59"
+export KRAKEN_WI_LIST="0.1,1.0"  # Wi=0 Newt removed: driver rejects lambda=0; Newt baseline established by M41 (R=30 :halfwayBB 132.08, R=60 :halfwayBB 132.68)
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_R_LIST="30,60"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+
+# M42 new path.
+export KRAKEN_ADVECTION_SCHEME="muscl_superbee_relax"
+export KRAKEN_WALL_BC="halfwayBB"
+
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_MAX_STEPS_BASE="100000"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+export KRAKEN_OUTPUT_DIR="${KRAKEN_OUTPUT_DIR:-tmp/m42_g5/${PBS_JOBID:-manual}}"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo "=== cyl_m42_g5 starting at $(date) ==="
+echo "Matrix: R ∈ {30, 60} × Wi ∈ {0, 0.1, 1.0} = 6 cases"
+echo "Fixed: beta=0.59 Re=1 bsd=1.0 (qwall, no embedded)"
+echo "Scheme: $KRAKEN_ADVECTION_SCHEME (M42 two-pass)"
+echo "Wall BC: $KRAKEN_WALL_BC"
+echo "Output dir: $KRAKEN_OUTPUT_DIR"
+
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== cyl_m42_g5 done at $(date) ==="
+ls -la "$KRAKEN_OUTPUT_DIR"
