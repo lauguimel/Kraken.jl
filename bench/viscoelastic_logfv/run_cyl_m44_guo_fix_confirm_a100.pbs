@@ -1,0 +1,89 @@
+#!/bin/bash -l
+#PBS -N M44_GUO_FIX_CONFIRM
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M44 — Aqua A100 F64 confirmation of the Guo half-step double-count fix
+# ported from slbm-paper commit 5ec27044. The fix removes +F/2 from:
+#   - src/kernels/logconformation_fv_2d.jl:1047-1048
+#     (logfv_compute_macroscopic_forced_field_2d_kernel!)
+#   - src/kernels/macroscopic.jl:71-72
+#     (compute_macroscopic_forced_2d_kernel!)
+#
+# Validation context:
+#   - M5b pair test (test/test_viscoelastic_logfv_patch_ladder.jl): PASS at
+#     1e-12 machine precision (N=100 collisions, uniform F, integrated
+#     convention gives N*F, no +F/2 offset).
+#   - Local Metal F32 smoke 50k steps at R=30 Wi=1.0 β=0.59 bsd=1.0
+#     muscl_superbee: Cd_kraken 111.09 (M32 D1 100k baseline) → 117.36
+#     post-fix (+6.27 Cd, closes 71 % of the M28-M42 9.54 % gap vs rT
+#     120.38). This Aqua F64 run replays the M32 D1 setup at full 100k
+#     steps to confirm beyond F32 noise (~0.5 Cd per M32 caveat).
+#
+# Setup: R=30 Wi=1.0 β=0.59 Re=1 bsd=1.0 muscl_superbee halfwayBB qwall
+#        L_up=L_down=15 R, max_steps=100000, F64 A100.
+# Cost: ~3-5 min walltime per M25 Phase 0 calibration.
+# Acceptance:
+#   - PASS: Cd_kraken ∈ [117, 120] (gap < 3 % vs rT 120.38; the +0.5 F32→F64
+#     shift per M32 may add ~0.5 Cd).
+#   - YELLOW: Cd ∈ [115, 117] (closure < 60 %).
+#   - RED: Cd < 115 (fix did not transfer cleanly to F64 production).
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Single case: R=30 Wi=1.0 β=0.59 (M29b production setup, replays M32 D1).
+export KRAKEN_BETA_LIST="0.59"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_R_LIST="30"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+
+# M29b production scheme + halfwayBB (NOT muscl_superbee_relax — we test
+# the *original* path that defined the M28-M42 gap).
+export KRAKEN_ADVECTION_SCHEME="muscl_superbee"
+export KRAKEN_WALL_BC="halfwayBB"
+
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_MAX_STEPS_BASE="100000"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+export KRAKEN_OUTPUT_DIR="${KRAKEN_OUTPUT_DIR:-tmp/m44_guo_fix_confirm/${PBS_JOBID:-manual}}"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo "=== M44 Guo fix confirm starting at $(date) ==="
+echo "Setup: R=30 Wi=1.0 β=0.59 Re=1 bsd=1.0 muscl_superbee halfwayBB"
+echo "Pre-fix M32 D1 baseline (Metal F32 100k): Cd_kraken = 111.09 (gap +9.54 % vs rT 120.38)"
+echo "Local post-fix smoke (Metal F32 50k): Cd_kraken = 117.36 (gap +2.57 %)"
+echo "Expected here (Aqua F64 100k): Cd ≥ 117 (PASS) ; Cd ∈ [120 ± 0.5] = full closure"
+echo "Output dir: $KRAKEN_OUTPUT_DIR"
+
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== M44 Guo fix confirm done at $(date) ==="
+ls -la "$KRAKEN_OUTPUT_DIR"

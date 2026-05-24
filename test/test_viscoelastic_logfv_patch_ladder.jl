@@ -1413,26 +1413,46 @@ end
         end
     end
 
-    @testset "M5b forced-field macroscopic velocity uses local Guo correction" begin
-        Nx, Ny = 5, 4
+    @testset "M5b Convention-I pair: collide_guo_field_2d! + logfv readout = N*F" begin
+        # Convention I (integrated, Guo 2002): the production pair
+        # `collide_guo_field_2d!` + `logfv_compute_macroscopic_forced_field_2d!`
+        # advances post-collision raw momentum by exactly F per step. After N
+        # steps from rest under uniform F, readout MUST equal N*F.
+        # The legacy `+F/2` over-correction in the readout (slbm-paper
+        # commit 5ec27044) is ported out — a regression would give N*F + F/2.
+        Nx, Ny = 4, 4
         f = zeros(Float64, Nx, Ny, 9)
         for q in 1:9
             f[:, :, q] .= Kraken.equilibrium(D2Q9(), 1.0, 0.0, 0.0, q)
         end
-        fx = [1e-4 * (i - 0.25j) for i in 1:Nx, j in 1:Ny]
-        fy = [-7e-5 * (j + 0.1i) for i in 1:Nx, j in 1:Ny]
-        rho = similar(fx)
-        ux = similar(fx)
-        uy = similar(fx)
+        fx_const = 1.0e-5
+        fy_const = 2.0e-5
+        fx = fill(fx_const, Nx, Ny)
+        fy = fill(fy_const, Nx, Ny)
+        is_solid = falses(Nx, Ny)
+        omega = 1.0
+        N_steps = 100
 
+        for _ in 1:N_steps
+            Kraken.collide_guo_field_2d!(f, is_solid, fx, fy, omega)
+        end
+
+        rho = zeros(Float64, Nx, Ny)
+        ux = zeros(Float64, Nx, Ny)
+        uy = zeros(Float64, Nx, Ny)
         Kraken.logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f, fx, fy)
         KernelAbstractions.synchronize(KernelAbstractions.CPU())
 
+        expected_ux = N_steps * fx_const
+        expected_uy = N_steps * fy_const
         for j in 1:Ny, i in 1:Nx
-            @test rho[i, j] ≈ 1.0 atol=5e-16 rtol=0.0
-            @test ux[i, j] ≈ 0.5 * fx[i, j] atol=2e-16 rtol=0.0
-            @test uy[i, j] ≈ 0.5 * fy[i, j] atol=2e-16 rtol=0.0
+            @test rho[i, j] ≈ 1.0 atol=1e-12 rtol=0.0
+            @test ux[i, j] ≈ expected_ux atol=1e-12 rtol=0.0
+            @test uy[i, j] ≈ expected_uy atol=1e-12 rtol=0.0
         end
+
+        # Regression sentinel: the legacy buggy readout would give N*F + F/2.
+        @test !isapprox(ux[1, 1], expected_ux + 0.5 * fx_const; atol=0.1 * fx_const)
     end
 
     @testset "M5c frozen-force coupled Poiseuille recovers total viscosity" begin

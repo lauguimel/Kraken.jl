@@ -68,8 +68,10 @@ end
         ρ_local = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
         inv_ρ = one(ρ_local) / ρ_local
         ρ[i,j] = ρ_local
-        ux[i,j] = ((f2 - f4 + f6 - f7 - f8 + f9) + T(Fx) / T(2)) * inv_ρ
-        uy[i,j] = ((f3 - f5 + f6 + f7 - f8 - f9) + T(Fy) / T(2)) * inv_ρ
+        # Convention I (integrated): collide_guo_2d! already advances the
+        # post-collision raw momentum by F; no +F/2 readout correction.
+        ux[i,j] = (f2 - f4 + f6 - f7 - f8 + f9) * inv_ρ
+        uy[i,j] = (f3 - f5 + f6 + f7 - f8 - f9) * inv_ρ
     end
 end
 

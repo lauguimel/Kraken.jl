@@ -651,6 +651,7 @@ function logfv_polymer_force_bc_aware_2d!(
     sync::Bool=true,
     polymer_wall_extrap::Symbol=:quadratic,
 )
+    @trace_enter :poly_force
     return fvfd_tensor_divergence_2d!(
         fx, fy, tauxx, tauxy, tauyy, is_solid, dx, dy, bc;
         sync=sync, polymer_wall_extrap=polymer_wall_extrap,
@@ -1043,8 +1044,10 @@ end
             rho_local = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
             inv_rho = one(T) / rho_local
             rho[i, j] = rho_local
-            ux[i, j] = (f2 - f4 + f6 - f7 - f8 + f9 + fx[i, j] / T(2)) * inv_rho
-            uy[i, j] = (f3 - f5 + f6 + f7 - f8 - f9 + fy[i, j] / T(2)) * inv_rho
+            # Convention I (integrated): collide_guo_field_2d! already advances
+            # the post-collision raw momentum by F; no +F/2 readout correction.
+            ux[i, j] = (f2 - f4 + f6 - f7 - f8 + f9) * inv_rho
+            uy[i, j] = (f3 - f5 + f6 + f7 - f8 - f9) * inv_rho
         end
     end
 end
@@ -1162,6 +1165,7 @@ function logfv_advect_upwind_bc_aware_2d!(
     sync::Bool=true,
     advection_scheme::Symbol=:rusanov,
 )
+    @trace_enter :psi_advect
     return fvfd_sym2_advect_upwind_2d!(
         psixx_out, psixy_out, psiyy_out,
         psixx, psixy, psiyy,
