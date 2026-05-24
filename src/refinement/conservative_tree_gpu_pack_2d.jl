@@ -1483,8 +1483,8 @@ function _conservative_tree_gpu_collide_level_2d!(
         return collide_Guo_conservative_tree_gpu_active_level_F_2d!(
             F, workspace.cell_pack, l,
             conservative_tree_leaf_equivalent_omega_2d(omega, spec, l),
-            conservative_tree_leaf_equivalent_force_2d(Fx, spec, l),
-            conservative_tree_leaf_equivalent_force_2d(Fy, spec, l);
+            Fx,
+            Fy;
             sync=false)
     elseif collision == :bgk
         return collide_BGK_conservative_tree_gpu_active_level_F_2d!(

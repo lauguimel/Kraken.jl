@@ -10,6 +10,7 @@ const AMR_D_CORNER_NESTED_DIR =
 const AMR_D_CORNER_THRESHOLD = 1.0e-4
 const AMR_D_CORNER_STEPS = 500
 const AMR_D_CORNER_NESTED_STEPS = 200
+const AMR_D_POISEUILLE_STEPS = 3000
 
 function _corner_rho_route_native(result, volume_fine::Real)
     coarse = result.coarse_F
@@ -88,6 +89,18 @@ end
         peak = _amr_d_corner_peak(result)
         @info "couette_H_nested1 corner peak |rho - 1|" peak
         @test peak <= AMR_D_CORNER_THRESHOLD
+    end
+
+    @testset "poiseuille_H_nested1 peak vs analytic" begin
+        path = joinpath(AMR_D_CORNER_FIXTURE_DIR, "poiseuille_H_nested1.krk")
+        @test isfile(path)
+        result = run_conservative_tree_amr_d_case_from_krk_2d(
+            path; steps_override=AMR_D_POISEUILLE_STEPS, T=Float64)
+        ux_max = maximum(result.ux_profile)
+        @info "poiseuille_H_nested1 peak ux vs analytic" ux_max result.linf_error result.relative_mass_drift
+        @test ux_max ≈ 4.31e-3 atol=2e-4
+        @test result.linf_error < 3e-4
+        @test result.relative_mass_drift < 1e-12
     end
 
     @testset "couette_yband_h_full_nested2 (ratio=4, auto-cascade 2 levels)" begin

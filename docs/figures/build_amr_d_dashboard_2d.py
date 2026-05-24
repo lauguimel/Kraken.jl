@@ -237,9 +237,10 @@ def build_dashboard():
                          cbar_ticks=[1.0 - span, 1.0, 1.0 + span],
                          cbar_tick_labels=[f"{1.0-span:.4f}", "1.000", f"{1.0+span:.4f}"])
 
-        # Profile
+        # Profile — load AMR-D for amr rows, reference for ref rows
         ax_prof = fig.add_subplot(gs[row, 4])
-        y, ux_p, an = load_profile(pa)
+        profile_csv = pa if mode == "amr" else pr
+        y, ux_p, an = load_profile(profile_csv)
         draw_profile(ax_prof, y, ux_p, an)
 
     fig.savefig(OUT, dpi=150, bbox_inches='tight', pad_inches=0.1,

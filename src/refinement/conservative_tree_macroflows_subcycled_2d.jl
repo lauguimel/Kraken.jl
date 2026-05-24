@@ -921,8 +921,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
             Flevel, local_spec, active_ids_by_level[level + 1],
             conservative_tree_leaf_equivalent_omega_2d(
                 omega, local_spec, level),
-            conservative_tree_leaf_equivalent_force_2d(Fx, local_spec, level),
-            conservative_tree_leaf_equivalent_force_2d(Fy, local_spec, level))
+            Fx,
+            Fy)
     for _ in 1:nsteps
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Ftmp, F, spec_run, table; boundary=:periodic_x_wall_y,
@@ -1132,8 +1132,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
             Flevel, local_spec, active_ids_by_level[level + 1], solid,
             conservative_tree_leaf_equivalent_omega_2d(
                 omega, local_spec, level),
-            conservative_tree_leaf_equivalent_force_2d(Fx, local_spec, level),
-            conservative_tree_leaf_equivalent_force_2d(Fy, local_spec, level))
+            Fx,
+            Fy)
     for _ in 1:nsteps
         stream_conservative_tree_subcycled_buffered_routes_F_2d!(
             Ftmp, F, spec_run, table; boundary=:periodic_x_wall_y,
