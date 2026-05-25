@@ -1,220 +1,206 @@
-# Next session prompt — Kraken.jl viscoelastic R=60 Wi=1 time/BC investigation
+# Next session prompt — Kraken.jl viscoelastic post-M53 step-back
 
 ## Resumption check
 
 ```bash
 cd ~/Documents/Recherche/Kraken.jl-viscoelastic
-git log --oneline -8   # session arc
-ls bench/viscoelastic_audit/M44_GUO_FIX_VERDICT.md  # M44 closed cluster M28-M42
-ls bench/viscoelastic_audit/M45_RESIDUAL_VERDICT.md # residual audit
-ls bench/viscoelastic_audit/M46_NEWT_AND_TCONV_VERDICT.md # latest finding
-ls tmp/m44_postfix_sweep/21827394.aqua/             # M44 48-case .jls
-ls tmp/m46b_tconv/21862685.aqua/                    # R=60 @ 100k/200k/400k
+git status --short              # uncommitted M51+M53 infra
+git log --oneline -8            # session arc
+ls bench/viscoelastic_audit/M{49,50,51,52a,52b,53a,53b,53c,53d}*.md \
+  bench/viscoelastic_audit/M48_POSTFIX_RESULT.md
+ls bench/viscoelastic_validation/patch_tests/PT_*.jl
+ls bench/viscoelastic_validation/discriminators/M48_halfway_meshconv.jl
+ls src/fvfd/halfway_wall_gradient_correction_2d.jl
+julia --project=. test/test_fvfd_operators_2d.jl 2>&1 | tail -3        # expect 953/953
+julia --project=. test/test_viscoelastic_logfv_patch_ladder.jl 2>&1 | tail -3   # expect 18213/18213
+julia --project=. bench/viscoelastic_validation/patch_tests/PT_halfway_wall_stencil.jl 2>&1 | tail -3   # M49 canari
 ```
 
-Recent commits :
-- `ce5fa838` docs(viscoelastic): M46 Newt sweep + M46-B time-convergence
+Recent commits (NOTHING from this session is committed yet):
+- `546808b2` docs(viscoelastic): next-session prompt with M0 Bouzidi polymer-chain bug audit
+- `ce5fa838` docs(viscoelastic): M46 Newt sweep + M46-B time-convergence probe
 - `83cb3efe` docs(viscoelastic): M45 post-M44 residual audit (B + C)
-- `4df9d431` docs(viscoelastic): M44 post-fix sweep verdict (4 R × 4 Wi × 3 β)
 - `9fd92ab0` fix(viscoelastic): port slbm-paper 5ec27044 Guo half-step double-count
 
 ---
 
-## Context (compact)
+## Session arc 2026-05-26 (compact)
 
-**M44 closed cluster M28-M42** (8 days, 10+ RED missions on advection-limiter)
-by porting `slbm-paper` commit `5ec27044` (Guo half-step `+F/2`
-double-count in `logfv_compute_macroscopic_forced_field_2d_kernel!`).
+User pivoted away from M0 Bouzidi audit (parked) to focus on **halfwayBB
+Wi=1 wrong mesh convergence** (M48). After 3 failed fix attempts, user
+called STEP BACK. M48 U-shape remains unfixed but the terrain is now
+clean and mapped.
 
-**Validation**:
-- Cylinder Wi=1 R=30 β=0.59 Aqua F64 100k: **Cd 111.09 → 118.10**
-  (78% closure of 9.54% gap vs rT 120.38). **Temporally rock-solid**
-  (M46-B R=30@400k = 118.099 → ±0.003 vs 100k).
-- 48-case sweep (R∈{30,40,50,60} × Wi∈{0.1,0.3,0.5,1.0} × β∈{0.59,0.8,0.9})
-  0/48 NaN. All R=60 cases NaN-free (pre-fix were NaN per M42 G5 v3).
-- M5b test rewritten as pair test asserting N·F (not N·F + F/2),
-  PASS at 1e-12.
-
-**OPEN ISSUE — found 2026-05-25 evening (M46 + M46-B)**:
-
-At R=60 Wi=1 β=0.59, Cd is **NOT temporally converged at 100k**.
-Time-convergence probe revealed:
-- R=60 @ 100k: Cd=113.234 (= M44 sweep value)
-- R=60 @ 200k: Cd=112.130 (−1.10)
-- R=60 @ 400k: Cd=109.424 (**−3.81, drift ACCELERATING**)
-
-The M44 sweep "Cd-decrease with R at Wi=1" (118.10 R=30 → 113.23 R=60)
-is **NOT a mesh effect** but **incomplete temporal convergence scaling
-with flow-through**. At R=30, 100k = 0.56 flow-through (converged).
-At R=60, 100k = 0.28 flow-through (wake still developing); 400k = 1.11
-flow-through (still drifting).
-
-**M46 Newtonian sweep (β=1.0)**: Cd INCREASES monotonically with R
-(halfwayBB +0.60, Bouzidi-FL +2.80 across R=30→60). Opposite direction
-to Wi=1 → eliminates β-class hypotheses (lattice-distance, TRT, domain).
-
-**Newt Bouzidi-FL trace_C_max anomaly**: 209 (R=30) → **1.4e7 (R=60)**
-despite β=1.0 (polymer dormant LBM-side, no F_poly). Polymer C-tensor
-unstable under Bouzidi-FL Newt R=60. Cd unaffected but suggests a
-**separate Bouzidi-FL polymer-chain bug** worth its own audit.
+**What was learned**:
+- Cylinder Wi=1 halfwayBB shows U-shape mesh convergence: R=10 → 114.48,
+  R=30 → 117.62 (best, gap −2.4% vs rT 120.40), R=50 → 114.26. ALL reach
+  plateau within 1 flow-through Metal F32 → M46-B "R=60 drift" is
+  continuation of dégradation, not under-sampling.
+- Bug A (M49 axis-aligned wall stencil): `_fvfd_solid_bc_derivative_*_2d`
+  returns derivative at first-fluid CENTER, not at wall. Confirmed
+  by M49 canari at 0.2s. Half-cell geometric offset, factor-2-class.
+- Bug B (M53a cylinder cut-cell): same stencil non-q_w-aware at
+  embedded cells. Mean abs_err 0.071 on canari (max 0.141, corr 0.78
+  vs q_w).
+- M52a audit (surprise): `wall_bc=:halfwayBB` does NOT force q_w=0.5 —
+  it dispatches `ApplyLiBBPrePhase` which IS q_w-aware (LBM-side OK).
+- Bug C (cylinder U-shape mechanism): NOT fully localized. Removing
+  helper applications doesn't change cylinder Cd much. Toggling
+  `embedded_gradient=true` causes NaN divergence at R≥30 (first-order
+  embedded helper too noisy under coupled cylinder).
+- M51 over-application broke 12 tests (M5d/M5e/M7d/M8h) because polymer
+  chain at cell-center consumed wall-position gradient. Cleaned up.
 
 ---
 
-## User-hinted hypotheses (load-bearing)
+## Current state (clean baseline)
 
-1. **Bouzidi BCs may be buggy** (user's hypothesis 2026-05-25). The
-   trace_C explosion under Bouzidi Newt is concrete evidence of a
-   Bouzidi-side polymer-chain bug. The M44 sweep + M46-B used
-   halfwayBB (NOT Bouzidi), so the R=60 drift is not directly caused
-   by Bouzidi, but a similar bug class may exist for halfwayBB + polymer
-   at long times.
+**Tests**: 18213/18213 + 953/953 GREEN. M49 + M53a canaries permanent.
 
-2. **"Guo en newtonien" residual** (user 2026-05-25): K Newt halfwayBB
-   R=30 = 132.076 vs rT 132.37 = −0.22%. Small residual in Newtonian
-   path post-M44. Codex M44 G2/G4/G5/G6/G7 inventory items remain
-   unfixed (Codex said not on cylinder path; worth re-verifying after
-   M46 anomalies).
+**Infrastructure preserved**:
+- `src/fvfd/halfway_wall_gradient_correction_2d.jl` (M51 helper,
+  second-order axis-aligned wall formula `(3u₁ − u₂/3 − (8/3)u_wall)/dy`)
+- `src/drivers/cavity_driver_2d.jl:221` calls helper in `:quadratic`
+  mode (M51b — cavity benefits from fix)
+- `FVFDEmbeddedBoundary2D` has bifurcated fields: `wall_distance` /
+  `wall_inv_distance` (centroid for volume integration) +
+  `wall_inv_distance_to_center` (plane for gradient helper)
+- `_fvfd_apply_embedded_wall_gradient_2d` consumes the plane field
 
-3. **Multiple confounded variables**: resolution (R) + Wi + polymer
-   coupling + BC type. Disentangle systematically with one variable
-   at a time, max_steps long enough at each R to ensure flow-through
-   convergence.
+**Reverted (not the fix)**:
+- M51 helper removed from shared step `_run_viscoelastic_logfv_step_channel_coupled_2d`
+  (line 430) → cylinder/square/bfs back to pre-M51 wall-row behavior
+- M51 helper removed from frozen_channel (1317), Poiseuille (2389),
+  square_periodic (2645), bfs_passive (2906)
+
+**Uncommitted changes** (per `git status` at end of session):
+- `src/fvfd/lowering_2d.jl` — bifurcation field added
+- `src/fvfd/operators_2d.jl` — helper uses new field
+- `src/drivers/cavity_driver_2d.jl` — call into M51 helper
+- `src/drivers/viscoelastic_logfv_2d.jl` — M51 application reverted
+  (5 sites), 1 step_callback payload extension (M48 instrumentation)
+- `src/Kraken.jl` — exports for new helper
+- `src/fvfd/halfway_wall_gradient_correction_2d.jl` — NEW
+- `test/test_fvfd_operators_2d.jl` — new bifurcation field test added
+- `test/test_viscoelastic_logfv_patch_ladder.jl` — M2c fixture re-baselined
+  to plane-distance input
+- Many bench/, scratch/, .engineer_brief_* artifacts
 
 ---
 
-## Starting mission for next session
+## Starting mission for next session (user choice required)
 
-**Mission 0 (P0, USER-FLAGGED 2026-05-25)** — Bouzidi-FL polymer-chain
-bug audit:
+User stepped back — the decision is theirs. Options on the table (in
+descending order of "fix the U-shape" ambition):
 
-User observation: trace_C_max under Bouzidi-FL Newt scales
-catastrophically with R: **209 (R=30) → 321 (R=60) for halfwayBB,
-vs 1938 → 1.4e7 for Bouzidi-FL**. Bouzidi shows **7200× growth** vs
-halfwayBB's normal 1.5×. With β=1.0 (no LBM coupling) the explosion
-is harmless (Cd unaffected). But with polymer (β<1), the inflated
-C tensor → inflated τ_p → injected as F_poly into LBM → spurious
-drag + likely NaN. **The R=60 NaN in M30 R-sweep + M32 Phase 4
-at Wi=1 may be entirely Bouzidi-driven, not polymer-physics.**
+### Option A — Build proper second-order cut-cell helper (vrai fix)
 
-This is the same bug PATTERN as M44 Guo (kernel writes wrong moment
-that propagates through downstream chain). M44 fixed the Guo half-step
-+F/2; this would be the analogous Bouzidi half-step or read-write
-ordering bug.
+Derive a q_w-aware wall-aware quadratic formula at cut-cells (analogue
+of M51's axis-aligned `(3u₁ − u₂/3 − (8/3)u_wall)/dy`, but for wall
+at variable distance `q_w·dx`). Validate on M53a canary (target mean
+abs_err < 1e-3 vs current first-order 0.023). Test M48 cylinder R-sweep.
 
-Audit plan:
-- Static kraken-trace (Tool 1 which + Cthulhu) on the Bouzidi-FL
-  kernels at R=60 Newt: identify exactly which moment field is
-  exploding (rho? momentum? gradient?)
-- Compare halfwayBB vs Bouzidi-FL writes to f_post at the cylinder
-  cells, identify the diff
-- Possibly: an `slbm-paper` sister-branch fix exists (per
-  [[feedback_port_sister_branch_fixes]] — audit `git log --all |
-  grep -i bouzidi` before designing fix from scratch)
+- ~1 h Codex implementation + audit
+- Risk: even second-order may not stabilize coupled cylinder run at R≥30
+- Mathematical sketch: fit `u(s) = u_wall + a·s + b·s²` through
+  `u(0) = 0`, `u(q_w·dx) = u₁`, `u((q_w+1)·dx) = u₂` (samples relative
+  to wall position, not cell center). Derivative `∂u/∂n|wall = a`.
 
-**Mission 1 (priority after M0)** — characterize R=60 Wi=1 halfwayBB
-time behavior to determine if a steady state exists:
+### Option B — Test M48 with Bouzidi-FL BC
 
-- Re-run R=60 Wi=1 β=0.59 muscl_superbee halfwayBB qwall at
-  `max_steps ∈ {800k, 1.6M}` (2 cases) on Aqua F64. Aim for
-  ~3.5-4.5 flow-throughs. Compare Cd progression.
-- If Cd plateaus by 800k → real steady-state is below 109 Cd; the
-  M44 sweep R-trend reflects under-sampling but the residual gap
-  vs rT is REAL and large.
-- If Cd keeps drifting linearly → numerical drift, not steady state.
-  Probably mass/momentum conservation issue. Need diagnostic.
-- If Cd oscillates → vortex shedding (Hopf bifurcation crossed at
-  R=60 Wi=1 with L=15R). Real physics, need to time-average over
-  shedding period.
+Toggle `wall_bc=:bouzidi_fl_twopass` on cylinder M48. Bouzidi-FL is
+explicitly q_w-aware at LBM-side. M52a noted FVFD gradient bug subsists
+but the BC change alone might shift the cylinder Cd. Discriminates
+"is U-shape BC-class or stencil-class".
 
-PBS template: `bench/viscoelastic_logfv/run_cyl_m46b_tconv_a100.pbs`
-(adapt MAX_STEPS_BASE values + output dir).
+- ~30 min Metal
+- Note: M47 H1 was parked because PT empirics didn't confirm Bouzidi
+  q_w-modulation mechanism for trace_C blowup. But the M46 sweep DID
+  show Bouzidi Newt trace_C 209 → 1.4e7 between R=30 and R=60 → a
+  real Bouzidi-side anomaly persists. Run with caution.
 
-**Mission 2 (in parallel)** — Cd time-series instrumentation:
+### Option C — Pivot to publication-ready scope (recommended if M48 not blocking paper)
 
-- Modify `src/drivers/viscoelastic_logfv_2d.jl` to log Cd every
-  N=1000 steps to a CSV. Minimal patch, ~10 LOC.
-- Re-run R=60 Wi=1 at max_steps=800k with logging enabled.
-- Inspect Cd(t) trajectory: monotone drift, oscillating, or
-  converging?
+Accept M48 U-shape at R≥40 as a known limit. Write up:
+- M44 fix (Guo half-step) closes M28-M42 cluster with 78% closure of
+  the original gap at R=30 anchor (118.10 vs rT 120.38).
+- V&V suite L1 Poiseuille Wi sweep all PASS (constitutive math validated).
+- Cavity refactored to use M51 second-order wall stencil.
+- 2 new permanent canaries (M49 + M53a) protect the FVFD stencil from
+  future regressions.
 
-**Mission 3 (audit)** — Bouzidi-FL polymer-chain bug:
+Document M48 mesh-convergence anomaly as an open research question
+(could be artifact of halfwayBB on a curved wall — rheoTool uses a
+different discretization). NOT a blocker for the slbm-paper / cylinder
+v0.1 publication.
 
-- Why does Bouzidi-FL Newt trace_C_max go 209 → 1.4e7 between R=30
-  and R=60? With β=1.0 (ν_p=0), polymer should be quiescent.
-- Possible mechanism: Bouzidi-FL writes some intermediate buffer
-  that the polymer chain reads with wrong scaling at high R.
-- Static audit (codex-style kraken-trace) of `_apply_bouzidi_fl_*`
-  vs polymer ψ-advection input fields.
+### Option D — Tactical commit + clear next-session
 
-**Mission 4 (Newt residual)** — Guo fix completeness:
-
-- K Newt halfwayBB R=30 = 132.076 vs rT 132.37 = −0.22%. 0.3 Cd
-  unaccounted for. Could be:
-  - rT under-converged at R=30
-  - Residual G2/G4/G5/G6/G7 readout bug Codex flagged
-  - Bouzidi-vs-halfwayBB BC discrepancy of ~0.56 Cd at R=30 (in M41
-    data)
-- Generate rT mesh refinement to confirm rT R=30 value at higher
-  resolution. If rT converges to ~132.5 → Kraken 132.08 is the
-  residual, ~0.4 Cd, possibly from Guo G2 fix completeness or other.
+User reviews the M51 cleanup + M53b/c bifurcation infra changes,
+commits them with appropriate message, then chooses A/B/C in a
+fresh session.
 
 ---
 
 ## Working notes for next session
 
-- **Don't trust M44 sweep R=40/50/60 verdict** — those were 100k
-  runs, possibly all under-converged at the faster mesh.
-- **M44 R=30 verdict IS solid** — temporally validated by M46-B.
-- **rT mesh refinement was on hold pending temporal-convergence
-  resolution** — still on hold. No point matching rT to Kraken target
-  that's moving.
-- **Per-θ M45 decomposition at R=60** was on non-converged snapshot
-  → conclusions about "Cd_solv shoulder + Cd_pres wake residual" are
-  unsupported.
-- **User constraint** (per `[[feedback_department_bail_out_pattern]]`):
-  Boss invokes Codex directly via `run-engineer.sh` for any
-  Codex-wait mission. Do NOT use Department subagents for spawn+wait.
-- **User constraint** (CLAUDE.md HPC policy): confirm before any
-  rsync to Aqua, qsub, or destructive command.
-- **Compaction status**: boss.md was at 1896 lines pre-2026-05-24,
-  compacted to ~407 + new 2026-05-24/25 sections. Check size at
-  session start; compact again if past ~600 lines.
+- **Per `[[feedback_small_tests_first]]`**: every fix iteration MUST
+  pass the M49 + M53a canaries (<2s each) before any Aqua / Metal
+  R-sweep is launched.
+- **Per `[[feedback_department_bail_out_pattern]]`**: Boss-direct
+  Codex via run-engineer.sh for any spawn-and-wait mission. No
+  Department subagents.
+- **Per CLAUDE.md HPC policy**: explicit user confirmation before
+  any Aqua qsub / rsync. Local Metal F32 (per `[[feedback_gpu_local]]`)
+  is the default for development.
+- **Compaction status**: `boss.md` was 641 lines at session start,
+  this session added a 2026-05-26 block (TODO: write that block when
+  resuming — it didn't get written before STEP BACK).
+- **One unwritten boss.md entry**: 2026-05-26 session (M48-M53). The
+  postmortem memory `project_m51_m53_session_postmortem.md` covers
+  it but boss.md timeline section needs the corresponding entry.
 
 ---
 
 ## Key files
 
-- `.orchestrator/memory/boss.md` — Boss memory (this session's
-  2026-05-24/25 entries are the active context)
-- `.orchestrator/memory/boss_archive_M1_M34_pre_20260523.md` —
-  pre-M44 history archive
-- `.orchestrator/mandate.md` — project mandate
-- `bench/viscoelastic_audit/M44_GUO_FIX_VERDICT.md` — root-cause fix
-- `bench/viscoelastic_audit/M44_GUO_AUDIT_CODEX.md` — Codex G1-G7 audit
-- `bench/viscoelastic_audit/M44_SWEEP_VERDICT.md` — 48-case sweep
-- `bench/viscoelastic_audit/M45_RESIDUAL_VERDICT.md` — residual
-  (now partially superseded by M46-B finding)
-- `bench/viscoelastic_audit/M45_RESIDUAL_AUDIT_CODEX.md` — Codex α/β/γ
-- `bench/viscoelastic_audit/M46_NEWT_AND_TCONV_VERDICT.md` — latest
-  load-bearing finding
-- `src/kernels/logconformation_fv_2d.jl:1047-1050` — the M44 fix
-- `src/kernels/macroscopic.jl:71-75` — base 2D G1 fix
-- `test/test_viscoelastic_logfv_patch_ladder.jl:1416-1455` — M5b
-  pair test
+- `.orchestrator/memory/boss.md` — Boss memory (M44-M46 era inside)
+- `.orchestrator/memory/department.md`, `engineer.md` — layered patterns
+- `~/.claude/projects/.../memory/project_m51_m53_session_postmortem.md` —
+  THIS SESSION's full postmortem (load-bearing for next session)
+- `~/.claude/projects/.../memory/project_m48_hw_meshconv.md` — M48 finding
+- `~/.claude/projects/.../memory/project_m51_wall_grad_fix_partial.md` —
+  M51 outcome
+- `bench/viscoelastic_audit/M48_POSTFIX_RESULT.md` — M48 R-sweep
+  post-M51 result (U-shape still there)
+- `bench/viscoelastic_audit/M49_WALL_STENCIL_CANARY.md` — axis-aligned
+  canary verdict
+- `bench/viscoelastic_audit/M50_STENCIL_CALLER_AUDIT.md` — stencil
+  call-site map
+- `bench/viscoelastic_audit/M52a_CUTCELL_AUDIT.md` — halfwayBB IS
+  q_w-aware via LI-BB, FVFD gradient is NOT (key surprise)
+- `bench/viscoelastic_audit/M52b_CYL_ADJ_CANARY.md` — cylinder cut-cell
+  canary (mean abs_err 0.071)
+- `bench/viscoelastic_audit/M53b_EMBEDDED_HELPER_AUDIT.md` — bug
+  localized: wall_distance was centroid not plane
+- `bench/viscoelastic_audit/M53c_BIFURCATION_VERDICT.md` — bifurcation
+  implemented
+- `bench/viscoelastic_audit/M53d_POLYMER_CONSUMER_AUDIT.md` — triage
+  of the 12 regressions (2 R + 10 P classification)
 
 ---
 
 ## Active waiters / processes
 
-None at session end (all Aqua jobs completed and rsync'd).
+None. All background tasks completed.
 
-## Memory entries (auto-memory `~/.claude/projects/.../memory/`)
+## Memory entries written this session
 
-- `project_m44_guo_halfstep_fix.md` — root cause + commit
-- `project_m44_m45_sweep_residual.md` — sweep + per-θ + Codex audit
-- `feedback_port_sister_branch_fixes.md` — process lesson for
-  pro-active sister-branch audits
+- `feedback_small_tests_first.md` — user directive about micro-canaries
+- `project_m48_hw_meshconv.md` — U-shape finding
+- `project_m51_wall_grad_fix_partial.md` — partial fix outcome
+- `project_m51_m53_session_postmortem.md` — full session postmortem
 
-Next session can extend these as needed.
+---
 
 End of next session prompt.

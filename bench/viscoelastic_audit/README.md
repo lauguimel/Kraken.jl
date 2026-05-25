@@ -1,5 +1,9 @@
 # Viscoelastic audit — staircase convergence
 
+Current validation status: the finite-inertia 2D Oldroyd-B cylinder is not yet
+solver-validated. The `R=30`, `Wi_R=0.1`, `β=0.59` agreement is a single-point
+record, superseded by the Wi-sweep audit. See `BUGS_20260501.md`.
+
 Purpose : one isolated failure mode per step. Each script below adds
 exactly ONE complication to the pipeline and measures its convergence
 order against the analytic Poiseuille Oldroyd-B solution (Liu Eq 62,
