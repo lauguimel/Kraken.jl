@@ -590,11 +590,13 @@ end
         @test embedded_h.wall_ny[3, 3] ≈ 0.0 atol=LOGFV_ATOL
         @test embedded_h.wall_distance[3, 3] ≈ 0.375 atol=LOGFV_ATOL
         @test embedded_h.wall_inv_distance[3, 3] ≈ inv(0.375) atol=LOGFV_ATOL
+        @test embedded_h.wall_inv_distance_to_center[3, 3] ≈ inv(0.25) atol=LOGFV_ATOL
 
         ux = zeros(Float64, Nx, Ny)
         uy = zeros(Float64, Nx, Ny)
-        ux[3, 3] = embedded_h.wall_distance[3, 3]
-        uy[3, 3] = 2 * embedded_h.wall_distance[3, 3]
+        wall_distance_to_center = inv(embedded_h.wall_inv_distance_to_center[3, 3])
+        ux[3, 3] = wall_distance_to_center
+        uy[3, 3] = 2 * wall_distance_to_center
         dudx = zeros(Float64, Nx, Ny)
         dudy = zeros(Float64, Nx, Ny)
         dvdx = zeros(Float64, Nx, Ny)
@@ -618,7 +620,9 @@ end
         embedded_h = Kraken.logfv_embedded_boundary_from_qwall_2d(q_wall)
         ux .= 0.0
         uy .= 0.0
-        ux[3, 3] = embedded_h.wall_distance[3, 3]
+        # M53c: gradient helper now uses plane distance (wall_inv_distance_to_center);
+        # input must scale with the same convention to keep target_normal_derivative = 1.
+        ux[3, 3] = inv(embedded_h.wall_inv_distance_to_center[3, 3])
         fill!(dudx, 0.0)
         fill!(dudy, 0.0)
         fill!(dvdx, 0.0)

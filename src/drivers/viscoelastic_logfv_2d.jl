@@ -382,6 +382,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
     )
     ux_face_bc = FVFDFieldBC2D(u_profile, ux_east, uy_south, uy_north)
     uy_face_bc = FVFDFieldBC2D(u_profile, ux_east, uy_south, uy_north)
+    wall_gradient_sides = WallGradientSides(uy_south, uy_north, nothing, nothing)
 
     logfv_add_constant_force_fluid_2d!(fx_total, fy_total, is_solid, Fx_body_t, zero(T); sync=false)
     logfv_compute_macroscopic_forced_field_2d!(rho, ux, uy, f_in, fx_total, fy_total; sync=false)
@@ -426,6 +427,11 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
                 sync=false,
             )
         end
+        # M51 helper REVERTED here (M53d audit): step is shared by cylinder,
+        # square_channel, bfs → applying wall-position gradient broke
+        # M5e/M7d/M8h. M48 cylinder R-sweep showed the helper was anyway
+        # not flattening the U-shape (net ~zero impact), so removing.
+        # Cavity keeps its own correction at cavity_driver_2d.jl:221.
 
         psixx_work, psixy_work, psiyy_work = psixx_adv, psixy_adv, psiyy_adv
         for _ in 1:selected_polymer_substeps
@@ -558,7 +564,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
             step_callback(step, (; rho, ux, uy,
                 psixx, psixy, psiyy, tauxx, tauxy, tauyy,
                 fx_poly, fy_poly, fx_total, fy_total,
-                dudx, dudy, dvdx, dvdy, is_solid_h))
+                dudx, dudy, dvdx, dvdy, f_out, q_wall, uwx, uwy, is_solid_h))
         end
         f_in, f_out = f_out, f_in
     end
@@ -1290,6 +1296,8 @@ function run_viscoelastic_logfv_frozen_channel_cde_2d(;
     fy_poly = KernelAbstractions.zeros(backend, T, Nx, Ny)
     fx_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
     fy_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    wall_ux = KernelAbstractions.zeros(backend, T, Nx)
+    wall_gradient_sides = WallGradientSides(wall_ux, wall_ux, nothing, nothing)
 
     copyto!(ux, ref.ux)
     copyto!(uy, ref.uy)
@@ -1307,6 +1315,11 @@ function run_viscoelastic_logfv_frozen_channel_cde_2d(;
         dudx, dudy, dvdx, dvdy, ux, uy, is_solid, ref.dx, ref.dy, bc;
         sync=false,
     )
+    # M51 wall-gradient correction REVERTED here (M53d audit):
+    # the helper produces wall-position gradient but the polymer chain
+    # consumes cell-center gradient → semantic mismatch broke M5e
+    # frozen-channel CDE steady-state assertions. Kept only on cylinder
+    # + cavity where the precondition was tested.
 
     for _ in 1:max_steps
         logfv_advect_upwind_bc_aware_2d!(
@@ -2366,6 +2379,8 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
     fy_poly = KernelAbstractions.zeros(backend, T, Nx, Ny)
     fx_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
     fy_total = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    wall_ux = KernelAbstractions.zeros(backend, T, Nx)
+    wall_gradient_sides = WallGradientSides(wall_ux, wall_ux, nothing, nothing)
     logfv_bc = logfv_periodicx_wally_bcspec_2d()
 
     for _ in 1:max_steps
@@ -2373,6 +2388,7 @@ function run_viscoelastic_logfv_poiseuille_coupled_2d(;
             dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy, logfv_bc;
             sync=false,
         )
+        # M51 wall-gradient correction REVERTED here (M53d audit): see comment near frozen_channel site.
         for _ in 1:selected_polymer_substeps
             logfv_step_oldroydb_log_2d!(
                 psixx_next, psixy_next, psiyy_next,
@@ -2602,6 +2618,7 @@ function run_viscoelastic_logfv_square_periodic_2d(;
     fy_poly = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
     fx_total = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
     fy_total = KernelAbstractions.zeros(backend, T, Nx_i, Ny_i)
+    wall_gradient_sides = WallGradientSides(uy_south, uy_north, nothing, nothing)
     logfv_bc = logfv_periodicx_wally_bcspec_2d()
 
     for _ in 1:max_steps
@@ -2624,6 +2641,7 @@ function run_viscoelastic_logfv_square_periodic_2d(;
             dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy, logfv_bc;
             sync=false,
         )
+        # M51 wall-gradient correction REVERTED here (M53d audit): see comment near frozen_channel site.
 
         psixx_work, psixy_work, psiyy_work = psixx_adv, psixy_adv, psiyy_adv
         for _ in 1:selected_polymer_substeps
@@ -2858,6 +2876,7 @@ function run_viscoelastic_logfv_bfs_passive_2d(;
     tauxx = KernelAbstractions.zeros(backend, T, Nx, Ny)
     tauxy = KernelAbstractions.zeros(backend, T, Nx, Ny)
     tauyy = KernelAbstractions.zeros(backend, T, Nx, Ny)
+    wall_gradient_sides = WallGradientSides(uy_south, uy_north, nothing, nothing)
     logfv_bc = logfv_openx_wally_bcspec_2d()
 
     for _ in 1:polymer_steps
@@ -2880,6 +2899,7 @@ function run_viscoelastic_logfv_bfs_passive_2d(;
             dudx, dudy, dvdx, dvdy, ux, uy, is_solid, one(T), one(T), logfv_bc;
             sync=false,
         )
+        # M51 wall-gradient correction REVERTED here (M53d audit): see comment near frozen_channel site.
 
         psixx_work, psixy_work, psiyy_work = psixx_adv, psixy_adv, psiyy_adv
         for _ in 1:selected_polymer_substeps

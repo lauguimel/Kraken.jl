@@ -3,6 +3,7 @@ struct FVFDEmbeddedBoundary2D{A,C}
     wall_ny::A
     wall_inv_distance::A
     wall_distance::A
+    wall_inv_distance_to_center::A
     cell_fraction::A
     wall_fraction::A
     west_fraction::A
@@ -14,6 +15,7 @@ end
 
 function FVFDEmbeddedBoundary2D(wall_nx, wall_ny, wall_inv_distance)
     wall_distance = zero.(wall_inv_distance)
+    wall_inv_distance_to_center = zero.(wall_inv_distance)
     cell_fraction = ones(eltype(wall_inv_distance), size(wall_inv_distance))
     wall_fraction = zeros(eltype(wall_inv_distance), size(wall_inv_distance))
     west_fraction = ones(eltype(wall_inv_distance), size(wall_inv_distance))
@@ -22,9 +24,9 @@ function FVFDEmbeddedBoundary2D(wall_nx, wall_ny, wall_inv_distance)
     north_fraction = ones(eltype(wall_inv_distance), size(wall_inv_distance))
     cut_count = zeros(UInt8, size(wall_inv_distance))
     return FVFDEmbeddedBoundary2D(
-        wall_nx, wall_ny, wall_inv_distance, wall_distance, cell_fraction,
-        wall_fraction, west_fraction, east_fraction, south_fraction,
-        north_fraction, cut_count,
+        wall_nx, wall_ny, wall_inv_distance, wall_distance,
+        wall_inv_distance_to_center, cell_fraction, wall_fraction,
+        west_fraction, east_fraction, south_fraction, north_fraction, cut_count,
     )
 end
 
@@ -33,6 +35,7 @@ function fvfd_empty_embedded_boundary_2d(Nx::Integer, Ny::Integer; FT::Type{<:Ab
     wall_ny = zeros(FT, Int(Nx), Int(Ny))
     wall_inv_distance = zeros(FT, Int(Nx), Int(Ny))
     wall_distance = zeros(FT, Int(Nx), Int(Ny))
+    wall_inv_distance_to_center = zeros(FT, Int(Nx), Int(Ny))
     cell_fraction = ones(FT, Int(Nx), Int(Ny))
     wall_fraction = zeros(FT, Int(Nx), Int(Ny))
     west_fraction = ones(FT, Int(Nx), Int(Ny))
@@ -41,9 +44,9 @@ function fvfd_empty_embedded_boundary_2d(Nx::Integer, Ny::Integer; FT::Type{<:Ab
     north_fraction = ones(FT, Int(Nx), Int(Ny))
     cut_count = zeros(UInt8, Int(Nx), Int(Ny))
     return FVFDEmbeddedBoundary2D(
-        wall_nx, wall_ny, wall_inv_distance, wall_distance, cell_fraction,
-        wall_fraction, west_fraction, east_fraction, south_fraction,
-        north_fraction, cut_count,
+        wall_nx, wall_ny, wall_inv_distance, wall_distance,
+        wall_inv_distance_to_center, cell_fraction, wall_fraction,
+        west_fraction, east_fraction, south_fraction, north_fraction, cut_count,
     )
 end
 
@@ -171,6 +174,7 @@ function fvfd_embedded_boundary_from_halfplane_2d(
     wall_ny = zeros(FT, Nx_i, Ny_i)
     wall_inv_distance = zeros(FT, Nx_i, Ny_i)
     wall_distance = zeros(FT, Nx_i, Ny_i)
+    wall_inv_distance_to_center = zeros(FT, Nx_i, Ny_i)
     cell_fraction = ones(FT, Nx_i, Ny_i)
     wall_fraction = zeros(FT, Nx_i, Ny_i)
     west_fraction = ones(FT, Nx_i, Ny_i)
@@ -202,14 +206,15 @@ function fvfd_embedded_boundary_from_halfplane_2d(
                                 ny_unit * moments.centroid_y
             wall_distance[i, j] = max(centroid_distance, eps(FT))
             wall_inv_distance[i, j] = inv(wall_distance[i, j])
+            wall_inv_distance_to_center[i, j] = inv(max(distance, eps(FT)))
             cut_count[i, j] = UInt8(1)
         end
     end
 
     return FVFDEmbeddedBoundary2D(
-        wall_nx, wall_ny, wall_inv_distance, wall_distance, cell_fraction,
-        wall_fraction, west_fraction, east_fraction, south_fraction,
-        north_fraction, cut_count,
+        wall_nx, wall_ny, wall_inv_distance, wall_distance,
+        wall_inv_distance_to_center, cell_fraction, wall_fraction,
+        west_fraction, east_fraction, south_fraction, north_fraction, cut_count,
     )
 end
 
@@ -313,6 +318,7 @@ function fvfd_embedded_boundary_from_circle_2d(
     wall_ny = zeros(FT, Nx_i, Ny_i)
     wall_inv_distance = zeros(FT, Nx_i, Ny_i)
     wall_distance = zeros(FT, Nx_i, Ny_i)
+    wall_inv_distance_to_center = zeros(FT, Nx_i, Ny_i)
     cell_fraction = ones(FT, Nx_i, Ny_i)
     wall_fraction = zeros(FT, Nx_i, Ny_i)
     west_fraction = ones(FT, Nx_i, Ny_i)
@@ -365,14 +371,15 @@ function fvfd_embedded_boundary_from_circle_2d(
             distance = max(distance, eps(FT))
             wall_distance[i, j] = distance
             wall_inv_distance[i, j] = inv(max(distance, eps(FT)))
+            wall_inv_distance_to_center[i, j] = inv(max(distance, eps(FT)))
             cut_count[i, j] = UInt8(1)
         end
     end
 
     return FVFDEmbeddedBoundary2D(
-        wall_nx, wall_ny, wall_inv_distance, wall_distance, cell_fraction,
-        wall_fraction, west_fraction, east_fraction, south_fraction,
-        north_fraction, cut_count,
+        wall_nx, wall_ny, wall_inv_distance, wall_distance,
+        wall_inv_distance_to_center, cell_fraction, wall_fraction,
+        west_fraction, east_fraction, south_fraction, north_fraction, cut_count,
     )
 end
 
@@ -404,6 +411,7 @@ function fvfd_embedded_boundary_from_qwall_2d(
     wall_ny = zeros(FT, Nx, Ny)
     wall_inv_distance = zeros(FT, Nx, Ny)
     wall_distance = zeros(FT, Nx, Ny)
+    wall_inv_distance_to_center = zeros(FT, Nx, Ny)
     cell_fraction = ones(FT, Nx, Ny)
     wall_fraction = zeros(FT, Nx, Ny)
     west_fraction = ones(FT, Nx, Ny)
@@ -495,6 +503,7 @@ function fvfd_embedded_boundary_from_qwall_2d(
                                     ny * moments.centroid_y
                 wall_distance[i, j] = max(centroid_distance, eps(FT))
                 wall_inv_distance[i, j] = inv(wall_distance[i, j])
+                wall_inv_distance_to_center[i, j] = inv(max(distance, eps(FT)))
                 cell_fraction[i, j] = measures.cell_fraction
                 wall_fraction[i, j] = measures.wall_fraction
                 west_fraction[i, j] = measures.west_fraction
@@ -516,6 +525,7 @@ function fvfd_embedded_boundary_from_qwall_2d(
                                     best_ny * moments.centroid_y
                 wall_distance[i, j] = max(centroid_distance, eps(FT))
                 wall_inv_distance[i, j] = inv(wall_distance[i, j])
+                wall_inv_distance_to_center[i, j] = inv(max(best_distance, eps(FT)))
                 cell_fraction[i, j] = measures.cell_fraction
                 wall_fraction[i, j] = measures.wall_fraction
                 west_fraction[i, j] = measures.west_fraction
@@ -538,6 +548,7 @@ function fvfd_embedded_boundary_from_qwall_2d(
                                 best_ny * moments.centroid_y
             wall_distance[i, j] = max(centroid_distance, eps(FT))
             wall_inv_distance[i, j] = inv(wall_distance[i, j])
+            wall_inv_distance_to_center[i, j] = inv(max(best_distance, eps(FT)))
             cell_fraction[i, j] = measures.cell_fraction
             wall_fraction[i, j] = measures.wall_fraction
             west_fraction[i, j] = measures.west_fraction
@@ -549,9 +560,9 @@ function fvfd_embedded_boundary_from_qwall_2d(
     end
 
     return FVFDEmbeddedBoundary2D(
-        wall_nx, wall_ny, wall_inv_distance, wall_distance, cell_fraction,
-        wall_fraction, west_fraction, east_fraction, south_fraction,
-        north_fraction, cut_count,
+        wall_nx, wall_ny, wall_inv_distance, wall_distance,
+        wall_inv_distance_to_center, cell_fraction, wall_fraction,
+        west_fraction, east_fraction, south_fraction, north_fraction, cut_count,
     )
 end
 
@@ -644,6 +655,7 @@ function fvfd_transfer_embedded_boundary_2d(
     wall_ny = KernelAbstractions.allocate(backend, T, Nx, Ny)
     wall_inv_distance = KernelAbstractions.allocate(backend, T, Nx, Ny)
     wall_distance = KernelAbstractions.allocate(backend, T, Nx, Ny)
+    wall_inv_distance_to_center = KernelAbstractions.allocate(backend, T, Nx, Ny)
     cell_fraction = KernelAbstractions.allocate(backend, T, Nx, Ny)
     wall_fraction = KernelAbstractions.allocate(backend, T, Nx, Ny)
     west_fraction = KernelAbstractions.allocate(backend, T, Nx, Ny)
@@ -655,6 +667,7 @@ function fvfd_transfer_embedded_boundary_2d(
     copyto!(wall_ny, T.(embedded.wall_ny))
     copyto!(wall_inv_distance, T.(embedded.wall_inv_distance))
     copyto!(wall_distance, T.(embedded.wall_distance))
+    copyto!(wall_inv_distance_to_center, T.(embedded.wall_inv_distance_to_center))
     copyto!(cell_fraction, T.(embedded.cell_fraction))
     copyto!(wall_fraction, T.(embedded.wall_fraction))
     copyto!(west_fraction, T.(embedded.west_fraction))
@@ -663,9 +676,9 @@ function fvfd_transfer_embedded_boundary_2d(
     copyto!(north_fraction, T.(embedded.north_fraction))
     copyto!(cut_count, UInt8.(embedded.cut_count))
     return FVFDEmbeddedBoundary2D(
-        wall_nx, wall_ny, wall_inv_distance, wall_distance, cell_fraction,
-        wall_fraction, west_fraction, east_fraction, south_fraction,
-        north_fraction, cut_count,
+        wall_nx, wall_ny, wall_inv_distance, wall_distance,
+        wall_inv_distance_to_center, cell_fraction, wall_fraction,
+        west_fraction, east_fraction, south_fraction, north_fraction, cut_count,
     )
 end
 

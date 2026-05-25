@@ -125,9 +125,9 @@ end
 end
 
 @inline function _fvfd_apply_embedded_wall_gradient_2d(
-    gx, gy, phi, wall_nx, wall_ny, wall_inv_distance, i, j,
+    gx, gy, phi, wall_nx, wall_ny, wall_inv_distance_to_center, i, j,
 )
-    inv_distance = wall_inv_distance[i, j]
+    inv_distance = wall_inv_distance_to_center[i, j]
     if inv_distance > zero(inv_distance)
         nx = wall_nx[i, j]
         ny = wall_ny[i, j]
@@ -1094,7 +1094,7 @@ end
 @kernel function fvfd_velocity_gradient_embedded_2d_kernel!(
     dudx, dudy, dvdx, dvdy,
     @Const(ux), @Const(uy), @Const(is_solid),
-    @Const(wall_nx), @Const(wall_ny), @Const(wall_inv_distance),
+    @Const(wall_nx), @Const(wall_ny), @Const(wall_inv_distance_to_center),
     inv_dx, inv_dy, inv_2dx, inv_2dy,
     west_bc, east_bc, south_bc, north_bc, Nx, Ny,
 )
@@ -1120,10 +1120,10 @@ end
                     uy, is_solid, i, j, Ny, inv_dy, inv_2dy, south_bc, north_bc,
                 )
                 ux_gx, ux_gy = _fvfd_apply_embedded_wall_gradient_2d(
-                    ux_gx, ux_gy, ux, wall_nx, wall_ny, wall_inv_distance, i, j,
+                    ux_gx, ux_gy, ux, wall_nx, wall_ny, wall_inv_distance_to_center, i, j,
                 )
                 uy_gx, uy_gy = _fvfd_apply_embedded_wall_gradient_2d(
-                    uy_gx, uy_gy, uy, wall_nx, wall_ny, wall_inv_distance, i, j,
+                    uy_gx, uy_gy, uy, wall_nx, wall_ny, wall_inv_distance_to_center, i, j,
                 )
                 dudx[i, j] = ux_gx
                 dudy[i, j] = ux_gy
@@ -1166,7 +1166,7 @@ function fvfd_velocity_gradient_embedded_2d!(
     kernel!(
         dudx, dudy, dvdx, dvdy,
         ux, uy, is_solid,
-        embedded.wall_nx, embedded.wall_ny, embedded.wall_inv_distance,
+        embedded.wall_nx, embedded.wall_ny, embedded.wall_inv_distance_to_center,
         inv(dx), inv(dy), inv(2 * dx), inv(2 * dy),
         bc.west, bc.east, bc.south, bc.north, Nx, Ny;
         ndrange=(Nx, Ny),

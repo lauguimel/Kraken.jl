@@ -61,6 +61,7 @@ include("kernels/conformation_lbm_2d.jl")
 include("kernels/conformation_lbm_3d.jl")
 include("kernels/logconformation_lbm_2d.jl")
 include("kernels/logconformation_lbm_3d.jl")
+include("diagnostics/trace.jl")
 include("fvfd/FVFD.jl")
 include("kernels/logconformation_fv_2d.jl")
 include("kernels/bsd_kinetic.jl")
@@ -331,6 +332,7 @@ export fvfd_geometry_from_lbm_2d, fvfd_transfer_geometry_2d
 export fvfd_velocity_gradient_2d!, fvfd_velocity_gradient_embedded_2d!
 export fvfd_tensor_divergence_2d!, fvfd_tensor_divergence_embedded_2d!
 export fvfd_embedded_wall_traction_2d!
+export WallGradientOrder, WallGradientSides, apply_halfway_wall_gradient_correction!
 export fvfd_bsd_force_2d!
 export fvfd_cell_velocity_to_faces_2d!, fvfd_cell_velocity_to_faces_embedded_2d!
 export fvfd_advect_upwind_2d!, fvfd_advect_upwind_embedded_2d!

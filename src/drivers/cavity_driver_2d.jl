@@ -147,6 +147,7 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
     # BC-aware kernels' signatures.
     dummy_y = KernelAbstractions.zeros(backend, T, Ny)
     dummy_x = KernelAbstractions.zeros(backend, T, Nx)
+    cavity_wall_sides = WallGradientSides(dummy_x, u_lid_profile, dummy_y, dummy_y)
 
     logfv_bc = logfv_wallxwally_bcspec_2d()
 
@@ -217,9 +218,9 @@ function run_viscoelastic_logfv_cavity_coupled_2d(;
         fvfd_velocity_gradient_2d!(
             dudx, dudy, dvdx, dvdy, ux, uy, is_solid, dx, dy, logfv_bc; sync=false,
         )
-        _logfv_cavity_apply_wall_gradient_correction!(
-            dudx, dudy, dvdx, dvdy, ux, uy, u_lid_profile, dx, dy;
-            skip_top_corners=skip_top_corners, sync=false,
+        apply_halfway_wall_gradient_correction!(
+            dudx, dudy, dvdx, dvdy, ux, uy, cavity_wall_sides, dx, dy;
+            order=:quadratic, skip_top_corners=skip_top_corners, sync=false,
         )
 
         # 4. Polymer source (substepped)

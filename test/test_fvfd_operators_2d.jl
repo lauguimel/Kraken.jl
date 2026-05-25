@@ -127,10 +127,12 @@ end
 
         wall_distance = embedded_h.wall_distance[3, 3]
         @test wall_distance ≈ 0.375 atol=FVFD_ATOL
+        wall_distance_to_center = inv(embedded_h.wall_inv_distance_to_center[3, 3])
+        @test wall_distance_to_center ≈ 0.25 atol=FVFD_ATOL
         ux = zeros(Float64, Nx, Ny)
         uy = zeros(Float64, Nx, Ny)
-        ux[3, 3] = wall_distance
-        uy[3, 3] = 2 * wall_distance
+        ux[3, 3] = wall_distance_to_center
+        uy[3, 3] = 2 * wall_distance_to_center
         dudx = zeros(Float64, Nx, Ny)
         dudy = zeros(Float64, Nx, Ny)
         dvdx = zeros(Float64, Nx, Ny)
