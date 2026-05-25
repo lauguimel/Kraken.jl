@@ -1,0 +1,117 @@
+#!/bin/bash -l
+#PBS -N M46B_TCONV
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M46-B — Temporal convergence probe for the M44 sweep mesh-R residual.
+#
+# User question: at R=60 Wi=1, only 100k LBM steps = 0.28 flow-through
+# (domain = 30R = 1800 LU, u_mean = 0.005, flow-through = 360k steps).
+# The apparent Cd-decrease with R could be an artifact of insufficient
+# integration time at higher R.
+#
+# Discriminator: re-run R=60 Wi=1 beta=0.59 (the worst-case) at:
+#   max_steps = 100000  (M44 sweep anchor: Cd=113.23)
+#   max_steps = 200000  (~0.55 flow-through)
+#   max_steps = 400000  (~1.10 flow-through, full-pass)
+#
+# Also R=30 Wi=1 beta=0.59 sanity at max_steps=400k to confirm 100k
+# was already converged at R=30 (M44 anchor 118.10 should be stable).
+#
+# If R=60 Cd_kraken shifts substantially (> 0.5 Cd) from 100k to 400k,
+# the M44 sweep R-trend is contaminated by transient → re-evaluate
+# M45 verdict.
+#
+# Setup: M44 sweep recipe (muscl_superbee + halfwayBB + qwall + bsd=1.0
+#        + beta=0.59 Wi=1 Re=1 + L=15R + F64 A100).
+# Cost: R=30 400k ~3 min; R=60 100k ~2 min, 200k ~5 min, 400k ~10 min.
+#       Total ~20 min compute + precompile. Walltime ceiling 2h.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Setup matches M44 sweep.
+export KRAKEN_BETA_LIST="0.59"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+export KRAKEN_ADVECTION_SCHEME="muscl_superbee"
+export KRAKEN_WALL_BC="halfwayBB"
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+ROOT_OUT="tmp/m46b_tconv/${PBS_JOBID:-manual}"
+mkdir -p "$ROOT_OUT"
+
+echo "=== M46-B temporal convergence probe starting at $(date) ==="
+echo "Goal: discriminate Cd R-trend artifact vs real residual"
+
+# R=30 Wi=1 at max_steps=400k (sanity: should match 118.10)
+echo ""
+echo "--- R=30 Wi=1 max_steps=400k (sanity, expected ≈118.10) ---"
+export KRAKEN_R_LIST="30"
+export KRAKEN_MAX_STEPS_BASE="400000"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R30_400k"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# R=60 Wi=1 at max_steps=100k (baseline confirmation)
+echo ""
+echo "--- R=60 Wi=1 max_steps=100k (M44 sweep anchor: 113.23) ---"
+export KRAKEN_R_LIST="60"
+export KRAKEN_MAX_STEPS_BASE="100000"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R60_100k"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# R=60 Wi=1 at max_steps=200k
+echo ""
+echo "--- R=60 Wi=1 max_steps=200k (~0.55 flow-through) ---"
+export KRAKEN_MAX_STEPS_BASE="200000"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R60_200k"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# R=60 Wi=1 at max_steps=400k
+echo ""
+echo "--- R=60 Wi=1 max_steps=400k (~1.10 flow-through) ---"
+export KRAKEN_MAX_STEPS_BASE="400000"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R60_400k"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== M46-B done at $(date) ==="
+echo "Compare:"
+for d in R30_400k R60_100k R60_200k R60_400k; do
+    f=$(ls "${ROOT_OUT}/${d}"/cyl_bigsweep_v2_*.csv 2>/dev/null | head -1)
+    if [ -n "$f" ]; then
+        cd_val=$(awk -F, 'NR==2 {print $26}' "$f")
+        echo "  $d : Cd_kraken=$cd_val"
+    fi
+done

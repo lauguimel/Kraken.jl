@@ -1,0 +1,111 @@
+#!/bin/bash -l
+#PBS -N M46_NEWT_SWEEP
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M46 — Kraken Newtonian mesh-R sweep for M45 residual discrimination.
+#
+# Question: at Wi=1, post-M44 Cd decreases monotonically with R
+# (118.10 R=30 -> 113.23 R=60). Is this:
+#   - a Newtonian baseline mesh effect (BC/lattice-distance/TRT)?
+#   - or a polymer-coupling residual (separate from M44 Guo half-step)?
+#
+# Discriminator: run Newtonian only (beta=1.0 placeholder) at the same
+# (R, BC, geometry) envelope. If Cd_K Newt also decreases monotonically
+# with R like the Wi=1 sweep, the residual is Newtonian -> polymer is
+# fully innocenté. If Cd_K Newt is flat or inverse, the polymer coupling
+# is responsible.
+#
+# Setup uses the M41 Newtonian recipe via the viscoelastic_logfv driver:
+#   beta=1.0 (zero polymer fraction)
+#   Wi=1.0   (placeholder; driver requires lambda>0, but with beta=1 the
+#             polymer chain produces zero stress and Cd is Newtonian)
+#   Re=1, bsd_fraction=1.0, L=15R, max_steps=100k, F64 A100.
+#
+# Wall BC matrix (the M45 question): 2 BCs at all 4 R = 8 cases.
+#   :halfwayBB + qwall                = apples-to-apples with M44 sweep
+#   :bouzidi_fl_twopass + qwall       = body-fitted analog (matches rT
+#                                        noSlip on body-fitted mesh
+#                                        philosophically)
+# Skip circle geometry (halfwayBB ignores q, so circle ≡ qwall numerically).
+#
+# rheoTool Newtonian reference at R=30 shrunk15R already converged:
+#   Cd = 132.369 (bench/rheotool/cylinder_newtonian_re1_shrunk15R/Cd.txt)
+#
+# Cost estimate: ~12 cases × ~60s each + precompile = ~15 min compute.
+# Walltime ceiling 1h.
+#
+# Acceptance gates (Boss-side post-rsync):
+#   - Sanity: R=30 halfwayBB qwall Newt reproduces M41 = 132.076 (±0.5).
+#   - Sanity: R=30 bouzidi_fl_twopass qwall Newt reproduces M41 = 132.637 (±0.5).
+#   - Discriminator: does Cd_K(R) at Wi=0 (Newt) follow the same
+#     monotone decrease seen at Wi=1, or is it flat/inverse?
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Common Newtonian-via-viscoelastic recipe (per M41).
+export KRAKEN_BETA_LIST="1.0"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_R_LIST="30,40,50,60"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+export KRAKEN_ADVECTION_SCHEME="rusanov"
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_MAX_STEPS_BASE="100000"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+ROOT_OUT="tmp/m46_newt_sweep/${PBS_JOBID:-manual}"
+mkdir -p "$ROOT_OUT"
+
+echo "=== M46 Newtonian sweep starting at $(date) ==="
+echo "Matrix: R ∈ {30, 40, 50, 60} × {halfwayBB+qwall, bouzidi_fl_twopass+qwall} = 8 cases"
+echo "Recipe: beta=1.0 (zero polymer), Wi=1.0 placeholder (lambda>0 required)"
+echo "Anchor expected: R=30 halfwayBB qwall → Cd ≈ 132.08 (M41); R=30 bouzidi_fl_twopass qwall → Cd ≈ 132.64 (M41)"
+
+# Block 1: halfwayBB + qwall (4 cases)
+echo ""
+echo "--- Block 1: halfwayBB + qwall ---"
+export KRAKEN_WALL_BC="halfwayBB"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/halfwayBB_qwall"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# Block 2: bouzidi_fl_twopass + qwall (4 cases)
+echo ""
+echo "--- Block 2: bouzidi_fl_twopass + qwall ---"
+export KRAKEN_WALL_BC="bouzidi_fl_twopass"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/bouzidi_fl_twopass_qwall"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== M46 Newtonian sweep done at $(date) ==="
+ls -la "$ROOT_OUT"
+ls -la "$ROOT_OUT/halfwayBB_qwall"
+ls -la "$ROOT_OUT/bouzidi_fl_twopass_qwall"
