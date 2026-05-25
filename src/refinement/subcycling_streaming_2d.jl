@@ -318,7 +318,7 @@ function _stream_conservative_tree_level_native_phase_direct_level_routes_F_2d!(
                     spec, child_level, pos_i, pos_j)
                 dst_id == 0 && continue
                 spec.cells[dst_id].level == level || continue
-                packet = _conservative_tree_limited_linear_child_packet_2d(
+                packet = c2f_limited_linear_child_packet_2d(
                     Fin, spec, cell_id, q, si, sj, ratio;
                     periodic_x=periodic_x)
                 Fout[dst_id, qcur] += packet

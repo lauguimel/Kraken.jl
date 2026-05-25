@@ -67,7 +67,7 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_route_2d!(
     qi = _check_d2q9_q(route.q)
     packet = _conservative_tree_c2f_time_factor_2d(
         bank, interface_time_scaling) *
-        _subcycle_coarse_to_fine_route_packet_2d(
+        c2f_subcycled_route_packet_2d(
             F, spec, route; alpha=alpha,
             coarse_to_fine_prolongation=coarse_to_fine_prolongation,
             periodic_x=periodic_x)
@@ -127,7 +127,7 @@ function conservative_tree_subcycle_sync_down_level_native_phase_routes_F_2d!(
                 pos_i = (src.i - 1) * ratio + si
                 pos_j = (src.j - 1) * ratio + sj
                 qcur = q
-                packet = _conservative_tree_limited_linear_child_packet_2d(
+                packet = c2f_limited_linear_child_packet_2d(
                     F, spec, src_id, q, si, sj, ratio;
                     periodic_x=periodic_x)
                 for substep in 1:ratio
