@@ -45,7 +45,8 @@ end
 """
     stream_conservative_tree_routes_F_2d!(Fout, Fin, spec, table;
                                           boundary=:skip, u_south=0,
-                                          u_north=0, rho_wall=1)
+                                          u_north=0, rho_wall=1,
+                                          coarse_to_fine_prolongation=:flat)
 
 Scatter integrated D2Q9 populations through a static multilevel route table.
 `Fout` is zeroed before scattering. Boundary routes are explicit:
@@ -66,13 +67,17 @@ function stream_conservative_tree_routes_F_2d!(
         boundary::Symbol=:skip,
         u_south=0,
         u_north=0,
-        rho_wall=1)
+        rho_wall=1,
+        coarse_to_fine_prolongation::Symbol=:flat)
     _check_conservative_tree_stream_args_2d(Fout, Fin, spec)
     policy = _check_conservative_tree_boundary_policy_2d(boundary)
+    ctx = C2FProlongationContext2D(spec, table, false, nothing, :none)
     fill!(Fout, zero(eltype(Fout)))
 
     @inbounds for route in table.routes
-        packet = route.weight * Fin[route.src, route.q]
+        packet = (route.kind == SPLIT_FACE || route.kind == SPLIT_CORNER) ?
+            c2f_route_packet_2d(coarse_to_fine_prolongation, Fin, route, ctx) :
+            route.weight * Fin[route.src, route.q]
         if route.dst == 0
             if policy != :skip
                 reflected = policy == :bounceback ? packet :
