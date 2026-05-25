@@ -28,7 +28,7 @@ Strategic step-back 2026-05-25 with adversarial Codex+Claude verdicts (`tmp/stra
 
 ## What replaces it
 
-Branch `kraken-amr-v2` ports the **Schornbaum-Rüde 2016 algorithm** (waLBerla's `src/lbm_generated/refinement/` ~340 LOC + `NonuniformGeneratedPdfPackInfo.impl.h` ~500 LOC) to Julia + KA.jl (CUDA + Metal + CPU).
+Branch `feat/amr-port-sr` ports the **Schornbaum-Rüde 2016 algorithm** (waLBerla's `src/lbm_generated/refinement/` ~340 LOC + `NonuniformGeneratedPdfPackInfo.impl.h` ~500 LOC) to Julia + KA.jl (CUDA + Metal + CPU).
 
 Decision basis (2026-05-25, two rounds of adversarial Codex+Claude audit on 4 candidates: waLBerla / Palabos / OpenLB / Neon):
 - **Schornbaum-Rüde** chosen for **mathematical rigor** (Σ f_q algebraic mass conservation, independent of collision) + **versatility** (collision-agnostic sweep contract for multiphysics) + **production GPU scaling** (JUWELS Booster 10000+ GPUs published)
