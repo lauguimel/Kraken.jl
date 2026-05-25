@@ -1,0 +1,1678 @@
+# Boss memory — Kraken.jl viscoelastic cavity spatial debug
+
+Initialised 2026-05-15. Project-level facts that affect future missions
+on the cavity / log-FV / viscoelastic branch.
+
+## 2026-05-15 — Mandate bootstrap
+
+Constitutive validated (0D shear + planar extension to machine precision
+at production substep cadence). Bug is purely spatial/coupling at the
+cavity, 18-24 % L2 on profiles at t=8 N=64. Five spatial candidates,
+sweep order driven by cost/prior. See `mandate.md` §5.
+
+**Implication**: future missions must not pivot back to 0D constitutive
+re-validation. Mandate §2 documents this. If a Department reports BLOCKED
+asking "is the constitutive maybe wrong?", that signals a brief framing
+issue — refine the brief, do not re-run 0D.
+
+## 2026-05-15 — Why bsd_fraction = 0.75 (not 1.0)
+
+`bsd_fraction = 1.0` crashes at the lid corner because the LBM BGK
+implicit diffusion stencil mismatches the FD-central laplacian in the
+explicit BSD correction. Architecturally clean fix is kinetic-moment BSD
+(M5), but deferred until M1-M4 are exhausted. Cavity sweep already
+showed <2 % sensitivity within bsd ∈ [0, 0.75], so this is a low-prior
+contributor to the cavity gap at N=64.
+
+**Implication**: do NOT propose a brief that tries `bsd=1.0` on cavity.
+Document if the urge arises again.
+
+## 2026-05-15 — M1 closed: Re mismatch refuted
+
+L2 essentially flat across u_max ∈ {0.005, 0.002, 0.001}: centerline
+1.797e-1 → 1.795e-1 (0.1% change); psi_xy 2.44e-1 → 2.38e-1 (2.5%).
+Inertia is NOT the cavity-gap driver. The 18-24% L2 band is robust
+under Re_LU 6.4 → 1.3. See verdict file
+`bench/viscoelastic_logfv/CAVITY_REMISMATCH_M1_VERDICT_20260515.md`.
+
+**Implication**: do NOT re-attempt a smaller-u_max sweep as a fix; the
+gap is dx-bound (spatial discretisation / coupling), not Re-bound.
+Next missions: M2 (wall-corner artifact) + M3 (frozen-replay polymer)
+in parallel per Mandate §6.
+
+## 2026-05-16 — M2 + M3 closed (smoke); M4 promoted to primary suspect
+
+M3 smoke: standalone polymer pipeline on frozen rheoTool U at t=8
+gives **4.08 %** L2 vs **18-24 %** for the coupled run. Polymer
+upwind / source / stress is NOT the dominant source. The bug
+originates upstream — in U itself, i.e. the LBM solvent response to
+the polymer force. This makes **M4 (Guo body-force vs FD divergence)
+the primary remaining candidate**.
+
+M2 smoke (N=32 t=2): corner kernel has a real but tiny effect (corner
+Δpsi_xy 1.58× bulk Δpsi_xy, both ~5e-5). Absolute magnitude too small
+at the smoke scale to bound how much of the 18-24% gap it would close
+at production N=64 t=8.
+
+**Implication**: prioritise M4 prep next. M2-full Aqua run is a
+secondary confirmation, not a gate. Department in M3 took the
+liberty of writing 4 entries directly into
+`memory/department.md` — keep the content (it is correct) but future
+Department briefs MUST explicitly state "do NOT write to memory; only
+suggest candidates in your report". Single-writer rule.
+
+## 2026-05-16 — Department reports may bypass single-writer memory rule
+
+If a Department's brief does not explicitly forbid memory writes, the
+sub-agent will sometimes write directly to `.orchestrator/memory/*.md`
+files instead of just suggesting candidates. Discovered with M3
+(2026-05-16). Mitigation: add an explicit forbidden line in every
+Department brief going forward:
+"You MUST NOT modify any file under `.orchestrator/memory/`. Suggest
+candidates in your report; the Boss decides what to persist."
+
+**Why**: maintains the audit trail; without this, memory accumulates
+content without the Boss filter and the audit log becomes ambiguous.
+
+## 2026-05-16 — M4 confirms BSD as primary cavity-gap suspect
+
+Guo body-force on the LBM differs from FD div(τ) by **53.5-53.8 % L2**
+on the saved N=64 cavity fields, structurally across u_max. Difference
+is dominated by the BSD `−ζ·ν_p·∇²u` correction. Max-diff cell (16, 63)
+is in the right-wall recirculation under the moving lid — the same
+region as M2's corner-artifact suspicion. **M2 and M4 are coupled at
+this cell.**
+
+**Implication**: the Mandate's prior assumption that `bsd ∈ [0, 0.75]`
+has "<2 % sensitivity at N=32" applied to *profiles*, not the *force*.
+At N=64 the force discrepancy is 54 %, plausibly enough to drive the
+18-24 % profile gap. Next decision experiment: **M4b BSD-fraction
+sweep** at N=64 t=8 with `bsd ∈ {0, 0.25, 0.5, 0.75}` to test whether
+the profile L2 collapses as the BSD correction shrinks.
+
+## 2026-05-16 — `fields.jls` writer omits `f` and body-force fields
+
+The cavity comparison harness `run_cavity_oldroydb_vs_rheotool.jl`
+persists only the macro fields `ux, uy, psi*, tau*` — NOT the LBM
+distribution `f` nor the applied body-force `fx_total/fy_total`. Any
+future Guo-vs-FD audit at the `f` level would need the snapshot writer
+extended. M4 worked around this by reconstructing F_Guo from `tau`
+using the implementation's known formula. Acceptable for a one-shot
+audit; not robust for parameter sweeps.
+
+**Why**: avoids spending a future Department iteration re-discovering
+this. If a future mission needs the body-force at the `f` level,
+extend the writer first.
+
+## 2026-05-16 — M6-A confirms wall-BC stencil mismatch as alternative
+
+M6-A audit found that Kraken's FD divergence at the wall row uses an
+implicit one-sided **quadratic** 3-point extrapolation, while rheoTool
+uses **linearExtrapolation** (2-point) on `τ` at the moving lid. The
+Ψ-side BC matches (both zeroGradient). Predicted impact of matching:
+54 % → ~15-30 % L2 at the M4 max-diff cell (16, 63).
+
+**Implication**: M6-B is a complementary fix to M5-B, not an
+alternative. M5-B fixes interior bit-exactness (Chapman-Enskog
+consistency). M6-B fixes the wall-row stencil. Both may be needed;
+either alone may not close the full 18-24 % profile gap. M4b
+verdict will help discriminate: if profile L2 falls fast with
+bsd→0, BSD operator is the dominant lever; if not, the wall
+stencil is. Sequencing: M5-B first (in flight), THEN M6-B (do not
+parallelise; both could touch operators_2d.jl in a follow-up).
+
+**Why**: prevents over-committing to either fix; documents the
+"likely both needed" reasoning so future sessions don't relitigate
+M5 vs M6 as exclusive alternatives.
+
+## 2026-05-16 — M4b REFUTES BSD-is-driver hypothesis
+
+Cavity profile L2 vs rheoTool falls *monotonically* as
+`bsd_fraction` increases over `{0, 0.25, 0.5, 0.75}` at fixed
+`N=64, t=8, De=1, beta=0.5, u_max=0.005`. Centerline L2:
+21.15 % → 17.97 %. psi_xy L2: 27.41 % → 24.41 %. Current
+production choice `bsd_fraction=0.75` is the best of the swept set.
+
+**Re-interpretation of M4**: the 54 % Guo-vs-FD discrepancy
+reported by M4 is the magnitude of the BSD correction term
+operating *as designed*, not a defect. The BSD correction is doing
+useful work (improving rheoTool match); the operator-mismatch
+concern was a misreading of M4. M5-B kinetic kernel is a clean
+refactor with the right semantics but cannot close the cavity gap.
+
+**Implication for the mission**: the next lever is M6-B (wall-BC
+stencil match with rheoTool's `linearExtrapolation` on τ). The
+remaining 18 % centerline gap at `bsd=0.75` must come from a
+non-BSD source — the wall stencil is the most concrete candidate
+identified to date. No future mission should propose another BSD
+sweep or another BSD-flavour refactor; that lever has been measured
+and it points the wrong way.
+
+**Why**: prevents future Departments from chasing the BSD ghost
+again. The data is in the verdict file
+`bench/viscoelastic_logfv/CAVITY_BSD_M4B_VERDICT_20260516.md`.
+
+## 2026-05-16 — M6-B REFUTES wall-stencil hypothesis at production
+
+Aqua confirmation job 21397692 ran cavity at N=64 t=8 with
+`polymer_wall_extrap` in {`:quadratic`, `:linear`}. Quadratic
+reproduced the M1 baseline (0.1797 / 0.2441) to 4 sig figs — sanity
+passed, kwarg default preserves behaviour. Linear gave 0.1817 /
+0.2433 — essentially unchanged (+1.1 % on centerline u, −0.3 % on
+psi_xy). The 12 % wall-row delta observed at the smoke does NOT
+propagate to the global profile.
+
+**Implication for the mission**: four of five originally-mandated
+candidates plus the user-suggested wall-BC alternative are refuted.
+The 18-24 % cavity profile gap remains unexplained. Need to
+step-back the Mandate and either close M2-full + grid-convergence
+sweep (cheap, bounds the gap as discretization-floor vs bug) or
+open M7-M9 for the remaining hypotheses (initial conditions, time
+integration, coupling order).
+
+**Why**: prevents future Departments from re-attempting any of the
+4 refuted candidates. The wall-stencil ghost-fill *implementation*
+is a separate possibility (one-sided vs reflective) and is NOT
+covered by M6-B's verdict — that would be M9 or similar if pursued.
+
+## 2026-05-16 — M8 ratchets the polymer pipeline OUT of suspicion
+
+Analytical Poiseuille frozen-velocity test of the FV polymer pipeline
+(advection + Oldroyd-B source + stress + wall velocity-gradient
+extraction) gives first-order convergence in `dt_poly` with NO spatial
+bias (ratio cell/analytical = 0.99805 uniformly across interior).
+At production `n_substeps=4096`, source-discretization error is ~4e-6.
+The `fvfd_velocity_gradient_2d!` wall stencil is bit-exact vs analytical.
+Combined with M3 (cavity frozen replay 4 % L2) and the 0D constitutive
+machine-epsilon audit, this fully exonerates the polymer pipeline.
+
+**Implication**: the 18-24 % cavity gap MUST be in the **LBM ↔ polymer
+coupling layer**:
+- Guo body-force injection on `f`
+- BSD correction magnitude/sign (BSD helps per M4b, so direction is
+  right but possibly amplitude is off)
+- Operator staggering / order between LBM step and polymer substeps
+- `u` reconstruction from `f` after Guo source
+
+**Why**: prevents any future Department from re-auditing the polymer
+ODE, the FV advection upwind, the stress reconstruction, or the wall
+velocity-gradient extraction — all ratcheted.
+
+## 2026-05-16 — Two-level polymer-pipeline regression ratchet established
+
+We now have a two-level testing ladder for the polymer pipeline:
+- **0D**: bit-exact (machine epsilon) at production substep cadence
+  (audit `bench/viscoelastic_logfv/CONSTITUTIVE_0D_AUDIT_20260515.md`).
+- **2D**: first-order in `dt_poly`, no spatial bias, at
+  `bench/viscoelastic_logfv/run_poiseuille_polymer_analytical_2d.jl`.
+
+Future polymer-pipeline regressions can be triaged against this
+two-level ratchet without re-running cavity. Cavity comparisons against
+rheoTool are NOT a fitness function for the polymer pipeline alone —
+they always carry the coupling-layer signal.
+
+**Why**: cleaner separation of concerns for future debugging sessions.
+
+## 2026-05-16 — M7b confirms Wi-INDEPENDENT polymer-coupling bug (SMOKING GUN)
+
+At Wi=0.001 with matched total LBM viscosity, two cavity cases that
+differ only in whether the polymer code path is active diverge by
+**3.42 % centerline u rel L2**. Control case (Newtonian Re-doubling)
+produces only 0.014 % delta — confirming Re is NOT the source. The
+polymer machinery introduces a Wi-independent perturbation on `u`
+that should not exist if the BSD/Guo split correctly absorbs the
+Newtonian portion of τ_p into the LBM solvent viscosity. Verdict:
+`bench/viscoelastic_logfv/CAVITY_LOWWI_M7B_VERDICT_20260516.md`.
+
+**Implication**: the cavity-gap bug is now LOCALISED. M10 (BSD/Guo
+coupling Wi→0 audit) is the natural next mission — algebraic
+verification that the implementation matches the design intent
+`ν_LBM_eff = ν_s + ν_p` at the discrete level.
+
+**Why**: prevents future Departments from re-attempting any high-Wi
+diagnostic chase — the bug is in the coupling and visible cleanly at
+Wi=0. Any future audit should leverage this clean Wi-0 isolation.
+
+## 2026-05-16 — Cavity Kraken-vs-Kraken noise floor is 0.014 %
+
+The B-vs-C control of M7b (Newtonian, Re-doubling 1.6 → 3.2 at
+N=64, u_max=0.005) gives 0.014 % centerline u rel L2. Any future
+Kraken-vs-Kraken comparison delta above ~0.1 % is meaningful.
+
+**Why**: gives a quantitative threshold for "noise" vs "signal" in
+any future cavity sensitivity study.
+
+## 2026-05-16 — LLM-friendly file-size constraint adopted
+
+User directive (2026-05-16): files should be ≤500-700 LOC for LLM
+Departments to work effectively. Current worst case in cavity-relevant
+code: `src/drivers/viscoelastic_logfv_2d.jl` = 3429 LOC (5× the
+limit). Any future cavity-driver refactor must include a SPLIT into
+modules (see `.orchestrator/memory/engineer.md` for the proposed
+decomposition). This is a load-bearing engineering constraint, not
+optional cleanup — M11's small fix got lost in the monolith context.
+
+**Why**: prevents the next session from going straight into Option 3
+implementation without first making the codebase tractable for the
+Engineer. Splitting should be the FIRST mission of the next session,
+not bundled with the BSD fix.
+
+## 2026-05-16 — Kraken-Mandate modularity violation (user-flagged)
+
+The original Kraken architectural mandate is: **geometry ≠ BC ≠ solver
+≠ stencil ≠ physics** (separation of concerns). The current cavity
+driver `src/drivers/viscoelastic_logfv_2d.jl` at 3429 LOC violates
+this directly — it co-locates:
+- The cavity GEOMETRY (lid-driven cavity setup)
+- The wall-BC kernels (`_logfv_cavity_apply_wall_gradient_correction!`)
+- Solver bits (timestep loop, LBM step orchestration)
+- Stencil choices (BSD `:fd` / `:kinetic` branches)
+- Physics (Oldroyd-B BSD correction, Guo body force assembly)
+
+This is structurally why M11 broke: the 5-LOC BSD fix shared state
+(buffers, kwargs, line context) with the wall-correction kernel and
+the source-ODE D-capture in the same file, so the fix accidentally
+perturbed unrelated concerns.
+
+**Implication**: the cavity driver SPLIT (per the engineer.md
+proposed decomposition) is not just for LLM-friendliness — it
+restores the project's own architectural mandate. Future cavity
+work must NOT bundle "fix BSD" with "split driver"; the split goes
+first as a standalone refactor mission, then the fix targets the
+clean post-split module.
+
+The orchestrator skill itself has been updated 2026-05-16 to enforce
+this generally: ≤500 LOC soft / ≤700 LOC hard, one-file-one-concern,
+in SKILL.md §Engineering hygiene. Applies to every project using the
+pattern, not just Kraken.
+
+**Why**: this is THE load-bearing project-level constraint going
+forward. Any Department brief that does not respect it is a trap.
+
+## 2026-05-17 — M16 SPLIT cavity driver landed (commit 77956ad8)
+
+`viscoelastic_logfv_2d.jl` 3429 → 2934 LOC. Cavity-specific code now
+lives in two dedicated files: `cavity_wall_correction_2d.jl` (98
+LOC, 4 helpers) and `cavity_driver_2d.jl` (400 LOC, main
+`run_viscoelastic_logfv_cavity_coupled_2d`). All three within hard
+ceiling 700 LOC. Refactor pur (zero semantic change). M17 (Option 3
+BSD same-stencil fix) is unblocked; allowed edit zone for M17 is
+`cavity_driver_2d.jl` + new helper modules below it, NOT the now-
+slimmer `viscoelastic_logfv_2d.jl` (which still holds 8+ unrelated
+drivers and remains over the hard ceiling — future M16b will split
+those, but they are NOT in the cavity bug critical path).
+
+**Why**: the orchestrator pattern's first major SPLIT mission worked
+cleanly; documents the post-split topology that future missions
+target. Saves the next Boss from re-discovering "M17 goes to
+cavity_driver_2d.jl, not the old monolith path".
+
+## 2026-05-17 — First M16 Department spawn hung silently
+
+The first Agent call for M16 (general-purpose subagent) returned a
+placeholder "Empty so far — still compiling. Let me wait for the
+Monitor notification" after 216 s and 42 tool calls without
+invoking Codex. The Department had drafted `.engineer_brief_M16A.md`
+correctly but appears to have wedged on a Monitor-tool call awaiting
+a subprocess event that never arrived. Respawned a second Department
+with an explicit "do NOT use Monitor; use plain Bash with timeout"
+clause and an instruction to pick up from the existing brief instead
+of redrafting — that one succeeded.
+
+**Why**: if a future Boss-spawned Department returns a stale Monitor
+placeholder, respawn with the no-Monitor clause and a "resume from
+existing artefacts" instruction rather than starting from scratch.
+
+## 2026-05-17 — Cavity coupling bug has TWO independent defects
+
+The 3.42% Wi-independent residual M7b measured has TWO theoretical
+sources, BOTH structural to the current WIDE F_poly chain:
+
+1. **M10 stencil mismatch** (commit `a2e6f088`, L1 quantification):
+   F_poly uses a wide 2dx-effective Laplacian, LBM+BSD use a narrow
+   5-point Laplacian. The wide-narrow truncation gap is O(dx²·∂⁴u)
+   and produces the 3.4% residual at N=64.
+2. **Nyquist null mode** (commit `c20e4e8c`, L4 verification):
+   WIDE F_poly has identically zero viscous damping at the checkerboard
+   pattern (k·dx = π). Any noise at that wavenumber accumulates
+   undamped. NARROW preserves 4/π² ≈ 0.405 of analytical damping at
+   the same mode.
+
+The naïve fix attempts (M11, M17-pre v1/v2, M17-impl) tried to address
+(1) by widening BSD; they failed because they REMOVED the (already-
+broken) WIDE damping mechanism without replacing it. The convergent
+theoretical answer from both M17-epsilon Departments (Claude + Codex):
+SPLIT F_poly into a narrow Newtonian (`ν_p·NARROW_Laplacian(u)`)
+plus a wide Elastic remainder (`div_wide(τ_p − 2·ν_p·D)`). This
+addresses BOTH defects simultaneously:
+- Newtonian portion uses NARROW: matches LBM+BSD stencil → closes
+  M10 bias.
+- Newtonian portion uses NARROW: preserves Nyquist damping at 40%
+  → closes null mode.
+- Elastic remainder remains wide but its 2× truncation bias is
+  bounded by the elastic-mode signal (zero at Wi=0).
+
+**Why**: future Boss sessions must read this BEFORE attempting any
+"adjust BSD" or "swap F_poly stencil" mission. The fix is structural,
+not parametric. M17-impl-v2 with split #2 is the prescribed
+implementation; any deviation needs explicit justification.
+
+## 2026-05-17 — Parallel theory Departments protocol paid off
+
+User-driven discipline: two parallel theoretical Departments (Claude
++ Codex) on the same brief produced divergent surface-level verdicts
+(Claude GREEN, Codex RED-naïve/YELLOW-corrected). Audit revealed
+they actually CONVERGED on the same correct implementation (face-
+flux or split Newtonian/elastic) but with different framings.
+
+The divergence surfaced a critical implementation subtlety: a naïve
+"narrow divergence on cell-centered τ_p" does NOT shrink the
+effective velocity stencil, because τ_p is built from FD-derived D.
+A single Department (either) would have either over-promised or
+been ambiguous; the comparison forced precision.
+
+**Why**: protocol confirmed useful for architectural decisions where
+the brief is non-trivial. Apply again whenever the Boss faces a
+"sounds clean but might have a hidden subtlety" hypothesis. Cost:
+2× the spawn time; benefit: catches subtleties that single-spawn
+would miss.
+
+## 2026-05-17 — M17 cluster CLOSED with reframed diagnostic (commit b995e304)
+
+After 6 RED implementation attempts on the (ε) split coupling
+architecture (M11 + M17-pre v1/v2 + M17-impl + M17-impl-v2 +
+M17-impl-v3), the cavity 3.4 % M7b Wi-independent signal was
+re-decomposed via clean Poiseuille analytical canaries + rheoTool
+iBSD-ON/OFF cross-check:
+
+| component | contribution to 3.4 % |
+|---|---|
+| polymer pipeline error | machine zero (1e-5 rel L2 on stress) |
+| BSD intrinsic cost (rheoTool-equivalent) | ~0.6 % |
+| M10 stencil mismatch (Poiseuille-isolated) | ~0.4 % |
+| **cavity corner singularity amplification (8×)** | **~2.4 %** |
+
+The **dominant contributor is corner amplification, NOT stencil
+mismatch**. The 6 M17 split-coupling attempts targeted the wrong
+component (~0.4 % only).
+
+**Strategic implication for cavity production gap (18-24 %)**:
+- ~1 % combined BSD/stencil bias (can't fix without major refactor).
+- ~2.4 % corner amplification (addressable by lid profile / corner
+  regularization).
+- ~10-12 % discretization floor at N=64 (M9 trajectory).
+- ~5-7 % finite-Wi residual at De=1.
+
+Single-digit production gap path: grid refinement (N=128 → ~9 % floor,
+N=256 → ~5 %) + corner regularization → likely achievable at N≥192
+WITHOUT touching the BSD coupling architecture.
+
+**Closed missions**: M11, M17-pre v1/v2, M17-impl, M17-impl-v2,
+M17-impl-v3 (all archived under `.orchestrator/red_archives/`).
+
+**Open**: M18 (production validation N=128+ on Aqua), M19 (corner
+regularization, optional), M16b (Poiseuille driver SPLIT debt — the
+monolith remains at 2934 LOC).
+
+**Why**: this re-decomposition is the durable conclusion of an entire
+session of M17 attempts. Future Boss must read this BEFORE attempting
+any architectural fix on the BSD coupling — the math is right but the
+target was wrong; corner amplification dominates.
+
+## 2026-05-17 — Polymer pipeline analytical match extends M8/M13
+
+Steady-state Oldroyd-B Poiseuille on the existing
+`run_viscoelastic_logfv_poiseuille_coupled_2d` driver matches
+analytical to machine precision on stress fields:
+  tau_xx rel L2 = 8.25e-6
+  tau_yy max abs = 5.77e-16 (machine zero)
+  N1 rel L2 = 8.24e-6 (= 9.1e-8 vs 9.1e-8 analytical)
+
+This is BSD-invariant (same numbers at ζ=0 and ζ=0.75) — consistent
+with Stokes balance: gamma_dot is determined by F_body and nu_total
+alone, regardless of how BSD splits viscosity between LBM-implicit
+and explicit body force. Only velocity profile (u) is affected by
+BSD; the polymer stress is sound by construction.
+
+**Why**: any future "is the polymer pipeline broken?" doubt can be
+answered with the script at /tmp/poiseuille_full_check.jl pattern.
+
+## 2026-05-18 — M20 closes: BSD operator-clean on smooth geometry; 8× cavity ratio is downstream
+
+Post-hoc decomposition of F_total on the existing Poiseuille coupled
+driver at steady state (Nx=8 Ny=32 100k steps CPU F64) — three cases
+A_no_BSD (ζ=0), A (ζ=0.75 Wi=8e-4), A_high_Wi (ζ=0.75 Wi=1).
+Decomposition uses the existing kernels (no `src/` patch): rebuild
+`tau*` from driver-returned `psi*` via `logfv_stress_from_log_2d!`,
+call `logfv_polymer_force_bc_aware_2d!` for F_poly_wide, then
+`F_BSD = F_poly_wide − (fx_total − F_body)` by algebraic identity from
+the driver chain.
+
+**Numbers** (rel L2 vs analytical Newtonian-limit `−F·ν_p/ν_total`):
+
+| case | F_poly int / wall | F_total int / wall |
+|---|---|---|
+| A_no_BSD | 0.50 % / 0.50 % | 0.50 % / 0.50 % |
+| A | 0.50 % / 0.50 % | **3.51 % / 3.51 %** |
+| A_high_Wi | 1.3e-5 | 9.3e-5 |
+
+**Two Boss-level insights worth preserving**:
+
+1. **Same-sign stencil residuals ADD, they do not cancel.** WIDE
+   `div_wide(τ_p)` and NARROW 5-point `∇²u` BOTH underestimate the
+   analytical d²u/dy² magnitude by ~0.5 %, with the same sign. Their
+   algebraic combination `F_poly − F_BSD` therefore accumulates the
+   absolute error rather than cancelling it. F_poly residual abs =
+   2.5e-8, F_BSD residual abs = 1.88e-8 same direction → F_total
+   residual abs = 4.4e-8 (= 2.5e-8 + 1.88e-8, near-perfect addition).
+
+2. **(1−ζ)⁻¹ = 4× normalisation amplification**. Same absolute residual
+   normalised against a 4× smaller F_total target shows up as 4× larger
+   relative residual. The "3.5 %" on F_total is the SAME force-error as
+   the "0.5 %" on F_poly — different denominators.
+
+**Localisation impact on the 8× cavity-vs-Poiseuille M7b ratio**:
+- Poiseuille has NO wall amplification (uniform residual in y).
+- Therefore the 8× cavity ratio does NOT live in the BSD subtraction
+  chain itself. It lives downstream — either (a) in the velocity-
+  gradient kernel difference (`fvfd_velocity_gradient_2d!` cavity vs
+  `logfv_velocity_gradient_bc_aware_2d!` Poiseuille, Open Q5 → M21),
+  or (b) in the LBM-side flow response to the same body force around
+  the corner singularity.
+
+**Implication for future BSD architectural work**: a bit-exact BSD
+cancellation (M5 kinetic OR M17 same-stencil) buys at most the 0.5 %
+operator-level residual on Poiseuille. The remaining 3.0 % on F_total
+is the same-sign-add + normalisation phenomenon, NOT a fixable bug.
+Any future "fix BSD" mission must answer: which of the 0.5 % is
+captureable in operator alignment? On cavity, the wall corner
+amplifies the same 0.5 % into the 3.42 % M7b signal — that's the
+real lever, not the operator alignment.
+
+**Why**: prevents future Boss sessions from chasing operator-level
+bit-exactness as a way to close the cavity gap. M20 shows the
+operator side is already at ~0.5 % bulk on Poiseuille; the cavity
+amplification mechanism is geometric (wall + corner), not algebraic.
+
+## 2026-05-18 — M21 NEGATIVE verdict: no operator-side BSD reformulation works
+
+Path-matrix sweep of 7 BSD/F_poly variants on smooth Poiseuille
+(commit `81745f3b`) confirms: **the cavity bug is NOT operator-side**.
+None of the historically-RED-on-cavity variants (`:fd_v2`,
+`:fd_v2_unc`, `:kinetic`, `:epsilon_force`) gives F_total < 3.51 % on
+smooth geometry. Two NaN, two bulk-wrong by 50× to 190×.
+
+Specifically refuted on Poiseuille:
+- **Open Q5 (kernel difference)**: `logfv_velocity_gradient_bc_aware_2d!`
+  is literally `return fvfd_velocity_gradient_2d!(...)` (lines 918-926
+  in `src/kernels/logconformation_fv_2d.jl`). The two kernels are
+  bit-identical. The 8× cavity-vs-Poiseuille ratio CANNOT come from
+  this kernel difference — there IS no difference.
+- **`:fd_v2` wide-on-wide BSD**: NaN at Wi=1; at Wi=8e-4 produces
+  τ_yy = 0.26 (≫ τ_xy ≈ 2.5e-3) — massive non-physical asymmetric
+  stress at walls, distinct from NaN failure mode. The wide-on-wide
+  bulk cancellation principle is sound on Taylor-Green (L1 analytical
+  ladder showed near-machine cancellation) but in the LBM-coupled
+  steady state with walls, the wall-row stencil mis-cancellation loops
+  back through the constitutive ODE catastrophically.
+- **`:kinetic` (M5 Π^neq route)**: F_BSD only −6.7e-8 vs target
+  −3.75e-6 (= 56× UNDER-shoots), so F_total UNDER-corrects by 30×.
+  The Chapman-Enskog identity that gave 5.85e-16 on the M5-A static
+  smoke does NOT hold in the dynamic coupled steady state. The
+  near-machine equivalence M5-B reported was a STATIC equivalence at
+  t=2, not a dynamic one at 100k steps.
+- **`:epsilon_force` (narrow Lap + force-level elastic split)**:
+  NaN both cases. The engineer.md 2026-05-17 recommended "discrete
+  identity workaround" (force-level subtract instead of cell-tensor)
+  doesn't work in dynamic LBM-coupled. Mirror-ghost narrow Laplacian
+  at halfway-bounce walls drives C non-SPD.
+
+**Strategic conclusion**: there is no untapped operator-side fix. The
+cavity 18-24 % gap decomposes (per M9 + M20) into:
+- ~10-12 % discretization floor (M9 trajectory, N=64 → N=∞)
+- ~5-7 % finite-Wi residual at De=1 (never directly measured)
+- ~1 % BSD intrinsic + stencil mismatch (M20 measured)
+- ~2.4 % corner singularity amplification (inferred from 8× cavity
+  ratio that M20+M21 confirm is NOT operator-side)
+
+The only remaining lever for the corner-amplification portion is
+**(a) wall-corner gradient correction bypass / redesign** (the
+`_logfv_cavity_wall_gradient_correction_kernel!` half-cell ghost
+mechanism, suspect per engineer.md 2026-05-17), or **(b) LBM-side
+corner treatment** (Zou-He lid coupling at corner cells, Guo source
+at corner). The corner-regularization mission (M19) is now the
+strongest candidate going forward.
+
+**Why**: locks in that further BSD operator-flavour missions
+(M22-M23 finite-Wi or rheoTool cross-check are still informative but
+purely confirmatory; they will not surface a new fix). The path
+forward for the cavity benchmark gap is grid refinement (M18) +
+wall-corner mechanism (M25/M26 to be opened).
+
+## 2026-05-18 — Matrix-sweep missions: prefer N parallel Departments
+
+For any future mission that is structurally "test N variants × M
+cases", default to spawning **N parallel Departments** (one per
+variant) instead of one sequential Department doing all N. The
+serialised approach used in M21 (single Department, 14 runs back-to-
+back) cost ~34 min wall for 9 min of CPU work — most of the wall time
+was Engineer code-writing + Department setup. Fan-out to N parallel
+Departments would have collapsed this to ~6 min wall + a 5-min Boss
+integration step.
+
+Trade-off: parallel pattern duplicates the bench infrastructure (each
+Department's Engineer re-writes the timestep loop boilerplate). Worth
+the duplication when N ≥ 4 variants and runtime per variant ≥ 5 min.
+Below that threshold, sequential is fine.
+
+User directive 2026-05-18 ("lance les simulations EN PARALLELE sur 7
+dep différents pour accélérer") arrived ~5 min after the sequential
+M21 Department had already completed; this captures the lesson for
+the next sweep.
+
+**Why**: future Boss sessions facing a matrix-sweep mission should
+spawn N parallel Departments in the same Agent-tool message (per
+SKILL.md §Fan-out). The cost is N× spawn overhead but the wall-time
+saving is substantial.
+
+## 2026-05-18 — M22+M23 cylinder Cd: BSD essential at coarse R, vanishes at fine R
+
+Parallel cylinder Cd convergence study at moderate Wi (commit `8aaac026`)
+**partially confirms** the user hypothesis that BSD impact on real complex
+flow drag collapses with mesh refinement, and **resolves** the original
+"anti-convergence" recollection.
+
+**Numbers** (R sweep, Wi=0.1, Cd_BSDon vs Cd_BSDoff in % difference):
+- R=20: +17.5 %
+- R=30: +11.6 %
+- R=40:  +7.3 %
+- R=50: **+1.1 %** ← collapses to ~permille range
+- Extrapolated R≥60: sub-1 %.
+
+This means the 3.51 % F_total Newtonian-limit operator-side residual
+(M20) does NOT propagate linearly to physical observables in the
+production regime. At R=30 with BSD ON, Kraken matches rheoTool to
+−1.45 % on Cd, which is the rheoTool-equivalent of "fine" given that
+rheoTool itself has F32-grade noise + iBSD coupling.
+
+**The "anti-convergence" recollection is RESOLVED** as a different pattern:
+- BSD ON: locks onto rheoTool at R=30 (~1.5%), then oscillates (R=40:
+  130.31 over-shoots; R=50: 127.82 under-shoots; F32 noise dominates).
+- BSD OFF: under-shoots widely at coarse R (107→115→121→126), monotone-
+  converges UP toward BSD ON values.
+- The two CONVERGE to the SAME rheoTool-consistent limit, just from
+  opposite sides. NOT divergent limits.
+- The "crossing then diverging" impression was the crossing of the two
+  curves at coarse mesh where BSD ON happens to over-shoot.
+
+**BUT — BSD is essential for stability at fine R + Wi > 0.1**: M23
+R=40 Wi=0.2 SPD-loss-like behaviour (Cd=783, min_detC=8e-4). Removing
+BSD is NOT a viable production option for high-Wi cylinder.
+
+**Strategic conclusion**: the BSD architecture is HEALTHY at the
+production mesh for the cylinder benchmark. The M9-M21 cluster of
+operator-side debugging was probing a metric (F_total residual at
+Newtonian-limit Poiseuille) that does NOT control the actual physical
+output (Cd) at the production mesh. The original motivator (cylinder
+Cd convergence vs rheoTool) is RESOLVED: at R=30 BSD ON the gap is
+−1.45 %, well within the F32 noise floor.
+
+**Implication for the project mandate (cavity benchmark gap)**: the
+cavity 18-24 % at production setup is therefore likely dominated by
+geometry-specific factors (discretization floor + corner singularity)
+NOT by the BSD operator, consistent with the M20+M21 conclusions. The
+cavity benchmark, like the cylinder, would close to rheoTool-match
+with grid refinement (M9 trajectory) + corner regularization.
+
+**Why**: future Boss sessions should NOT re-investigate BSD operator-side
+fixes as a way to close the cavity gap or the cylinder Cd. The BSD
+is doing what it's supposed to do at production mesh. The remaining
+levers are geometry-specific (corner regularization, mesh refinement).
+
+## 2026-05-18 — Codex Engineer can hand off to Boss-on-host for execution
+
+When a Codex Engineer Department times out / crashes on Anthropic API
+during the EXECUTION phase (after the bench/code has been written and
+committed to disk by the Engineer), the Boss can take over and run the
+bench directly via Bash + run_in_background. This bypasses the spawn-
+overhead penalty of a recovery Department and avoids re-paying the API
+quota for the same work.
+
+Observed M22 + M23 (2026-05-18): both Engineers wrote 286+294 LOC
+bench scripts cleanly, then the parent Department wedged on the
+API connection during the post-Engineer `--full` execution step. The
+Boss ran the 16 cases (~13 min wall each in parallel) and wrote the
+joint synthesis directly. This worked because:
+1. Engineer bench scripts were already in their final form (~9 KB each).
+2. The bench scripts run autonomously (no Codex needed once written).
+3. The synthesis (M22+M23 cross-comparison) is a Boss-level task by
+   definition — not something a single Department should do anyway.
+
+**Why**: future Boss sessions should NOT auto-respawn a recovery
+Department when the Engineer artifact is already on disk and the
+remaining work is "run the bench + write the verdict". Boss-on-host
+takes ~20 min less wall time and is the right scope for the synthesis
+anyway.
+
+## 2026-05-18 evening — Phase 0 Liu-match setup + 3 bugs + 1111_circle bug
+
+Three bugs fixed pre-launch (commits `533afa08`, `488a7b56`, `86f1391c`):
+
+1. **CUDA backend detection silent-fail** in
+   `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl::detect_backend()`
+   (~line 34): `Base.invokelatest(getfield(Main, :CUDA), :functional)`
+   treated the `CUDA` module as callable with `:functional` as arg.
+   Silently `MethodError`'d → bare `catch end` → silent CPU fallback.
+   Aqua A100 job `21534810` burned **4h35 at CPU speed** before the
+   `backend=cpu` column in the CSV was spotted. Fix mirrors the Metal
+   branch + adds `@warn` on explicit-request fallback.
+2. **β=0.5 vs Liu/rheoTool β=0.59 default mismatch**. Phase 0 ran at
+   β=0.5 while Liu 2025 (line 2515) AND rheoTool
+   (`constant/constitutiveProperties` etaS=0.59 etaP=0.41) both use
+   β=0.59. Numerical Cd comparison was confounded. Fix: new default
+   `KRAKEN_BETA_LIST="0.59"` (driver respects env).
+3. **M22 vs M23 v1 apples-vs-oranges kwargs**: M22 used L_up=L_down=15;
+   M23 used L_up=4 L_down=8 (Codex Engineer auto-chose smaller domain
+   to save compute). My "v1 SPD-loss at R=40 Wi=0.2" was a different
+   simulation, not a transient. **Lesson**: ALWAYS diff kwargs between
+   sister benches before cross-comparing.
+
+**Implications for future briefs**:
+- Any GPU-backend smoke test MUST verify the `backend=` column in the
+  CSV, not just trust `KRAKEN_BACKEND` env var (silent fallback can
+  burn hours).
+- Reference values Liu Table 3 + rheoTool are at β=0.59, NOT β=0.5 —
+  every cylinder mission must check the reference convention.
+- Parallel-Department briefs (M22+M23 style) MUST list kwargs
+  explicitly identical between siblings; ad-hoc Engineer auto-choices
+  break cross-comparison.
+
+**Wi single-point sweep is NOT a benchmark — minimum 3 Wi for
+elastic regime validation**. Phase 0 (M25) is locked at Wi=0.1,
+which is quasi-Newtonian (polymer contribution `Cd_p − Cd_bsd` ≈
+−0.3 Cd points, dominated by `Cd_s`). To validate the BSD+embedded
+physics across the elastic regime, M28 Phase 1 MUST sweep Wi ∈
+{0.1, 0.3, 0.5, 1.0}. "Convergence at Wi=0.1 alone tells us nothing
+about elastic physics" — could be hiding a polymer-pipeline bug
+that only activates at finite Wi. Boss must enforce this in M28.
+
+**1111_circle Cd_s ghost drag is a CONFIRMED bug to find and fix**
+(user directive 2026-05-18 evening). At Newtonian Re=1 R=30, full
+embedded mode gives Cd_s = 140.78 vs baseline 0000_qwall Cd_s =
+131.99 → **+8.8 Cd points (~6.7%) fictitious solvent drag** with
+no physical justification. Dual-spawn pattern launched 2026-05-18
+evening: M26-analysis (math audit) + M26-impl (Newtonian bench).
+Phase 0 case 3 `0001_qwall` will isolate H1 (drag-only) from
+H2/H3 (force/quadrature) on the viscoelastic side; M26-impl
+isolates them on Newtonian.
+
+**Cd decomposition formula** (durable doc, user-asked):
+- `Cd_kraken = Cd_s + (Cd_p − Cd_bsd)`, NOT `Cd_s + Cd_p`.
+- LBM with `ν_LBM = ν_s + ζ·ν_p` absorbs `ζ·ν_p·∇²u` into implicit
+  viscous diffusion → `Cd_s` includes that contribution.
+- Guo body force = `div(τ_p) − ζ·ν_p·∇²u` → drag integral of body
+  force = `Cd_p − Cd_bsd`.
+- At Wi=0.1, `Cd_p ≈ Cd_bsd` to within 1-2 Cd points (BSD doing its
+  job, absorbing Newtonian-additive portion of `τ_p`).
+- At higher Wi, `Cd_p − Cd_bsd` becomes finite → genuine
+  elastic-stress drag contribution.
+
+**Phase 0 job 21563085.aqua setup** (in-flight, R since 17:50):
+- β=0.59 Re=1 Wi=0.1 (Liu Table 3 reference)
+- R ∈ {20, 30, 40} × 4 embedded tuples zipped:
+  - `0000_qwall` (= Liu reference mode)
+  - `1000_qwall` (gradient only)
+  - `0001_qwall` (drag only — isolate suspected bug)
+  - `1100_qwall` (gradient+advection, Phase 0 v1 best at Cd=131.15)
+- 12 runs, ~2-3h on A100 F64
+- Output: `results/viscoelastic_logfv/cyl_bigsweep_v2_21563085.aqua/SUMMARY.csv`
+- Pass criterion: `0000_qwall` R=30 Cd ∈ [129.5, 131.5] (Liu CNEBB ± 1).
+
+**Reference docs** (next Boss reads first):
+1. `.orchestrator/mandate.md` §5 M25/M26/M28
+2. `NEXT_SESSION_PROMPT_20260518_cylinder_handoff.md`
+3. `bench/viscoelastic_audit/CYLINDER_DOE_PLAN_CODEX_20260518.md` (DoE)
+4. `bench/viscoelastic_audit/liu_2025.txt` §4.3 + Table 3
+5. `bench/viscoelastic_logfv/CYL_CD_CONVERGENCE_M22M23_SYNTHESIS_20260518.md`
+
+**Why**: this entry locks in all durable lessons from the Phase 0
+preparation session so the next Boss does not re-litigate β
+convention, CUDA-detect path, kwargs sibling-diff discipline, or
+the Wi-single-point limitation when proposing Phase 1.
+
+## 2026-05-18 — M26 dual-spawn closes analysis + impl; finite-Wi gated on Phase 0
+
+M26 Boss-level adversarial dual-spawn (parallel Layer-1 Departments)
+returned 2 complementary verdicts that fully scoped the bug:
+
+**M26-analysis (Claude general-purpose, math audit)** — identifies
+the mechanism :
+1. `fvfd_tensor_divergence_embedded_2d_kernel!`
+   (`src/fvfd/operators_2d.jl:759-766`) outputs force-per-fluid-volume
+   (divides by `cell_fraction`) but the Guo source consumer expects
+   force-per-lattice-cell → **overdoses cut cells by 3-10×**.
+2. `_fvfd_apply_embedded_wall_gradient_2d`
+   (`src/fvfd/operators_2d.jl:127-140`) writes half-cell normal ∂u/∂n
+   into shared `dudx/dvdx` buffers → **same family as cavity
+   M17-canary-A bug**. Source ODE AND polymer-force divergence both
+   consume the half-cell ghost.
+
+Combined → singular Guo body force on cut cells → biases `f` → 
+inflates LBM cut-link drag via MEA.
+
+**M26-impl (Codex Newtonian bench)** — ratchets the polymer-coupling
+localisation:
+
+| case | Cd_s (β=1, Re=1, R=20, 1k steps, CPU F64) |
+|---|---|
+| 0000_qwall | 136.26 |
+| 0001_qwall | 136.26 (bit-exact) |
+| 0000_circle | 136.44 (+0.13 %) |
+| 1111_circle | 136.44 (bit-exact vs 0000_circle) |
+
+**Newtonian-clean.** At nu_p=0 the polymer pipeline is inert, all
+embedded flags become NO-OPs, so the +8.8 anomaly disappears
+completely. The bug lives ENTIRELY in polymer-coupling paths.
+
+**Correction to handoff wording**: `embedded_drag` only toggles
+`Cd_p` and `Cd_bsd` (driver lines ~470, ~485), NOT `Cd_s` which is
+always sourced from `compute_drag_libb_mei_2d` (LBM MEA). The
+handoff "+8.8 Cd_s" is loose for "+8.8 Cd_kraken" or "+8.8 Cd_p".
+
+**Phase 0 21563085 will discriminate H1/H2/H3 at finite Wi**:
+- If `0001_qwall` Cd_p ≈ `0000_qwall` Cd_p → bug NOT in drag formula
+  alone → H2 (force kernel cell-fraction) per M26-analysis
+- If `0001_qwall` Cd_p ≈ +8 over `0000_qwall` → bug isolated in
+  drag_p formula → H1 (= revised: not impossible, since H1 was about
+  Cd_s; bug in Cd_p still possible from `logfv_embedded_wall_traction_2d!`).
+- Phase 0 misses `0010_qwall` (force-only) → if H2 confirmed but not
+  individually pinned, a Phase 0b adds 3 runs (~30 min A100).
+
+**Implication for M26b** (the eventual fix mission): per M26-analysis,
+the M17-canary-A pattern applies — give the force path its own
+`D_uncorrected` buffer, add cell-fraction re-scale on polymer-force
+output. Target files: `src/fvfd/operators_2d.jl` (kernel signature
+change, scoped to embedded variant only) + `src/drivers/<cylinder
+driver>` (allocate extra buffer + re-call). Scope: ~50-80 LOC, 1-2 h
+Codex + verification.
+
+**Adversarial dual-spawn at Boss-level WORKED** (5th validation this
+project): each Department's blind spot was covered by the other.
+Math-Claude would have over-attributed to the cavity-family pattern
+alone (missing the cell-fraction divisor specifically); impl-Codex
+alone would have ratcheted Newtonian but couldn't have proposed the
+mechanism. The 2 spawns + Boss synthesis (~5 min) gave a complete
+diagnostic without needing a third iteration.
+
+**Decision deferred to Phase 0 result**: per user 2026-05-18
+("Attendre Phase 0 recommandé"), no M26b spawn until job 21563085
+SUMMARY.csv lands. Then Boss compares `Cd_p` between the 4 tuples,
+decides M26b scope (drag_p only / force kernel only / both), and
+proposes the brief.
+
+**Why**: locks the M26 mechanism in memory before context drifts.
+Future Boss landing on a similar embedded-mode anomaly should
+read this entry FIRST and head straight to the cell-fraction
+divisor + half-cell ghost pair; don't waste a Department on
+H1-as-Cd_s framing.
+
+## 2026-05-18 evening — Julia 1.12 world-age trap in CUDA detection (NEW gotcha class)
+
+Pattern that bit Phase 0 hard: ~4h35 of Aqua A100 time burned in
+`21563085.aqua` running on CPU instead of GPU because of a Julia 1.12
+world-age trap in `detect_backend()`:
+
+```julia
+try
+    @eval using CUDA                          # advances world age in Main
+    CUDAMod = getfield(Main, :CUDA)            # function still in OLD world age
+                                                # → UndefVarError: :CUDA not defined
+    if Base.invokelatest(getfield(CUDAMod, :functional))
+        return CUDAMod.CUDABackend(), "cuda", FT
+    end
+catch end                                      # BARE catch swallows the UndefVarError
+```
+
+The bare `catch end` made the failure invisible. The `@warn` branch
+that would have surfaced this only fires if `req != "auto" && req != "cpu"`,
+and with `KRAKEN_BACKEND=auto` default, no warning fired → silent CPU
+fallback. Same pattern would break Metal detection (validated locally).
+
+**Fix shipped in commit `e602726f`**: wrap `getfield` calls in
+`Base.invokelatest(getfield, Main, :CUDA)` to evade world-age cache;
+replace bare `catch` with `@warn "...: $(sprint(showerror, e))"` that
+surfaces the actual exception; emit `@warn` also on `KRAKEN_BACKEND=auto`
+fallback for visibility.
+
+**Implication for future bench scripts**: any pattern `@eval using X`
+followed by `getfield(Main, :X)` inside a function is suspect. Either:
+- Wrap the access in `Base.invokelatest` (minimal patch).
+- Move `using X` to top-level (clean but may fail if X not installed).
+- Use `Base.eval(Main, :(using X))` + `Base.invokelatest` (verbose).
+
+**Implication for HPC ops protocol**: ALWAYS check the `backend=`
+column / log line in the first CSV / first few log lines of any
+GPU sweep, BEFORE walking away from a multi-hour job. The 4h35
+wasted on 21563085 could have been caught at minute 35 by reading
+the first CSV.
+
+**Symptom→bug-class mapping**:
+- "Submit to GPU queue, finishes 5-10× slower than expected" → check
+  backend detection. Don't trust `nvidia-smi || true` + Pkg.precompile
+  output as evidence the GPU is actually used.
+- `resources_used.ngpus=0` in PBS exit info means Julia never touched
+  the GPU, even though it was allocated.
+
+**Why**: Julia 1.12 is recent (this project upgraded ~mid-session);
+the world-age behavior is stricter than 1.10. Old code patterns may
+silently fail. This is now a project-wide hazard class — anytime a
+new Julia version lands, run a CUDA + Metal smoke before any
+production sweep.
+
+## 2026-05-18 evening — M25 Phase 0 done; M26 closed empirically; M28 launched
+
+End-of-session state across the cylinder branch (3 jobs ran):
+
+1. **21563085 (Phase 0 v1)**: KILLED. Silent-CPU due to world-age trap.
+   3 cases R=20 in ~2h confirmed CPU path. qdel; no usable data.
+
+2. **21570657 (Phase 0 v2, fixed)**: GREEN. 12/12 cases, **7m24s, 66.66%
+   GPU util A100**. `0000_qwall` R=30 = **129.39** vs Liu CNEBB 130.36
+   = **−0.7 %** (0.11 below the strict ±1 window). Approximate-PASS;
+   accepted as Phase 1 baseline. Trend Cd(R) monotone toward asymptote
+   ~129.5 — 0.9 Cd systematic offset below Liu, consistent across
+   `:qwall` and `:circle` geometries when no embedded flag is on.
+
+3. **21572831 (Phase 0b discrimination)**: GREEN. 27/27 cases, **14m55s,
+   69.89% GPU util A100**. Sweep 9 embedded-flag tuples × 3R for full
+   H1/H2/H3 disambiguation. **Verdict R=30 Δ vs `0000_circle`**:
+
+   | tuple | Δ Cd | role |
+   |---|---|---|
+   | 0100_circle (adv) | −0.07 | NO-OP |
+   | 0001_circle (drag) | +0.18 | NO-OP on Cd_kraken |
+   | 1000_circle (grad) | +2.53 | secondary |
+   | **0010_circle (force)** | **+8.10** | **dominant bug** |
+   | 1111_circle (full) | +9.88 | reproduces +8.8 handoff |
+   | **0010_qwall (force on qwall)** | **+8.71** | **bug NOT geometry-specific** |
+
+   - **H1 REFUTED** (drag-only Δ negligible).
+   - **H3 REFUTED** (force-only bug same magnitude on `:qwall`).
+   - **H2 CONFIRMED**: bug is in `embedded_force=true` code path,
+     specifically `fvfd_tensor_divergence_embedded_2d_kernel!`
+     (`src/fvfd/operators_2d.jl:759-766`) cell-fraction divisor
+     overdose, exactly as predicted by M26-analysis.
+
+**Joint verdict file**:
+`bench/viscoelastic_logfv/CYL_PHASE0_PHASE0B_VERDICT_20260518.md`.
+
+**Boss-level adversarial dual-spawn pattern** (M26-analysis Claude +
+M26-impl Codex) plus empirical Phase 0b validation gave a tight,
+multi-source confirmation of the bug — H2 is now empirically locked,
+not just theoretically suspected. The math hypothesis (math-Claude),
+the Newtonian ratchet (Codex bench), AND the finite-Wi A100 sweep all
+converge.
+
+**Next mission gates** (sequencing per user 2026-05-18 evening
+"Persist + commit + M28 Phase 1"):
+- **M28 launching** at end of this session.
+- **M26b** (`src/fvfd/operators_2d.jl` patch — remove or compensate
+  the cell-fraction divisor) opens after M28.
+
+**Why**: complete record of the M25+M26 closure cluster, so the next
+Boss inheriting the embedded-mode work knows exactly which paths are
+ratcheted (H1, H3) and which is the load-bearing fix target (H2 in
+operators_2d.jl:759-766). No need to re-litigate the 1111_circle
+mystery.
+
+## 2026-05-19 — M28 cluster synthesis ; Liu Table 3 column mis-read ; geometry isn't the gap ; Wi-DEPENDENT defect
+
+End of multi-Department session on β=0.59 cylinder Cd. Cluster
+M28/b/c/d/e/f + rheoTool sweep + Liu Table 3 verification + M26b
+fix attempt. Three durable lessons :
+
+### Lesson 1 — Liu Table 3 column mis-read
+
+Liu 2025 Table 3 columns at fixed R are ordered Wi=1.0 / 0.5 / 0.1
+(descending), not ascending. The M25 verdict "Kraken 129.39 = 0.7 %
+below Liu 130.36" was a **Newtonian coincidence** : Kraken was running
+Wi=0.1 and the brief had Kraken Wi=0.1 matched against Liu's Wi=1.0
+column (both close to Hulsen Newtonian Cd ≈ 132). At the correct Wi
+columns :
+
+- Liu Wi=0.1 R=30 = **151.31** (BUT Sc-sweep shows this is contaminated
+  by artificial diffusion : 151.31 / 149.74 / 147.14 across Sc =
+  1e4 / 1e5 / 1e6 — Wi=0.1 column is NOT converged in Liu's own data).
+- Liu Wi=1.0 R=30 = **130.36** (this IS converged in Sc).
+
+**Rule for future viscoelastic-cylinder briefs** : do NOT use Liu
+Wi=0.1 as a reference target. Use rheoTool (130.43 at Wi=0.1, full
+sweep available `bench/viscoelastic_logfv/RHEOTOOL_CD_SWEEP_M28.csv`).
+For Wi=1.0 Liu 130.36 is reliable, but the Liu trend (151.31 → 126.31
+→ 130.36 across Wi=0.1/0.5/1.0) is non-monotone in a way that reflects
+Liu's own BC instability at Wi=0.1, not physics. See
+`.orchestrator/M28_liu_table_verification.md`.
+
+### Lesson 2 — Geometry / domain is NOT the gap (Kraken-vs-rheoTool)
+
+The Kraken-vs-rheoTool gap at R=30 grows with Wi : 0.8 % (Wi=0.1)
+→ 3.2 % (Wi=0.5) → 7.3 % (Wi=1.0). At any time during this session
+the "obvious" hypothesis was wake-truncation / domain asymmetry /
+mesh resolution. ALL THREE were systematically REFUTED :
+
+- M28f matched-domain L_up=20 L_down=60 (Liu/rheoTool spec) : Δ vs
+  M28 baseline = **+0.38 Cd CONSTANT across Wi**. Domain length
+  doesn't fix the Wi-dependent gap.
+- M28e mesh sweep R ∈ {20, 30, 40} at Wi=1 : Cd plateaus at 111.4,
+  monotone DECREASING in R (away from rheoTool 120.40, not toward).
+  Mesh refinement doesn't close the gap.
+- M28c integration time 100k → 1M : Δ < 3e-7 Cd. 100k IS converged.
+  Under-integration not the gap.
+
+**Rule for future Boss-level brief framing** : when a Δ to an
+external reference grows monotonically with a physical parameter
+(Wi here), do NOT spend cycles on geometry / mesh / time-integration
+hypotheses. Spend them on physics-internal coupling (constitutive
+discretisation, source-injection ordering, prefactor placement).
+M28f burned a Department-day on this and got +0.38 Cd in return.
+
+### Lesson 3 — M28-cluster ratcheting pattern
+
+Eight Departments ran in serial-parallel to ratchet the gap location
+(M28 baseline, M28b BSD-off, M28c time-conv, M28d force-on, M28e
+mesh, M28f domain, rheoTool sweep, Liu Table verification). Each
+ratcheted out one hypothesis ; **the result is the Boss now knows
+WHAT it is NOT, not WHAT it is**. M29-tau-compare (in-flight) is the
+next ratchet. Acceptable for a research session ; **document the
+fact that the gap is now bracketed to two hypotheses** (log-conf
+source discretisation vs Guo coupling ordering) so the next session
+doesn't re-run the eight ratchet-out Departments.
+
+**Rule for future Boss-level multi-Department clusters** : after
+each Department closes, update an EXPLICIT "ratcheted out" list
+(M28 synthesis §6) so the same Department isn't accidentally
+re-spawned by a future session. Inheritor reads §6 first, knows
+where NOT to look.
+
+### Lesson 4 — Wi-dependent Δ is a signature
+
+A Δ that GROWS with Wi (here 0.8 % → 7.3 %) is the signature of a
+**polymer-coupling defect**, NOT a discretisation noise floor. Constant-%
+offset would be discretisation. Wi-amplifying offset rules in
+**constitutive / source / drag-integration physics**. Memorise this as
+a triage rule.
+
+**Why**: locks the M28 cluster outcome in Boss memory before context
+drift. Future Boss landing on a viscoelastic-cylinder Cd-gap issue
+should read M28_SYNTHESIS §6-7 first (what is ratcheted out, what
+is still suspect), avoiding re-litigation.
+
+## 2026-05-19 evening — M29-tau-compare CLOSES the cluster: constitutive scheme is the locus
+
+Field-level direct comparison rheoTool vs Kraken at R=30 Wi=1.0
+β=0.59 (Aqua job 21585158, Kraken snapshot via new
+`KRAKEN_SAVE_FIELDS=1` bench env flag) gives a definitive
+attribution:
+
+| field | L2_rel Kraken vs rheoTool | interpretation |
+|---|---|---|
+| u_x | 0.17 | matches reasonably |
+| u_y | 0.18 | matches reasonably |
+| τ_xx | **0.93** | catastrophic mis-match |
+| τ_xy | 0.77 | strong mis-match |
+| τ_yy | 0.58 | strong mis-match |
+
+**Spatial localisation**: disagreement concentrated 100× in the
+near-cylinder zone (|x| < 1.5 R). Peak occurs at the **leeward
+shoulder** (x/R ∈ [0, 0.3]) and **near wake** (x/R ∈ [1, 1.3]).
+Absolute peak τ_xx: rheoTool 135.5 vs Kraken 75.3 → **Kraken
+under-predicts the polymer stress peak by 44 %**.
+
+**Verdict: outcome (b)** — u matches OK, τ disagrees catastrophically.
+The Cd gap is a **constitutive-scheme problem**, NOT coupling /
+BSD / Guo.
+
+**Mechanism (locked)**: Kraken uses **Rusanov first-order upwind**
+on the log-conformation Ψ advection. This smears the wrap-around
+stress feature (width O(1 LU at R=30)) over ~50 % of its magnitude.
+rheoTool's `cubista` TVD scheme preserves it. The missing polymer
+wall shear precisely accounts for the −8.85 Cd Kraken-vs-rheoTool
+drift at Wi=1.0 R=30. **Quantitative match between defect mechanism
+and gap magnitude**.
+
+**Implication for future Boss work**:
+- The M28 ratchet-out list is now CLOSED. The locus is pinned to
+  the Ψ-advection scheme.
+- M29b: port a TVD scheme (CUBISTA or MUSCL-superbee) to the
+  log-conf advection kernel in `src/kernels/logconformation_fv_2d.jl`
+  (or wherever the Rusanov upwind currently lives). This IS `src/`
+  work — should be a separate Codex Department mission with
+  comprehensive tests.
+- The Wi-dependent gap (0.8 % → 7.3 %) signature is now
+  understood: low-order advection smearing amplifies with
+  trace_C peak amplitude, which grows ∝ Wi (trace_C max went
+  5.5 → 195 from Wi=0.1 → 1.0 at R=30).
+- Same defect likely affects the cavity benchmark (which also
+  uses log-conf advection). Future cavity revisit should expect
+  similar magnitude (~5-10 Cd point under-prediction at finite Wi).
+
+**Reusable infrastructure** (now committed to bench):
+- `KRAKEN_SAVE_FIELDS=1` env flag for the v2 bench → 10-line
+  patch in `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl`,
+  no src/ touched. Writes per-case `.jls` with `(ux, uy, tauxx,
+  tauxy, tauyy, is_solid, Nx, Ny, R, cx_lbm, cy_lbm, u_mean,
+  Cd_*)`. ~4 MB/case at R=30.
+- `bench/viscoelastic_audit/run_kraken_vs_rheotool_tau_compare.jl`
+  — Cartesian ROI in physical units (cylinder at origin, R=1),
+  bilinear on Kraken LBM grid, kNN+affine (12 neighbours, 3-term
+  basis) on rheoTool O-grid. Reusable for any future geometry.
+- New PBS `bench/viscoelastic_logfv/run_cyl_m29_field_snapshot_a100.pbs`
+  for snapshot-mode single-case runs.
+
+**Why**: this is the definitive end of the M28 cluster. Next
+session opens with M29b src/ patch (HRS on log-conf). Boss should
+read this entry FIRST before any further BSD / coupling /
+embedded-mode debugging on the cylinder.
+
+## 2026-05-19 night — M29b PARTIAL : MUSCL-superbee closes 56 % of gap ; M29c needed
+
+M29b deployed MUSCL-superbee on log-conformation Ψ advection behind
+`advection_scheme::Symbol = :rusanov` kwarg (default = byte-identical
+legacy). At R=30 Wi=1.0 β=0.59 production setup:
+
+| metric | Rusanov | MUSCL-superbee | rheoTool target |
+|---|---|---|---|
+| Cd_kraken | 111.55 | **116.47** | 120.40 |
+| τ_xx peak | 75.3 | 80.3 | 135.5 |
+
+**Δ achieved = +4.92 Cd (56 % of gap)**. Acceptance window [118, 122]
+not met, but direction + magnitude correct. Root cause of remaining
+~4 Cd gap: **MUSCL boundary fall-back to 1st-order Rusanov within
+±2 cells of solid** prevents the limiter firing in the leeward
+shoulder — exactly the M29-localised stress-peak zone. M29c (1-sided
+3-point reconstruction at boundary) is the prescribed follow-up.
+
+**Pre-existing tech debt surfaced**: the entire `src/fvfd/` directory
+(4 files, ~1500 LOC, including the M29b-patched `operators_2d.jl`)
+**was never tracked** on this branch even though `src/Kraken.jl:64`
+includes it. The code was working locally but a fresh clone would
+fail. M29b's commit also initial-tracks the directory. Future Boss
+should run `git ls-files src/` periodically to detect orphaned-but-
+used files (one-line audit).
+
+**M26b WIP carries forward**: the partial `embedded_force=true`
+cell-fraction rescale patch in `src/drivers/viscoelastic_logfv_2d.jl`
+(closes 8 % of the +8 Cd ghost drag at R=30 Wi=0.1) is bundled into
+the M29b commit since both touch the same file. The M26b path is
+INACTIVE on the `0000_qwall` production mode (`embedded_force=false`)
+so it doesn't affect the M28/M29 results. M26c (deeper fix on
+wall-segment terms) remains a separate open mission.
+
+**Why**: M29b proves the M29 attribution mechanism (1st-order
+Rusanov smears polymer stress peak) is correct AND fixable. Future
+Boss inheriting cylinder work should head straight to M29c if a
+production-grade match to rheoTool is required.
+
+## 2026-05-19 night — M29c-v2 ROLLED BACK ; M28/M29 volume-locus attribution falsified by wall-stress decomposition
+
+After ratchet through M29c-asis (FAIL: anti-TVD CD2, Cd=−1571),
+M29c-v2 (1-line `oneSided := upwind` fix, NaN'd at step 92,200), and
+two contradictory postmortems (DIFF algebraically falsified by
+adversarial Claude+Codex audit ; LOCATE observationally valid but
+mechanism unproven), the **wall-stress decomposition** on the same
+30k snapshots (M29c-wallstress mission) inverted the entire M28/M29
+narrative:
+
+| | rheoTool | M29b | M29c-v2 | gap rT−M29c-v2 |
+|---|---|---|---|---|
+| Cd_pressure | 85.77 | 75.64 | 75.56 | **+10.22** |
+| Cd_solvent  | 19.78 | 21.19 | 20.34 | −0.56 |
+| Cd_polymer  | 13.45 | **13.40** | **20.01** | **−6.55** |
+| Cd_total    | 119.0 | 110.23 | 115.90 | +3.11 |
+
+Key findings:
+- M29b matched `Cd_polymer` wall integral to **0.05** vs rheoTool —
+  polymer wall stress on the cylinder was already correct.
+- M29c-v2 **over-shoots** `Cd_polymer` by 50 % with 45° azimuthal
+  offset (rT peak θ≈±0.6π front-shoulder, Kraken peak θ≈±0.35π
+  rear-shoulder, 3× too high at rear). The MUSCL-superbee 1-sided
+  near-wall reconstruction injects too much polymer stress at rear.
+- The +5.7 Cd `M29c-v2 − M29b` total-Cd "improvement" was a
+  **cancellation of opposite-sign errors** (−6.5 polymer overshoot
+  + +10.2 pressure under-prediction ≈ +3 net), not a real
+  improvement.
+- **The true Cd gap is in `Cd_pressure`** (+10 pts under-predicted at
+  front-shoulder), not in the constitutive advection.
+
+Process lessons:
+- The M28 ratchet-out "constitutive scheme is the locus" verdict
+  (commit `94f4b82d`) used **volume** L2_rel(τ_p) and peak-τ_xx on
+  a wake ROI. Neither is monotonic in Cd contribution. **This whole
+  attribution branch was structurally biased.**
+- The Boss spent ~6 missions (M29 → M29c-v2 → 2 postmortems → audit
+  → tau-decompose) before the user (Guillaume) re-asked the right
+  question: "donne les tau_p et tau_s SUR le cylindre permettant
+  de mesurer le Cd". 5 minutes of Department compute then closed
+  the question.
+- The DIFF postmortem and LOCATE postmortem were BOTH limited —
+  one was algebraically wrong (Codex found `ue=0` at solid faces
+  killing the proposed mechanism), the other was observationally
+  correct but its "elastic stiffness runaway" mechanism remained
+  speculative. Wall-decomposition leap-frogged both.
+
+Decisions taken:
+- `git checkout src/fvfd/operators_2d.jl` to revert M29c-v2 patch.
+  M29b remains production.
+- Mandate `M29c` block rewritten as FAIL + meta-finding.
+- **New mission M30** opens on `Cd_pressure` (front-shoulder gap),
+  supersedes the M29d stretch goal. Snapshots must be extended to
+  store `rho` (the LBM density) so pressure can be wall-integrated
+  directly instead of only via residual.
+- Future advection-scheme upgrades on log-conf Ψ are GATED on M30
+  reaching a verdict — otherwise we risk chasing numerical
+  cancellation artefacts again.
+
+**Why**: this entry is the project's strongest meta-correction so
+far. Future Boss inheriting cylinder work must read it BEFORE
+acting on any volume-field claim (peak τ_xx, L2_rel on ROI).
+**Cd gap attribution starts with wall decomposition. Always.**
+
+## 2026-05-20 — M31 frame audit ; 3rd adversarial win ; Cd_polymer M29b actually under by ~19%
+
+Sequence: (i) M30 Phase 0a extracted rheoTool wall p(θ), 93.6 % at
+front pole; (ii) Metal F32 100k M29b case ran locally (Aqua under
+maintenance) producing the first snapshot with `:rho` persisted;
+(iii) Phase 0c found Kraken/rT amplitude ratio 0.58 front-arc vs
+0.28 rear-arc → H1 (LBM ρ-BC) ranked PRIMARY; (iv) user flagged
+Cl_pressure=0.27 as non-negligible; (v) centering audit confirmed
+geometry is centered (parity 1410/1410) but exposed a 1 LU offset
+between snapshot's `cx_phys` and rasterised cylinder centre
+`(cx_phys+1, cy_phys+1)`; (vi) M31 adversarial Claude+Codex
+identified the post-processing scripts (Phase 0c, M29c-wallstress)
+as mis-framed in `:phys` (`dx = i − cx_phys`) when they should use
+`:idx` (`dx = (i−1) − cx_phys`).
+
+### What is RIGHT (driver Kraken)
+- `_run_viscoelastic_logfv_step_channel_coupled_2d`
+  (`src/drivers/viscoelastic_logfv_2d.jl:591-604` final, `:515-521`
+  accumulation) uses `xw = (i−1) + q_w·c_q, cx = cx_phys`. Correct.
+- All `Cd_kraken` values stored since M28 are physically valid.
+
+### What is WRONG (post-processing harnesses)
+- `bench/scratch/m29c_wallstress/run_wallstress.jl`
+- `bench/scratch/m30_kraken_p_profile/run_kraken_p_profile.jl`
+- Both used `dx = i − cx_phys` → 1 LU off → Cd_polymer drift +24 %
+  (polymer stress steep in wall layer), Cd_total drift −2.2 %.
+
+### Retroactive corrections to prior verdicts
+- M29c-wallstress claim "M29b matches Cd_polymer rheoTool to 0.05":
+  **falsified**. Real Cd_polymer M29b = 10.82 (ring `:idx`) or 11.49
+  (driver Cd_p stored) vs rT 13.45 → −15 to −20 % under-predicted.
+- Mandate `M29c FAIL` entry from yesterday (`1059ab10`): the
+  "meta-finding" that the M28/M29 constitutive-locus attribution
+  was wrong remains correct in SPIRIT — volume L2_rel(τ_p) ≠ Cd
+  contribution — but its specific number (Cd_polymer M29b matched
+  rheoTool) was itself a frame artefact. The truer statement is:
+  "Cd_polymer is moderately under-predicted across all three
+  schemes (Rusanov 19 %, MUSCL-superbee unknown, all wrt rT 13.45);
+  the dominant gap remains Cd_pressure at front-shoulder."
+
+### Re-ranked M30 hypotheses (post-M31)
+- **H1** (LBM ρ-BC near-wall, +10 pressure): PRIMARY.
+- **H2/H3** (BSD coupling, polymer advection scheme): co-secondary,
+  ~+2.6 Cd_polymer under-prediction. The "BSD=0 experiment" plan
+  is now even better posed since it would simultaneously test the
+  pressure-BC pathway (H1) AND the polymer-coupling pathway (H2).
+- **H4**: still excluded.
+
+### Process lesson (3rd adversarial win)
+Without Codex's independent vote on Q4 (which frame is physically
+correct?), the Department's first-pass Claude analysis would have
+shipped the wrong conclusion (vote A `:phys`). The discrepancy
+was resolved by reading the M30 centering audit harness side-by-side
+with the driver's `xw = (i−1) + q_w·c_q` formula. **The pattern of
+"Claude derives FIRST, then Codex on same brief, then compare"
+([[feedback_adversarial_codex_claude]]) is now load-bearing**:
+3 documented wins, no documented losses on hypothesis-ranking
+or formal-derivation missions.
+
+### Files
+- `bench/viscoelastic_audit/M31_FRAME_AUDIT_{CLAUDE,CODEX,VERDICT}.md`
+- `bench/viscoelastic_audit/M30_PHASE_0C_VERDICT.md` (caveat: read in `:idx`)
+- `bench/viscoelastic_audit/M30_CENTERING_AUDIT_VERDICT.md`
+
+### What this changes for M30 Phase 1
+- Re-do the BSD=0 experiment in BOTH `:phys` and `:idx` integration
+  to ensure the verdict is frame-independent.
+- Fix the post-processing harnesses first (LOW priority but should
+  be done before any Phase 1 conclusions are committed).
+
+**Why**: this is the 4th major project-level meta-correction in 4
+days (M28 volume-locus falsified → M29c rolled back → polymer-match
+artefact identified → frame offset). Future Boss reading the cylinder
+work should treat any pre-M31 absolute Cd_component number as
+suspect until re-integrated in `:idx`. The TOTAL `Cd_kraken` values
+remain valid (driver is correct); only the per-component
+decomposition is biased.
+
+## 2026-05-21 — M32 methodology validation : G3 PASS, gap Wi=1 is R-invariant polymer-scheme problem (M28 vindicated)
+
+After 6+ phases of empilage on Bouzidi-FL BC port (port landed, NaN'd
+at Wi=1 100k, audit identified lag bug), user step-back triggered
+M32 methodology overhaul. Setup audit + canonical matrix:
+
+### M32 Phase 1 (setup audit) — HARD mismatches found
+- rT L_down=60R vs Kraken 15R (4× longer wake on rT)
+- rT body-fitted O-grid vs Kraken halfway-BB staircase
+- rT `coupling` (no BSD) vs Kraken BSD=1.0
+- rT Wi=1.0 NOT time-converged at endTime=10 (drift +3.4 over Δt=2)
+
+### M32 Phase 2 (canonical setup)
+- rT cases shrunk to L_up=L_down=15R, endTime=20 for Wi=1.
+- Kraken matrix R ∈ {30, 40, 60} × Wi ∈ {0.1, 1.0} + Newtonian sanity
+  ran on Aqua F64 CUDA.
+
+### M32 Phase 3 (cross-code matrix) — definitive
+
+| case | Kraken | rT shrunk | gap |
+|---|---|---|---|
+| Newtonian R=30 | 132.08 | 132.37 | -0.22 % ✓ G3 PASS |
+| Wi=0.1 R=30 | 129.39 | 130.43 | -0.80 % ✓ |
+| Wi=0.1 R=40 | 129.49 | 130.43 | -0.72 % ✓ |
+| Wi=1.0 R=30 | 111.55 | 120.38 | -7.34 % ✗ |
+| Wi=1.0 R=40 | 111.29 | 120.38 | -7.55 % ✗ |
+| Newtonian R=60 | 132.68 | n/a | stable |
+| Wi=0.1 R=60 | NaN | n/a | polymer-coupled NaN |
+| Wi=1.0 R=60 | NaN | n/a | polymer-coupled NaN |
+
+Also: rT Wi=1 shrunk (L=15R) Cd = 120.38 ≡ rT Wi=1 non-shrunk Cd = 120.40
+to 0.02%. **L_down=60→15 shrink does NOT change Cd.** Wake truncation
+was a false suspect.
+
+### Definitive findings
+
+1. **G3 Newtonian gate PASSES** (Kraken vs rT shrunk: gap -0.22% < 2%
+   threshold). Setup canonique validé bilateral. Conventions identiques.
+   Frame issue closed by M31.
+2. **R-convergence within Kraken** OK at R=30 → R=40 (Cd
+   essentially R-invariant for both Wi values, Δ < 0.3 %).
+3. **R=60 NaN is polymer-coupled** (Newtonian R=60 stable Cd=132.68).
+   H_d "LBM-staircase intrinsic" EXCLUDED. H_a "polymer-coupled at
+   high R" confirmed.
+4. **Wi=1 gap R-invariant** at -7.34 % (R=30) and -7.55 % (R=40) →
+   the gap is structurally in the polymer scheme, NOT resolution,
+   NOT L_down truncation, NOT BC convention, NOT Cd normalisation
+   (C1 audit confirmed SAME), NOT Newtonian baseline (G3 PASS).
+5. **M28 vindicated**: the constitutive scheme `:rusanov` 1st-order
+   upwind on log-conformation Ψ advection is the locus. M28's initial
+   diagnosis was abandoned 2026-05-19 because M29c-wallstress in
+   `:phys` frame falsely "matched" Cd_polymer to 0.05; M31 falsified
+   that match, and the multi-Wi matrix now confirms M28's direction.
+6. **Bouzidi-FL Phase 2b parked** : Bouzidi-FL targets the pole K/rT
+   pressure deficit (BC structural, Wi-invariant) — that contribution
+   is small in Cd_total (azimuthal cancellation masks it at Wi=0.1).
+   At Wi=1, dominant contribution is the polymer wake (rear shoulder,
+   Wi-coupled), which Bouzidi-FL does NOT address.
+
+### Process lesson (the deeper one)
+
+5 days of session yielded the wrong narrative twice (M28 attribution
+→ M29c rollback → polymer match falsified by M31 → Bouzidi-FL
+attempted → finally back to M28 with a clean matrix). The path
+through was:
+- Volume L2_rel(τ_p) metric (M28/M29) → directionally right, gave
+  the polymer-scheme answer.
+- Wall decomposition `:phys` frame (M29c-wallstress) → numerically
+  wrong (frame artifact), said "polymer matches rT".
+- Frame audit `:idx` (M31) → corrected the wall decomposition,
+  but the conclusion was misread as "polymer matters more than thought"
+  (it does, by ~15-20% L2_rel on wall) instead of acknowledging
+  the volume verdict was already correct.
+- BC pole K/rT 0.59 / 0.16 (Phase 0c, Phase 1c) → real (Wi-invariant)
+  but DOES NOT dominate Cd_total at Wi=1 (the cancellation pattern
+  makes pole contribution sub-dominant).
+- Multi-Wi cross-code matrix (M32 Phase 3) → cleanest signal:
+  gap R-invariant, Wi-coupled, exits the BC narrative and lands on
+  polymer.
+
+### Boss-level memory candidate
+- **Always run cross-code multi-(Wi, R) matrix FIRST** when comparing
+  to a reference code. A single-point disagreement at one (Wi, R) is
+  uninterpretable — pole-vs-wake-vs-baseline contributions cancel
+  in scalars. Pattern: Newtonian gate + 2×R × 2×Wi = 5 cases is the
+  minimum viable signal. Anything less leads to volume vs wall vs
+  frame side-quests for days.
+
+**Why**: this is the *most expensive* meta-lesson of the session.
+Future Boss inheriting any cross-code comparison must start from
+multi-Wi multi-R matrix, NOT single-point wall decomposition.
+
+### Decisions taken
+- M32 Phase 3 closes the cluster M28/M29/M30/M31/M32 (initial gap
+  attribution sequence). Verdict: **polymer scheme is the locus**.
+- Bouzidi-FL Phase 2b stays parked. May be picked up later as a
+  secondary improvement to azimuthal K/rT structure, but it does
+  not close the dominant Cd gap.
+- Next cluster opens: **polymer scheme upgrade** (CUBISTA proper /
+  MUSCL-superbee with two-pass fix from Phase 2b audit / WENO).
+  Distinct mission, fresh session.
+
+## 2026-05-22 — M32 Phase 4 trifecta closes M28-M32 cluster (BC pole, NOT polymer scheme)
+
+Step-back from the M32 Phase 3 closure narrative. The user explicitly
+declined the "M33 polymer-scheme upgrade" handoff and asked the Boss
+to validate the premise before building the intervention. Three
+diagnostics ran (D1 + D2bis + D3-finalize) — all empirical, all
+agreeing: the locus is BC pole halfway-BB, not the constitutive
+`:rusanov` scheme. The M32 Phase 3 "M28 vindicated" claim is
+**empirically falsified**.
+
+### D1 — Wi=1 R=30 + R=40 wall decomposition (`:idx` frame)
+
+3×3 (component × region) bucket matrix on the existing Metal F32 .jls
+dumps (Kraken R=30 from `tmp/m30_rho_metal/run01/...`, R=40 from
+`tmp/m30_R_sweep_metal/...`; rT shrunk wi1.0 from `bench/rheotool/...`).
+
+ΔCd = rT − Kraken at R=30 Wi=1 (total gap 10.37):
+
+```
+component  | front_pole  shoulder  wake   row
+pressure   | +8.34      +1.67     −1.10   +8.90
+visc_solv  | +0.07      −1.34     +0.07   −1.20
+polymer    | +0.59      +3.14     −1.05   +2.67
+col        | +8.99      +3.47     −2.09  +10.37
+```
+
+- **Pressure × front-pole = 80.4 %** of the gap.
+- **Polymer × wake = −10 %** (opposite sign — M28/M33 target zone
+  is anti-correlated with the actual gap).
+- R=40 cross-check consistent (same dominant bucket, 71.4 %).
+- Verdict file: `bench/viscoelastic_audit/M32_PHASE4_WI1_GAP_LOCALIZATION_VERDICT.md`.
+- Collateral: `tmp/m29c_kraken/...R30_bsd1_*.jls` is the M29c
+  rolled-back catastrophe dump (`:muscl_superbee`, Cd=−1571,
+  no `rho`), NOT a `:rusanov` reference — D1 caught this and
+  switched dataset. Future briefs must validate `propertynames(snap)`,
+  `snap.advection_scheme`, `snap.Cd_kraken` before consuming any
+  `tmp/*.jls`.
+
+### D2bis — R=60 Wi=1 NaN spatial fingerprint (Metal F32 Phase A)
+
+NaN at step 29, cell (943, 72), field **`rho`** (not Ψ — `rho` is
+the moment integral, the first to saturate). 98 NaN cells form
+**bilateral arcs at θ ≈ ±(38°, 48°), r−R ∈ [0, 7] LU**, position
+**front-shoulder**. Near-NaN-front: max|Ψ_xx|=15.86, max|u|=554,
+max|F_total|=320, ρ ∈ [−1.13, +4.42]. Classification (with caveat):
+`logconf_singularity` triggered by F32 exp(Ψ) saturation; polymer
+back-force ∇·τ_p blows up → super-sonic velocities → moment integral
+saturates → ρ NaN.
+
+- **F32 vs F64 caveat**: F32 exp ceiling ≈ 3.4e38, F64 ≈ 1.8e308.
+  The Aqua F64 fingerprint was NOT obtained — Phase B job
+  21619886.aqua crashed at startup with a `kwerr` (D2-original
+  wired `step_callback` kwarg in runner, driver does NOT accept it).
+  Plumbing bug, fixable; deferred to M34 validation cascade.
+- Verdict file: `bench/viscoelastic_audit/M32_PHASE4_R60_NAN_TRACE_VERDICT.md`.
+
+### D3-finalize — kraken-trace provenance (200 steps R=30 Wi=1)
+
+The first kraken-trace mission on viscoelastic. Captured trace at
+`.engineer_logs/trace.jsonl` (167 KB; 8 distinct kernels × 200
+steps). Per-step ordering:
+`psi_advect → psi_sym2_advect → psi_advect_inner ×3 → vel_grad →
+poly_force → lbm_step → lbm_step_halfwayBB`. Cross-step:
+**halfwayBB(n) writes ρ,ux,uy → psi_advect(n+1) reads them ~0.55 ms
+later**.
+
+`which` dispatch points (validated for this case):
+- halfwayBB → `src/kernels/li_bb_2d_v2.jl:138`
+- vel_grad → `src/fvfd/operators_2d.jl:1127`
+- psi_advect → `src/kernels/logconformation_fv_2d.jl:1154`
+- poly_force → `src/kernels/logconformation_fv_2d.jl:649`
+- Brick spec: `_TRT_LIBB_V2_GUO_FIELD_SPEC` at `src/kernels/li_bb_2d_v2.jl:49-54`
+  contains BOTH `PullHalfwayBB` (BC) AND `WriteMoments` (writes
+  ρ, ux, uy that D2bis reports as first-NaN). Single args_hash per
+  kernel — no per-region dispatch separation.
+
+**Verdict**: SAME mechanism. D1 (pressure × front-pole) and D2bis
+(polymer × front-shoulder) share one upstream code path
+`_TRT_LIBB_V2_GUO_FIELD_SPEC` brick sequence.
+
+Verdict file: `bench/viscoelastic_audit/M32_PHASE4_MECHANISM_VERDICT.md`.
+
+### Decisions taken 2026-05-22
+
+- **M33 REDIRECTED** in mandate.md §5 — polymer-scheme upgrade
+  premise empirically falsified. Conditional on M34 residual,
+  re-opened as M35.
+- **M34 = Bouzidi-FL Phase 2b unpark** opened as primary mission.
+  One-line driver flip `wall_bc=:bouzidi_fl` at
+  `src/kernels/li_bb_2d_v2.jl:154` + lag-1 read fix from
+  M30 Phase 2b audit (split kernel into two passes so x_ff reads
+  are lag-0 = current step post-collision). Acceptance: Kraken
+  Cd R=30 Wi=1 ∈ [118, 122] + R=30 Wi=0.1 within 1 % of rT +
+  R=40 Wi=1 reproduces + R=60 Wi=0.1 no NaN at 100k Aqua F64.
+- **NOT in scope of M34**: any Ψ-scheme change (M35 conditional);
+  any BSD change; any other BC family.
+
+### Process lessons (boss-level memory)
+
+1. **3-axis empirical signal beats inference-by-elimination**:
+   the M28 → M29c rollback → polymer match falsified → BC-pole
+   sub-dominant claim → M33 mandate sequence took 5+ session-days
+   of inference-by-elimination on cross-code gap, all reaching
+   different conclusions. M32 Phase 4 cost ~1 day (D1 + D2bis
+   + D3-finalize in series) and produced a converged verdict.
+   Pattern: localize via (wall decomp spatial + NaN spatial +
+   kraken-trace dispatch) BEFORE choosing the intervention.
+2. **Department Monitor anti-pattern** — D2-original AND
+   D3-original both captured the data needed for their verdicts,
+   then armed Monitor and sat in standby 5h+ without writing
+   the verdict markdown. The Boss spawned thin "-finalize"
+   Departments to consume the existing artifacts. Saved to
+   auto-memory `[[feedback_monitor_antipattern]]`. Future
+   Department briefs must forbid Monitor for any wait > 30s
+   and gate validation on artifact existence, not on
+   "Monitor returned".
+3. **The M28 verdict was DIRECTIONALLY wrong** (not partially right):
+   the boss.md tail "M28 vindicated" was based on Wi-dependence of
+   the gap, but the matrix doesn't say "polymer-coupled" implies
+   "polymer-scheme is the locus" — the polymer pipeline reads from
+   the BC-written fields, so a BC pole produces a Wi-coupled gap
+   too. Future Boss attribution must distinguish "Wi-coupled signal"
+   from "polymer-scheme defect" via spatial localization, not
+   via Wi-dependence alone.
+
+### Reusable artifacts (now landed, see git status)
+
+- `src/diagnostics/trace.jl` — kraken-trace `@trace_enter` macro
+  + JSONL writer (Contract A: zero-cost when KRAKEN_TRACE unset).
+  First kraken-trace adoption in Kraken.jl. Future trace missions
+  reuse this as the project's diagnostics infrastructure.
+- `bench/scratch/m32_phase4_*` — wall decomp harness, NaN trace
+  analyzer, kraken-trace probe + canary. The Phase 4 mission template
+  is now reusable for future cross-code gap localization.
+- `bench/viscoelastic_audit/M32_PHASE4_*_VERDICT.md` — three
+  verdict markdowns; canonical reference for future Boss reading.
+
+
+### 2026-05-22 evening — M34 Bouzidi-FL two-pass committed + Aqua matrix submitted
+
+- Commit `f380157a` — M34 implementation: new `ApplyBouzidiFLPostCollideTwoPass`
+  brick (lag-0 reads of `f_out` at both `x_f`/`x_ff` and `ρ_out` for `rho_w`)
+  + `:bouzidi_fl_twopass` dispatch with pass-1 → synchronize → pass-2 launch
+  pattern. Architectural guarantee: pass-2 `required_args` excludes `:f_in`
+  → lag-1 reads forbidden by construction. Smoke 10/10 PASS, drift 9% lower
+  than `:halfwayBB` baseline.
+- Commit (this one) — `KRAKEN_WALL_BC` env→kwarg plumbing in
+  `bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl` (+7 LOC, additive,
+  default `:halfwayBB` for M32 bit-exact backcompat).
+
+### Aqua jobs in flight (check next session)
+
+| Job ID | Mission | Cases | Walltime |
+|---|---|---|---|
+| `21654012.aqua` | matrix | R∈{30, 40} × Wi∈{0.1, 1.0} `:bouzidi_fl_twopass` β=0.59 BSD=1.0 | 4 h |
+| `21654013.aqua` | R=60 NaN-elimination | R=60 Wi=0.1 β=0.59 BSD=1.0 `:bouzidi_fl_twopass` | 2 h |
+
+Submitted 2026-05-22T16:15:29+1000, queue `gpu_batch` (A100), state Q.
+
+**Check command for next session**:
+```bash
+ssh aqua 'qstat 21654012.aqua 21654013.aqua; tail -40 ~/Kraken.jl-viscoelastic-run/M34_bouzidi_fl_*.o*'
+```
+
+**Acceptance gates (mandate.md §M34 G4)** — ALL must pass for M34 to ship:
+
+1. Kraken R=30 Wi=1 β=0.59 `:bouzidi_fl_twopass` **Cd ∈ [118, 122]**
+   (closes ≥80 % of the −7.3 % gap toward rT 120.38) ← primary signal
+2. Kraken R=30 Wi=0.1 β=0.59 `:bouzidi_fl_twopass` **Cd within 1 % of
+   rT 130.43** (no regression vs `:halfwayBB` 129.39)
+3. Kraken R=40 Wi=1 β=0.59 `:bouzidi_fl_twopass` reproduces R=30 verdict
+   ±0.5 % (R-invariance preserved)
+4. Kraken R=60 Wi=0.1 β=0.59 `:bouzidi_fl_twopass` **no NaN at 100 k
+   steps** Aqua F64 CUDA
+
+If 1-4 PASS → M32-M34 cluster closes, M35 (Ψ-scheme upgrade) stays
+parked. If 1 FAILS by >2 % → M35 opens conditionally per mandate.
+
+### Session lessons (for next Boss)
+
+- **4× Department stall pattern** in this session (D2-original, D3-original,
+  M34-codex spinner, D2bis Phase B kwerr). Recurring root cause: too-long
+  Engineer briefs OR Monitor armed on infinite-wait conditions. Solution
+  applied: claude-subagent (no Codex) with tight brief (~5-8 KB),
+  artifact-gated success criterion (verdict file existence, NOT canary
+  pass), explicit Bash `timeout` instead of Monitor. Saved as
+  `[[feedback_monitor_antipattern]]` (auto-memory).
+- **Codex planning loop** (M34 first attempt) — Codex received a 26 KB brief
+  + write-first discipline, then spent 22 min writing PLAN.md 7+ times
+  without advancing to implementation. Killed via `kill -9 92202`,
+  re-spawned as claude-subagent with 5 KB brief; landed in 13 min.
+  Suggests `[[feedback_codex_write_first_discipline]]` works against you
+  when the brief itself is too detailed — write-first amplifies planning
+  paralysis instead of forcing action. Future: keep Codex briefs tight
+  AND tell Codex to skip planning (jump straight to file edits per the
+  spec). Or default to claude-subagent for missions where the spec is
+  cross-engine validated already.
+- **Boss-level meta-discipline check**: this session burned ~6 h on
+  4 stall pattern occurrences. Worth a `[[project_orchestrator_pattern_audit]]`
+  in a future session to fix the orchestrator pipeline itself before
+  scaling further.
+
+## 2026-05-22 late — M34 v1 RED on Aqua, root cause identified via dual Department convergence
+
+**Aqua matrix result (jobs 21654012 + 21654013, M34 v1 :bouzidi_fl_twopass)**:
+
+| R | Wi | Cd | nan_flag |
+|---|---|---|---|
+| 30 | 0.1 | **117.59** | false |
+| 40 | 0.1 | NaN | true |
+| 30 | 1.0 | NaN | true |
+| 40 | 1.0 | NaN | true |
+
+All 4 cases ran 100k steps (no early bail-out). Only R=30 Wi=0.1
+survived, with Cd −12 units below `:halfwayBB` baseline 129.39 → wrong
+direction. G4 BC gate FAILED.
+
+### Convergent root cause (M34-debug + M34-spec-audit, parallel claude-subagent)
+
+**Pass-1 of `:bouzidi_fl_twopass` reuses `_TRT_LIBB_V2_GUO_FIELD_SPEC`
+which already contains `ApplyLiBBPrePhase` (a Bouzidi-FL pre-collision
+substitution). Pass-2 then applies a SECOND Bouzidi-FL post-collision
+overwrite. Result: BC fires twice per step → over-bounce pathology.**
+
+V2 docstring at `src/kernels/li_bb_2d_v2.jl:12-20` literally warns about
+this double-BC pathology (cites L2 ≈ 2.2 % drift). The single-pass
+`:bouzidi_fl` spec (`li_bb_2d_v2.jl:56-61`) correctly drops the
+pre-phase. M34 v1 `:bouzidi_fl_twopass` re-introduced it by reusing the
+pre-phase-containing SPEC name.
+
+### Empirical signatures (both Departments)
+
+- **Cd over-shoot pattern (R=30 Wi=0.1 finite)**: ΔCd_pres = +16.6 pts
+  vs `:halfwayBB` baseline, concentrated at front-pole (+7.55) and
+  shoulder (+6.18). Polymer/solvent components unchanged → pure pressure
+  over-bounce, BC family is the locus.
+- **NaN distribution (3 NaN cases)**: 97 % of domain NaN, **uniformly
+  distributed azimuthally** (front ≈ shoulder ≈ wake). NOT the D2bis
+  bilateral arcs front-shoulder fingerprint → diagnostic: uniform NaN =
+  BC over-bounce envelope crossing, bilateral arcs = polymer back-force
+  (saved as `[[feedback_nan_uniform_vs_arc_diagnostic]]`).
+
+### Why earlier validations missed it
+
+- **M30 P2b audit (adversarial Claude+Codex)**: referenced pass-1 by
+  SPEC NAME without enumerating its bricks. Both engines independently
+  wrote "pass 1 = existing `_TRT_LIBB_V2_GUO_FIELD_SPEC`" but neither
+  audited the brick list of that SPEC. Lesson: adversarial audits MUST
+  enumerate bricks in proposed SPECs (saved as
+  `[[feedback_double_bouzidi_two_pass_trap]]`).
+- **M34 v1 smoke test (closed-box R=8 Newtonian 100 steps)**: all
+  q_wall = 0.5 → `_libb_branch` collapses to halfway-BB → pre-phase
+  algebraically equivalent to post-collision overwrite → no
+  double-application observable. Lesson: smoke tests for cut-link-
+  dependent BCs MUST use a curved geometry that produces q ∈ (0, 1)
+  (saved as `[[feedback_smoke_must_exercise_cutlinks]]`).
+
+### Concrete fix (≤ 10 LOC, M34-fix mission)
+
+```julia
+# New spec in src/kernels/li_bb_2d_v2.jl
+const _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC = LBMSpec(
+    PullHalfwayBB(), SolidInert(), Moments(),
+    CollideTRTDirectGuoField(), WriteMoments()
+)
+
+# In :bouzidi_fl_twopass dispatch, swap pass-1:
+# _TRT_LIBB_V2_GUO_FIELD_SPEC → _TRT_LIBB_V2_GUO_FIELD_RAW_SPEC
+```
+
+### Sub-pattern of session lessons (cumulative)
+
+5× Department/Engineer stalls + 1× cross-engine audit gap (brick
+enumeration) + 1× weak smoke test design. The orchestrator pipeline
+itself needs a hygiene pass before the next major mission cluster.
+Candidate session for `[[project_orchestrator_pattern_audit]]`.
+
+### 2026-05-22 night — M34-fix YELLOW: BC over-bounce reduced but not eliminated; M34v3 next
+
+**Aqua re-submission** (jobs 21664026 matrix + 21664027 R60, M34-fix RAW pass-1):
+
+| R | Wi | Cd | nan | Status |
+|---|---|---|---|---|
+| 30 | 0.1 | 132.51 (+1.6 % vs rT 130.43) | false | partial (over G4 1 % gate) |
+| 40 | 0.1 | 133.46 (+2.3 % vs rT) | false | partial |
+| 30 | 1.0 | NaN | true | FAIL |
+| 40 | 1.0 | NaN | true | FAIL |
+| 60 | 0.1 | NaN | true | FAIL |
+
+Double-BC fix (Wi=0.1 cases) WORKED: M34 v1 Cd=117.59 → M34-fix Cd=132.51,
+right direction, no NaN at Wi=0.1. But residual over-bounce persists.
+
+**M34-fix-diag triage** (`bench/viscoelastic_audit/M34_FIX_DIAG_VERDICT.md`):
+- 3 NaN cases all `classification=uniform`, rho_nan_frac ≈ 97.4 %
+- **Ψ stays FINITE everywhere** (psi_nan_frac = 0.0) — polymer field innocent
+- NaN distribution: wake + "other" (bulk channel) + FULL inlet + outlet columns
+- Recommendation: **M34-second-bug** (NOT M35-open)
+- Single coherent root cause: residual over-bounce at cut-link cells; +1.6 % Cd at Wi=0.1 R=30 survives; amplifies × R or × Wi → envelope crossed.
+
+**Top candidate residual bug** (HIGH confidence): pass-2 of
+`:bouzidi_fl_twopass` reads `ρ_out` from pass-1 (post-halfwayBB, NOT
+post-Bouzidi-FL). The `rho_w` in the Bouzidi-FL formula is therefore
+inconsistent with the post-pass-2 `f`. Fix: cut-link-only re-WriteMoments
+after pass-2.
+
+**Next session: M34v3** — implement the HIGH fix + add a Wi=0.1 polymer
+smoke (not just Newtonian) + re-submit Aqua matrix.
+
+**M35 stays parked**: Ψ-scheme upgrade is NOT the right intervention
+per triage (Ψ is the FINITE field, ρ NaN's).
+
+**Cumulative session stats**:
+- 7 commits today (71fb5f24 → c3fe5063 → dc57f373 + diag verdict next)
+- 6× Department stalls observed (Codex planning loop + Monitor + socket)
+- 2× Aqua matrix iterations, both with new failure modes
+- 3 new feedback memory entries
+- 1 new project memory entry
+- M28-M34 cluster STILL OPEN (BC family direction correct, implementation needs M34v3)
+
