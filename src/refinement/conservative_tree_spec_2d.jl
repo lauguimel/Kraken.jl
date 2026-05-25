@@ -86,6 +86,125 @@ function _conservative_tree_auto_block_name_2d(name::String,
     return "$(name)_L$(level_index)"
 end
 
+function _conservative_tree_mask_rectangles_2d(mask::AbstractMatrix{Bool})
+    nx, ny = size(mask)
+    used = falses(nx, ny)
+    rects = Tuple{UnitRange{Int},UnitRange{Int}}[]
+    @inbounds for j in 1:ny, i in 1:nx
+        mask[i, j] && !used[i, j] || continue
+        i_hi = i
+        while i_hi < nx && mask[i_hi + 1, j] && !used[i_hi + 1, j]
+            i_hi += 1
+        end
+        j_hi = j
+        grow = true
+        while grow && j_hi < ny
+            for ii in i:i_hi
+                if !(mask[ii, j_hi + 1] && !used[ii, j_hi + 1])
+                    grow = false
+                    break
+                end
+            end
+            grow && (j_hi += 1)
+        end
+        used[i:i_hi, j:j_hi] .= true
+        push!(rects, (i:i_hi, j:j_hi))
+    end
+    return rects
+end
+
+function _conservative_tree_child_mask_2d(mask::AbstractMatrix{Bool})
+    nx, ny = size(mask)
+    child = falses(2 * nx, 2 * ny)
+    @inbounds for j in 1:ny, i in 1:nx
+        mask[i, j] || continue
+        child[(2 * i - 1):(2 * i), (2 * j - 1):(2 * j)] .= true
+    end
+    return child
+end
+
+function _conservative_tree_erode_refine_mask_2d(mask::AbstractMatrix{Bool},
+                                                 pad::Int)
+    nx, ny = size(mask)
+    eroded = falses(nx, ny)
+    @inbounds for j in 1:ny, i in 1:nx
+        mask[i, j] || continue
+        keep = true
+        for dj in -pad:pad, di in -pad:pad
+            jj = j + dj
+            if jj < 1 || jj > ny
+                continue
+            end
+            ii = mod1(i + di, nx)
+            if !mask[ii, jj]
+                keep = false
+                break
+            end
+        end
+        eroded[i, j] = keep
+    end
+    return eroded
+end
+
+function conservative_tree_wall_closed_xband_refine_blocks_2d(
+        name::AbstractString,
+        Nx::Integer,
+        Ny::Integer,
+        base_i_range::AbstractUnitRange{<:Integer},
+        nlevels::Integer;
+        cap_cells::Integer=min(4, max(1, div(Int(Ny) - 1, 2))),
+        erosion_pad::Integer=2)
+    Nx_i = Int(Nx)
+    Ny_i = Int(Ny)
+    levels = Int(nlevels)
+    levels >= 1 || throw(ArgumentError("nlevels must be positive"))
+    cap = Int(cap_cells)
+    pad = Int(erosion_pad)
+    1 <= first(base_i_range) <= last(base_i_range) <= Nx_i ||
+        throw(ArgumentError("base_i_range must be inside the base x-domain"))
+    1 <= cap && 2 * cap < Ny_i ||
+        throw(ArgumentError("wall-closed xband caps leave no interior channel"))
+    pad >= 0 || throw(ArgumentError("erosion_pad must be nonnegative"))
+
+    masks = Vector{BitMatrix}(undef, levels)
+    base = falses(Nx_i, Ny_i)
+    base[:, 1:cap] .= true
+    base[Int(first(base_i_range)):Int(last(base_i_range)),
+         (cap + 1):(Ny_i - cap)] .= true
+    base[:, (Ny_i - cap + 1):Ny_i] .= true
+    masks[1] = base
+    for level in 2:levels
+        masks[level] = _conservative_tree_erode_refine_mask_2d(
+            _conservative_tree_child_mask_2d(masks[level - 1]), pad)
+        count(masks[level]) > 0 ||
+            throw(ArgumentError("wall-closed xband eroded to an empty level"))
+    end
+
+    blocks = ConservativeTreeRefineBlock2D[]
+    previous = Tuple{String,BitMatrix}[(String(""), trues(Nx_i, Ny_i))]
+    for level in 1:levels
+        current = masks[level]
+        next = Tuple{String,BitMatrix}[]
+        for (parent_name, parent_mask) in previous
+            cover = level == 1 ? trues(size(current)) :
+                    _conservative_tree_child_mask_2d(parent_mask)
+            part = current .& cover
+            for (i_range, j_range) in _conservative_tree_mask_rectangles_2d(part)
+                block_name = "$(String(name))_wall_closed_L$(level)_$(length(next) + 1)"
+                push!(blocks, ConservativeTreeRefineBlock2D(
+                    block_name, i_range, j_range; parent=parent_name))
+                block_mask = falses(size(current))
+                block_mask[i_range, j_range] .= true
+                push!(next, (block_name, block_mask))
+            end
+        end
+        isempty(next) &&
+            throw(ArgumentError("wall-closed xband produced no blocks at level $level"))
+        previous = next
+    end
+    return blocks
+end
+
 @inline function _conservative_tree_cell_key_2d(level::Int, i::Int, j::Int)
     return (level, i, j)
 end
@@ -375,7 +494,32 @@ function conservative_tree_is_active_leaf_2d(spec::ConservativeTreeSpec2D,
     return spec.cells[id].active
 end
 
-function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
+function _conservative_tree_register_refine_block_2d!(
+        blocks::Vector{ConservativeTreeRefineBlock2D},
+        refine_level::Dict{String,Int},
+        refine_i_range::Dict{String,UnitRange{Int}},
+        refine_j_range::Dict{String,UnitRange{Int}},
+        block::ConservativeTreeRefineBlock2D,
+        Nx::Int,
+        Ny::Int)
+    haskey(refine_level, block.name) &&
+        throw(ArgumentError("duplicate Refine name '$(block.name)'"))
+    parent_level = _validate_conservative_tree_refine_parent_2d(
+        block, block.parent, refine_level, refine_i_range, refine_j_range)
+    _check_refine_block_domain_2d(block, Nx, Ny, parent_level)
+    push!(blocks, block)
+    child_level = parent_level + 1
+    refine_level[block.name] = child_level
+    refine_i_range[block.name] =
+        _conservative_tree_child_range_2d(block.i_range)
+    refine_j_range[block.name] =
+        _conservative_tree_child_range_2d(block.j_range)
+    return child_level
+end
+
+function conservative_tree_refine_blocks_from_krk_2d(domain, refinements;
+                                                     wall_xband_closure::Bool=false,
+                                                     wall_xband_cap_cells=nothing)
     Nx = Int(getproperty(domain, :Nx))
     Ny = Int(getproperty(domain, :Ny))
     Lx = getproperty(domain, :Lx)
@@ -386,6 +530,7 @@ function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
     refine_level = Dict{String,Int}()
     refine_i_range = Dict{String,UnitRange{Int}}()
     refine_j_range = Dict{String,UnitRange{Int}}()
+    decomposed_refines = Set{String}()
 
     for ref in refinements
         name = String(getproperty(ref, :name))
@@ -401,6 +546,8 @@ function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
         if _conservative_tree_base_parent_name_2d(parent)
             parent_level = 0
         else
+            parent in decomposed_refines &&
+                throw(ArgumentError("Refine $name cannot use decomposed wall-closed parent '$parent'"))
             haskey(refine_level, parent) ||
                 throw(ArgumentError("Refine $name references missing parent '$parent'"))
             parent_level = refine_level[parent]
@@ -437,6 +584,33 @@ function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
                 throw(ArgumentError("Refine $name is outside parent '$parent' in y"))
         end
 
+        closes_wall_xband =
+            wall_xband_closure &&
+            _conservative_tree_base_parent_name_2d(parent) &&
+            nlevels > 1 &&
+            first(target_j_range) == 1 &&
+            last(target_j_range) == ny_level &&
+            first(i_ranges[1]) > 1 &&
+            last(i_ranges[1]) < Nx
+        if closes_wall_xband
+            closed_blocks = wall_xband_cap_cells === nothing ?
+                conservative_tree_wall_closed_xband_refine_blocks_2d(
+                    name, Nx, Ny, i_ranges[1], nlevels) :
+                conservative_tree_wall_closed_xband_refine_blocks_2d(
+                    name, Nx, Ny, i_ranges[1], nlevels;
+                    cap_cells=Int(wall_xband_cap_cells))
+            for block in closed_blocks
+                _conservative_tree_register_refine_block_2d!(
+                    blocks, refine_level, refine_i_range, refine_j_range,
+                    block, Nx, Ny)
+            end
+            refine_level[name] = parent_level + nlevels
+            refine_i_range[name] = target_i_range
+            refine_j_range[name] = target_j_range
+            push!(decomposed_refines, name)
+            continue
+        end
+
         block_parent = parent
         for k in 1:nlevels
             block_name = _conservative_tree_auto_block_name_2d(name, k, nlevels)
@@ -447,13 +621,9 @@ function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
 
             block = ConservativeTreeRefineBlock2D(
                 block_name, i_ranges[k], j_ranges[k]; parent=block_parent)
-            push!(blocks, block)
-            child_level = parent_level + k
-            refine_level[block_name] = child_level
-            refine_i_range[block_name] =
-                _conservative_tree_child_range_2d(i_ranges[k])
-            refine_j_range[block_name] =
-                _conservative_tree_child_range_2d(j_ranges[k])
+            _conservative_tree_register_refine_block_2d!(
+                blocks, refine_level, refine_i_range, refine_j_range,
+                block, Nx, Ny)
             block_parent = block_name
         end
     end
@@ -475,8 +645,20 @@ function create_conservative_tree_spec_from_krk_2d(setup;
     getproperty(setup, :lattice) == :D2Q9 ||
         throw(ArgumentError("conservative-tree 2D specs require D2Q9"))
     domain = getproperty(setup, :domain)
+    vars = getproperty(setup, :user_vars)
+    wall_xband_closure_raw = haskey(vars, :wall_xband_closure) ?
+        vars[:wall_xband_closure] :
+        haskey(vars, :amr_d_wall_xband_closure) ?
+        vars[:amr_d_wall_xband_closure] : 0.0
+    wall_xband_closure = round(Int, wall_xband_closure_raw) != 0
+    wall_xband_cap_cells = haskey(vars, :wall_xband_cap_cells) ?
+        round(Int, vars[:wall_xband_cap_cells]) :
+        haskey(vars, :amr_d_wall_xband_cap_cells) ?
+        round(Int, vars[:amr_d_wall_xband_cap_cells]) : nothing
     blocks = conservative_tree_refine_blocks_from_krk_2d(
-        domain, getproperty(setup, :refinements))
+        domain, getproperty(setup, :refinements);
+        wall_xband_closure=wall_xband_closure,
+        wall_xband_cap_cells=wall_xband_cap_cells)
     return create_conservative_tree_spec_2d(
         Int(getproperty(domain, :Nx)), Int(getproperty(domain, :Ny)), blocks;
         balance=balance, coarse_volume=coarse_volume)

@@ -867,6 +867,7 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
         backend=nothing,
+        wall_phase_transport_correction=nothing,
         T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
@@ -879,6 +880,10 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
         sampling, coarse_to_fine_prolongation)
     c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
         coarse_to_fine_predictor_weight, sampling)
+    wall_phase_correction = wall_phase_transport_correction === nothing ?
+        backend === nothing : Bool(wall_phase_transport_correction)
+    backend === nothing || !wall_phase_correction ||
+        throw(ArgumentError("GPU AMR-D macroflows do not yet support wall_phase_transport_correction=true"))
     if backend !== nothing
         return _run_conservative_tree_channel_subcycled_backend_2d(
             flow=:poiseuille_subcycled, max_level=max_level, steps=nsteps,
@@ -933,7 +938,8 @@ function run_conservative_tree_poiseuille_subcycled_2d(;
             interface_time_scaling=interface_time_scaling,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
-            Fsource=Fsource, Fscratch=Fscratch)
+            Fsource=Fsource, Fscratch=Fscratch,
+            wall_phase_transport_correction=wall_phase_correction)
         if enforce_mass
             raw_rel = _enforce_active_mass_conservation_2d!(
                 Ftmp, spec_run, mass_initial; rtol=guard)
@@ -975,6 +981,7 @@ function run_conservative_tree_couette_subcycled_2d(;
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
         backend=nothing,
+        wall_phase_transport_correction=nothing,
         T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
@@ -987,6 +994,10 @@ function run_conservative_tree_couette_subcycled_2d(;
         sampling, coarse_to_fine_prolongation)
     c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
         coarse_to_fine_predictor_weight, sampling)
+    wall_phase_correction = wall_phase_transport_correction === nothing ?
+        backend === nothing : Bool(wall_phase_transport_correction)
+    backend === nothing || !wall_phase_correction ||
+        throw(ArgumentError("GPU AMR-D macroflows do not yet support wall_phase_transport_correction=true"))
     if backend !== nothing
         return _run_conservative_tree_channel_subcycled_backend_2d(
             flow=:couette_subcycled, max_level=max_level, steps=nsteps,
@@ -1040,7 +1051,8 @@ function run_conservative_tree_couette_subcycled_2d(;
             interface_time_scaling=interface_time_scaling,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
-            Fsource=Fsource, Fscratch=Fscratch)
+            Fsource=Fsource, Fscratch=Fscratch,
+            wall_phase_transport_correction=wall_phase_correction)
         if enforce_mass
             raw_rel = _enforce_active_mass_conservation_2d!(
                 Ftmp, spec_run, mass_initial; rtol=guard)
@@ -1083,6 +1095,7 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         enforce_mass::Bool=true,
         mass_guard_rtol=nothing,
         spec::Union{Nothing,ConservativeTreeSpec2D}=nothing,
+        wall_phase_transport_correction=nothing,
         T::Type{<:AbstractFloat}=Float64)
     nsteps = Int(steps)
     nsteps >= 0 || throw(ArgumentError("steps must be nonnegative"))
@@ -1097,6 +1110,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
         sampling, coarse_to_fine_prolongation)
     c2f_predictor_weight = _resolve_conservative_tree_c2f_predictor_weight_2d(
         coarse_to_fine_predictor_weight, sampling)
+    wall_phase_correction = wall_phase_transport_correction === nothing ?
+        true : Bool(wall_phase_transport_correction)
     interface_time_scaling = sampling == :level_native ?
         :level_native : :leaf_equivalent
     table = create_conservative_tree_route_table_2d(
@@ -1144,7 +1159,8 @@ function run_conservative_tree_solid_obstacle_subcycled_2d(;
             interface_time_scaling=interface_time_scaling,
             pre_stream_level! = collide_level!,
             schedule=schedule, route_bank=route_bank, state_bank=state_bank,
-            Fsource=Fsource, Fscratch=Fscratch, is_solid=solid)
+            Fsource=Fsource, Fscratch=Fscratch, is_solid=solid,
+            wall_phase_transport_correction=wall_phase_correction)
         if enforce_mass
             raw_rel = _enforce_active_fluid_mass_conservation_2d!(
                 Ftmp, spec_run, solid, mass_initial; rtol=guard)

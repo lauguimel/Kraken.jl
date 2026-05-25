@@ -34,6 +34,8 @@ any modification.
 - `rho, ux, uy`: macroscopic fields [Nx, Ny]
 - `is_solid`: obstacle mask [Nx, Ny]
 - `omega`: relaxation parameter (rescaled from parent)
+- `reflux_coarse, reflux_fine`: per-population flux ledgers for conservative
+  coarse/fine reflux at the valid refined-core boundary
 """
 struct RefinementPatch{T}
     name::String
@@ -64,6 +66,8 @@ struct RefinementPatch{T}
     ux_prev::AbstractMatrix{T}
     uy_prev::AbstractMatrix{T}
     f_prev::AbstractArray{T, 3}
+    reflux_coarse::AbstractArray{T, 3}
+    reflux_fine::AbstractArray{T, 3}
 end
 
 """
@@ -187,21 +191,33 @@ function create_patch(name::String, level::Int, ratio::Int,
     copyto!(f_in, f_cpu)
     copyto!(f_out, f_cpu)
 
-    # Temporal interpolation buffers (parent-size region + halo for interpolation)
-    n_parent_i = length(parent_i_range) + 2  # +2 for bilinear stencil margin
-    n_parent_j = length(parent_j_range) + 2
+    # Temporal interpolation buffers (parent-size region + halo for interpolation).
+    # The centered fine→parent mapping can require two parent cells of margin
+    # for ratio=2 with two fine ghost layers.
+    parent_margin = _refinement_parent_margin(ratio, n_ghost)
+    n_parent_i = length(parent_i_range) + 2 * parent_margin
+    n_parent_j = length(parent_j_range) + 2 * parent_margin
     rho_prev = KernelAbstractions.ones(backend, T, n_parent_i, n_parent_j)
     ux_prev  = KernelAbstractions.zeros(backend, T, n_parent_i, n_parent_j)
     uy_prev  = KernelAbstractions.zeros(backend, T, n_parent_i, n_parent_j)
     f_prev   = KernelAbstractions.zeros(backend, T, n_parent_i, n_parent_j, 9)
+    n_overlap_i = length(parent_i_range)
+    n_overlap_j = length(parent_j_range)
+    reflux_coarse = KernelAbstractions.zeros(backend, T, n_overlap_i, n_overlap_j, 9)
+    reflux_fine   = KernelAbstractions.zeros(backend, T, n_overlap_i, n_overlap_j, 9)
 
     return RefinementPatch{T}(
         name, level, ratio, Nx, Ny, Nx_inner, Ny_inner,
         dx_fine, x_min_snap, y_min_snap, x_max_snap, y_max_snap,
         parent_i_range, parent_j_range, n_ghost,
         f_in, f_out, rho, ux, uy, is_solid, omega_fine,
-        rho_prev, ux_prev, uy_prev, f_prev
+        rho_prev, ux_prev, uy_prev, f_prev,
+        reflux_coarse, reflux_fine
     )
+end
+
+@inline function _refinement_parent_margin(ratio::Int, n_ghost::Int)
+    return max(1, ceil(Int, (Float64(n_ghost) - 0.5) / Float64(ratio) + 0.5))
 end
 
 """

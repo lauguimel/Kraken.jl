@@ -30,11 +30,12 @@ function save_coarse_state!(patch::RefinementPatch{T},
     Nx_c = size(rho_c, 1)
     Ny_c = size(rho_c, 2)
 
-    # Extract region with 1-cell margin for bilinear interpolation
-    i_lo = max(first(i_range) - 1, 1)
-    i_hi = min(last(i_range) + 1, Nx_c)
-    j_lo = max(first(j_range) - 1, 1)
-    j_hi = min(last(j_range) + 1, Ny_c)
+    # Extract the parent halo needed by the centered fine→parent mapping.
+    margin = _refinement_parent_margin(patch.ratio, patch.n_ghost)
+    i_lo = max(first(i_range) - margin, 1)
+    i_hi = min(last(i_range) + margin, Nx_c)
+    j_lo = max(first(j_range) - margin, 1)
+    j_hi = min(last(j_range) + margin, Ny_c)
 
     n_i = i_hi - i_lo + 1
     n_j = j_hi - j_lo + 1
@@ -130,14 +131,23 @@ function fill_ghost_temporal!(patch::RefinementPatch{T},
                               f_curr, rho_curr, ux_curr, uy_curr,
                               omega_coarse::Real,
                               Nx_c::Int, Ny_c::Int,
-                              t_frac::Real) where T
+                              t_frac::Real;
+                              Fx_coarse::Real=0.0,
+                              Fy_coarse::Real=0.0) where T
     prolongate_f_rescaled_temporal_2d!(
         patch.f_in, f_curr, rho_curr, ux_curr, uy_curr,
         patch.f_prev, patch.rho_prev, patch.ux_prev, patch.uy_prev,
         patch.ratio, patch.Nx_inner, patch.Ny_inner,
         patch.n_ghost, first(patch.parent_i_range), first(patch.parent_j_range),
-        Nx_c, Ny_c, omega_coarse, Float64(patch.omega), Float64(t_frac)
+        Nx_c, Ny_c, omega_coarse, Float64(patch.omega), Float64(t_frac);
+        Fx_coarse, Fy_coarse
     )
+end
+
+@inline function _restriction_valid_inset(patch::RefinementPatch)
+    Nx_overlap = length(patch.parent_i_range)
+    Ny_overlap = length(patch.parent_j_range)
+    return (Nx_overlap > 2 && Ny_overlap > 2) ? 1 : 0
 end
 
 """
@@ -148,17 +158,72 @@ Filippova-Hanel rescaling.
 """
 function restrict_to_coarse!(patch::RefinementPatch{T},
                              f_coarse, rho_c, ux_c, uy_c,
-                             omega_coarse::Real) where T
+                             omega_coarse::Real;
+                             Fx_fine::Real=0.0, Fy_fine::Real=0.0,
+                             Fx_coarse::Real=0.0, Fy_coarse::Real=0.0) where T
     Nx_overlap = length(patch.parent_i_range)
     Ny_overlap = length(patch.parent_j_range)
+    inset = _restriction_valid_inset(patch)
+    Nx_valid = Nx_overlap - 2 * inset
+    Ny_valid = Ny_overlap - 2 * inset
+    Nx_valid > 0 && Ny_valid > 0 || return nothing
+
     restrict_f_rescaled_2d!(
         f_coarse, rho_c, ux_c, uy_c,
         patch.f_in, patch.rho, patch.ux, patch.uy,
         patch.ratio, patch.n_ghost,
-        first(patch.parent_i_range), first(patch.parent_j_range),
-        Nx_overlap, Ny_overlap,
-        omega_coarse, Float64(patch.omega)
+        first(patch.parent_i_range) + inset, first(patch.parent_j_range) + inset,
+        Nx_valid, Ny_valid,
+        omega_coarse, Float64(patch.omega);
+        i_parent_offset=inset, j_parent_offset=inset,
+        Fx_fine, Fy_fine, Fx_coarse, Fy_coarse
     )
+end
+
+function _prepare_reflux!(patch::RefinementPatch{T}, f_coarse,
+                          omega_coarse::Real) where T
+    Nx_overlap = length(patch.parent_i_range)
+    Ny_overlap = length(patch.parent_j_range)
+    inset = _restriction_valid_inset(patch)
+    inset > 0 || return false
+
+    accumulate_reflux_coarse_2d!(
+        patch.reflux_coarse, f_coarse,
+        first(patch.parent_i_range), first(patch.parent_j_range),
+        Nx_overlap, Ny_overlap, inset)
+    reset_reflux_fine_2d!(patch.reflux_fine)
+    return true
+end
+
+function _accumulate_fine_reflux!(patch::RefinementPatch{T},
+                                  omega_coarse::Real;
+                                  Fx_fine::Real=0.0,
+                                  Fy_fine::Real=0.0) where T
+    Nx_overlap = length(patch.parent_i_range)
+    Ny_overlap = length(patch.parent_j_range)
+    inset = _restriction_valid_inset(patch)
+    inset > 0 || return nothing
+
+    accumulate_reflux_fine_2d!(
+        patch.reflux_fine, patch.f_in, patch.rho, patch.ux, patch.uy,
+        patch.ratio, patch.n_ghost, Nx_overlap, Ny_overlap, inset,
+        omega_coarse, Float64(patch.omega);
+        Fx_fine, Fy_fine)
+    return nothing
+end
+
+function _apply_reflux!(patch::RefinementPatch{T}, f_coarse;
+                        mode::Symbol=:population) where T
+    Nx_overlap = length(patch.parent_i_range)
+    Ny_overlap = length(patch.parent_j_range)
+    inset = _restriction_valid_inset(patch)
+    inset > 0 || return false
+
+    apply_reflux_correction_2d!(
+        f_coarse, patch.reflux_coarse, patch.reflux_fine,
+        first(patch.parent_i_range), first(patch.parent_j_range),
+        Nx_overlap, Ny_overlap, inset; mode)
+    return true
 end
 
 """
@@ -191,15 +256,23 @@ function advance_refined_step!(domain::RefinedDomain{T},
                                bc_base_fn=nothing,
                                bc_patch_fns=nothing,
                                patch_collide_fns=nothing,
+                               patch_macro_fns=nothing,
                                patch_macro_fn=nothing,
+                               patch_stream_fn=stream_2d!,
+                               coarse_force=(0.0, 0.0),
+                               patch_forces=nothing,
                                patch_diag_fns=nothing,
-                               coarse_diag_fn=nothing) where T
+                               coarse_diag_fn=nothing,
+                               reflux::Bool=false,
+                               reflux_mode::Symbol=:population) where T
     Nx = domain.base_Nx
     Ny = domain.base_Ny
 
     # 1. Save coarse state at time n for all patches
+    macro_fn(rho, ux, uy, f_in)
     for patch in domain.patches
         save_coarse_state!(patch, f_in, rho, ux, uy)
+        reflux && _prepare_reflux!(patch, f_in, Float64(domain.base_omega))
     end
 
     # 2. Advance coarse grid one step
@@ -221,6 +294,7 @@ function advance_refined_step!(domain::RefinedDomain{T},
     # 3. Sub-cycle each patch
     for (pidx, patch) in enumerate(domain.patches)
         ratio = patch.ratio
+        Fx_c, Fy_c = coarse_force
 
         for sub_step in 1:ratio
             # Temporal interpolation: sub_step=1 -> t_frac=0, sub_step=ratio -> (ratio-1)/ratio
@@ -229,15 +303,36 @@ function advance_refined_step!(domain::RefinedDomain{T},
             # Temporal ghost fill: at t_frac=0 reads from *_prev (time n),
             # at t_frac>0 blends toward current f_in (time n+1).
             fill_ghost_temporal!(patch, f_in, rho, ux, uy,
-                                Float64(domain.base_omega), Nx, Ny, t_frac)
+                                Float64(domain.base_omega), Nx, Ny, t_frac;
+                                Fx_coarse=Fx_c, Fy_coarse=Fy_c)
 
             # Advance patch one fine step
             bc_fn = bc_patch_fns !== nothing ? get(bc_patch_fns, pidx, nothing) : nothing
             pcf = patch_collide_fns !== nothing ? get(patch_collide_fns, pidx, nothing) : nothing
-            pmf = patch_macro_fn !== nothing ? patch_macro_fn : compute_macroscopic_2d!
-            pdf = patch_diag_fns !== nothing ? get(patch_diag_fns, pidx, nothing) : nothing
+            pmf = patch_macro_fns !== nothing ? get(patch_macro_fns, pidx, nothing) : nothing
+            if pmf === nothing
+                pmf = patch_macro_fn !== nothing ? patch_macro_fn : compute_macroscopic_2d!
+            end
+            pdf_user = patch_diag_fns !== nothing ? get(patch_diag_fns, pidx, nothing) : nothing
+            Fx_f = 0.0
+            Fy_f = 0.0
+            if patch_forces !== nothing
+                pf = get(patch_forces, pidx, nothing)
+                if pf !== nothing
+                    Fx_f, Fy_f = pf
+                end
+            end
+            pdf = if reflux
+                (f_pre, f_post, is_s, nx, ny) -> begin
+                    _accumulate_fine_reflux!(patch, Float64(domain.base_omega);
+                                             Fx_fine=Fx_f, Fy_fine=Fy_f)
+                    pdf_user !== nothing && pdf_user(f_pre, f_post, is_s, nx, ny)
+                end
+            else
+                pdf_user
+            end
             advance_patch!(patch;
-                          stream_fn=stream_fn,
+                          stream_fn=patch_stream_fn,
                           collide_fn=pcf !== nothing ? pcf : (f, is_s) -> collide_2d!(f, is_s, patch.omega),
                           macro_fn=pmf,
                           bc_fn=bc_fn,
@@ -249,9 +344,27 @@ function advance_refined_step!(domain::RefinedDomain{T},
     end
 
     # 4. Restrict fine results back to coarse
-    for patch in domain.patches
+    for (pidx, patch) in enumerate(domain.patches)
+        Fx_c, Fy_c = coarse_force
+        Fx_f = 0.0
+        Fy_f = 0.0
+        if patch_forces !== nothing
+            pf = get(patch_forces, pidx, nothing)
+            if pf !== nothing
+                Fx_f, Fy_f = pf
+            end
+        end
         restrict_to_coarse!(patch, f_in, rho, ux, uy,
-                           Float64(domain.base_omega))
+                           Float64(domain.base_omega);
+                           Fx_fine=Fx_f, Fy_fine=Fy_f,
+                           Fx_coarse=Fx_c, Fy_coarse=Fy_c)
+    end
+    if reflux
+        did_reflux = false
+        for patch in domain.patches
+            did_reflux |= _apply_reflux!(patch, f_in; mode=reflux_mode)
+        end
+        did_reflux && macro_fn(rho, ux, uy, f_in)
     end
 
     return f_in, f_out

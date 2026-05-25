@@ -62,7 +62,11 @@ end
 function couette_analytic_profile_2d(ny::Int, U)
     ny >= 2 || throw(ArgumentError("ny must be >= 2"))
     T = typeof(float(U))
-    return [T(U) * T(j - 1) / T(ny - 1) for j in 1:ny]
+    # Halfway-BB convention: walls at j=0.5 (stationary) and j=ny+0.5 (moving at U).
+    # Cell-centered sampling : y at cell j = (j - 0.5), domain height H = ny.
+    # → u(j) = U · (j - 0.5) / ny.
+    # Earlier `(j - 1) / (ny - 1)` was node-centered (wall AT j=1), wrong for halfway-BB.
+    return [T(U) * (T(j) - T(0.5)) / T(ny) for j in 1:ny]
 end
 
 function poiseuille_analytic_profile_2d(ny::Int, Fx, omega; rho=1)
