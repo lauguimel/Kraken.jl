@@ -57,6 +57,23 @@ Headline findings for downstream missions:
 
 **Implication**: M12/M13 (per-module docs) and any future refactor must treat `AbstractPolymerModel` as the constitutive seam and budget SPLIT missions for `kraken_parser.jl` + `simulation_runner.jl` BEFORE relocating BC/IO into target dirs.
 
+## 2026-05-29 — M3 (units module spec) DONE — GREEN
+
+Spec frozen at `docs/spec/units-v1.md` (588 lines) on new branch **`dev/units-module`** (worktree `/Users/guillaume/Documents/Recherche/Kraken.jl-units`, branched from local `main`). User chose a fresh isolated branch over dev-viscoelastic (clean module, single .orchestrator) — see [[where-units-lives]] decision below.
+
+Spec covers §0–§10: API surface (`compile`/`audit`/`driver_kwargs`/`report` + `register_physics!`/`register_stability!`/`register_bc_combo!`), type hierarchy (`AbstractPhysicsSpec`, `LBMUnits{T}`, `SimulationPlan{T}`), 3-registry pattern, forward/reverse semantics, strict-vs-lenient errors, **10-file decomposition** (each ≤500/700), thermal Phase-2 zero-edit extension contract (with bit-identical proof obligation), validation gate, prior-art reconciliation, risks.
+
+**Generalisations beyond M62b for M4 to honour**:
+- Naming: units uses `SimulationPlan` / `ViscoelasticSpec` (NOT `runtime_specs.jl`'s `SimulationSpec` / `PhysicsSpec`); UInt8 lattice/BC codes via a future thin adapter, not in Phase 1.
+- `src/geometry/` + `GeometryInfo` DON'T EXIST yet → spec uses a NamedTuple fallback + local `GeometryDescriptor`; a single real constructor is added when geometry lands (do not block M4 on geometry).
+- Thermal/GNF/multiphase/MHD structs are pre-declared + pre-registered as stubs so M5 edits ZERO Phase-1 files.
+
+**M4 dispatch note**: runner `codex` (kraken-branch-governor + kraken-codebase-map), deps M3 done. Brief must point at `docs/spec/units-v1.md` AND `dev/v0.2-architecture:src/runtime_specs.jl` (prior art) as required reading. Work happens on `dev/units-module` worktree.
+
+## 2026-05-29 — .orchestrator divergence DEBT (3 copies)
+
+Three `.orchestrator/` copies now exist: **slbm-paper = CANONICAL** (freshest: M1 §6 patch, M2/M3 ADRs, all boss notes), `main`/`dev/units-module` = bootstrap version (`0a5bcdb54`, stale), `dev-viscoelastic` = yet another older copy. Departments MUST read the mandate slice from the slbm-paper worktree (`/Users/guillaume/Documents/Recherche/Kraken.jl/.orchestrator/`), never from a sibling worktree's copy. Consolidation (single source) is a deferred mission — for now the Boss writes only the slbm-paper copy. Deliverables (specs/code) land on their feature branch; mandate/ADR/memory stay canonical on slbm-paper.
+
 ## 2026-05-29 — Harness constraint: subagents cannot spawn sub-agents
 
 In this Claude Code harness a Department subagent has **no Agent/Task tool** — it cannot spawn an Engineer (Layer 2). For read-only / structural missions the Department executes the work itself within the allowed zone (acceptable). For code-heavy missions needing Codex, the Boss must run `run-engineer.sh` directly rather than routing through a Department spawn. Also: a long Department `Agent` call dropped on a socket error after ~7 min mid-flight; its on-disk prep survived and a fresh re-spawn (a "resume" brief noting prep already done) completed cheaply. Keep Department missions short or checkpoint to disk.

@@ -7,32 +7,24 @@ the specific intent of the session.
 
 ---
 
-## C. Dispatch M1 du ship-plan (vraie première mission de code)
+## Status (2026-05-29)
 
-```
-Nous sommes dans Kraken.jl. KRK-SHIP-001 est défini dans
-.orchestrator/ship-plan.md (5 sections + §6 overlay Boss).
+KRK-SHIP-001 progress: **M1 ✅** (module audit — mandate §6 filled),
+**M2 ✅** (`lbm` + `refinement-patches-dev` retired; `dev/v0.2-architecture`
+kept), **M3 ✅** (units spec frozen — `docs/spec/units-v1.md` on
+`dev/units-module`). Phase A + Phase-B spec done.
 
-Tâche :
-1. Charge les skills `orchestrator` et `kraken-architect`.
-2. Lis .orchestrator/mandate.md (mandat + ADRs) et
-   .orchestrator/memory/boss.md (état actuel).
-3. Lis le §3 Mission graph du ship-plan et identifie M1
-   (la première mission dispatchable sans dépendance).
-4. Cross-check avec §6 Locked decisions (overrident toute divergence
-   §3). Si M1 est M2 (retirements), bascule sur le prompt A à la place.
-5. Pour la mission identifiée, draft un Department brief en remplissant
-   ~/.claude/skills/orchestrator/department_brief_template.md. Inputs,
-   allowed edit zones, forbidden actions, exit criterion concret,
-   runner recommandé, format de rapport.
-6. Avant de spawner le Department, montre-moi le brief complet.
-   Je valide ou corrige.
-7. Une fois validé : spawn le Department via Agent (background si la
-   mission est longue, foreground si courte).
+**Next dispatchable: M4** — implement `src/units/` Phase 1 (Newtonian + VE)
+from the frozen spec. Code-heavy Julia → **Codex** mission (use prompt **E**
+with `M<N> = M4`), runs on the `dev/units-module` worktree
+(`/Users/guillaume/Documents/Recherche/Kraken.jl-units`). M4 required reading:
+`docs/spec/units-v1.md` AND `dev/v0.2-architecture:src/runtime_specs.jl`
+(prior art). **Canonical mandate lives on `slbm-paper`** — read it from
+`/Users/guillaume/Documents/Recherche/Kraken.jl/.orchestrator/`, never from a
+sibling worktree's stale `.orchestrator` copy (3 divergent copies exist).
 
-NE fais AUCUN edit dans src/ ou test/. Toute exécution passe par
-Department → Engineer.
-```
+Prompts A (M2), B (cherry-pick), C (M1 dispatch) are **DONE** and have been
+retired. D (generic resume) and E (Codex relay) remain — both reusable.
 
 ---
 
