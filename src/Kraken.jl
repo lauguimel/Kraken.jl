@@ -19,6 +19,9 @@ include("lattice/lattice.jl")
 include("lattice/d2q9.jl")
 include("lattice/d3q19.jl")
 
+# --- Wall-aware node→physical coordinate mapping (used by postproc/benchmarks) ---
+include("axis_coords.jl")
+
 # --- GPU kernels (Newtonian + thermal) ---
 include("kernels/equilibrium_helpers.jl")
 include("kernels/equilibrium_helpers_3d.jl")
@@ -126,5 +129,6 @@ export run_simulation
 
 # Post-processing
 export extract_line, field_error, probe, domain_stats
+export axis_node_coords
 
 end # module Kraken
