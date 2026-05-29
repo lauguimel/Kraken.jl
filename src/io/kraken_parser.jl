@@ -163,7 +163,21 @@ struct SimulationSetup
     refinements::Vector{RefineSetup}
     velocity_field::Union{InitialSetup, Nothing}  # prescribed velocity expressions (ux, uy)
     rheology::Vector{RheologySetup}                # per-phase rheology models
+    mesh::Any                                      # Mesh-directive descriptor (body-fitted / Gmsh); `nothing` for the Cartesian path. Consumed by run_simulation (`setup.mesh !== nothing`) + _run_gmsh_slbm_drag. The producing parser is not built yet (KRK-GEO).
 end
+
+# Backward-compatible constructor: `mesh` defaults to `nothing`, so every existing
+# 15-argument call site (parser line ~469, tests) keeps working unchanged. Only
+# `_override_max_steps` threads the 16-argument form. This completes commit
+# 682e3f3c0, which referenced `setup.mesh` in the runner without ever adding the
+# field to this struct — leaving `run_simulation` broken for every .krk on the
+# v0.3 / paper lineage.
+SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
+                initial, modules, max_steps, outputs, diagnostics, refinements,
+                velocity_field, rheology) =
+    SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
+                    initial, modules, max_steps, outputs, diagnostics, refinements,
+                    velocity_field, rheology, nothing)
 
 # --- Tokenization: strip comments, join multi-line blocks ---
 
