@@ -13,18 +13,30 @@ KRK-SHIP-001 progress: **M1 ✅** (module audit — mandate §6 filled),
 **M2 ✅** (`lbm` + `refinement-patches-dev` retired; `dev/v0.2-architecture`
 kept), **M3 ✅** (units spec frozen, `docs/spec/units-v1.md`),
 **M4 ✅** (units Phase 1 Newt+VE — 165 tests), **M5 ✅** (units Thermal-Boussinesq
-Phase 2 — 277 tests, zero-edit contract §7 PROVEN). **Phase A + Phase B (units
-module) COMPLETE.** All on `dev/units-module`
+Phase 2 — 277 tests, zero-edit contract §7 PROVEN), **M6 ✅** (Cartesian cavity
+benchmark vs Ghia 1982 + icoFoam — **Phase C OPENED**; icoFoam <0.5%, Kraken BGK
+2-3% rel; 3D Zou-He top-BC bug fixed `9674e1c4c`→main `a5ce7c6f0`, deliverables
+`a524f7ded`). **Phase A + B COMPLETE; Phase C started.** All on `dev/units-module`
 (`/Users/guillaume/Documents/Recherche/Kraken.jl-units`), local commits, no push.
 
-**Next dispatchable — Phase C benchmarks (all unblocked)**:
-- **M6** RheoTool Cartesian cavity (icoFoam, Re=100/400/1000) — Validate,
-  `claude-subagent` + `sim-openfoam`/`sim-rheotool`, HPC via `pbs` if needed. Dep M4 ✓.
+**Parallel track KRK-GEO** (STL/complex geometry, separate from ship-1): M-GEO-1+2
+GREEN on `feat/geometry-stl` (off `dev/v0.3-campaign`) — STL via `.krk` + mesh-field
+regression fix. See boss.md.
+
+**Next dispatchable**:
 - **M7** RheoTool thermal Rayleigh-Bénard (buoyantBoussinesqPimpleFoam, Ra 1e3-1e5) — dep M5 ✓.
-- **M8** RheoTool viscoelastic cylinder (rheoFoam Oldroyd-B, Wi 0.1/0.5/1.0) — dep M4 ✓.
-Also available: **driver-integration** (wire `driver_kwargs(plan)` into a real
-driver + Cd/Nu repro — the deferred part of M4/M5; needs a VE/thermal-carrying
-branch → touches the merge debt), and **M9–M13** tri-track docs.
+  Reuses the M6 icoFoam-Docker recipe (**`cd /case` inside `bash -c`** — the 2412
+  image entrypoint forces CWD to /root) + `bench/scratch/run_cavity_bench.jl`+`plot_cavity_bench.jl`.
+- **M8** RheoTool viscoelastic cylinder (rheoFoam Oldroyd-B, Wi 0.1/0.5/1.0) — dep M4 ✓; Aqua.
+- **M9–M13** tri-track docs; **driver-integration** (deferred Cd/Nu repro, merge debt).
+**M6 RESOLVED — cavity is <1%**: the 2-3% was a **half-cell coordinate bug** (Zou-He
+lid on-node vs hand-coded `(j-0.5)/N`), NOT BGK/MRT/resolution. Fixed via
+`axis_node_coords(N;lo,hi)` (`src/axis_coords.jl`, `78ed276c4`→main `9b9a97aa8`,
+corrected M6 `04188e067`): Kraken-vs-Ghia rel-L2 **0.47/0.41/1.05%**. Couette control =
+machine-zero ⇒ solver exact; TRT confirmed irrelevant (≡BGK), port reverted. **PENDING:
+cherry-pick the helper to lineage branches** (slbm-paper/dev-visco/v0.3/amr/docs —
+deferred, dirty/active worktrees; batch w/ KRK-GEO's `fc9a4d7eb` or via M14). Convention:
+[[feedback_wall_aware_coords]]. Residual open item: (b) BGK marginal-ω instability (16³, ω≈1.89).
 
 **For ANY units follow-up**: the module lives on `dev/units-module`; 277 tests
 green via `julia --project=. -e 'using Pkg; Pkg.test(; test_args=["units"])'`.
