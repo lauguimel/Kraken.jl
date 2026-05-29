@@ -80,6 +80,16 @@ Verified non-tautological: M61 diffusive parity (τ=0.95, ν=0.15 at R∈{10,30,
 
 **Codex pilot mechanics that worked**: brief at `<worktree>/.codex_brief.md`, `pilot.sh <wt> M4 --add-dir <sibling>` for cross-worktree reference reads (M48/M61 values on dev-viscoelastic), background launch, ~tens of min for a 1149-LOC + 165-test mission. The spec being frozen first (M3) made M4 a clean single-pass GREEN — spec-then-impl two-mission split paid off.
 
+## 2026-05-29 — M5 (units thermal Phase 2) DONE — GREEN; zero-edit contract PROVEN
+
+`physics/thermal.jl` un-stubbed on `dev/units-module` (commit `9e3b8e04b`), 101 LOC. **Zero-edit verified**: `git diff --name-only -- src/units` = `physics/thermal.jl` ONLY. 277/277 tests green (re-run by Boss). The §8.t proof compiles VE plans R∈{10,30,50} around an active thermal probe and asserts `isequal` (incl NaN) vs M4 frozen refs + empty issue codes → thermal's load-time `register_*` calls don't perturb Phase-1.
+
+Thermal conversion: `α=ν/Pr`, `β_thermal=Ra·ν·α/R³` (Ra reconstructs 1e-10). No M4 seam gap. This empirically validates mandate §1 "new physics = new module, zero trunk surgery" — GNF/multiphase/MHD will follow the identical pattern.
+
+**Method win to reuse**: spec-frozen-first (M3) + pre-registered stub seam in M4 (`ThermalBoussinesqSpec` in Units.jl + `:thermal_boussinesq` in physics_registry) made M5 a clean one-file drop-in, single-pass GREEN. Replicate for any future physics extension.
+
+**Phase-B units module COMPLETE** (M3 spec + M4 Newt/VE + M5 thermal). Next KRK-SHIP-001: M6/M7/M8 RheoTool benchmarks (Validate, claude-subagent + sim-rheotool/sim-openfoam), OR the driver-integration that consumes `driver_kwargs(plan)` (deferred Cd/Nu repro), OR docs M9-M13. M6/M8 dep M4 ✓; M7 dep M5 ✓ — all now unblocked.
+
 ## 2026-05-29 — .orchestrator divergence DEBT (3 copies)
 
 Three `.orchestrator/` copies now exist: **slbm-paper = CANONICAL** (freshest: M1 §6 patch, M2/M3 ADRs, all boss notes), `main`/`dev/units-module` = bootstrap version (`0a5bcdb54`, stale), `dev-viscoelastic` = yet another older copy. Departments MUST read the mandate slice from the slbm-paper worktree (`/Users/guillaume/Documents/Recherche/Kraken.jl/.orchestrator/`), never from a sibling worktree's copy. Consolidation (single source) is a deferred mission — for now the Boss writes only the slbm-paper copy. Deliverables (specs/code) land on their feature branch; mandate/ADR/memory stay canonical on slbm-paper.
