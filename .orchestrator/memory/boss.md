@@ -45,3 +45,18 @@ Task B (resume-prompts §B) cherry-picked `ec90389e7` onto **local** `main` (com
 **Guardrails**:
 - NEVER `git push origin main` without re-checking this — it would fast-forward all 164 private commits incl. the AI-workflow scaffold onto a public branch.
 - NEVER merge `main`/`slbm-paper`/`dev-*` into a public `release/*` branch without first stripping `.orchestrator/`. That merge is the one place the scaffold could leak.
+
+## 2026-05-29 — M1 (Modular architecture audit) DONE — GREEN
+
+Department classified all 99 `src/**/*.jl` files in `dev-viscoelastic`. Mandate §6 `_audit needed_` cells all filled (grep==0). Full table in `bench/scratch/m1_module_audit.md` (untracked scratch — `bench/` is NOT tracked on `slbm-paper`).
+
+Headline findings for downstream missions:
+- **28/99 files MIXED**, dominated (24) by **physics↔lbm-operator fusion** (constitutive math baked into collide kernels). Clean factoring seam already exists: `viscoelastic_spec.jl::AbstractPolymerModel`.
+- **11 files over the 700-LOC HARD ceiling**. Two trunk SPLIT candidates blocking modularity: `io/kraken_parser.jl` (2010 LOC), `simulation_runner.jl` (1843 LOC) — the latter also holds inflow/outflow BC inline.
+- **No `src/{bc,geometry,mesh,physics,backend,units,lbm}/` dirs exist yet** — every §6 target module is a net-new directory. M3/M4 (`src/units/`) is the first to create one.
+
+**Implication**: M12/M13 (per-module docs) and any future refactor must treat `AbstractPolymerModel` as the constitutive seam and budget SPLIT missions for `kraken_parser.jl` + `simulation_runner.jl` BEFORE relocating BC/IO into target dirs.
+
+## 2026-05-29 — Harness constraint: subagents cannot spawn sub-agents
+
+In this Claude Code harness a Department subagent has **no Agent/Task tool** — it cannot spawn an Engineer (Layer 2). For read-only / structural missions the Department executes the work itself within the allowed zone (acceptable). For code-heavy missions needing Codex, the Boss must run `run-engineer.sh` directly rather than routing through a Department spawn. Also: a long Department `Agent` call dropped on a socket error after ~7 min mid-flight; its on-disk prep survived and a fresh re-spawn (a "resume" brief noting prep already done) completed cheaply. Keep Department missions short or checkpoint to disk.
