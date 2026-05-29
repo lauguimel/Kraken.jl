@@ -190,9 +190,21 @@ Generic Zou-He velocity BC kernel for any face in D3Q19.
         f[i,j,k,face.q_axis] = f[i,j,k,face.q_axis_opp] -
                                 T(face.sign) * T(1.0/3.0) * ρ_wall * u_normal
 
-        # Read tangential population differences
-        tang1_diff = f[i,j,k,face.tang1_plus] - f[i,j,k,face.tang1_minus]
-        tang2_diff = f[i,j,k,face.tang2_plus] - f[i,j,k,face.tang2_minus]
+        # Net tangential momentum of the wall-parallel plane. The four parallel
+        # diagonal pops (parallel[6:9], the cz=0 / cx=0 / cy=0 diagonals) carry
+        # tangential momentum too and MUST be included — omitting them leaves a
+        # residual that makes the lid velocity overshoot
+        # (ux_lid = u_tang1 + (omitted diag momentum)/ρ; measured 1.608·u_lid at
+        # the D3Q19 top lid). The diagonal sign pattern is uniform across all 6
+        # faces: tang1 = +p6 - p7 + p8 - p9 ; tang2 = +p6 + p7 - p8 - p9.
+        d1 = f[i,j,k,face.parallel[6]]
+        d2 = f[i,j,k,face.parallel[7]]
+        d3 = f[i,j,k,face.parallel[8]]
+        d4 = f[i,j,k,face.parallel[9]]
+        tang1_diff = (f[i,j,k,face.tang1_plus] - f[i,j,k,face.tang1_minus]) +
+                     (d1 - d2 + d3 - d4)
+        tang2_diff = (f[i,j,k,face.tang2_plus] - f[i,j,k,face.tang2_minus]) +
+                     (d1 + d2 - d3 - d4)
 
         # Diagonal unknowns: 4 populations grouped in pairs
         # Pair 1 (tang1 plane): indices 1,2 in q_diag
