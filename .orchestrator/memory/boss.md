@@ -27,3 +27,21 @@ User initially asked for full thermal in ship-1, Department warned scope creep, 
 ## 2026-05-28 — Scope cuts ADR'd for ship-1
 
 Axisymmetric, backend module factoring, multiphase, AMR, STL — all deferred. Do not let any mission scope them in. If a brief touches any of these, refuse and re-scope.
+
+## 2026-05-29 — M2 executed; v0.2-architecture retirement REVERSED
+
+Retired `lbm` (local + `origin/lbm`) and `refinement-patches-dev` (both 0 unique commits). **Did NOT retire `dev/v0.2-architecture`** despite the 2026-05-28 ADR: inspection showed commit `74c39c633` carries `src/runtime_specs.jl` (502 LOC, "v0.2 runtime architecture skeleton: specs → lowering → plans" with typed lattice/BC/rheology/module/output codes) that exists on NO active branch. v0.3-campaign reused `axisymmetric.jl` but not `runtime_specs.jl` — so "superseded" was inaccurate.
+
+**Implication for M3 (units spec)**: `runtime_specs.jl` on `dev/v0.2-architecture` is a prior art design of the specs→lowering→plans pattern the `src/units/` SimulationPlanner targets. The M3 Department brief MUST include it as required reading (`git show dev/v0.2-architecture:src/runtime_specs.jl`) — do not re-derive what was already prototyped. Final disposition of the branch decided after M3.
+
+**Lesson**: ADR retirement premises ("superseded by X") must be verified by checking the unique commit content survives in X, not assumed. `git merge-base --is-ancestor` + per-file `git cat-file -e` on active branches before any `branch -d/-D`.
+
+## 2026-05-29 — `.orchestrator/` is LOCAL-ONLY — never push to a public branch
+
+`github.com:lauguimel/Kraken.jl` is a **PUBLIC** repo. The `.orchestrator/` scaffold (mandate, ship-plan, memory, resume-prompts) contains 50+ explicit Claude/Codex/Anthropic/Department/Engineer mentions → violates the confidentiality rule (no AI/LLM mentions in public-facing content).
+
+Task B (resume-prompts §B) cherry-picked `ec90389e7` onto **local** `main` (commit `0a5bcdb54`). Cross-worktree access works via the shared local object store — **no push required** and none was done. `origin/main` is intentionally stale (164 commits behind local main); publication goes through scrubbed `release/*` branches (worktree `Kraken-main` on `release/v0.1`), never `main`.
+
+**Guardrails**:
+- NEVER `git push origin main` without re-checking this — it would fast-forward all 164 private commits incl. the AI-workflow scaffold onto a public branch.
+- NEVER merge `main`/`slbm-paper`/`dev-*` into a public `release/*` branch without first stripping `.orchestrator/`. That merge is the one place the scaffold could leak.
