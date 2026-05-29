@@ -7,55 +7,6 @@ the specific intent of the session.
 
 ---
 
-## A. Branch cleanup (KRK-SHIP-001 M2 — retirements)
-
-```
-Nous sommes dans Kraken.jl. Per .orchestrator/mandate.md §4 ADR
-2026-05-28, trois branches sont approuvées pour retirement :
-- `lbm` (merged into main, 0 ahead)
-- `refinement-patches-dev` (merged, 0 ahead)
-- `dev/v0.2-architecture` (superseded by dev/v0.3-campaign)
-
-Tâche :
-1. Pour chaque branche, montre-moi `git log <branch> --not main --oneline`
-   pour confirmer qu'il n'y a rien d'unique à perdre, plus un récap court
-   des fichiers diff vs main.
-2. Confirme avec moi (AskUserQuestion) avant chaque `git branch -d`.
-3. Si la branche existe aussi en remote (`refs/remotes/origin/<branch>`),
-   demande séparément avant `git push origin --delete`.
-4. Après chaque suppression réussie, mets à jour .orchestrator/mandate.md
-   §5 Branch map (retire la ligne) et tick §8 si applicable.
-5. En fin, commit "chore: retire merged branches (KRK-SHIP-001 M2)".
-   Pas de push sans confirmation.
-
-Charge les skills `git-audit` et `kraken-architect`.
-```
-
----
-
-## B. Cherry-pick orchestrator scaffold to main
-
-```
-Nous sommes dans Kraken.jl. Le commit `ec90389e7` ("chore: bootstrap
-orchestrator pattern") existe sur `slbm-paper` et contient
-`.orchestrator/` (mandate + ship-plan + memory). Il doit aussi vivre sur
-`main` pour que tous les worktrees y aient accès.
-
-Tâche :
-1. Vérifie que main n'a pas déjà `.orchestrator/`
-   (`git show main:.orchestrator/mandate.md`).
-2. Crée un worktree temporaire de main :
-   `git worktree add /tmp/krk-main main`.
-3. Dans ce worktree, cherry-pick `ec90389e7`.
-4. Vérifie que `.orchestrator/mandate.md`, `ship-plan.md`, et
-   `memory/{boss,department,engineer}.md` sont bien présents.
-5. Cleanup : `git worktree remove /tmp/krk-main` UNIQUEMENT après que
-   le pick est confirmé propre.
-6. Pas de push automatique sur origin/main — demande avant.
-```
-
----
-
 ## C. Dispatch M1 du ship-plan (vraie première mission de code)
 
 ```
