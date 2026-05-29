@@ -7,24 +7,36 @@ the specific intent of the session.
 
 ---
 
-## Status (2026-05-29)
+## Status (2026-05-29, updated end-of-session)
 
 KRK-SHIP-001 progress: **M1 ✅** (module audit — mandate §6 filled),
 **M2 ✅** (`lbm` + `refinement-patches-dev` retired; `dev/v0.2-architecture`
-kept), **M3 ✅** (units spec frozen — `docs/spec/units-v1.md` on
-`dev/units-module`). Phase A + Phase-B spec done.
+kept), **M3 ✅** (units spec frozen, `docs/spec/units-v1.md`),
+**M4 ✅** (units Phase 1 Newt+VE — 165 tests), **M5 ✅** (units Thermal-Boussinesq
+Phase 2 — 277 tests, zero-edit contract §7 PROVEN). **Phase A + Phase B (units
+module) COMPLETE.** All on `dev/units-module`
+(`/Users/guillaume/Documents/Recherche/Kraken.jl-units`), local commits, no push.
 
-**Next dispatchable: M4** — implement `src/units/` Phase 1 (Newtonian + VE)
-from the frozen spec. Code-heavy Julia → **Codex** mission (use prompt **E**
-with `M<N> = M4`), runs on the `dev/units-module` worktree
-(`/Users/guillaume/Documents/Recherche/Kraken.jl-units`). M4 required reading:
-`docs/spec/units-v1.md` AND `dev/v0.2-architecture:src/runtime_specs.jl`
-(prior art). **Canonical mandate lives on `slbm-paper`** — read it from
+**Next dispatchable — Phase C benchmarks (all unblocked)**:
+- **M6** RheoTool Cartesian cavity (icoFoam, Re=100/400/1000) — Validate,
+  `claude-subagent` + `sim-openfoam`/`sim-rheotool`, HPC via `pbs` if needed. Dep M4 ✓.
+- **M7** RheoTool thermal Rayleigh-Bénard (buoyantBoussinesqPimpleFoam, Ra 1e3-1e5) — dep M5 ✓.
+- **M8** RheoTool viscoelastic cylinder (rheoFoam Oldroyd-B, Wi 0.1/0.5/1.0) — dep M4 ✓.
+Also available: **driver-integration** (wire `driver_kwargs(plan)` into a real
+driver + Cd/Nu repro — the deferred part of M4/M5; needs a VE/thermal-carrying
+branch → touches the merge debt), and **M9–M13** tri-track docs.
+
+**For ANY units follow-up**: the module lives on `dev/units-module`; 277 tests
+green via `julia --project=. -e 'using Pkg; Pkg.test(; test_args=["units"])'`.
+**Canonical mandate lives on `slbm-paper`** — read it from
 `/Users/guillaume/Documents/Recherche/Kraken.jl/.orchestrator/`, never from a
-sibling worktree's stale `.orchestrator` copy (3 divergent copies exist).
+sibling worktree's stale `.orchestrator` copy (3 divergent copies — consolidation
+is a deferred mission).
 
-Prompts A (M2), B (cherry-pick), C (M1 dispatch) are **DONE** and have been
-retired. D (generic resume) and E (Codex relay) remain — both reusable.
+Prompts A (M2), B (cherry-pick), C (M1) are **DONE** and retired. D (generic
+resume), E (Codex relay, used for M4+M5) remain — both reusable. M6/M7/M8 are
+`claude-subagent` Validate missions (NOT Codex) — use prompt D to re-orient, then
+draft a Department brief per the orchestrator skill with `sim-rheotool` loaded.
 
 ---
 
