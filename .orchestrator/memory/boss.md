@@ -70,6 +70,16 @@ Spec covers §0–§10: API surface (`compile`/`audit`/`driver_kwargs`/`report` 
 
 **M4 dispatch note**: runner `codex` (kraken-branch-governor + kraken-codebase-map), deps M3 done. Brief must point at `docs/spec/units-v1.md` AND `dev/v0.2-architecture:src/runtime_specs.jl` (prior art) as required reading. Work happens on `dev/units-module` worktree.
 
+## 2026-05-29 — M4 (units Phase 1 impl) DONE — GREEN
+
+`src/units/` implemented on `dev/units-module` (commit `36e59adc6`), 15 source files (1149 LOC, all under 500/700), 4 test suites, .krk fixture, runtests `test_args=["units"]` dispatch, branch_contract. Codex pilot (kraken-branch-governor + kraken-resource-integrator). **165/165 tests green — re-run independently by Boss, not trusted from Codex.** Closes Phase B.
+
+Verified non-tautological: M61 diffusive parity (τ=0.95, ν=0.15 at R∈{10,30,50}), round-trip 1e-12, strict/lenient raises, M59-B U-shape + M48 toggle audit codes fire, .krk dual-syntax parity.
+
+**For M5 (thermal Phase-2)**: the zero-edit contract (spec §7) is the gate. M5 edits ONLY `src/units/physics/thermal.jl` (un-stub) + new `test/test_units_thermal.jl`. The §8.t proof = snapshot a Phase-1 VE plan, load thermal-concrete, recompute → assert bit-identical `units` + identical Issue.code set. `ThermalBoussinesqSpec` is already pre-declared in `Units.jl` + pre-registered in `PHYSICS_REGISTRY` (Codex shipped the seam). Codex resolved one M4 ambiguity: used §3.6 max-step formula over the PBS fixed-step note — re-confirm this doesn't bite thermal stability predicates.
+
+**Codex pilot mechanics that worked**: brief at `<worktree>/.codex_brief.md`, `pilot.sh <wt> M4 --add-dir <sibling>` for cross-worktree reference reads (M48/M61 values on dev-viscoelastic), background launch, ~tens of min for a 1149-LOC + 165-test mission. The spec being frozen first (M3) made M4 a clean single-pass GREEN — spec-then-impl two-mission split paid off.
+
 ## 2026-05-29 — .orchestrator divergence DEBT (3 copies)
 
 Three `.orchestrator/` copies now exist: **slbm-paper = CANONICAL** (freshest: M1 §6 patch, M2/M3 ADRs, all boss notes), `main`/`dev/units-module` = bootstrap version (`0a5bcdb54`, stale), `dev-viscoelastic` = yet another older copy. Departments MUST read the mandate slice from the slbm-paper worktree (`/Users/guillaume/Documents/Recherche/Kraken.jl/.orchestrator/`), never from a sibling worktree's copy. Consolidation (single source) is a deferred mission — for now the Boss writes only the slbm-paper copy. Deliverables (specs/code) land on their feature branch; mandate/ADR/memory stay canonical on slbm-paper.
