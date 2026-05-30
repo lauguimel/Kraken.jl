@@ -1,39 +1,5 @@
-# CPU-only population halo for the D3Q19 pull brick's eager edge reads.
-struct _CPUHaloArray4{T,A<:AbstractArray{T,4}} <: AbstractArray{T,4}
-    data::A
-    nx::Int
-    ny::Int
-    nz::Int
-    nq::Int
-end
-
-Base.IndexStyle(::Type{<:_CPUHaloArray4}) = IndexCartesian()
-Base.size(A::_CPUHaloArray4) = (A.nx + 2, A.ny + 2, A.nz + 2, A.nq)
-Base.axes(A::_CPUHaloArray4) = (0:(A.nx + 1), 0:(A.ny + 1),
-                                0:(A.nz + 1), 1:A.nq)
-Base.getindex(A::_CPUHaloArray4, i::Int, j::Int, k::Int, q::Int) =
-    A.data[i + 1, j + 1, k + 1, q]
-function Base.setindex!(A::_CPUHaloArray4, v, i::Int, j::Int, k::Int, q::Int)
-    A.data[i + 1, j + 1, k + 1, q] = v
-    return v
-end
-KernelAbstractions.get_backend(::_CPUHaloArray4) = KernelAbstractions.CPU()
-
-function _allocate_libb_f_3d(backend, ::Type{T}, Nx, Ny, Nz) where T
-    if backend isa KernelAbstractions.CPU
-        return _CPUHaloArray4(zeros(T, Nx + 2, Ny + 2, Nz + 2, 19),
-                              Nx, Ny, Nz, 19)
-    end
-    return KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19)
-end
-
-function _copy_libb_f_in!(dest::_CPUHaloArray4, src)
-    @inbounds for q in 1:19, k in 1:dest.nz, j in 1:dest.ny, i in 1:dest.nx
-        dest[i, j, k, q] = src[i, j, k, q]
-    end
-    return dest
-end
-_copy_libb_f_in!(dest, src) = copyto!(dest, src)
+# Plain backend allocation: the D3Q19 pull brick (PullHalfwayBB_3D) clamps its
+# eager-ifelse neighbour reads, so f_in/f_out need no halo padding on CPU.
 
 function _libb_pressure_value_3d(bc, ::Type{T}) where T
     if haskey(bc.values, :rho)
@@ -156,8 +122,8 @@ function run_obstacle_libb_3d(setup;
     uw_x = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19)
     uw_y = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19)
     uw_z = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19)
-    f_in = _allocate_libb_f_3d(backend, T, Nx, Ny, Nz)
-    f_out = _allocate_libb_f_3d(backend, T, Nx, Ny, Nz)
+    f_in = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19)
+    f_out = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz, 19)
     ρ = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
     ux = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
     uy = KernelAbstractions.allocate(backend, T, Nx, Ny, Nz)
@@ -166,7 +132,7 @@ function run_obstacle_libb_3d(setup;
     copyto!(q_wall, q_wall_h)
     copyto!(is_solid, is_solid_h)
     fill!(uw_x, zero(T)); fill!(uw_y, zero(T)); fill!(uw_z, zero(T))
-    _copy_libb_f_in!(f_in, f_in_h)
+    copyto!(f_in, f_in_h)
     fill!(ρ, one(T)); fill!(ux, zero(T))
     fill!(uy, zero(T)); fill!(uz, zero(T))
 
@@ -177,13 +143,17 @@ function run_obstacle_libb_3d(setup;
     Fz_sum = 0.0
     n_avg = 0
 
-    for _ in 1:setup.max_steps
+    # Drag is averaged over the final window only (steady-state estimate).
+    # Computing it every step would launch an extra reduction kernel per
+    # step for no benefit; mirrors run_sphere_libb_3d's avg_window pattern.
+    avg_window = max(1, setup.max_steps ÷ 5)
+    for step in 1:setup.max_steps
         fused_trt_libb_v2_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
                                     q_wall, uw_x, uw_y, uw_z,
                                     Nx, Ny, Nz, ν)
         apply_bc_rebuild_3d!(f_out, f_in, bcspec, ν, Nx, Ny, Nz)
 
-        if !(f_out isa _CPUHaloArray4)
+        if step > setup.max_steps - avg_window
             drag = compute_drag_libb_3d(f_out, q_wall, Nx, Ny, Nz)
             Fx_sum += drag.Fx
             Fy_sum += drag.Fy

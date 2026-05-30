@@ -50,29 +50,35 @@ struct PullHalfwayBB_3D <: LBMBrick end
 required_args(::PullHalfwayBB_3D) = (:f_in, :Nx, :Ny, :Nz)
 phase(::PullHalfwayBB_3D) = :pre_solid
 emit_code(::PullHalfwayBB_3D) = quote
+    # Neighbour indices are clamped (min/max) so the EAGER ifelse branch
+    # (Julia `ifelse` evaluates BOTH arms) never reads out of bounds at a
+    # domain edge — without the clamp, `f_in[i-1,...]` at i=1 segfaults
+    # under `@inbounds` on CPU. The clamp only changes the address of the
+    # DISCARDED arm, never the selected result → bit-identical to the
+    # unclamped form. Mirrors the 2D `PullHalfwayBB` brick.
     fp1  = f_in[i, j, k, 1]
     # Axis-aligned
-    fp2  = ifelse(i > 1,              f_in[i-1, j,   k,   2],  f_in[i, j, k, 3])
-    fp3  = ifelse(i < Nx,             f_in[i+1, j,   k,   3],  f_in[i, j, k, 2])
-    fp4  = ifelse(j > 1,              f_in[i,   j-1, k,   4],  f_in[i, j, k, 5])
-    fp5  = ifelse(j < Ny,             f_in[i,   j+1, k,   5],  f_in[i, j, k, 4])
-    fp6  = ifelse(k > 1,              f_in[i,   j,   k-1, 6],  f_in[i, j, k, 7])
-    fp7  = ifelse(k < Nz,             f_in[i,   j,   k+1, 7],  f_in[i, j, k, 6])
+    fp2  = ifelse(i > 1,              f_in[max(i-1,1),  j,            k,            2],  f_in[i, j, k, 3])
+    fp3  = ifelse(i < Nx,             f_in[min(i+1,Nx), j,            k,            3],  f_in[i, j, k, 2])
+    fp4  = ifelse(j > 1,              f_in[i,           max(j-1,1),   k,            4],  f_in[i, j, k, 5])
+    fp5  = ifelse(j < Ny,             f_in[i,           min(j+1,Ny),  k,            5],  f_in[i, j, k, 4])
+    fp6  = ifelse(k > 1,              f_in[i,           j,            max(k-1,1),   6],  f_in[i, j, k, 7])
+    fp7  = ifelse(k < Nz,             f_in[i,           j,            min(k+1,Nz),  7],  f_in[i, j, k, 6])
     # Edge xy: 8(+x+y), 9(-x+y), 10(+x-y), 11(-x-y)
-    fp8  = ifelse(i > 1  && j > 1,    f_in[i-1, j-1, k,   8],  f_in[i, j, k, 11])
-    fp9  = ifelse(i < Nx && j > 1,    f_in[i+1, j-1, k,   9],  f_in[i, j, k, 10])
-    fp10 = ifelse(i > 1  && j < Ny,   f_in[i-1, j+1, k,   10], f_in[i, j, k, 9])
-    fp11 = ifelse(i < Nx && j < Ny,   f_in[i+1, j+1, k,   11], f_in[i, j, k, 8])
+    fp8  = ifelse(i > 1  && j > 1,    f_in[max(i-1,1),  max(j-1,1),   k,            8],  f_in[i, j, k, 11])
+    fp9  = ifelse(i < Nx && j > 1,    f_in[min(i+1,Nx), max(j-1,1),   k,            9],  f_in[i, j, k, 10])
+    fp10 = ifelse(i > 1  && j < Ny,   f_in[max(i-1,1),  min(j+1,Ny),  k,            10], f_in[i, j, k, 9])
+    fp11 = ifelse(i < Nx && j < Ny,   f_in[min(i+1,Nx), min(j+1,Ny),  k,            11], f_in[i, j, k, 8])
     # Edge xz: 12(+x+z), 13(-x+z), 14(+x-z), 15(-x-z)
-    fp12 = ifelse(i > 1  && k > 1,    f_in[i-1, j,   k-1, 12], f_in[i, j, k, 15])
-    fp13 = ifelse(i < Nx && k > 1,    f_in[i+1, j,   k-1, 13], f_in[i, j, k, 14])
-    fp14 = ifelse(i > 1  && k < Nz,   f_in[i-1, j,   k+1, 14], f_in[i, j, k, 13])
-    fp15 = ifelse(i < Nx && k < Nz,   f_in[i+1, j,   k+1, 15], f_in[i, j, k, 12])
+    fp12 = ifelse(i > 1  && k > 1,    f_in[max(i-1,1),  j,            max(k-1,1),   12], f_in[i, j, k, 15])
+    fp13 = ifelse(i < Nx && k > 1,    f_in[min(i+1,Nx), j,            max(k-1,1),   13], f_in[i, j, k, 14])
+    fp14 = ifelse(i > 1  && k < Nz,   f_in[max(i-1,1),  j,            min(k+1,Nz),  14], f_in[i, j, k, 13])
+    fp15 = ifelse(i < Nx && k < Nz,   f_in[min(i+1,Nx), j,            min(k+1,Nz),  15], f_in[i, j, k, 12])
     # Edge yz: 16(+y+z), 17(-y+z), 18(+y-z), 19(-y-z)
-    fp16 = ifelse(j > 1  && k > 1,    f_in[i,   j-1, k-1, 16], f_in[i, j, k, 19])
-    fp17 = ifelse(j < Ny && k > 1,    f_in[i,   j+1, k-1, 17], f_in[i, j, k, 18])
-    fp18 = ifelse(j > 1  && k < Nz,   f_in[i,   j-1, k+1, 18], f_in[i, j, k, 17])
-    fp19 = ifelse(j < Ny && k < Nz,   f_in[i,   j+1, k+1, 19], f_in[i, j, k, 16])
+    fp16 = ifelse(j > 1  && k > 1,    f_in[i,           max(j-1,1),   max(k-1,1),   16], f_in[i, j, k, 19])
+    fp17 = ifelse(j < Ny && k > 1,    f_in[i,           min(j+1,Ny),  max(k-1,1),   17], f_in[i, j, k, 18])
+    fp18 = ifelse(j > 1  && k < Nz,   f_in[i,           max(j-1,1),   min(k+1,Nz),  18], f_in[i, j, k, 17])
+    fp19 = ifelse(j < Ny && k < Nz,   f_in[i,           min(j+1,Ny),  min(k+1,Nz),  19], f_in[i, j, k, 16])
 end
 
 "Solid cells are INERT: rest-equilibrium populations on D3Q19."
