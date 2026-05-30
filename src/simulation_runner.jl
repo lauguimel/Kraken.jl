@@ -150,6 +150,7 @@ function run_simulation(setup::SimulationSetup;
 
     # --- Apply geometry ---
     _apply_geometry!(is_solid, setup, dx, dy)
+    stl_libb = _has_stl_libb_obstacle(setup)
 
     # --- Apply initial conditions ---
     if setup.initial !== nothing
@@ -187,9 +188,23 @@ function run_simulation(setup::SimulationSetup;
             Fy_field .= Fy_val
         end
     end
+    if stl_libb && (has_body_force || has_rheology)
+        error("STL wall=libb in the generic .krk runner supports only Newtonian flow without body force")
+    end
 
     # --- Build boundary handlers ---
     bc_handlers = _build_boundary_handlers(setup, dx, dy, Nx, Ny, T, backend)
+    libb_q_wall = nothing
+    libb_uw_x = nothing
+    libb_uw_y = nothing
+    libb_bcspec = nothing
+    if stl_libb
+        q_wall_cpu = _precompute_stl_libb_q_wall_2d(Array(is_solid), setup, dx, dy, T)
+        libb_q_wall = _copy_to_backend(backend, T, q_wall_cpu)
+        libb_uw_x = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+        libb_uw_y = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+        libb_bcspec = _build_libb_bc_rebuild_spec_2d(setup, dx, dy, Nx, Ny, T, backend)
+    end
 
     # --- Setup output ---
     vtk_out = _find_output(setup, :vtk)
@@ -208,29 +223,38 @@ function run_simulation(setup::SimulationSetup;
 
     # --- Time loop ---
     for step in 1:setup.max_steps
-        # 1. Stream
-        stream_fn!(f_out, f_in, Nx, Ny)
-
-        # 2. Apply boundary conditions
-        _apply_boundary_conditions!(f_out, bc_handlers, step, Nx, Ny, dx, dy, dom, T)
-
-        # 3. Collide
-        if has_rheology && has_body_force
-            collide_rheology_guo_2d!(f_out, is_solid, rheology_model, tau_field,
-                                      Fx_field, Fy_field)
-        elseif has_rheology
-            collide_rheology_2d!(f_out, is_solid, rheology_model, tau_field)
-        elseif has_body_force
-            collide_guo_2d!(f_out, is_solid, ω, Fx_val, Fy_val)
+        if stl_libb
+            # Fused TRT LI-BB performs pull-streaming, wall treatment, collision,
+            # and moment writes. Face BCs are rebuilt from f_in afterwards.
+            fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                     libb_q_wall, libb_uw_x, libb_uw_y,
+                                     Nx, Ny, T(ν))
+            apply_bc_rebuild_2d!(f_out, f_in, libb_bcspec, ν, Nx, Ny)
         else
-            collide_2d!(f_out, is_solid, ω)
-        end
+            # 1. Stream
+            stream_fn!(f_out, f_in, Nx, Ny)
 
-        # 4. Macroscopic quantities
-        if has_body_force
-            compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, Fx_val, Fy_val)
-        else
-            compute_macroscopic_2d!(ρ, ux, uy, f_out)
+            # 2. Apply boundary conditions
+            _apply_boundary_conditions!(f_out, bc_handlers, step, Nx, Ny, dx, dy, dom, T)
+
+            # 3. Collide
+            if has_rheology && has_body_force
+                collide_rheology_guo_2d!(f_out, is_solid, rheology_model, tau_field,
+                                          Fx_field, Fy_field)
+            elseif has_rheology
+                collide_rheology_2d!(f_out, is_solid, rheology_model, tau_field)
+            elseif has_body_force
+                collide_guo_2d!(f_out, is_solid, ω, Fx_val, Fy_val)
+            else
+                collide_2d!(f_out, is_solid, ω)
+            end
+
+            # 4. Macroscopic quantities
+            if has_body_force
+                compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, Fx_val, Fy_val)
+            else
+                compute_macroscopic_2d!(ρ, ux, uy, f_out)
+            end
         end
 
         # 5. Swap
@@ -1223,6 +1247,143 @@ function _build_boundary_handlers(setup::SimulationSetup, dx, dy, Nx, Ny, ::Type
     end
 
     return handlers
+end
+
+function _has_stl_libb_obstacle(setup::SimulationSetup)
+    return any(r -> r.stl !== nothing && r.bc_type === :libb, setup.regions)
+end
+
+function _halfway_q_wall_from_mask_2d(is_solid_cpu::AbstractArray{Bool},
+                                      ::Type{T}) where T
+    Nx, Ny = size(is_solid_cpu)
+    q_wall = zeros(T, Nx, Ny, 9)
+    cxs = velocities_x(D2Q9())
+    cys = velocities_y(D2Q9())
+    half = T(0.5)
+
+    @inbounds for j in 1:Ny, i in 1:Nx
+        is_solid_cpu[i, j] && continue
+        for q in 2:9
+            ni = i + Int(cxs[q])
+            nj = j + Int(cys[q])
+            if 1 <= ni <= Nx && 1 <= nj <= Ny && is_solid_cpu[ni, nj]
+                q_wall[i, j, q] = half
+            end
+        end
+    end
+    return q_wall
+end
+
+function _precompute_stl_libb_q_wall_2d(is_solid_cpu::AbstractArray{Bool},
+                                        setup::SimulationSetup, dx, dy,
+                                        ::Type{T}) where T
+    Nx, Ny = setup.domain.Nx, setup.domain.Ny
+    q_wall = _halfway_q_wall_from_mask_2d(is_solid_cpu, T)
+
+    for region in setup.regions
+        (region.stl !== nothing && region.bc_type === :libb) || continue
+        region.kind == :obstacle || throw(ArgumentError(
+            "wall=libb is only supported on STL Obstacle regions"))
+
+        stl_src = region.stl
+        mesh = read_stl(stl_src.file)
+        if stl_src.scale != 1.0 || stl_src.translate != (0.0, 0.0, 0.0)
+            mesh = transform_mesh(mesh; scale=stl_src.scale,
+                                  translate=stl_src.translate)
+        end
+        q_stl, _ = precompute_q_wall_from_stl_2d(mesh, Nx, Ny, dx, dy;
+                                                 z_slice=stl_src.z_slice,
+                                                 FT=T, sub_cell=true)
+        @inbounds for q in 2:9, j in 1:Ny, i in 1:Nx
+            if q_stl[i, j, q] > zero(T) && q_wall[i, j, q] > zero(T)
+                q_wall[i, j, q] = q_stl[i, j, q]
+            end
+        end
+    end
+
+    any(x -> x != zero(T), q_wall) || throw(ArgumentError(
+        "wall=libb was selected, but no fluid-solid cut links were found"))
+    return q_wall
+end
+
+function _libb_velocity_profile_host(bc::BoundarySetup, setup::SimulationSetup,
+                                     dx, dy, Nx, Ny, ::Type{T}) where T
+    if any(is_time_dependent, values(bc.values))
+        throw(ArgumentError("time-dependent velocity BCs are not supported with STL wall=libb"))
+    end
+
+    dom = setup.domain
+    if bc.face in (:west, :east)
+        profile = zeros(T, Ny)
+        x_val = bc.face == :west ? dx / 2 : dom.Lx - dx / 2
+        for j in 1:Ny
+            y_val = (j - 0.5) * dy
+            kw = (; x=x_val, y=y_val, Lx=dom.Lx, Ly=dom.Ly,
+                    Nx=Float64(Nx), Ny=Float64(Ny), dx=dx, dy=dy, t=0.0)
+            profile[j] = haskey(bc.values, :ux) ?
+                T(evaluate(bc.values[:ux]; kw...)) : zero(T)
+        end
+    elseif bc.face in (:south, :north)
+        profile = zeros(T, Nx)
+        y_val = bc.face == :south ? dy / 2 : dom.Ly - dy / 2
+        for i in 1:Nx
+            x_val = (i - 0.5) * dx
+            kw = (; x=x_val, y=y_val, Lx=dom.Lx, Ly=dom.Ly,
+                    Nx=Float64(Nx), Ny=Float64(Ny), dx=dx, dy=dy, t=0.0)
+            profile[i] = haskey(bc.values, :uy) ?
+                T(evaluate(bc.values[:uy]; kw...)) : zero(T)
+        end
+    else
+        throw(ArgumentError("Boundary face ':$(bc.face)' is not valid for 2D STL wall=libb"))
+    end
+    return profile
+end
+
+function _libb_pressure_value(bc::BoundarySetup, ::Type{T}) where T
+    if haskey(bc.values, :rho)
+        expr = bc.values[:rho]
+        (is_spatial(expr) || is_time_dependent(expr)) && throw(ArgumentError(
+            "spatial or time-dependent pressure BCs are not supported with STL wall=libb"))
+        return T(evaluate(expr; t=0.0))
+    end
+    return one(T)
+end
+
+function _build_libb_bc_rebuild_spec_2d(setup::SimulationSetup, dx, dy,
+                                        Nx, Ny, ::Type{T}, backend) where T
+    west = HalfwayBB()
+    east = HalfwayBB()
+    south = HalfwayBB()
+    north = HalfwayBB()
+
+    for bc in setup.boundaries
+        face_bc = if bc.type == :wall
+            HalfwayBB()
+        elseif bc.type == :velocity
+            profile = _libb_velocity_profile_host(bc, setup, dx, dy, Nx, Ny, T)
+            ZouHeVelocity(_copy_to_backend(backend, T, profile))
+        elseif bc.type == :pressure
+            ZouHePressure(_libb_pressure_value(bc, T))
+        elseif bc.type == :periodic
+            throw(ArgumentError("periodic domain boundaries are not supported with STL wall=libb"))
+        else
+            throw(ArgumentError("Boundary type ':$(bc.type)' is not supported with STL wall=libb"))
+        end
+
+        if bc.face == :west
+            west = face_bc
+        elseif bc.face == :east
+            east = face_bc
+        elseif bc.face == :south
+            south = face_bc
+        elseif bc.face == :north
+            north = face_bc
+        else
+            throw(ArgumentError("Boundary face ':$(bc.face)' is not valid for 2D STL wall=libb"))
+        end
+    end
+
+    return BCSpec2D(; west=west, east=east, south=south, north=north)
 end
 
 """Fill BC arrays with spatial profile for a given face."""

@@ -567,7 +567,7 @@ function _parse_define(line::String)
     return key, val
 end
 
-"""Parse: Obstacle <name> [wall(...)] { <condition> }"""
+"""Parse: Obstacle <name> [wall(...)] { <condition> } or stl(..., wall=libb)"""
 function _parse_obstacle(line::String, user_vars::Dict{Symbol,Float64})
     return _parse_geometry_region(line, :obstacle, user_vars)
 end
@@ -686,6 +686,13 @@ function _parse_geometry_region(line::String, kind::Symbol, user_vars::Dict{Symb
     # Check for wall(...) with properties
     bc_type = :wall
     bc_values = Dict{Symbol, KrakenExpr}()
+    wall_type_m = match(r"\bwall\s*=\s*(\w+)", line)
+    if wall_type_m !== nothing
+        wall_type = Symbol(wall_type_m.captures[1])
+        wall_type in (:wall, :libb) || throw(ArgumentError(
+            "Unknown obstacle wall selector '$wall_type'. Expected wall or libb."))
+        bc_type = wall_type
+    end
     wall_m = match(r"wall\(([^)]+)\)", line)
     if wall_m !== nothing
         for param_m in eachmatch(r"(\w+)\s*=\s*([^,)]+)", wall_m.captures[1])
@@ -2083,4 +2090,3 @@ function _preset_lines(name::AbstractString)
     end
     return String[]
 end
-
