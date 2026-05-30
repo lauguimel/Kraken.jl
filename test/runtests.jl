@@ -22,6 +22,7 @@ using Kraken
     include("test_simulation_runner.jl")
     include("test_stl.jl")
     include("test_geometry_stl_krk.jl")
+    include("test_geometry_descriptor.jl")
     include("test_krk_examples.jl")
     include("test_refinement.jl")
     include("test_conservative_tree_2d.jl")

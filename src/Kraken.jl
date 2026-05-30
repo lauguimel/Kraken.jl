@@ -97,6 +97,10 @@ include("curvilinear/mesh_gmsh.jl")
 # --- Multi-block structured (v0.3) ---
 include("multiblock/multiblock.jl")
 
+# --- Parser ---
+include("io/expression.jl")
+include("io/kraken_parser.jl")
+
 # --- Grid refinement ---
 include("refinement/refinement.jl")
 include("refinement/conservative_tree_2d.jl")
@@ -120,19 +124,17 @@ include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
 include("kernels/refinement_exchange_3d.jl")
 include("refinement/refinement_3d.jl")
+include("refinement/conservative_tree_krk_validation_2d.jl")
 
 # --- I/O ---
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
-include("io/expression.jl")
-include("io/stl_reader.jl")
-include("io/voxelizer.jl")
-include("io/stl_libb.jl")
-include("io/kraken_parser.jl")
-include("refinement/conservative_tree_krk_validation_2d.jl")
 
 # --- Spatial boundary kernels ---
 include("kernels/boundary_spatial_2d.jl")
+
+# --- Geometry ---
+include("geometry/Geometry.jl")
 
 # --- Generic simulation runner ---
 include("simulation_runner.jl")
