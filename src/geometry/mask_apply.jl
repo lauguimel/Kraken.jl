@@ -45,6 +45,15 @@ function _voxelize_stl_region(stl_src::STLSource, Nx, Ny, dx, dy)
     return voxelize_2d(mesh, Nx, Ny, dx, dy; z_slice=stl_src.z_slice)
 end
 
+"""Load and voxelize an STL file for a 3D simulation."""
+function _voxelize_stl_region_3d(stl_src::STLSource, Nx, Ny, Nz, dx)
+    mesh = read_stl(stl_src.file)
+    if stl_src.scale != 1.0 || stl_src.translate != (0.0, 0.0, 0.0)
+        mesh = transform_mesh(mesh; scale=stl_src.scale, translate=stl_src.translate)
+    end
+    return voxelize_3d(mesh, Nx, Ny, Nz, dx, dx, dx)
+end
+
 # --- 3D geometry helpers ---
 
 """Evaluate obstacle geometry on 3D grid."""
@@ -58,18 +67,28 @@ function _apply_geometry_3d!(is_solid, setup::SimulationSetup, dx::Float64)
     solid_cpu = has_fluid_region ? ones(Bool, Nx, Ny, Nz) : zeros(Bool, Nx, Ny, Nz)
 
     for region in setup.regions
-        region.stl !== nothing && continue
-        region.condition === nothing && continue
-        for k in 1:Nz, j in 1:Ny, i in 1:Nx
-            x = (i - 0.5) * dx
-            y = (j - 0.5) * dx
-            z = (k - 0.5) * dx
-            result = evaluate(region.condition; x=x, y=y, z=z,
-                             Lx=Lx, Ly=Ly, Lz=Lz, dx=dx, dy=dx, dz=dx)
-            if region.kind == :fluid && result
-                solid_cpu[i, j, k] = false
-            elseif region.kind == :obstacle && result
-                solid_cpu[i, j, k] = true
+        if region.stl !== nothing
+            stl_mask = _voxelize_stl_region_3d(region.stl, Nx, Ny, Nz, dx)
+            for k in 1:Nz, j in 1:Ny, i in 1:Nx
+                if region.kind == :fluid && stl_mask[i, j, k]
+                    solid_cpu[i, j, k] = false
+                elseif region.kind == :obstacle && stl_mask[i, j, k]
+                    solid_cpu[i, j, k] = true
+                end
+            end
+        else
+            region.condition === nothing && continue
+            for k in 1:Nz, j in 1:Ny, i in 1:Nx
+                x = (i - 0.5) * dx
+                y = (j - 0.5) * dx
+                z = (k - 0.5) * dx
+                result = evaluate(region.condition; x=x, y=y, z=z,
+                                 Lx=Lx, Ly=Ly, Lz=Lz, dx=dx, dy=dx, dz=dx)
+                if region.kind == :fluid && result
+                    solid_cpu[i, j, k] = false
+                elseif region.kind == :obstacle && result
+                    solid_cpu[i, j, k] = true
+                end
             end
         end
     end
