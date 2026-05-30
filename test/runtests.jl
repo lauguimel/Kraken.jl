@@ -25,6 +25,7 @@ using Kraken
     include("test_geometry_descriptor.jl")
     include("test_geometry_units_krk.jl")
     include("test_geometry_units_3d_krk.jl")
+    include("test_geometry_stl_flow_3d_krk.jl")
     include("test_krk_examples.jl")
     include("test_refinement.jl")
     include("test_conservative_tree_2d.jl")

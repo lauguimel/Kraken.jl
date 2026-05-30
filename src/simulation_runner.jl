@@ -1790,7 +1790,10 @@ function _run_d3q19(setup::SimulationSetup;
     name = lowercase(setup.name)
     dom  = setup.domain
     ν    = setup.physics.params[:nu]
-    if occursin("cavity_3d", name) || occursin("cavity3d", name)
+    if _has_stl_libb_obstacle(setup)
+        result = run_obstacle_libb_3d(setup; backend=backend, T=T)
+        return merge(result, (setup=setup,))
+    elseif occursin("cavity_3d", name) || occursin("cavity3d", name)
         # Look for a velocity BC on top/north for u_lid; default to 0.1.
         u_lid = 0.1
         for b in setup.boundaries

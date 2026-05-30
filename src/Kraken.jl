@@ -135,6 +135,7 @@ include("kernels/boundary_spatial_2d.jl")
 
 # --- Geometry ---
 include("geometry/Geometry.jl")
+include("drivers/obstacle_3d.jl")
 
 # --- Generic simulation runner ---
 include("simulation_runner.jl")

@@ -54,3 +54,41 @@ function _precompute_stl_libb_q_wall_2d(is_solid_cpu::AbstractArray{Bool},
         "wall=libb was selected, but no fluid-solid cut links were found"))
     return q_wall
 end
+
+function _precompute_stl_libb_q_wall_3d(is_solid_cpu::AbstractArray{Bool},
+                                        setup::SimulationSetup, dx,
+                                        ::Type{T}) where T
+    Nx, Ny, Nz = setup.domain.Nx, setup.domain.Ny, setup.domain.Nz
+    expected_size = (Nx, Ny, Nz)
+    size(is_solid_cpu) == expected_size || throw(ArgumentError(
+        "3D LI-BB solid mask size $(size(is_solid_cpu)) does not match domain $(expected_size)"))
+    q_wall = zeros(T, Nx, Ny, Nz, 19)
+
+    for region in setup.regions
+        (region.stl !== nothing && region.bc_type === :libb) || continue
+        region.kind == :obstacle || throw(ArgumentError(
+            "wall=libb is only supported on STL Obstacle regions"))
+
+        stl_src = region.stl
+        mesh = read_stl(stl_src.file)
+        if stl_src.scale != 1.0 || stl_src.translate != (0.0, 0.0, 0.0)
+            mesh = transform_mesh(mesh; scale=stl_src.scale,
+                                  translate=stl_src.translate)
+        end
+        q_stl, _ = precompute_q_wall_from_stl_3d(mesh, Nx, Ny, Nz,
+                                                 dx, dx, dx;
+                                                 FT=T, sub_cell=true)
+        @inbounds for q in 2:19, k in 1:Nz, j in 1:Ny, i in 1:Nx
+            if q_stl[i, j, k, q] > zero(T)
+                if q_wall[i, j, k, q] == zero(T) ||
+                   q_stl[i, j, k, q] < q_wall[i, j, k, q]
+                    q_wall[i, j, k, q] = q_stl[i, j, k, q]
+                end
+            end
+        end
+    end
+
+    any(x -> x != zero(T), q_wall) || throw(ArgumentError(
+        "wall=libb was selected, but no fluid-solid cut links were found"))
+    return q_wall
+end
