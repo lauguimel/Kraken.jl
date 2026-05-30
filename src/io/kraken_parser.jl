@@ -25,6 +25,23 @@ struct PhysicsSetup
 end
 
 """
+    UnitsSetup
+
+Physical-to-LU bridge parsed from a `.krk` `Units { ... }` block.
+`L_ref` and `R_LU` are the same characteristic length; the STL example uses
+the cylinder radius, so `dx_real = L_ref / R_LU` has no hidden factor of two.
+"""
+struct UnitsSetup
+    length::Symbol
+    L_ref::Float64
+    R_LU::Int
+    Re::Float64
+    scaling::Symbol
+    L_up::Float64
+    L_down::Float64
+end
+
+"""
     STLSource
 
 Reference to an STL file with optional transform parameters.
@@ -164,9 +181,10 @@ struct SimulationSetup
     velocity_field::Union{InitialSetup, Nothing}  # prescribed velocity expressions (ux, uy)
     rheology::Vector{RheologySetup}                # per-phase rheology models
     mesh::Any                                      # Mesh-directive descriptor (body-fitted / Gmsh); `nothing` for the Cartesian path. Consumed by run_simulation (`setup.mesh !== nothing`) + _run_gmsh_slbm_drag. The producing parser is not built yet (KRK-GEO).
+    units::Union{UnitsSetup, Nothing}              # Parse-time physical-units descriptor. Runner ignores it; fields above are already raw LU.
 end
 
-# Backward-compatible constructor: `mesh` defaults to `nothing`, so every existing
+# Backward-compatible constructors: `mesh` and `units` default to `nothing`, so existing
 # 15-argument call site (parser line ~469, tests) keeps working unchanged. Only
 # `_override_max_steps` threads the 16-argument form. This completes commit
 # 682e3f3c0, which referenced `setup.mesh` in the runner without ever adding the
@@ -177,7 +195,14 @@ SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
                 velocity_field, rheology) =
     SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
                     initial, modules, max_steps, outputs, diagnostics, refinements,
-                    velocity_field, rheology, nothing)
+                    velocity_field, rheology, nothing, nothing)
+
+SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
+                initial, modules, max_steps, outputs, diagnostics, refinements,
+                velocity_field, rheology, mesh) =
+    SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
+                    initial, modules, max_steps, outputs, diagnostics, refinements,
+                    velocity_field, rheology, mesh, nothing)
 
 # --- Tokenization: strip comments, join multi-line blocks ---
 
@@ -361,6 +386,15 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
         user_vars[k] = Float64(v)
     end
 
+    units_setup = nothing
+    for line in lines
+        _first_word(line) == "Units" || continue
+        units_setup === nothing ||
+            throw(ArgumentError("Only one Units { ... } block is allowed"))
+        units_setup = _parse_units_block(line, user_vars)
+    end
+    units_setup !== nothing && (user_vars[:u_LU] = get(user_vars, :u_LU, 0.0))
+
     # --- Second pass: parse everything ---
     name = ""
     lattice = :D2Q9
@@ -394,9 +428,12 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
         elseif keyword == "Domain"
             domain = _parse_domain(line, user_vars)
         elseif keyword == "Physics"
-            merge!(physics_params, _parse_physics(line, user_vars))
+            merge!(physics_params, _parse_physics(line, user_vars;
+                                                  allow_auto_nu=units_setup !== nothing))
         elseif keyword == "Define"
             # Already processed in first pass
+        elseif keyword == "Units"
+            # Already processed before boundary parsing so `u_LU` is an allowed token.
         elseif keyword == "Obstacle"
             push!(regions, _parse_obstacle(line, user_vars))
         elseif keyword == "Fluid"
@@ -426,7 +463,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
             known = ("Simulation", "Domain", "Physics", "Define", "Obstacle",
                      "Fluid", "Boundary", "Refine", "Initial", "Velocity",
                      "Module", "Run", "Output", "Diagnostics", "Rheology",
-                     "Setup", "Preset", "Sweep")
+                     "Setup", "Units", "Preset", "Sweep")
             suggestion = _suggest_name(keyword, known)
             msg = "Unknown keyword '$keyword' in .krk file"
             if suggestion !== nothing
@@ -477,12 +514,17 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     # --- Apply Setup helpers (Reynolds, Rayleigh) ---
     _apply_setup_helpers!(physics_params, setup_helpers, domain, boundaries)
 
+    if units_setup !== nothing
+        regions = _apply_units_bridge!(units_setup, domain, regions, boundaries,
+                                       physics_params, user_vars)
+    end
+
     physics = PhysicsSetup(physics_params, body_force)
 
     setup = SimulationSetup(name, lattice, domain, physics, user_vars,
                             regions, boundaries, initial, modules,
                             max_steps, outputs, diagnostics, refinements,
-                            velocity_field, rheology_setups)
+                            velocity_field, rheology_setups, nothing, units_setup)
 
     # --- Validate face names against lattice dimensionality ---
     _validate_faces_vs_lattice(setup)
@@ -540,13 +582,54 @@ function _eval_domain_value(s::AbstractString, user_vars::Dict{Symbol,Float64})
     throw(ArgumentError("Unknown variable '$s' in Domain. Define it with 'Define $s = ...' or pass as kwarg."))
 end
 
+"""Parse: Units { length = mm L_ref = ... R_LU = ... Re = ... scaling = ... }"""
+function _parse_units_block(line::String, user_vars::Dict{Symbol,Float64})
+    brace_m = match(r"\{(.+)\}", line)
+    brace_m === nothing && throw(ArgumentError("Missing { ... } in Units block: $line"))
+    vals = Dict{Symbol,Any}()
+    known = (:length, :L_ref, :R_LU, :Re, :scaling, :L_up, :L_down)
+    for m in eachmatch(r"(\w+)\s*=\s*([^\s,{}]+)", brace_m.captures[1])
+        key = Symbol(m.captures[1])
+        key in known || throw(ArgumentError("Unknown Units key '$key'"))
+        raw = strip(String(m.captures[2]))
+        if key in (:length, :scaling)
+            vals[key] = Symbol(raw)
+        elseif key === :R_LU
+            vals[key] = round(Int, _eval_units_number(raw, user_vars))
+        else
+            vals[key] = _eval_units_number(raw, user_vars)
+        end
+    end
+    for key in (:length, :L_ref, :R_LU, :Re)
+        haskey(vals, key) || throw(ArgumentError("Units block missing required key '$key'"))
+    end
+    L_ref = Float64(vals[:L_ref])
+    R_LU = Int(vals[:R_LU])
+    L_ref > 0 || throw(ArgumentError("Units L_ref must be positive"))
+    R_LU > 0 || throw(ArgumentError("Units R_LU must be positive"))
+    return UnitsSetup(Symbol(vals[:length]), L_ref, R_LU, Float64(vals[:Re]),
+                      Symbol(get(vals, :scaling, :auto)),
+                      Float64(get(vals, :L_up, 15.0)),
+                      Float64(get(vals, :L_down, 15.0)))
+end
+
+function _eval_units_number(s::AbstractString, user_vars::Dict{Symbol,Float64})
+    val = tryparse(Float64, s)
+    val !== nothing && return val
+    sym = Symbol(s)
+    haskey(user_vars, sym) && return user_vars[sym]
+    return Float64(evaluate(parse_kraken_expr(s, user_vars)))
+end
+
 """Parse: Physics <key> = <value> ...  (values can be expressions with user vars)"""
-function _parse_physics(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}())
+function _parse_physics(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}();
+                        allow_auto_nu::Bool=false)
     params = Dict{Symbol, Float64}()
     # Match all key = value pairs (value can be a number or an expression)
     for m in eachmatch(r"(\w+)\s*=\s*([\w.eE+\-*/()]+)", line)
         key = Symbol(m.captures[1])
         val_str = strip(String(m.captures[2]))
+        allow_auto_nu && key === :nu && val_str == "auto" && continue
         # Try literal first, then evaluate as expression with user vars
         val = tryparse(Float64, val_str)
         if val === nothing
@@ -1105,6 +1188,112 @@ function _parse_stl_params(params_str::AbstractString)
     zs_m !== nothing && (z_slice = parse(Float64, zs_m.captures[1]))
 
     return STLSource(file, scale, translate, z_slice)
+end
+
+function _apply_units_bridge!(units::UnitsSetup, domain::DomainSetup,
+                              regions::Vector{GeometryRegion},
+                              boundaries::Vector{BoundarySetup},
+                              physics_params::Dict{Symbol,Float64},
+                              user_vars::Dict{Symbol,Float64})
+    _validate_units_domain!(domain)
+    haskey(physics_params, :nu) && throw(ArgumentError(
+        "Units block owns Physics nu. Use `Physics nu = auto` or omit `nu`."))
+
+    dx_real = units.L_ref / units.R_LU
+    scale_stl = 1.0 / dx_real
+    geom = _units_geometry_namedtuple(regions, domain, scale_stl, units)
+    bc = _units_bc_namedtuple(boundaries, regions)
+    plan = Units.compile(; physics=:newtonian, geometry=geom, bc=bc,
+                         Re=units.Re, R_LU=units.R_LU, dx_real=dx_real,
+                         scaling=units.scaling, L_up=units.L_up,
+                         L_down=units.L_down)
+
+    user_vars[:u_LU] = Float64(plan.units.u_LU)
+    _inject_units_velocity!(boundaries, user_vars)
+    physics_params[:nu] = Float64(plan.units.nu_total_LU)
+    physics_params[:Re] = units.Re
+    return _units_scaled_stl_regions(regions, 1.0 / Float64(plan.units.dx_real))
+end
+
+function _validate_units_domain!(domain::DomainSetup)
+    ok = domain.Lx == Float64(domain.Nx) && domain.Ly == Float64(domain.Ny)
+    ok || throw(ArgumentError(
+        "Units block requires Domain L == N in x/y so coordinates are LU; " *
+        "got L=$(domain.Lx)x$(domain.Ly), N=$(domain.Nx)x$(domain.Ny)."))
+    return nothing
+end
+
+function _units_scaled_stl_regions(regions::Vector{GeometryRegion}, scale_stl::Float64)
+    out = GeometryRegion[]
+    sizehint!(out, length(regions))
+    for region in regions
+        stl = region.stl
+        if stl !== nothing && stl.scale == 1.0
+            stl = STLSource(stl.file, scale_stl, stl.translate, stl.z_slice)
+        end
+        push!(out, GeometryRegion(region.name, region.kind, region.condition, stl,
+                                  region.bc_type, region.bc_values))
+    end
+    return out
+end
+
+function _units_geometry_namedtuple(regions::Vector{GeometryRegion},
+                                    domain::DomainSetup,
+                                    scale_stl::Float64,
+                                    units::UnitsSetup)
+    any(r -> r.stl !== nothing, regions) ||
+        throw(ArgumentError("Units block currently requires at least one STL region"))
+    scaled = _units_scaled_stl_regions(regions, scale_stl)
+    probe = SimulationSetup("_units_geometry_probe", :D2Q9, domain,
+                            PhysicsSetup(Dict{Symbol,Float64}(),
+                                         Dict{Symbol,KrakenExpr}()),
+                            Dict{Symbol,Float64}(), scaled, BoundarySetup[],
+                            nothing, Symbol[], 1, OutputSetup[], nothing,
+                            RefineSetup[], nothing, RheologySetup[])
+    mask = falses(domain.Nx, domain.Ny)
+    _apply_geometry!(mask, probe, 1.0, 1.0)
+    kind = first(r.kind for r in regions if r.stl !== nothing)
+    desc = build_geometry_descriptor(kind, mask)
+    return (type=desc.type, blockage=desc.blockage, q_wall_dist=desc.q_wall_dist,
+            stl_hash=desc.stl_hash, kappa_max=0.0,
+            L_up=units.L_up, L_down=units.L_down)
+end
+
+function _units_bc_namedtuple(boundaries::Vector{BoundarySetup},
+                              regions::Vector{GeometryRegion})
+    inlet = :velocity_parabolic
+    outlet = :zou_he_pressure
+    has_west_periodic = any(b -> b.face === :west && b.type === :periodic, boundaries)
+    has_east_periodic = any(b -> b.face === :east && b.type === :periodic, boundaries)
+    if has_west_periodic && has_east_periodic
+        inlet = :periodic_x
+        outlet = :periodic_x
+    else
+        for b in boundaries
+            b.face === :west || continue
+            if b.type === :velocity
+                ux = get(b.values, :ux, nothing)
+                inlet = ux !== nothing && is_spatial(ux) ? :velocity_parabolic : :velocity_uniform
+            end
+        end
+        any(b -> b.face === :east && b.type === :pressure, boundaries) &&
+            (outlet = :zou_he_pressure)
+    end
+    wall_bc = any(r -> r.bc_type === :libb, regions) ? :bouzidi_fl : :halfwayBB
+    return (inlet=inlet, outlet=outlet, north_wall=:halfwayBB,
+            south_wall=:halfwayBB, wall_bc=wall_bc)
+end
+
+function _inject_units_velocity!(boundaries::Vector{BoundarySetup},
+                                 user_vars::Dict{Symbol,Float64})
+    for b in boundaries
+        b.type === :velocity || continue
+        for (key, expr) in collect(b.values)
+            occursin(r"\bu_LU\b", expr.source) || continue
+            b.values[key] = parse_kraken_expr(expr.source, user_vars)
+        end
+    end
+    return nothing
 end
 
 # =============================================================================
