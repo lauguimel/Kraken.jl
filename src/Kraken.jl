@@ -142,6 +142,10 @@ include("simulation_runner.jl")
 # --- Post-processing helpers ---
 include("postprocess.jl")
 
+# --- LU <-> real-units conversion (self-contained submodule) ---
+include("units/Units.jl")
+export Units
+
 # Lattice types and functions
 export AbstractLattice, D2Q9, D3Q19
 export lattice_dim, lattice_q, weights, velocities_x, velocities_y, velocities_z

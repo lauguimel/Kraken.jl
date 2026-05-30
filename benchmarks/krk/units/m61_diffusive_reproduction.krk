@@ -1,0 +1,69 @@
+# M4 units fixture: reproduces the M61 diffusive R=30 anchor.
+
+Plan mega_m61 {
+    Physics viscoelastic {
+        Re = 1.0
+        Wi = 1.0
+        beta = 0.59
+        bsd_fraction = 1.0
+        model = oldroyd_b
+    }
+    Units {
+        R_LU = 30
+        L_up = 15.0
+        L_down = 15.0
+        scaling = diffusive
+        tau_target = 0.95
+        n_flow_through = 1.0
+    }
+    Geometry cylinder_2d {
+        blockage = 0.5
+    }
+    BC {
+        inlet = velocity_parabolic
+        outlet = zou_he_pressure
+        north_wall = halfwayBB
+        south_wall = halfwayBB
+        wall_bc = halfwayBB
+    }
+    Discretization {
+        advection_scheme = muscl_superbee
+        embedded_geometry = qwall
+        embedded_gradient = false
+    }
+    Backend {
+        T = Float64
+    }
+}
+
+Define base_m61 from_nondim {
+    physics = viscoelastic
+    Re = 1.0
+    Wi = 1.0
+    beta = 0.59
+    bsd_fraction = 1.0
+    model = oldroyd_b
+    R_LU = 30
+    L_up = 15.0
+    L_down = 15.0
+    geometry_type = cylinder_2d
+    blockage = 0.5
+    inlet = velocity_parabolic
+    outlet = zou_he_pressure
+    north_wall = halfwayBB
+    south_wall = halfwayBB
+    wall_bc = halfwayBB
+    scaling = diffusive
+    tau_target = 0.95
+    n_flow_through = 1.0
+    advection_scheme = muscl_superbee
+    embedded_geometry = qwall
+    embedded_gradient = false
+    T = Float64
+}
+
+Define cross_m61 logfv_oldroydb {
+    from_plan = base_m61
+    u_mean = 0.123
+    embedded_gradient = false
+}
