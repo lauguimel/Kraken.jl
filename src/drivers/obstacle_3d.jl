@@ -169,8 +169,24 @@ function run_obstacle_libb_3d(setup;
     Fy_avg = n_avg == 0 ? 0.0 : Fy_sum / n_avg
     Fz_avg = n_avg == 0 ? 0.0 : Fz_sum / n_avg
 
+    # Drag coefficient on the obstacle. Frontal area = projected silhouette of
+    # the solid onto the y-z (cross-flow) plane — convention-free and matches
+    # the analytic A=πR² for a sphere. Cd = 2·Fx / (u_ref²·A_frontal).
+    frontal = 0
+    @inbounds for k in 1:Nz, j in 1:Ny
+        any_solid = false
+        for i in 1:Nx
+            is_solid_h[i, j, k] && (any_solid = true; break)
+        end
+        any_solid && (frontal += 1)
+    end
+    A_frontal = Float64(frontal)
+    u_ref = Float64(maximum(abs, u_profile_h))
+    Cd = (A_frontal > 0 && u_ref > 0) ? 2.0 * Fx_avg / (u_ref^2 * A_frontal) : 0.0
+    D_eq = A_frontal > 0 ? 2.0 * sqrt(A_frontal / π) : 0.0
+
     return (; ρ=Array(ρ), ux=Array(ux), uy=Array(uy), uz=Array(uz),
-            Fx=Fx_avg, Fy=Fy_avg, Fz=Fz_avg,
+            Fx=Fx_avg, Fy=Fy_avg, Fz=Fz_avg, Cd=Cd, A=A_frontal, D=D_eq,
             q_wall=Array(q_wall), is_solid=Array(is_solid),
-            inlet_profile=u_profile_h, u_ref=Float64(maximum(abs, u_profile_h)))
+            inlet_profile=u_profile_h, u_ref=u_ref)
 end
