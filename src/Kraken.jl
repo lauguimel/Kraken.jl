@@ -136,7 +136,8 @@ include("kernels/refinement_exchange_2d.jl")
 include("refinement/time_stepping.jl")
 include("refinement/thermal_refinement.jl")
 include("kernels/refinement_exchange_3d.jl")
-include("refinement/refinement_3d.jl")
+include("refinement/refinement_3d_core.jl")
+include("refinement/refinement_3d_thermal_bcs.jl")
 include("refinement/conservative_tree_krk_validation_2d.jl")
 
 # --- I/O ---
