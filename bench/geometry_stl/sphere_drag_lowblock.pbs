@@ -1,0 +1,30 @@
+#!/bin/bash -l
+#PBS -N kraken_drag_lowblock
+#PBS -l select=1:ncpus=4:ngpus=1:mem=110GB:gpu_mem=60gb
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m n
+#
+# M-GEO-7(b) follow-up: low-blockage (8%, 6%) sphere drag, CUDA F64, on an
+# 80GB H100 (the 8%/6% cases OOM'd on a 40GB A100 in the first run).
+#
+#   cd ~/Kraken.jl-v0.3-campaign
+#   qsub bench/geometry_stl/sphere_drag_lowblock.pbs
+cd $PBS_O_WORKDIR
+set -o pipefail                       # so a Julia failure → non-zero job exit (the first run's tee masked it)
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS=4
+
+echo "== nvidia-smi =="; nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+echo "== julia --version =="; julia --version
+julia --project=. -e 'using Pkg; Pkg.instantiate()' || { echo "ERROR: instantiate failed"; exit 1; }
+
+echo "== run low-blockage drag =="
+julia --project=. bench/geometry_stl/sphere_drag_lowblock.jl 2>&1 | tee bench/geometry_stl/sphere_drag_lowblock.log
+rc=${PIPESTATUS[0]}
+
+echo "== CSV =="; cat bench/geometry_stl/sphere_drag_conv_lowblock.csv
+echo "== julia rc=$rc =="
+exit $rc
