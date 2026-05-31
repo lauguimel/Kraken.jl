@@ -1008,6 +1008,18 @@ function slbm_reg_libb_step_local_2d!(f_out, f_in, ρ, ux, uy, is_solid,
             ndrange=(geom.Nξ, geom.Nη))
 end
 
+"""
+    slbm_trt_libb_step_local_biquad_2d!(f_out, f_in, ρ, ux, uy, is_solid,
+
+Public function in the curvilinear mesh and SLBM API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.slbm_trt_libb_step_local_biquad_2d!)
+```
+"""
 function slbm_trt_libb_step_local_biquad_2d!(f_out, f_in, ρ, ux, uy, is_solid,
                                                q_wall, uw_link_x, uw_link_y,
                                                geom::SLBMGeometry,

@@ -1,3 +1,15 @@
+"""
+    Units
+
+Submodule containing Kraken lattice-unit planning, stability audits, and driver keyword conversion helpers.
+Use it through `Kraken.Units` when converting physical nondimensional inputs into lattice-unit simulation plans.
+
+```julia
+using Kraken
+
+plan = Kraken.Units.compile(; physics=:newtonian, geometry=(; type=:channel), bc=(;))
+```
+"""
 module Units
 
 import KernelAbstractions

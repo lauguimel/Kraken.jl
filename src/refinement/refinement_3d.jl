@@ -5,6 +5,18 @@
 # D3Q19 Filippova-Hanel rescaling, and ratio³ block-averaging.
 # ===========================================================================
 
+"""
+    RefinementPatch3D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.RefinementPatch3D
+```
+"""
 struct RefinementPatch3D{T}
     name::String
     level::Int
@@ -34,6 +46,18 @@ struct RefinementPatch3D{T}
     f_prev::AbstractArray{T, 4}
 end
 
+"""
+    RefinedDomain3D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.RefinedDomain3D
+```
+"""
 struct RefinedDomain3D{T}
     base_Nx::Int; base_Ny::Int; base_Nz::Int
     base_dx::Float64
@@ -41,6 +65,18 @@ struct RefinedDomain3D{T}
     patches::Vector{RefinementPatch3D{T}}
 end
 
+"""
+    create_patch_3d(name::String, level::Int, ratio::Int,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.create_patch_3d)
+```
+"""
 function create_patch_3d(name::String, level::Int, ratio::Int,
                           region::NTuple{6, Float64},  # (x0, y0, z0, x1, y1, z1)
                           parent_Nx::Int, parent_Ny::Int, parent_Nz::Int,
@@ -117,6 +153,18 @@ function create_patch_3d(name::String, level::Int, ratio::Int,
         rho_prev, ux_prev, uy_prev, uz_prev, f_prev)
 end
 
+"""
+    create_refined_domain_3d(Nx, Ny, Nz, dx, omega, patches)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.create_refined_domain_3d)
+```
+"""
 function create_refined_domain_3d(Nx, Ny, Nz, dx, omega, patches)
     T = isempty(patches) ? Float64 : eltype(patches[1].dx)
     return RefinedDomain3D{T}(Nx, Ny, Nz, Float64(dx), Float64(omega), patches)
@@ -175,6 +223,18 @@ end
 
 # --- Advance one coarse timestep with 3D sub-cycling ---
 
+"""
+    advance_refined_step_3d!(domain::RefinedDomain3D{T},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.advance_refined_step_3d!)
+```
+"""
 function advance_refined_step_3d!(domain::RefinedDomain3D{T},
                                     f_in, f_out, rho, ux, uy, uz, is_solid;
                                     stream_fn, collide_fn, macro_fn,
@@ -266,6 +326,18 @@ struct ThermalPatchArrays3D{T}
     g_prev::AbstractArray{T, 4}
 end
 
+"""
+    create_thermal_patch_arrays_3d(patch::RefinementPatch3D{T},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.create_thermal_patch_arrays_3d)
+```
+"""
 function create_thermal_patch_arrays_3d(patch::RefinementPatch3D{T},
                                          omega_T_parent::Real;
                                          T_init::Real=0.5,
@@ -353,6 +425,18 @@ end
     end
 end
 
+"""
+    fill_thermal_ghost_3d!(patch::RefinementPatch3D{T},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.fill_thermal_ghost_3d!)
+```
+"""
 function fill_thermal_ghost_3d!(patch::RefinementPatch3D{T},
                                  thermal::ThermalPatchArrays3D{T},
                                  g_coarse,
@@ -366,6 +450,18 @@ function fill_thermal_ghost_3d!(patch::RefinementPatch3D{T},
         Nx_c, Ny_c, Nz_c, T(t_frac))
 end
 
+"""
+    fill_thermal_full_3d!(patch::RefinementPatch3D{T},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.fill_thermal_full_3d!)
+```
+"""
 function fill_thermal_full_3d!(patch::RefinementPatch3D{T},
                                 thermal::ThermalPatchArrays3D{T},
                                 g_coarse, Nx_c::Int, Ny_c::Int, Nz_c::Int) where T
@@ -380,6 +476,18 @@ function fill_thermal_full_3d!(patch::RefinementPatch3D{T},
     copyto!(thermal.g_out, thermal.g_in)
 end
 
+"""
+    restrict_thermal_to_coarse_3d!(patch::RefinementPatch3D{T},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.restrict_thermal_to_coarse_3d!)
+```
+"""
 function restrict_thermal_to_coarse_3d!(patch::RefinementPatch3D{T},
                                          thermal::ThermalPatchArrays3D{T},
                                          g_coarse, Temp_c) where T
@@ -396,6 +504,18 @@ end
 
 # --- Thermal refined sub-cycling (3D) ---
 
+"""
+    advance_thermal_refined_step_3d!(domain::RefinedDomain3D{T},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.advance_thermal_refined_step_3d!)
+```
+"""
 function advance_thermal_refined_step_3d!(domain::RefinedDomain3D{T},
                                             thermals::Vector{ThermalPatchArrays3D{T}},
                                             f_in, f_out, g_in, g_out,
@@ -561,6 +681,18 @@ function build_patch_thermal_bcs_3d(patches::Vector{RefinementPatch3D{T}},
     return patch_bcs
 end
 
+"""
+    build_patch_flow_bcs_3d(patches::Vector{RefinementPatch3D{T}},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.build_patch_flow_bcs_3d)
+```
+"""
 function build_patch_flow_bcs_3d(patches::Vector{RefinementPatch3D{T}},
                                   Lx, Ly, Lz, Nx;
                                   wall_faces=Symbol[]) where T

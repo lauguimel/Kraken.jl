@@ -385,6 +385,18 @@ function stream_composite_routes_interior_F_3d!(
                                           topology, :skip, clear)
 end
 
+"""
+    stream_composite_routes_periodic_x_F_3d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_composite_routes_periodic_x_F_3d!)
+```
+"""
 function stream_composite_routes_periodic_x_F_3d!(
         coarse_out::AbstractArray{<:Any,4},
         patch_out::ConservativeTreePatch3D,
@@ -397,6 +409,18 @@ function stream_composite_routes_periodic_x_F_3d!(
                                           topology, :periodic_x, clear)
 end
 
+"""
+    stream_composite_routes_periodic_x_wall_yz_F_3d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_composite_routes_periodic_x_wall_yz_F_3d!)
+```
+"""
 function stream_composite_routes_periodic_x_wall_yz_F_3d!(
         coarse_out::AbstractArray{<:Any,4},
         patch_out::ConservativeTreePatch3D,

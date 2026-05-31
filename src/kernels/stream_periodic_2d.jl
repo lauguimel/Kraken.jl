@@ -49,6 +49,18 @@ end
 
 # --- Public API ---
 
+"""
+    stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_periodic_x_wall_y_2d!)
+```
+"""
 function stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_periodic_x_wall_y_2d_kernel!(backend)
@@ -78,6 +90,18 @@ end
     end
 end
 
+"""
+    stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_fully_periodic_2d!)
+```
+"""
 function stream_fully_periodic_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_fully_periodic_2d_kernel!(backend)
@@ -127,6 +151,18 @@ end
     end
 end
 
+"""
+    stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_periodic_x_axisym_2d!)
+```
+"""
 function stream_periodic_x_axisym_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_periodic_x_axisym_2d_kernel!(backend)
@@ -176,6 +212,18 @@ end
     end
 end
 
+"""
+    stream_axisym_inlet_2d!(f_out, f_in, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_axisym_inlet_2d!)
+```
+"""
 function stream_axisym_inlet_2d!(f_out, f_in, Nx, Ny)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_axisym_inlet_2d_kernel!(backend)

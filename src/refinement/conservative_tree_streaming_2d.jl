@@ -716,6 +716,18 @@ function stream_composite_routes_periodic_x_moving_wall_y_F_2d!(
                                           coarse_prolongation=coarse_prolongation)
 end
 
+"""
+    stream_composite_routes_zou_he_x_wall_y_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_composite_routes_zou_he_x_wall_y_F_2d!)
+```
+"""
 function stream_composite_routes_zou_he_x_wall_y_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -743,6 +755,18 @@ function stream_composite_routes_zou_he_x_wall_y_F_2d!(
     return coarse_out, patch_out
 end
 
+"""
+    stream_composite_routes_zou_he_x_wall_y_solid_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_composite_routes_zou_he_x_wall_y_solid_F_2d!)
+```
+"""
 function stream_composite_routes_zou_he_x_wall_y_solid_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -773,6 +797,18 @@ function stream_composite_routes_zou_he_x_wall_y_solid_F_2d!(
     return coarse_out, patch_out
 end
 
+"""
+    stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_composite_routes_periodic_x_wall_y_solid_F_2d!)
+```
+"""
 function stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -789,6 +825,18 @@ function stream_composite_routes_periodic_x_wall_y_solid_F_2d!(
                                           coarse_prolongation=coarse_prolongation)
 end
 
+"""
+    collide_Guo_composite_solid_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_Guo_composite_solid_F_2d!)
+```
+"""
 function collide_Guo_composite_solid_F_2d!(
         coarse_F::AbstractArray{<:Any,3},
         patch::ConservativeTreePatch2D,
@@ -815,6 +863,18 @@ function collide_Guo_composite_solid_F_2d!(
     return coarse_F, patch
 end
 
+"""
+    regrid_conservative_tree_patch_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.regrid_conservative_tree_patch_F_2d!)
+```
+"""
 function regrid_conservative_tree_patch_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -847,6 +907,18 @@ function _source_parent_leaf_block_F_2d!(
     return leaf_block
 end
 
+"""
+    regrid_conservative_tree_patch_direct_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.regrid_conservative_tree_patch_direct_F_2d!)
+```
+"""
 function regrid_conservative_tree_patch_direct_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -878,6 +950,18 @@ function regrid_conservative_tree_patch_direct_F_2d!(
     return coarse_out, patch_out
 end
 
+"""
+    conservative_tree_solid_mask_patch_range_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_solid_mask_patch_range_2d)
+```
+"""
 function conservative_tree_solid_mask_patch_range_2d(
         is_solid::AbstractArray{Bool,2};
         pad::Int=1)
@@ -910,6 +994,18 @@ function conservative_tree_solid_mask_patch_range_2d(
     return (i_range=i_min:i_max, j_range=j_min:j_max)
 end
 
+"""
+    conservative_tree_indicator_patch_range_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_indicator_patch_range_2d)
+```
+"""
 function conservative_tree_indicator_patch_range_2d(
         indicator::AbstractArray{<:Real,2};
         threshold::Real,
@@ -946,6 +1042,18 @@ function conservative_tree_indicator_patch_range_2d(
     return (i_range=i_min:i_max, j_range=j_min:j_max)
 end
 
+"""
+    conservative_tree_gradient_indicator_2d(field::AbstractArray{<:Real,2})
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_gradient_indicator_2d)
+```
+"""
 function conservative_tree_gradient_indicator_2d(field::AbstractArray{<:Real,2})
     nx = size(field, 1)
     ny = size(field, 2)
@@ -979,6 +1087,18 @@ function conservative_tree_gradient_indicator_2d(field::AbstractArray{<:Real,2})
     return indicator
 end
 
+"""
+    conservative_tree_hysteresis_patch_range_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_hysteresis_patch_range_2d)
+```
+"""
 function conservative_tree_hysteresis_patch_range_2d(
         current_i_range::AbstractUnitRange{<:Integer},
         current_j_range::AbstractUnitRange{<:Integer},
@@ -1014,6 +1134,18 @@ function conservative_tree_hysteresis_patch_range_2d(
     return (i_range=current_i, j_range=current_j)
 end
 
+"""
+    conservative_tree_velocity_gradient_patch_range_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_velocity_gradient_patch_range_2d)
+```
+"""
 function conservative_tree_velocity_gradient_patch_range_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T};
@@ -1045,6 +1177,18 @@ function conservative_tree_velocity_gradient_patch_range_2d(
         shrink_margin=shrink_margin)
 end
 
+"""
+    adapt_conservative_tree_patch_to_velocity_gradient_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.adapt_conservative_tree_patch_to_velocity_gradient_2d)
+```
+"""
 function adapt_conservative_tree_patch_to_velocity_gradient_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T};
@@ -1066,6 +1210,18 @@ function adapt_conservative_tree_patch_to_velocity_gradient_2d(
     return (coarse_F=coarse_out, patch=patch_out)
 end
 
+"""
+    adapt_conservative_tree_patch_to_solid_mask_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.adapt_conservative_tree_patch_to_solid_mask_2d)
+```
+"""
 function adapt_conservative_tree_patch_to_solid_mask_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},
@@ -1082,6 +1238,18 @@ function adapt_conservative_tree_patch_to_solid_mask_2d(
     return (coarse_F=coarse_out, patch=patch_out)
 end
 
+"""
+    vertical_facing_step_solid_mask_leaf_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.vertical_facing_step_solid_mask_leaf_2d)
+```
+"""
 function vertical_facing_step_solid_mask_leaf_2d(
         Nx::Int,
         Ny::Int,
@@ -1102,6 +1270,18 @@ function vertical_facing_step_solid_mask_leaf_2d(
     return mask
 end
 
+"""
+    ConservativeTreeAdaptiveRun2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeAdaptiveRun2D
+```
+"""
 struct ConservativeTreeAdaptiveRun2D{T}
     flow::Symbol
     coarse_F::Array{T,3}
@@ -1116,6 +1296,18 @@ struct ConservativeTreeAdaptiveRun2D{T}
     regrid_count::Int
 end
 
+"""
+    ConservativeTreeSolidAdaptiveRun2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeSolidAdaptiveRun2D
+```
+"""
 struct ConservativeTreeSolidAdaptiveRun2D{T}
     flow::Symbol
     coarse_F::Array{T,3}
@@ -1132,6 +1324,18 @@ struct ConservativeTreeSolidAdaptiveRun2D{T}
     regrid_count::Int
 end
 
+"""
+    ConservativeTreeOpenChannelRun2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeOpenChannelRun2D
+```
+"""
 struct ConservativeTreeOpenChannelRun2D{T}
     flow::Symbol
     coarse_F::Array{T,3}
@@ -1163,6 +1367,18 @@ function _composite_open_channel_mean_ux_2d(coarse_F::AbstractArray{T,3},
     return sum(profile) / T(length(profile))
 end
 
+"""
+    run_conservative_tree_couette_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_couette_route_native_2d)
+```
+"""
 function run_conservative_tree_couette_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -1213,6 +1429,18 @@ function run_conservative_tree_couette_route_native_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_poiseuille_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_poiseuille_route_native_2d)
+```
+"""
 function run_conservative_tree_poiseuille_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -1263,6 +1491,18 @@ function run_conservative_tree_poiseuille_route_native_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_open_channel_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_open_channel_route_native_2d)
+```
+"""
 function run_conservative_tree_open_channel_route_native_2d(;
         Nx::Int=18,
         Ny::Int=10,
@@ -1381,6 +1621,18 @@ function run_conservative_tree_open_channel_mass_ledger_2d(;
         mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_bfs_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_bfs_route_native_2d)
+```
+"""
 function run_conservative_tree_bfs_route_native_2d(;
         Nx::Int=28,
         Ny::Int=14,
@@ -1445,6 +1697,18 @@ function run_conservative_tree_bfs_route_native_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_poiseuille_adaptive_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_poiseuille_adaptive_route_native_2d)
+```
+"""
 function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -1519,6 +1783,18 @@ function run_conservative_tree_poiseuille_adaptive_route_native_2d(;
         steps, regrid_every, regrid_count)
 end
 
+"""
+    run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d)
+```
+"""
 function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -1605,6 +1881,18 @@ function run_conservative_tree_poiseuille_gradient_adaptive_route_native_2d(;
         steps, regrid_every, regrid_count)
 end
 
+"""
+    validate_conservative_tree_route_native_phase_p_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.validate_conservative_tree_route_native_phase_p_2d)
+```
+"""
 function validate_conservative_tree_route_native_phase_p_2d(;
         steps::Int=1000,
         T::Type{<:Real}=Float64)
@@ -1646,6 +1934,18 @@ function validate_conservative_tree_route_native_phase_p_2d(;
     )
 end
 
+"""
+    run_conservative_tree_square_obstacle_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_square_obstacle_route_native_2d)
+```
+"""
 function run_conservative_tree_square_obstacle_route_native_2d(;
         Nx::Int=24,
         Ny::Int=14,
@@ -1705,6 +2005,18 @@ function run_conservative_tree_square_obstacle_route_native_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_cylinder_obstacle_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_cylinder_obstacle_route_native_2d)
+```
+"""
 function run_conservative_tree_cylinder_obstacle_route_native_2d(;
         Nx::Int=24,
         Ny::Int=14,
@@ -1787,6 +2099,18 @@ function run_conservative_tree_cylinder_obstacle_route_native_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps, avg_window_i)
 end
 
+"""
+    ConservativeTreeBenchmarkRow2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeBenchmarkRow2D
+```
+"""
 struct ConservativeTreeBenchmarkRow2D
     flow::Symbol
     method::Symbol
@@ -1816,6 +2140,18 @@ function _conservative_tree_benchmark_row_2d(flow::Symbol,
         Float64(ux), Float64(uy), Float64(rel), Float64(elapsed_s))
 end
 
+"""
+    benchmark_conservative_tree_cartesian_vs_amr_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.benchmark_conservative_tree_cartesian_vs_amr_2d)
+```
+"""
 function benchmark_conservative_tree_cartesian_vs_amr_2d(;
         flows::Tuple=(:bfs, :square, :cylinder),
         steps::Int=240,
@@ -1863,6 +2199,18 @@ function benchmark_conservative_tree_cartesian_vs_amr_2d(;
     return rows
 end
 
+"""
+    ConservativeTreeConvergenceRow2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeConvergenceRow2D
+```
+"""
 struct ConservativeTreeConvergenceRow2D
     flow::Symbol
     method::Symbol
@@ -1963,6 +2311,18 @@ function _conservative_tree_obstacle_patch_ranges_2d(flow::Symbol,
     throw(ArgumentError("unsupported obstacle convergence flow: $flow"))
 end
 
+"""
+    convergence_conservative_tree_obstacles_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.convergence_conservative_tree_obstacles_2d)
+```
+"""
 function convergence_conservative_tree_obstacles_2d(;
         flows::Tuple=(:square, :cylinder),
         scales::Tuple=(1, 2),
@@ -2076,6 +2436,18 @@ function convergence_conservative_tree_obstacles_2d(;
     return rows
 end
 
+"""
+    run_conservative_tree_vfs_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_vfs_route_native_2d)
+```
+"""
 function run_conservative_tree_vfs_route_native_2d(;
         Nx::Int=28,
         Ny::Int=14,
@@ -2133,6 +2505,18 @@ function run_conservative_tree_vfs_route_native_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_vfs_mask_adaptive_route_native_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_vfs_mask_adaptive_route_native_2d)
+```
+"""
 function run_conservative_tree_vfs_mask_adaptive_route_native_2d(;
         Nx::Int=28,
         Ny::Int=14,

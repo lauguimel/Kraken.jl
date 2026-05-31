@@ -14,11 +14,35 @@ function _check_conservative_tree_F_2d(F::AbstractMatrix,
     return nothing
 end
 
+"""
+    allocate_conservative_tree_F_2d(spec::ConservativeTreeSpec2D;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.allocate_conservative_tree_F_2d)
+```
+"""
 function allocate_conservative_tree_F_2d(spec::ConservativeTreeSpec2D;
                                          T::Type{<:Real}=Float64)
     return zeros(T, length(spec.cells), 9)
 end
 
+"""
+    active_population_sums_F_2d(F::AbstractMatrix,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.active_population_sums_F_2d)
+```
+"""
 function active_population_sums_F_2d(F::AbstractMatrix,
                                      spec::ConservativeTreeSpec2D)
     _check_conservative_tree_F_2d(F, spec)
@@ -31,6 +55,18 @@ function active_population_sums_F_2d(F::AbstractMatrix,
     return sums
 end
 
+"""
+    level_population_sums_F_2d(F::AbstractMatrix,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.level_population_sums_F_2d)
+```
+"""
 function level_population_sums_F_2d(F::AbstractMatrix,
                                     spec::ConservativeTreeSpec2D,
                                     level::Integer)
@@ -56,6 +92,18 @@ function _coalesce_conservative_tree_parent_F_2d!(F::AbstractMatrix,
     return nothing
 end
 
+"""
+    coalesce_conservative_tree_ledgers_F_2d!(F::AbstractMatrix,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.coalesce_conservative_tree_ledgers_F_2d!)
+```
+"""
 function coalesce_conservative_tree_ledgers_F_2d!(F::AbstractMatrix,
                                                   spec::ConservativeTreeSpec2D)
     _check_conservative_tree_F_2d(F, spec)
@@ -83,6 +131,18 @@ function _explode_conservative_tree_parent_F_2d!(F::AbstractMatrix,
     return nothing
 end
 
+"""
+    explode_conservative_tree_ledgers_F_2d!(F::AbstractMatrix,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.explode_conservative_tree_ledgers_F_2d!)
+```
+"""
 function explode_conservative_tree_ledgers_F_2d!(F::AbstractMatrix,
                                                  spec::ConservativeTreeSpec2D)
     _check_conservative_tree_F_2d(F, spec)

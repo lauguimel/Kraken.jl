@@ -4,6 +4,18 @@
 # needed for one coarse step and two fine half-steps so interface transfers can
 # be tested before they are put in the hot loop.
 
+"""
+    ConservativeTreeSubcycleLedger2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeSubcycleLedger2D
+```
+"""
 struct ConservativeTreeSubcycleLedger2D{T}
     ratio::Int
     coarse_to_fine::Array{T,4}
@@ -55,6 +67,18 @@ struct ConservativeTreeSubcycleSpatialLedgerBank2D{T}
     inactive_refined_ids_by_level::Vector{Vector{Int}}
 end
 
+"""
+    create_conservative_tree_subcycle_ledger_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.create_conservative_tree_subcycle_ledger_2d)
+```
+"""
 function create_conservative_tree_subcycle_ledger_2d(;
         T::Type{<:Real}=Float64,
         ratio::Integer=2)
@@ -1439,6 +1463,18 @@ function conservative_tree_subcycle_sync_up_ledger_2d(
     return conservative_tree_subcycle_pair_ledger_2d(bank, parent)
 end
 
+"""
+    reset_conservative_tree_subcycle_ledger_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.reset_conservative_tree_subcycle_ledger_2d!)
+```
+"""
 function reset_conservative_tree_subcycle_ledger_2d!(
         ledger::ConservativeTreeSubcycleLedger2D)
     ledger.coarse_to_fine .= 0
@@ -1446,6 +1482,18 @@ function reset_conservative_tree_subcycle_ledger_2d!(
     return ledger
 end
 
+"""
+    conservative_tree_subcycle_weights_2d(ledger::ConservativeTreeSubcycleLedger2D{T}) where T
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_subcycle_weights_2d)
+```
+"""
 function conservative_tree_subcycle_weights_2d(ledger::ConservativeTreeSubcycleLedger2D{T}) where T
     ledger.ratio == 2 ||
         throw(ArgumentError("conservative-tree subcycle weights require ratio = 2"))
@@ -1460,6 +1508,18 @@ end
     return step
 end
 
+"""
+    conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!)
+```
+"""
 function conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!(
         ledger::ConservativeTreeSubcycleLedger2D,
         Fq,
@@ -1475,6 +1535,18 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_face_2d!(
     return ledger
 end
 
+"""
+    conservative_tree_subcycle_deposit_coarse_to_fine_corner_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_subcycle_deposit_coarse_to_fine_corner_2d!)
+```
+"""
 function conservative_tree_subcycle_deposit_coarse_to_fine_corner_2d!(
         ledger::ConservativeTreeSubcycleLedger2D,
         Fq,
@@ -1490,6 +1562,18 @@ function conservative_tree_subcycle_deposit_coarse_to_fine_corner_2d!(
     return ledger
 end
 
+"""
+    conservative_tree_subcycle_accumulate_fine_to_coarse_face_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_subcycle_accumulate_fine_to_coarse_face_2d!)
+```
+"""
 function conservative_tree_subcycle_accumulate_fine_to_coarse_face_2d!(
         ledger::ConservativeTreeSubcycleLedger2D,
         fine_half_step::AbstractArray{<:Any,3},
@@ -1504,6 +1588,18 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_face_2d!(
     return ledger
 end
 
+"""
+    conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!)
+```
+"""
 function conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!(
         ledger::ConservativeTreeSubcycleLedger2D,
         fine_half_step::AbstractArray{<:Any,3},
@@ -1518,6 +1614,18 @@ function conservative_tree_subcycle_accumulate_fine_to_coarse_corner_2d!(
     return ledger
 end
 
+"""
+    conservative_tree_subcycle_orientation_sums_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_subcycle_orientation_sums_2d)
+```
+"""
 function conservative_tree_subcycle_orientation_sums_2d(
         ledger::ConservativeTreeSubcycleLedger2D{T}) where T
     coarse_to_fine = zeros(T, 9)
@@ -1531,6 +1639,18 @@ function conservative_tree_subcycle_orientation_sums_2d(
     return (coarse_to_fine=coarse_to_fine, fine_to_coarse=fine_to_coarse)
 end
 
+"""
+    conservative_tree_subcycle_total_sums_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_subcycle_total_sums_2d)
+```
+"""
 function conservative_tree_subcycle_total_sums_2d(
         ledger::ConservativeTreeSubcycleLedger2D)
     sums = conservative_tree_subcycle_orientation_sums_2d(ledger)

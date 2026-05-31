@@ -4,15 +4,75 @@
 # not own LBM state and deliberately stays separate from the conservative
 # projection/restriction oracle in conservative_tree_2d.jl.
 
+"""
+    LinkKind
+
+Public enumeration for the grid-refinement and conservative-tree AMR API. Exported values documented by this definition include `LinkKind`, `SAME_LEVEL`, `COARSE_TO_FINE`, `FINE_TO_COARSE`, `BOUNDARY`.
+Use these tags when inspecting or constructing route and topology metadata.
+
+```julia
+using Kraken
+
+Kraken.LinkKind
+```
+"""
 @enum LinkKind::UInt8 SAME_LEVEL=0 COARSE_TO_FINE=1 FINE_TO_COARSE=2 BOUNDARY=3
+"""
+    RouteKind
+
+Public enumeration for the grid-refinement and conservative-tree AMR API. Exported values documented by this definition include `RouteKind`, `DIRECT`, `SPLIT_FACE`, `SPLIT_CORNER`, `COALESCE_FACE`, `COALESCE_CORNER`, `ROUTE_BOUNDARY`.
+Use these tags when inspecting or constructing route and topology metadata.
+
+```julia
+using Kraken
+
+Kraken.RouteKind
+```
+"""
 @enum RouteKind::UInt8 DIRECT=0 SPLIT_FACE=1 SPLIT_CORNER=2 COALESCE_FACE=3 COALESCE_CORNER=4 ROUTE_BOUNDARY=5
 
+"""
+    AbstractCellMetrics
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.AbstractCellMetrics
+```
+"""
 abstract type AbstractCellMetrics end
 
+"""
+    CartesianMetrics2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.CartesianMetrics2D
+```
+"""
 struct CartesianMetrics2D <: AbstractCellMetrics
     volume::Float64
 end
 
+"""
+    ConservativeTreeCell2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeCell2D
+```
+"""
 struct ConservativeTreeCell2D
     level::Int
     i::Int
@@ -22,12 +82,36 @@ struct ConservativeTreeCell2D
     parent::Int
 end
 
+"""
+    ConservativeTreeLink2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeLink2D
+```
+"""
 struct ConservativeTreeLink2D
     src::Int
     q::Int
     kind::LinkKind
 end
 
+"""
+    ConservativeTreeRoute2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeRoute2D
+```
+"""
 struct ConservativeTreeRoute2D
     src::Int
     dst::Int
@@ -36,6 +120,18 @@ struct ConservativeTreeRoute2D
     kind::RouteKind
 end
 
+"""
+    ConservativeTreeTopology2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeTopology2D
+```
+"""
 struct ConservativeTreeTopology2D
     cells::Vector{ConservativeTreeCell2D}
     links::Vector{ConservativeTreeLink2D}
@@ -50,6 +146,18 @@ struct ConservativeTreeTopology2D
     boundary_routes::Vector{Int}
 end
 
+"""
+    ConservativeTreeBlock2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeBlock2D
+```
+"""
 struct ConservativeTreeBlock2D
     level::Int
     first_cell::Int
@@ -57,6 +165,18 @@ struct ConservativeTreeBlock2D
     morton_first::UInt64
 end
 
+"""
+    ConservativeTreePackedRoute2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreePackedRoute2D
+```
+"""
 struct ConservativeTreePackedRoute2D
     src_block::Int
     src_local::Int
@@ -67,6 +187,18 @@ struct ConservativeTreePackedRoute2D
     kind::RouteKind
 end
 
+"""
+    ConservativeTreePackedTopology2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreePackedTopology2D
+```
+"""
 struct ConservativeTreePackedTopology2D
     cells_per_block::Int
     blocks::Vector{ConservativeTreeBlock2D}

@@ -104,12 +104,36 @@ end
 
 # --- Public API ---
 
+"""
+    stream_3d!(f_out, f_in, Nx, Ny, Nz)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_3d!)
+```
+"""
 function stream_3d!(f_out, f_in, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_3d_kernel!(backend)
     kernel!(f_out, f_in, Nx, Ny, Nz; ndrange=(Nx, Ny, Nz))
 end
 
+"""
+    collide_3d!(f, is_solid, ω)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_3d!)
+```
+"""
 function collide_3d!(f, is_solid, ω)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny, Nz = size(f,1), size(f,2), size(f,3)

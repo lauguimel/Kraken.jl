@@ -13,16 +13,52 @@ const D2Q9_OPPOSITE_INT = (1, 4, 5, 2, 3, 8, 9, 6, 7)
     return q
 end
 
+"""
+    d2q9_cx(q::Integer)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.d2q9_cx)
+```
+"""
 @inline function d2q9_cx(q::Integer)
     qi = _check_d2q9_q(Int(q))
     return D2Q9_CX_INT[qi]
 end
 
+"""
+    d2q9_cy(q::Integer)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.d2q9_cy)
+```
+"""
 @inline function d2q9_cy(q::Integer)
     qi = _check_d2q9_q(Int(q))
     return D2Q9_CY_INT[qi]
 end
 
+"""
+    d2q9_opposite(q::Integer)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.d2q9_opposite)
+```
+"""
 @inline function d2q9_opposite(q::Integer)
     qi = _check_d2q9_q(Int(q))
     return D2Q9_OPPOSITE_INT[qi]
@@ -145,6 +181,18 @@ function moments_F(F::AbstractArray{<:Any,3})
     return m, mx, my
 end
 
+"""
+    fill_equilibrium_integrated_D2Q9!(Fcell::AbstractVector,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.fill_equilibrium_integrated_D2Q9!)
+```
+"""
 function fill_equilibrium_integrated_D2Q9!(Fcell::AbstractVector,
                                            volume,
                                            rho,
@@ -172,6 +220,18 @@ function fill_equilibrium_integrated_D2Q9!(F::AbstractArray{<:Any,3},
     return F
 end
 
+"""
+    conservative_tree_parent_index(i_f::Int, j_f::Int)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_parent_index)
+```
+"""
 @inline function conservative_tree_parent_index(i_f::Int, j_f::Int)
     i_f >= 1 || throw(ArgumentError("i_f must be >= 1"))
     j_f >= 1 || throw(ArgumentError("j_f must be >= 1"))
@@ -587,6 +647,18 @@ function collide_BGK_integrated_D2Q9!(F::AbstractArray{<:Any,3}, volume, omega)
     return F
 end
 
+"""
+    collide_Guo_integrated_D2Q9!(Fcell::AbstractVector,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_Guo_integrated_D2Q9!)
+```
+"""
 function collide_Guo_integrated_D2Q9!(Fcell::AbstractVector,
                                       volume,
                                       omega,
@@ -767,6 +839,18 @@ function stream_periodic_x_moving_wall_y_F_2d!(Fout::AbstractArray{<:Any,3},
     return Fout
 end
 
+"""
+    cylinder_solid_mask_leaf_2d(Nx::Int, Ny::Int, cx, cy, radius)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.cylinder_solid_mask_leaf_2d)
+```
+"""
 function cylinder_solid_mask_leaf_2d(Nx::Int, Ny::Int, cx, cy, radius)
     mask = falses(Nx, Ny)
     r2 = radius * radius
@@ -776,6 +860,18 @@ function cylinder_solid_mask_leaf_2d(Nx::Int, Ny::Int, cx, cy, radius)
     return mask
 end
 
+"""
+    square_solid_mask_leaf_2d(Nx::Int, Ny::Int,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.square_solid_mask_leaf_2d)
+```
+"""
 function square_solid_mask_leaf_2d(Nx::Int, Ny::Int,
                                    i_range::AbstractUnitRange{<:Integer},
                                    j_range::AbstractUnitRange{<:Integer})
@@ -794,6 +890,18 @@ function square_solid_mask_leaf_2d(Nx::Int, Ny::Int,
     return mask
 end
 
+"""
+    backward_facing_step_solid_mask_leaf_2d(Nx::Int, Ny::Int,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.backward_facing_step_solid_mask_leaf_2d)
+```
+"""
 function backward_facing_step_solid_mask_leaf_2d(Nx::Int, Ny::Int,
                                                  step_i::Int,
                                                  step_height::Int)
@@ -861,6 +969,18 @@ function stream_periodic_x_wall_y_solid_F_2d!(Fout::AbstractArray{<:Any,3},
     return Fout
 end
 
+"""
+    stream_bounceback_xy_solid_F_2d!(Fout::AbstractArray{<:Any,3},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_bounceback_xy_solid_F_2d!)
+```
+"""
 function stream_bounceback_xy_solid_F_2d!(Fout::AbstractArray{<:Any,3},
                                           Fin::AbstractArray{<:Any,3},
                                           is_solid::AbstractArray{Bool,2})
@@ -900,6 +1020,18 @@ function stream_bounceback_xy_solid_F_2d!(Fout::AbstractArray{<:Any,3},
     return Fout
 end
 
+"""
+    apply_zou_he_west_cell_F_2d!(Fcell::AbstractVector{T}, u_in, volume) where T
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_zou_he_west_cell_F_2d!)
+```
+"""
 function apply_zou_he_west_cell_F_2d!(Fcell::AbstractVector{T}, u_in, volume) where T
     _check_d2q9_vector(Fcell, "Fcell")
     u = T(u_in)
@@ -917,6 +1049,18 @@ function apply_zou_he_west_cell_F_2d!(Fcell::AbstractVector{T}, u_in, volume) wh
     return Fcell
 end
 
+"""
+    apply_zou_he_west_F_2d!(F::AbstractArray{T,3}, u_in, volume) where T
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_zou_he_west_F_2d!)
+```
+"""
 function apply_zou_he_west_F_2d!(F::AbstractArray{T,3}, u_in, volume) where T
     size(F, 3) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
     @inbounds for j in axes(F, 2)
@@ -936,6 +1080,18 @@ function apply_zou_he_west_F_2d!(F::AbstractArray{T,3}, u_in, volume,
     return F
 end
 
+"""
+    apply_zou_he_pressure_east_cell_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_zou_he_pressure_east_cell_F_2d!)
+```
+"""
 function apply_zou_he_pressure_east_cell_F_2d!(
         Fcell::AbstractVector{T},
         volume;
@@ -956,6 +1112,18 @@ function apply_zou_he_pressure_east_cell_F_2d!(
     return Fcell
 end
 
+"""
+    apply_zou_he_pressure_east_F_2d!(F::AbstractArray{T,3}, volume;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_zou_he_pressure_east_F_2d!)
+```
+"""
 function apply_zou_he_pressure_east_F_2d!(F::AbstractArray{T,3}, volume;
                                           rho_out=one(T)) where T
     size(F, 3) == 9 || throw(ArgumentError("F must have 9 D2Q9 populations in dimension 3"))
@@ -1009,6 +1177,18 @@ function collide_Guo_integrated_D2Q9!(F::AbstractArray{<:Any,3},
     return F
 end
 
+"""
+    compute_drag_mea_solid_F_2d(Fpre::AbstractArray{<:Any,3},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.compute_drag_mea_solid_F_2d)
+```
+"""
 function compute_drag_mea_solid_F_2d(Fpre::AbstractArray{<:Any,3},
                                      Fpost::AbstractArray{<:Any,3},
                                      is_solid::AbstractArray{Bool,2})
@@ -1144,6 +1324,18 @@ function _check_composite_coarse_layout(coarse_F::AbstractArray{<:Any,3},
     return nothing
 end
 
+"""
+    apply_composite_zou_he_west_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_composite_zou_he_west_F_2d!)
+```
+"""
 function apply_composite_zou_he_west_F_2d!(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},
@@ -1168,6 +1360,18 @@ function apply_composite_zou_he_west_F_2d!(
     return coarse_F, patch
 end
 
+"""
+    apply_composite_zou_he_pressure_east_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_composite_zou_he_pressure_east_F_2d!)
+```
+"""
 function apply_composite_zou_he_pressure_east_F_2d!(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},
@@ -1339,6 +1543,18 @@ function active_momentum_F(coarse_F::AbstractArray{<:Any,3},
     return mx + fmx, my + fmy
 end
 
+"""
+    active_moments_F(coarse_F::AbstractArray{<:Any,3},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.active_moments_F)
+```
+"""
 function active_moments_F(coarse_F::AbstractArray{<:Any,3},
                           patch::ConservativeTreePatch2D)
     m = active_mass_F(coarse_F, patch)
@@ -1543,6 +1759,18 @@ function stream_composite_fully_periodic_leaf_F_2d!(
     return coarse_out, patch_out
 end
 
+"""
+    stream_composite_periodic_x_wall_y_leaf_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_composite_periodic_x_wall_y_leaf_F_2d!)
+```
+"""
 function stream_composite_periodic_x_wall_y_leaf_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -1558,6 +1786,18 @@ function stream_composite_periodic_x_wall_y_leaf_F_2d!(
     return coarse_out, patch_out
 end
 
+"""
+    stream_composite_periodic_x_moving_wall_y_leaf_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_composite_periodic_x_moving_wall_y_leaf_F_2d!)
+```
+"""
 function stream_composite_periodic_x_moving_wall_y_leaf_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,
@@ -1602,6 +1842,18 @@ function collide_BGK_composite_F_2d!(coarse_F::AbstractArray{<:Any,3},
     return coarse_F, patch
 end
 
+"""
+    collide_Guo_composite_F_2d!(coarse_F::AbstractArray{<:Any,3},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_Guo_composite_F_2d!)
+```
+"""
 function collide_Guo_composite_F_2d!(coarse_F::AbstractArray{<:Any,3},
                                      patch::ConservativeTreePatch2D,
                                      volume_coarse,
@@ -1622,6 +1874,18 @@ function collide_Guo_composite_F_2d!(coarse_F::AbstractArray{<:Any,3},
     return coarse_F, patch
 end
 
+"""
+    ConservativeTreeMacroFlow2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeMacroFlow2D
+```
+"""
 struct ConservativeTreeMacroFlow2D{T}
     flow::Symbol
     coarse_F::Array{T,3}
@@ -1636,6 +1900,18 @@ struct ConservativeTreeMacroFlow2D{T}
     steps::Int
 end
 
+"""
+    ConservativeTreeCylinderResult2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeCylinderResult2D
+```
+"""
 struct ConservativeTreeCylinderResult2D{T}
     coarse_F::Array{T,3}
     patch::ConservativeTreePatch2D{T}
@@ -1651,6 +1927,18 @@ struct ConservativeTreeCylinderResult2D{T}
     avg_window::Int
 end
 
+"""
+    ConservativeTreeCylinderChannelResult2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeCylinderChannelResult2D
+```
+"""
 struct ConservativeTreeCylinderChannelResult2D{T}
     coarse_F::Array{T,3}
     patch::ConservativeTreePatch2D{T}
@@ -1668,6 +1956,18 @@ struct ConservativeTreeCylinderChannelResult2D{T}
     avg_window::Int
 end
 
+"""
+    ConservativeTreeSolidFlowResult2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeSolidFlowResult2D
+```
+"""
 struct ConservativeTreeSolidFlowResult2D{T}
     flow::Symbol
     coarse_F::Array{T,3}
@@ -1681,6 +1981,18 @@ struct ConservativeTreeSolidFlowResult2D{T}
     steps::Int
 end
 
+"""
+    composite_leaf_mean_ux_profile(coarse_F::AbstractArray{T,3},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.composite_leaf_mean_ux_profile)
+```
+"""
 function composite_leaf_mean_ux_profile(coarse_F::AbstractArray{T,3},
                                         patch::ConservativeTreePatch2D{T};
                                         volume_leaf::T=T(0.25),
@@ -1701,6 +2013,18 @@ function composite_leaf_mean_ux_profile(coarse_F::AbstractArray{T,3},
     return profile
 end
 
+"""
+    composite_leaf_velocity_field_2d(coarse_F::AbstractArray{T,3},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.composite_leaf_velocity_field_2d)
+```
+"""
 function composite_leaf_velocity_field_2d(coarse_F::AbstractArray{T,3},
                                           patch::ConservativeTreePatch2D{T};
                                           volume_leaf::T=T(0.25),
@@ -1722,12 +2046,36 @@ function composite_leaf_velocity_field_2d(coarse_F::AbstractArray{T,3},
     return (ux=ux, uy=uy)
 end
 
+"""
+    couette_analytic_profile_2d(ny::Int, U)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.couette_analytic_profile_2d)
+```
+"""
 function couette_analytic_profile_2d(ny::Int, U)
     ny >= 2 || throw(ArgumentError("ny must be >= 2"))
     T = typeof(float(U))
     return [T(U) * T(j - 1) / T(ny - 1) for j in 1:ny]
 end
 
+"""
+    poiseuille_analytic_profile_2d(ny::Int, Fx, omega; rho=1)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.poiseuille_analytic_profile_2d)
+```
+"""
 function poiseuille_analytic_profile_2d(ny::Int, Fx, omega; rho=1)
     ny >= 2 || throw(ArgumentError("ny must be >= 2"))
     T = promote_type(typeof(float(Fx)), typeof(float(omega)), typeof(float(rho)))
@@ -1801,6 +2149,18 @@ function _leaf_fluid_mean_velocity_F(F::AbstractArray{T,3},
     return ux_sum / T(n_fluid), uy_sum / T(n_fluid)
 end
 
+"""
+    run_conservative_tree_couette_macroflow_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_couette_macroflow_2d)
+```
+"""
 function run_conservative_tree_couette_macroflow_2d(;
         Nx::Int=16,
         Ny::Int=12,
@@ -1844,6 +2204,18 @@ function run_conservative_tree_couette_macroflow_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_poiseuille_macroflow_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_poiseuille_macroflow_2d)
+```
+"""
 function run_conservative_tree_poiseuille_macroflow_2d(;
         Nx::Int=18,
         Ny::Int=14,
@@ -1986,6 +2358,18 @@ function _run_conservative_tree_open_solid_macroflow_2d(
         mass_initial, mass_final, mass_final - mass_initial, steps)
 end
 
+"""
+    run_conservative_tree_square_obstacle_macroflow_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_square_obstacle_macroflow_2d)
+```
+"""
 function run_conservative_tree_square_obstacle_macroflow_2d(;
         Nx::Int=24,
         Ny::Int=14,
@@ -2007,6 +2391,18 @@ function run_conservative_tree_square_obstacle_macroflow_2d(;
         Fx=Fx, Fy=Fy, omega=omega, rho=rho, steps=steps, T=T)
 end
 
+"""
+    run_conservative_tree_bfs_macroflow_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_bfs_macroflow_2d)
+```
+"""
 function run_conservative_tree_bfs_macroflow_2d(;
         Nx::Int=28,
         Ny::Int=14,
@@ -2028,6 +2424,18 @@ function run_conservative_tree_bfs_macroflow_2d(;
         u_in=u_in, omega=omega, rho=rho, steps=steps, T=T)
 end
 
+"""
+    run_conservative_tree_cylinder_macroflow_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_cylinder_macroflow_2d)
+```
+"""
 function run_conservative_tree_cylinder_macroflow_2d(;
         Nx::Int=24,
         Ny::Int=14,
@@ -2098,6 +2506,18 @@ function run_conservative_tree_cylinder_macroflow_2d(;
         mass_initial, mass_final, mass_final - mass_initial, steps, avg_window)
 end
 
+"""
+    run_conservative_tree_cylinder_channel_macroflow_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_cylinder_channel_macroflow_2d)
+```
+"""
 function run_conservative_tree_cylinder_channel_macroflow_2d(;
         Nx::Int=24,
         Ny::Int=14,

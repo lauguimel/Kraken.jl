@@ -4,6 +4,18 @@
 # refined parent and each fine leaf. It does not yet build routes between
 # multiple refined regions.
 
+"""
+    ConservativeTreePatchSet2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreePatchSet2D
+```
+"""
 struct ConservativeTreePatchSet2D{T}
     Nx::Int
     Ny::Int
@@ -100,6 +112,18 @@ function active_volume(patch_set::ConservativeTreePatchSet2D)
     return active_coarse + 0.25 * active_fine
 end
 
+"""
+    active_coarse_mask(patch_set::ConservativeTreePatchSet2D)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.active_coarse_mask)
+```
+"""
 function active_coarse_mask(patch_set::ConservativeTreePatchSet2D)
     mask = trues(patch_set.Nx, patch_set.Ny)
     @inbounds for J in 1:patch_set.Ny, I in 1:patch_set.Nx
@@ -108,6 +132,18 @@ function active_coarse_mask(patch_set::ConservativeTreePatchSet2D)
     return mask
 end
 
+"""
+    conservative_tree_parent_owner_2d(patch_set::ConservativeTreePatchSet2D,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_parent_owner_2d)
+```
+"""
 @inline function conservative_tree_parent_owner_2d(patch_set::ConservativeTreePatchSet2D,
                                                    I::Integer,
                                                    J::Integer)
@@ -118,6 +154,18 @@ end
     return patch_set.parent_owner[i, j]
 end
 
+"""
+    conservative_tree_leaf_owner_2d(patch_set::ConservativeTreePatchSet2D,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_leaf_owner_2d)
+```
+"""
 @inline function conservative_tree_leaf_owner_2d(patch_set::ConservativeTreePatchSet2D,
                                                  i_leaf::Integer,
                                                  j_leaf::Integer)
@@ -128,6 +176,18 @@ end
     return patch_set.leaf_owner[i, j]
 end
 
+"""
+    conservative_tree_patch_owner_counts_2d(patch_set::ConservativeTreePatchSet2D)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_patch_owner_counts_2d)
+```
+"""
 function conservative_tree_patch_owner_counts_2d(patch_set::ConservativeTreePatchSet2D)
     counts = zeros(Int, length(patch_set.patches))
     @inbounds for owner in patch_set.parent_owner

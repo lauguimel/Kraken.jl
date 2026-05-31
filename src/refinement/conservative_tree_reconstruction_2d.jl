@@ -4,6 +4,18 @@
 # into route/interface kernels. Rows store integrated populations
 # `F_q = f_q * cell_volume`.
 
+"""
+    macrostate_integrated_D2Q9(Fcell::AbstractVector, volume)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.macrostate_integrated_D2Q9)
+```
+"""
 function macrostate_integrated_D2Q9(Fcell::AbstractVector, volume)
     _check_d2q9_vector(Fcell, "Fcell")
     T = typeof(zero(eltype(Fcell)) + volume)
@@ -27,6 +39,18 @@ function macrostate_integrated_D2Q9(Fcell::AbstractVector, volume)
     return rho, ux, uy
 end
 
+"""
+    reconstruct_integrated_D2Q9_eq_neq!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.reconstruct_integrated_D2Q9_eq_neq!)
+```
+"""
 function reconstruct_integrated_D2Q9_eq_neq!(
         Fdst::AbstractVector,
         dst_volume,
@@ -52,6 +76,18 @@ function reconstruct_integrated_D2Q9_eq_neq!(
     return Fdst
 end
 
+"""
+    reconstructed_integrated_D2Q9_packet(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.reconstructed_integrated_D2Q9_packet)
+```
+"""
 function reconstructed_integrated_D2Q9_packet(
         Fsrc::AbstractVector,
         src_volume,

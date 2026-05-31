@@ -38,6 +38,18 @@ using KernelAbstractions
     end
 end
 
+"""
+    compute_polymeric_force_2d!(Fx_p, Fy_p, tau_xx, tau_xy, tau_yy)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.compute_polymeric_force_2d!)
+```
+"""
 function compute_polymeric_force_2d!(Fx_p, Fy_p, tau_xx, tau_xy, tau_yy)
     backend = KernelAbstractions.get_backend(Fx_p)
     Nx, Ny = size(Fx_p)
@@ -135,6 +147,18 @@ end
     end
 end
 
+"""
+    evolve_stress_2d!(tau_xx_new, tau_xy_new, tau_yy_new,
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.evolve_stress_2d!)
+```
+"""
 function evolve_stress_2d!(tau_xx_new, tau_xy_new, tau_yy_new,
                             tau_xx, tau_xy, tau_yy,
                             ux, uy, nu_p, lambda)
@@ -254,6 +278,18 @@ end
     end
 end
 
+"""
+    evolve_logconf_2d!(Theta_xx_new, Theta_xy_new, Theta_yy_new,
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.evolve_logconf_2d!)
+```
+"""
 function evolve_logconf_2d!(Theta_xx_new, Theta_xy_new, Theta_yy_new,
                              Theta_xx, Theta_xy, Theta_yy,
                              ux, uy; lambda=1.0, L_max=0.0)
@@ -295,6 +331,18 @@ For FENE-P: τ_p = G · f(tr(C)) · (C - I).
     end
 end
 
+"""
+    compute_stress_from_conf_2d!(tau_xx, tau_xy, tau_yy, Cxx, Cxy, Cyy;
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.compute_stress_from_conf_2d!)
+```
+"""
 function compute_stress_from_conf_2d!(tau_xx, tau_xy, tau_yy, Cxx, Cxy, Cyy;
                                        G=1.0, L_max=0.0)
     backend = KernelAbstractions.get_backend(tau_xx)
@@ -328,6 +376,18 @@ Compute τ_p from log-conformation Θ: C = exp(Θ), then τ_p = G · f(tr(C)) ·
     end
 end
 
+"""
+    compute_stress_from_logconf_2d!(tau_xx, tau_xy, tau_yy,
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.compute_stress_from_logconf_2d!)
+```
+"""
 function compute_stress_from_logconf_2d!(tau_xx, tau_xy, tau_yy,
                                           Theta_xx, Theta_xy, Theta_yy;
                                           G=1.0, L_max=0.0)

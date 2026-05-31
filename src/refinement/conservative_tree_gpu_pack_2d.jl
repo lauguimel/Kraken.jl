@@ -4,6 +4,18 @@
 # arrays. CPU tests replay the pack directly; a later patch can transfer these
 # arrays to CUDA/Metal without changing the route contract.
 
+"""
+    ConservativeTreeGPURoutePack2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeGPURoutePack2D
+```
+"""
 struct ConservativeTreeGPURoutePack2D{T}
     cells_per_block::Int32
     block_level::Vector{UInt8}
@@ -88,6 +100,18 @@ function pack_conservative_tree_gpu_routes_2d(
         Int32.(packed.boundary_routes))
 end
 
+"""
+    conservative_tree_gpu_route_weight_sums_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_gpu_route_weight_sums_2d)
+```
+"""
 function conservative_tree_gpu_route_weight_sums_2d(
         pack::ConservativeTreeGPURoutePack2D{T}) where T
     sums = Dict{Tuple{Int32,UInt8},T}()
@@ -139,6 +163,18 @@ end
     return nothing
 end
 
+"""
+    stream_conservative_tree_gpu_pack_interior_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_conservative_tree_gpu_pack_interior_F_2d!)
+```
+"""
 function stream_conservative_tree_gpu_pack_interior_F_2d!(
         coarse_out::AbstractArray{<:Any,3},
         patch_out::ConservativeTreePatch2D,

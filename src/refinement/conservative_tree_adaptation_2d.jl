@@ -4,6 +4,18 @@
 # indicators or DSL Refine blocks into bounded patch plans, then leaves the
 # actual conservative population transfer to the existing direct regrid path.
 
+"""
+    ConservativeTreeAdaptationPolicy2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeAdaptationPolicy2D
+```
+"""
 struct ConservativeTreeAdaptationPolicy2D
     pad_parent::Int
     min_i_cells::Int
@@ -31,6 +43,18 @@ function ConservativeTreeAdaptationPolicy2D(;
     return ConservativeTreeAdaptationPolicy2D(pad, min_i, min_j, growth, shrink)
 end
 
+"""
+    ConservativeTreePatchProposal2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreePatchProposal2D
+```
+"""
 struct ConservativeTreePatchProposal2D
     name::String
     i_range::UnitRange{Int}
@@ -47,6 +71,18 @@ function ConservativeTreePatchProposal2D(i_range::AbstractUnitRange{<:Integer},
     return ConservativeTreePatchProposal2D(String(name), i, j, reason)
 end
 
+"""
+    ConservativeTreeAdaptationPlan2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeAdaptationPlan2D
+```
+"""
 struct ConservativeTreeAdaptationPlan2D
     current_i_range::UnitRange{Int}
     current_j_range::UnitRange{Int}
@@ -160,6 +196,18 @@ function conservative_tree_adaptation_plan_2d(
         selected.i_range, selected.j_range, reason, changed)
 end
 
+"""
+    conservative_tree_adaptation_plan_from_proposal_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_adaptation_plan_from_proposal_2d)
+```
+"""
 function conservative_tree_adaptation_plan_from_proposal_2d(
         Nx::Integer,
         Ny::Integer,
@@ -218,6 +266,18 @@ function conservative_tree_patch_proposals_from_krk_2d(setup)
     return proposals
 end
 
+"""
+    conservative_tree_adaptation_policy_from_krk_refine_2d(refine)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_adaptation_policy_from_krk_refine_2d)
+```
+"""
 function conservative_tree_adaptation_policy_from_krk_refine_2d(refine)
     criterion = getproperty(refine, :criterion)
     criterion === nothing && return ConservativeTreeAdaptationPolicy2D()
@@ -227,6 +287,18 @@ function conservative_tree_adaptation_policy_from_krk_refine_2d(refine)
         shrink_margin=getproperty(criterion, :shrink_margin))
 end
 
+"""
+    conservative_tree_indicator_adaptation_plan_from_krk_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_indicator_adaptation_plan_from_krk_2d)
+```
+"""
 function conservative_tree_indicator_adaptation_plan_from_krk_2d(
         indicator::AbstractArray{<:Real,2},
         current_i_range::AbstractUnitRange{<:Integer},
@@ -244,6 +316,18 @@ function conservative_tree_indicator_adaptation_plan_from_krk_2d(
         reason=:krk_refine_criterion)
 end
 
+"""
+    adapt_conservative_tree_patch_with_plan_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.adapt_conservative_tree_patch_with_plan_2d)
+```
+"""
 function adapt_conservative_tree_patch_with_plan_2d(
         coarse_F::AbstractArray{T,3},
         patch::ConservativeTreePatch2D{T},

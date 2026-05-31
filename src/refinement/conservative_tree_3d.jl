@@ -14,21 +14,69 @@ const D3Q19_OPPOSITE_INT = (1, 3, 2, 5, 4, 7, 6, 11, 10, 9, 8, 15, 14, 13, 12, 1
     return q
 end
 
+"""
+    d3q19_cx(q::Integer)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.d3q19_cx)
+```
+"""
 @inline function d3q19_cx(q::Integer)
     qi = _check_d3q19_q(Int(q))
     return D3Q19_CX_INT[qi]
 end
 
+"""
+    d3q19_cy(q::Integer)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.d3q19_cy)
+```
+"""
 @inline function d3q19_cy(q::Integer)
     qi = _check_d3q19_q(Int(q))
     return D3Q19_CY_INT[qi]
 end
 
+"""
+    d3q19_cz(q::Integer)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.d3q19_cz)
+```
+"""
 @inline function d3q19_cz(q::Integer)
     qi = _check_d3q19_q(Int(q))
     return D3Q19_CZ_INT[qi]
 end
 
+"""
+    d3q19_opposite(q::Integer)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.d3q19_opposite)
+```
+"""
 @inline function d3q19_opposite(q::Integer)
     qi = _check_d3q19_q(Int(q))
     return D3Q19_OPPOSITE_INT[qi]
@@ -83,11 +131,35 @@ function explode_uniform_F_3d!(Fc::AbstractArray{<:Any,4}, Fp::AbstractVector)
     return Fc
 end
 
+"""
+    mass_F_3d(F::AbstractVector)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.mass_F_3d)
+```
+"""
 function mass_F_3d(F::AbstractVector)
     _check_d3q19_vector(F, "F")
     return sum(F)
 end
 
+"""
+    momentum_F_3d(F::AbstractVector)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.momentum_F_3d)
+```
+"""
 function momentum_F_3d(F::AbstractVector)
     _check_d3q19_vector(F, "F")
 
@@ -103,6 +175,18 @@ function momentum_F_3d(F::AbstractVector)
     return mx, my, mz
 end
 
+"""
+    moments_F_3d(F::AbstractVector)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.moments_F_3d)
+```
+"""
 function moments_F_3d(F::AbstractVector)
     m = mass_F_3d(F)
     mx, my, mz = momentum_F_3d(F)
@@ -142,6 +226,18 @@ function moments_F_3d(F::AbstractArray{<:Any,4})
     return m, mx, my, mz
 end
 
+"""
+    fill_equilibrium_integrated_D3Q19!(Fcell::AbstractVector,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.fill_equilibrium_integrated_D3Q19!)
+```
+"""
 function fill_equilibrium_integrated_D3Q19!(Fcell::AbstractVector,
                                             volume,
                                             rho,
@@ -232,6 +328,18 @@ function _check_conservative_tree_patch_layout(patch::ConservativeTreePatch3D)
     return nothing
 end
 
+"""
+    coalesce_patch_to_shadow_F_3d!(patch::ConservativeTreePatch3D)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.coalesce_patch_to_shadow_F_3d!)
+```
+"""
 function coalesce_patch_to_shadow_F_3d!(patch::ConservativeTreePatch3D)
     _check_conservative_tree_patch_layout(patch)
 
@@ -249,6 +357,18 @@ function coalesce_patch_to_shadow_F_3d!(patch::ConservativeTreePatch3D)
     return patch
 end
 
+"""
+    explode_shadow_to_patch_uniform_F_3d!(patch::ConservativeTreePatch3D)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.explode_shadow_to_patch_uniform_F_3d!)
+```
+"""
 function explode_shadow_to_patch_uniform_F_3d!(patch::ConservativeTreePatch3D)
     _check_conservative_tree_patch_layout(patch)
 
@@ -338,6 +458,18 @@ function composite_to_leaf_F_3d!(leaf_F::AbstractArray{<:Any,4},
     return leaf_F
 end
 
+"""
+    active_mass_F_3d(coarse_F::AbstractArray{<:Any,4},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.active_mass_F_3d)
+```
+"""
 function active_mass_F_3d(coarse_F::AbstractArray{<:Any,4},
                           patch::ConservativeTreePatch3D)
     _check_composite_coarse_layout_3d(coarse_F, patch)
@@ -354,6 +486,18 @@ function active_mass_F_3d(coarse_F::AbstractArray{<:Any,4},
     return total + mass_F_3d(patch.fine_F)
 end
 
+"""
+    active_population_sums_F_3d(coarse_F::AbstractArray{<:Any,4},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.active_population_sums_F_3d)
+```
+"""
 function active_population_sums_F_3d(coarse_F::AbstractArray{<:Any,4},
                                      patch::ConservativeTreePatch3D)
     _check_composite_coarse_layout_3d(coarse_F, patch)
@@ -372,6 +516,18 @@ function active_population_sums_F_3d(coarse_F::AbstractArray{<:Any,4},
     return totals
 end
 
+"""
+    active_momentum_F_3d(coarse_F::AbstractArray{<:Any,4},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.active_momentum_F_3d)
+```
+"""
 function active_momentum_F_3d(coarse_F::AbstractArray{<:Any,4},
                               patch::ConservativeTreePatch3D)
     _check_composite_coarse_layout_3d(coarse_F, patch)
@@ -401,6 +557,18 @@ function active_momentum_F_3d(coarse_F::AbstractArray{<:Any,4},
     return mx + fmx, my + fmy, mz + fmz
 end
 
+"""
+    active_moments_F_3d(coarse_F::AbstractArray{<:Any,4},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.active_moments_F_3d)
+```
+"""
 function active_moments_F_3d(coarse_F::AbstractArray{<:Any,4},
                              patch::ConservativeTreePatch3D)
     m = active_mass_F_3d(coarse_F, patch)
@@ -408,6 +576,18 @@ function active_moments_F_3d(coarse_F::AbstractArray{<:Any,4},
     return m, mx, my, mz
 end
 
+"""
+    collide_BGK_integrated_D3Q19!(Fcell::AbstractVector, volume, omega)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_BGK_integrated_D3Q19!)
+```
+"""
 function collide_BGK_integrated_D3Q19!(Fcell::AbstractVector, volume, omega)
     _check_d3q19_vector(Fcell, "Fcell")
     volume > zero(volume) || throw(ArgumentError("volume must be positive"))
@@ -437,6 +617,18 @@ function collide_BGK_integrated_D3Q19!(F::AbstractArray{<:Any,4}, volume, omega)
     return F
 end
 
+"""
+    collide_Guo_integrated_D3Q19!(Fcell::AbstractVector,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_Guo_integrated_D3Q19!)
+```
+"""
 function collide_Guo_integrated_D3Q19!(Fcell::AbstractVector,
                                        volume,
                                        omega,
@@ -486,6 +678,18 @@ function collide_Guo_integrated_D3Q19!(F::AbstractArray{<:Any,4},
     return F
 end
 
+"""
+    collide_BGK_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_BGK_composite_F_3d!)
+```
+"""
 function collide_BGK_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
                                      patch::ConservativeTreePatch3D,
                                      volume_coarse,
@@ -507,6 +711,18 @@ function collide_BGK_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
     return coarse_F, patch
 end
 
+"""
+    collide_Guo_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_Guo_composite_F_3d!)
+```
+"""
 function collide_Guo_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
                                      patch::ConservativeTreePatch3D,
                                      volume_coarse,
@@ -532,6 +748,18 @@ function collide_Guo_composite_F_3d!(coarse_F::AbstractArray{<:Any,4},
     return coarse_F, patch
 end
 
+"""
+    conservative_tree_parent_index_3d(i_f::Int, j_f::Int, k_f::Int)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_parent_index_3d)
+```
+"""
 @inline function conservative_tree_parent_index_3d(i_f::Int, j_f::Int, k_f::Int)
     i_f >= 1 || throw(ArgumentError("i_f must be >= 1"))
     j_f >= 1 || throw(ArgumentError("j_f must be >= 1"))

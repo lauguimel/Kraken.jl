@@ -104,6 +104,18 @@ using KernelAbstractions
     end
 end
 
+"""
+    collide_thermal_3d!(g, ux, uy, uz, ω_T)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_thermal_3d!)
+```
+"""
 function collide_thermal_3d!(g, ux, uy, uz, ω_T)
     backend = KernelAbstractions.get_backend(g)
     Nx, Ny, Nz = size(g, 1), size(g, 2), size(g, 3)
@@ -123,6 +135,18 @@ end
     end
 end
 
+"""
+    compute_temperature_3d!(Temp, g)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.compute_temperature_3d!)
+```
+"""
 function compute_temperature_3d!(Temp, g)
     backend = KernelAbstractions.get_backend(g)
     Nx, Ny, Nz = size(Temp)
@@ -151,6 +175,18 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_west_3d!(g, T_wall, Ny, Nz)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_west_3d!)
+```
+"""
 function apply_fixed_temp_west_3d!(g, T_wall, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_west_3d_kernel!(backend)
@@ -173,6 +209,18 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_east_3d!(g, T_wall, Nx, Ny, Nz)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_east_3d!)
+```
+"""
 function apply_fixed_temp_east_3d!(g, T_wall, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_east_3d_kernel!(backend)
@@ -195,6 +243,18 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_south_3d!(g, T_wall, Nx, Nz)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_south_3d!)
+```
+"""
 function apply_fixed_temp_south_3d!(g, T_wall, Nx, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_south_3d_kernel!(backend)
@@ -217,6 +277,18 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_north_3d!(g, T_wall, Nx, Ny, Nz)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_north_3d!)
+```
+"""
 function apply_fixed_temp_north_3d!(g, T_wall, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_north_3d_kernel!(backend)
@@ -239,6 +311,18 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_bottom_3d!(g, T_wall, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_bottom_3d!)
+```
+"""
 function apply_fixed_temp_bottom_3d!(g, T_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_bottom_3d_kernel!(backend)
@@ -261,6 +345,18 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_top_3d!(g, T_wall, Nx, Ny, Nz)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_top_3d!)
+```
+"""
 function apply_fixed_temp_top_3d!(g, T_wall, Nx, Ny, Nz)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_top_3d_kernel!(backend)
@@ -428,6 +524,18 @@ end
     end
 end
 
+"""
+    collide_boussinesq_3d!(f, Temp, is_solid, ω, β_g, T_ref)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_boussinesq_3d!)
+```
+"""
 function collide_boussinesq_3d!(f, Temp, is_solid, ω, β_g, T_ref)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny, Nz = size(f, 1), size(f, 2), size(f, 3)

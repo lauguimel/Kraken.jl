@@ -4,6 +4,18 @@
 # active leaves, but it does not own LBM populations and does not dispatch a
 # multilevel runtime.
 
+"""
+    ConservativeTreeRefineBlock2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeRefineBlock2D
+```
+"""
 struct ConservativeTreeRefineBlock2D
     name::String
     parent::String
@@ -11,6 +23,18 @@ struct ConservativeTreeRefineBlock2D
     j_range::UnitRange{Int}
 end
 
+"""
+    ConservativeTreeSpec2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeSpec2D
+```
+"""
 struct ConservativeTreeSpec2D
     Nx::Int
     Ny::Int
@@ -351,6 +375,18 @@ function active_volume(spec::ConservativeTreeSpec2D)
     return total
 end
 
+"""
+    conservative_tree_cell_id_2d(spec::ConservativeTreeSpec2D,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_cell_id_2d)
+```
+"""
 function conservative_tree_cell_id_2d(spec::ConservativeTreeSpec2D,
                                       level::Integer,
                                       i::Integer,
@@ -359,6 +395,18 @@ function conservative_tree_cell_id_2d(spec::ConservativeTreeSpec2D,
                _conservative_tree_cell_key_2d(Int(level), Int(i), Int(j)), 0)
 end
 
+"""
+    conservative_tree_children_2d(spec::ConservativeTreeSpec2D,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_children_2d)
+```
+"""
 function conservative_tree_children_2d(spec::ConservativeTreeSpec2D,
                                        cell_id::Integer)
     id = Int(cell_id)
@@ -367,6 +415,18 @@ function conservative_tree_children_2d(spec::ConservativeTreeSpec2D,
     return spec.children[id]
 end
 
+"""
+    conservative_tree_is_active_leaf_2d(spec::ConservativeTreeSpec2D,
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_is_active_leaf_2d)
+```
+"""
 function conservative_tree_is_active_leaf_2d(spec::ConservativeTreeSpec2D,
                                              cell_id::Integer)
     id = Int(cell_id)
@@ -375,6 +435,18 @@ function conservative_tree_is_active_leaf_2d(spec::ConservativeTreeSpec2D,
     return spec.cells[id].active
 end
 
+"""
+    conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_refine_blocks_from_krk_2d)
+```
+"""
 function conservative_tree_refine_blocks_from_krk_2d(domain, refinements)
     Nx = Int(getproperty(domain, :Nx))
     Ny = Int(getproperty(domain, :Ny))

@@ -95,6 +95,18 @@ struct CutLinkList{IT<:AbstractVector{Int32}, WT<:AbstractVector}
     Nlinks::Int
 end
 
+"""
+    CutLinkList3D
+
+Public type or module in the kernel-level LBM operation.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.CutLinkList3D
+```
+"""
 struct CutLinkList3D{IT<:AbstractVector{Int32}, WT<:AbstractVector}
     list_i::IT; list_j::IT; list_k::IT; list_q::IT
     list_qw::WT
@@ -127,6 +139,18 @@ function build_cut_link_list_2d(q_wall_h::AbstractArray{T,3}; backend=CPU()) whe
     return CutLinkList(li, lj, lq, lw, N)
 end
 
+"""
+    build_cut_link_list_3d(q_wall_h::AbstractArray{T,4}; backend=CPU()) where {T}
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.build_cut_link_list_3d)
+```
+"""
 function build_cut_link_list_3d(q_wall_h::AbstractArray{T,4}; backend=CPU()) where {T}
     Nx, Ny, Nz, _ = size(q_wall_h)
     is_h = Int32[]; js_h = Int32[]; ks_h = Int32[]; qs_h = Int32[]; qws_h = T[]

@@ -1,5 +1,17 @@
 # Macro-flow runners over the recursive AMR-D subcycled route scheduler.
 
+"""
+    ConservativeTreeSpecMacroFlow2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeSpecMacroFlow2D
+```
+"""
 struct ConservativeTreeSpecMacroFlow2D{T}
     flow::Symbol
     max_level::Int
@@ -40,6 +52,18 @@ struct ConservativeTreeSpecSolidFlow2D{T}
     leaf_equivalent_cell_count::Int
 end
 
+"""
+    conservative_tree_mass_roundoff_rtol_2d(::Type{T},
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_mass_roundoff_rtol_2d)
+```
+"""
 function conservative_tree_mass_roundoff_rtol_2d(::Type{T},
                                                  steps::Integer,
                                                  max_level::Integer;
@@ -103,6 +127,18 @@ function _nested_channel_refine_blocks_2d(max_level::Integer)
     return blocks
 end
 
+"""
+    create_conservative_tree_nested_channel_spec_2d(max_level::Integer;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.create_conservative_tree_nested_channel_spec_2d)
+```
+"""
 function create_conservative_tree_nested_channel_spec_2d(max_level::Integer;
                                                          Nx::Integer=16,
                                                          Ny::Integer=12)
@@ -112,6 +148,18 @@ function create_conservative_tree_nested_channel_spec_2d(max_level::Integer;
         Int(Nx), Int(Ny), _nested_channel_refine_blocks_2d(max_level))
 end
 
+"""
+    initialize_conservative_tree_equilibrium_F_2d!(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.initialize_conservative_tree_equilibrium_F_2d!)
+```
+"""
 function initialize_conservative_tree_equilibrium_F_2d!(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D;
@@ -295,6 +343,18 @@ function _collide_Guo_conservative_tree_active_fluid_level_F_2d!(
     return F
 end
 
+"""
+    conservative_tree_leaf_mean_ux_profile_2d(
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_leaf_mean_ux_profile_2d)
+```
+"""
 function conservative_tree_leaf_mean_ux_profile_2d(
         F::AbstractMatrix,
         spec::ConservativeTreeSpec2D;
@@ -449,6 +509,18 @@ function _initialize_cartesian_channel_equilibrium_F_2d!(
     return F
 end
 
+"""
+    run_cartesian_channel_mass_reference_2d(;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_cartesian_channel_mass_reference_2d)
+```
+"""
 function run_cartesian_channel_mass_reference_2d(;
         flow::Symbol,
         max_level::Integer,

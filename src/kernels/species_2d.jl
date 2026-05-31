@@ -50,6 +50,18 @@ using KernelAbstractions
     end
 end
 
+"""
+    collide_species_2d!(h, ux, uy, ω_D)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_species_2d!)
+```
+"""
 function collide_species_2d!(h, ux, uy, ω_D)
     backend = KernelAbstractions.get_backend(h)
     Nx, Ny = size(h, 1), size(h, 2)
@@ -64,6 +76,18 @@ end
     end
 end
 
+"""
+    compute_concentration_2d!(C, h)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.compute_concentration_2d!)
+```
+"""
 function compute_concentration_2d!(C, h)
     backend = KernelAbstractions.get_backend(h)
     Nx, Ny = size(C)
@@ -93,12 +117,36 @@ end
     end
 end
 
+"""
+    apply_fixed_conc_south_2d!(h, C_wall, Nx)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_conc_south_2d!)
+```
+"""
 function apply_fixed_conc_south_2d!(h, C_wall, Nx)
     backend = KernelAbstractions.get_backend(h)
     kernel! = apply_fixed_conc_south_2d_kernel!(backend)
     kernel!(h, eltype(h)(C_wall); ndrange=(Nx,))
 end
 
+"""
+    apply_fixed_conc_north_2d!(h, C_wall, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_conc_north_2d!)
+```
+"""
 function apply_fixed_conc_north_2d!(h, C_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(h)
     kernel! = apply_fixed_conc_north_2d_kernel!(backend)

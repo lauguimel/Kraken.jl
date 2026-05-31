@@ -135,6 +135,18 @@ end
 #    builds a constant profile on the backend.
 # =====================================================================
 
+"""
+    AbstractBC
+
+Public type or module in the kernel-level LBM operation.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.AbstractBC
+```
+"""
 abstract type AbstractBC end
 
 "Kernel-fallback halfway bounce-back. No-op (the fused LBM kernel

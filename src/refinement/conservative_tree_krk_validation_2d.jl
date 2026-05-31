@@ -1,5 +1,17 @@
 # AMR-D .krk validation and runtime dispatch helpers.
 
+"""
+    ConservativeTreeAMRDKrkCase2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeAMRDKrkCase2D
+```
+"""
 struct ConservativeTreeAMRDKrkCase2D
     name::String
     flow::Symbol
@@ -33,6 +45,18 @@ end
     return get(faces, face, :missing) == bc_type
 end
 
+"""
+    conservative_tree_amr_d_boundary_policy_2d(source)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_amr_d_boundary_policy_2d)
+```
+"""
 function conservative_tree_amr_d_boundary_policy_2d(source)
     setup = _amr_d_setup_from_source_2d(source)
     faces = _amr_d_boundary_type_map_2d(setup)
@@ -56,6 +80,18 @@ function conservative_tree_amr_d_boundary_policy_2d(source)
     return :unsupported
 end
 
+"""
+    conservative_tree_amr_d_geometry_2d(source)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_amr_d_geometry_2d)
+```
+"""
 function conservative_tree_amr_d_geometry_2d(source)
     setup = _amr_d_setup_from_source_2d(source)
     obstacles = filter(r -> getproperty(r, :kind) == :obstacle,
@@ -143,6 +179,18 @@ function _amr_d_runtime_status_2d(flow::Symbol,
            "nested AMR-D runtime does not support this case"
 end
 
+"""
+    conservative_tree_amr_d_case_from_krk_2d(source)
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_amr_d_case_from_krk_2d)
+```
+"""
 function conservative_tree_amr_d_case_from_krk_2d(source)
     setup = _amr_d_setup_from_source_2d(source)
     boundary_policy = conservative_tree_amr_d_boundary_policy_2d(setup)
@@ -177,6 +225,18 @@ function conservative_tree_amr_d_case_from_krk_2d(source)
         runtime_supported, runtime_status, runtime_reason)
 end
 
+"""
+    conservative_tree_amr_d_support_matrix_2d()
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.conservative_tree_amr_d_support_matrix_2d)
+```
+"""
 function conservative_tree_amr_d_support_matrix_2d()
     return [
         (feature=:periodic_x_wall_y, single_patch=true, nested=true,
@@ -237,6 +297,18 @@ function _amr_d_single_patch_ranges_2d(setup)
     return only(ranges)
 end
 
+"""
+    run_conservative_tree_amr_d_case_from_krk_2d(source;
+
+Public function in the grid-refinement and conservative-tree AMR API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.run_conservative_tree_amr_d_case_from_krk_2d)
+```
+"""
 function run_conservative_tree_amr_d_case_from_krk_2d(source;
         steps_override=nothing,
         mass_guard_rtol=nothing,

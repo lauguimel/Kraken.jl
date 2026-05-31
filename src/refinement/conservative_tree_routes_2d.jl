@@ -3,6 +3,18 @@
 # This is still a static correctness layer. It builds packet routes for active
 # leaves, but it does not stream populations.
 
+"""
+    ConservativeTreeRouteTable2D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeRouteTable2D
+```
+"""
 struct ConservativeTreeRouteTable2D
     links::Vector{ConservativeTreeLink2D}
     routes::Vector{ConservativeTreeRoute2D}

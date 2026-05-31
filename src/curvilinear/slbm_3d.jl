@@ -23,6 +23,18 @@ struct SLBMGeometry3D{T<:AbstractFloat, AT4<:AbstractArray{T, 4}}
     dx_ref::T
 end
 
+"""
+    build_slbm_geometry_3d(mesh::CurvilinearMesh3D{T}; local_cfl::Bool=false) where {T}
+
+Public function in the curvilinear mesh and SLBM API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.build_slbm_geometry_3d)
+```
+"""
 function build_slbm_geometry_3d(mesh::CurvilinearMesh3D{T}; local_cfl::Bool=false) where {T}
     Nξ, Nη, Nζ = mesh.Nξ, mesh.Nη, mesh.Nζ
     cx = velocities_x(D3Q19())
@@ -83,6 +95,18 @@ function build_slbm_geometry_3d(mesh::CurvilinearMesh3D{T}; local_cfl::Bool=fals
         mesh.periodic_ξ, mesh.periodic_η, mesh.periodic_ζ, dxr)
 end
 
+"""
+    transfer_slbm_geometry_3d(geom::SLBMGeometry3D{T}, backend) where {T}
+
+Public function in the curvilinear mesh and SLBM API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.transfer_slbm_geometry_3d)
+```
+"""
 function transfer_slbm_geometry_3d(geom::SLBMGeometry3D{T}, backend) where {T}
     i_dep = KernelAbstractions.allocate(backend, T, size(geom.i_dep))
     j_dep = KernelAbstractions.allocate(backend, T, size(geom.j_dep))

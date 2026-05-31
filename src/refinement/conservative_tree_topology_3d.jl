@@ -4,12 +4,48 @@
 # route weights. It does not own LBM state and intentionally stops before
 # streaming or GPU packing.
 
+"""
+    RouteKind3D
+
+Public enumeration for the grid-refinement and conservative-tree AMR API. Exported values documented by this definition include `RouteKind3D`, `DIRECT_3D`, `SPLIT_FACE_3D`, `SPLIT_EDGE_3D`, `COALESCE_FACE_3D`, `COALESCE_EDGE_3D`, `ROUTE_BOUNDARY_3D`.
+Use these tags when inspecting or constructing route and topology metadata.
+
+```julia
+using Kraken
+
+Kraken.RouteKind3D
+```
+"""
 @enum RouteKind3D::UInt8 DIRECT_3D=0 SPLIT_FACE_3D=1 SPLIT_EDGE_3D=2 COALESCE_FACE_3D=3 COALESCE_EDGE_3D=4 ROUTE_BOUNDARY_3D=5
 
+"""
+    CartesianMetrics3D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.CartesianMetrics3D
+```
+"""
 struct CartesianMetrics3D <: AbstractCellMetrics
     volume::Float64
 end
 
+"""
+    ConservativeTreeCell3D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeCell3D
+```
+"""
 struct ConservativeTreeCell3D
     level::Int
     i::Int
@@ -20,12 +56,36 @@ struct ConservativeTreeCell3D
     parent::Int
 end
 
+"""
+    ConservativeTreeLink3D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeLink3D
+```
+"""
 struct ConservativeTreeLink3D
     src::Int
     q::Int
     kind::LinkKind
 end
 
+"""
+    ConservativeTreeRoute3D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeRoute3D
+```
+"""
 struct ConservativeTreeRoute3D
     src::Int
     dst::Int
@@ -34,6 +94,18 @@ struct ConservativeTreeRoute3D
     kind::RouteKind3D
 end
 
+"""
+    ConservativeTreeTopology3D
+
+Public type or module in the grid-refinement and conservative-tree AMR API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.ConservativeTreeTopology3D
+```
+"""
 struct ConservativeTreeTopology3D
     cells::Vector{ConservativeTreeCell3D}
     links::Vector{ConservativeTreeLink3D}

@@ -61,6 +61,18 @@ using KernelAbstractions
     end
 end
 
+"""
+    collide_thermal_2d!(g, ux, uy, ω_T)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_thermal_2d!)
+```
+"""
 function collide_thermal_2d!(g, ux, uy, ω_T)
     backend = KernelAbstractions.get_backend(g)
     Nx, Ny = size(g, 1), size(g, 2)
@@ -106,6 +118,18 @@ end
     end
 end
 
+"""
+    compute_temperature_2d!(Temp, g)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.compute_temperature_2d!)
+```
+"""
 function compute_temperature_2d!(Temp, g)
     backend = KernelAbstractions.get_backend(g)
     Nx, Ny = size(Temp)
@@ -140,12 +164,36 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_south_2d!(g, T_wall, Nx)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_south_2d!)
+```
+"""
 function apply_fixed_temp_south_2d!(g, T_wall, Nx)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_south_2d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall); ndrange=(Nx,))
 end
 
+"""
+    apply_fixed_temp_north_2d!(g, T_wall, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_north_2d!)
+```
+"""
 function apply_fixed_temp_north_2d!(g, T_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_north_2d_kernel!(backend)
@@ -178,12 +226,36 @@ end
     end
 end
 
+"""
+    apply_fixed_temp_west_2d!(g, T_wall, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_west_2d!)
+```
+"""
 function apply_fixed_temp_west_2d!(g, T_wall, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_west_2d_kernel!(backend)
     kernel!(g, eltype(g)(T_wall); ndrange=(Ny,))
 end
 
+"""
+    apply_fixed_temp_east_2d!(g, T_wall, Nx, Ny)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_fixed_temp_east_2d!)
+```
+"""
 function apply_fixed_temp_east_2d!(g, T_wall, Nx, Ny)
     backend = KernelAbstractions.get_backend(g)
     kernel! = apply_fixed_temp_east_2d_kernel!(backend)
@@ -312,6 +384,18 @@ BGK collision with per-node Boussinesq force AND temperature-dependent viscosity
     end
 end
 
+"""
+    collide_boussinesq_vt_2d!(f, Temp, is_solid, ν_ref, T_ref, A_arr, β_g)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_boussinesq_vt_2d!)
+```
+"""
 function collide_boussinesq_vt_2d!(f, Temp, is_solid, ν_ref, T_ref, A_arr, β_g)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)
@@ -320,6 +404,18 @@ function collide_boussinesq_vt_2d!(f, Temp, is_solid, ν_ref, T_ref, A_arr, β_g
     kernel!(f, Temp, is_solid, ET(ν_ref), ET(T_ref), ET(A_arr), ET(β_g); ndrange=(Nx, Ny))
 end
 
+"""
+    collide_boussinesq_2d!(f, Temp, is_solid, ω, β_g, T_ref)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_boussinesq_2d!)
+```
+"""
 function collide_boussinesq_2d!(f, Temp, is_solid, ω, β_g, T_ref)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)
@@ -399,6 +495,18 @@ Used for rheological contrast studies: α_visc = ln(Rc), Rc = η_max/η_min.
     end
 end
 
+"""
+    collide_boussinesq_vt_modified_2d!(f, Temp, is_solid, ν_ref, T0_visc, α_visc, β_g, T_ref_buoy)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_boussinesq_vt_modified_2d!)
+```
+"""
 function collide_boussinesq_vt_modified_2d!(f, Temp, is_solid, ν_ref, T0_visc, α_visc, β_g, T_ref_buoy)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)

@@ -69,6 +69,18 @@ end
 
 # --- Public API ---
 
+"""
+    collide_guo_2d!(f, is_solid, ω, Fx, Fy)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_guo_2d!)
+```
+"""
 function collide_guo_2d!(f, is_solid, ω, Fx, Fy)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)
@@ -130,6 +142,18 @@ end
     end
 end
 
+"""
+    collide_guo_field_2d!(f, is_solid, Fx_field, Fy_field, ω)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_guo_field_2d!)
+```
+"""
 function collide_guo_field_2d!(f, is_solid, Fx_field, Fy_field, ω)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)

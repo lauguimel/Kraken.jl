@@ -89,6 +89,18 @@ r = j - 0.5 (half-way BB, r=0 axis at j=0.5).
     end
 end
 
+"""
+    collide_axisymmetric_2d!(f, is_solid, ω, Nx, Ny)
+
+Public function in the high-level simulation driver API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_axisymmetric_2d!)
+```
+"""
 function collide_axisymmetric_2d!(f, is_solid, ω, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = collide_axisymmetric_2d_kernel!(backend)
@@ -241,6 +253,18 @@ end
     end
 end
 
+"""
+    collide_li_axisym_2d!(f, is_solid, τ, Nx, Ny; Fz_body=0.0)
+
+Public function in the high-level simulation driver API.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_li_axisym_2d!)
+```
+"""
 function collide_li_axisym_2d!(f, is_solid, τ, Nx, Ny; Fz_body=0.0)
     backend = KernelAbstractions.get_backend(f)
     T = eltype(f)

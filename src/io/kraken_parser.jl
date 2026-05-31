@@ -132,6 +132,18 @@ struct RefineCriterionSetup
     balance::Int                   # 1 means adjacent AMR leaves differ by <= 1 level
 end
 
+"""
+    RefineSetup
+
+Public type or module in the .krk parsing and I/O API.
+Construct or dispatch on this type according to the field layout and methods defined below.
+
+```julia
+using Kraken
+
+Kraken.RefineSetup
+```
+"""
 struct RefineSetup
     name::String
     region::NTuple{4, Float64}   # 2D: (x_min, y_min, x_max, y_max)

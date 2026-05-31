@@ -128,6 +128,18 @@ function _default_dx_ref_3d(dXdξ, dXdη, dXdζ, dYdξ, dYdη, dYdζ,
     return min_edge
 end
 
+"""
+    validate_mesh_3d(mesh::CurvilinearMesh3D{T}) where {T}
+
+Public function in the curvilinear mesh and SLBM API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.validate_mesh_3d)
+```
+"""
 function validate_mesh_3d(mesh::CurvilinearMesh3D{T}) where {T}
     Jmin = minimum(mesh.J); Jmax = maximum(mesh.J)
     Jabs_min = min(abs(Jmin), abs(Jmax))
