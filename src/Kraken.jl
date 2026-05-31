@@ -103,7 +103,11 @@ include("io/kraken_parser.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
-include("refinement/conservative_tree_2d.jl")
+include("refinement/conservative_tree_base_transfer_2d.jl")
+include("refinement/conservative_tree_leaf_ops_2d.jl")
+include("refinement/conservative_tree_patch_ledger_2d.jl")
+include("refinement/conservative_tree_composite_ops_2d.jl")
+include("refinement/conservative_tree_macroflows_2d.jl")
 include("refinement/conservative_tree_reconstruction_2d.jl")
 include("refinement/conservative_tree_multipatch_2d.jl")
 include("refinement/conservative_tree_3d.jl")
