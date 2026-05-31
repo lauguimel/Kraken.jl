@@ -161,6 +161,7 @@ makedocs(;
                 "Cartesian cavity" => "users/tutorials/cartesian-cavity.md",
                 "Thermal natural convection" => "users/tutorials/thermal-natural-convection.md",
                 "Sphere drag 3D" => "users/tutorials/sphere-drag-3d.md",
+                "Viscoelastic cylinder" => "users/tutorials/viscoelastic-cylinder.md",
             ],
             "Benchmarks" => [
                 "Cartesian cavity" => "users/benchmarks/cartesian-cavity.md",
