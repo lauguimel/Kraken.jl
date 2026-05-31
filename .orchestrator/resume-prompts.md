@@ -19,9 +19,13 @@ benchmark vs Ghia 1982 + icoFoam — **Phase C OPENED**; icoFoam <0.5%, Kraken B
 `a524f7ded`). **Phase A + B COMPLETE; Phase C started.** All on `dev/units-module`
 (`/Users/guillaume/Documents/Recherche/Kraken.jl-units`), local commits, no push.
 
-**Parallel track KRK-GEO** (STL/complex geometry, separate from ship-1): M-GEO-1+2
-GREEN on `feat/geometry-stl` (off `dev/v0.3-campaign`) — STL via `.krk` + mesh-field
-regression fix. See boss.md.
+**Parallel track KRK-GEO** (STL/complex geometry) — **CHAIN COMPLETE on `dev/v0.3-campaign` (HEAD `ac4785c9c`)**, 6 commits (2026-05-29/30):
+`fc9a4d7eb` fix run_simulation mesh-field regression · `434aee036` STL via `.krk` ·
+`2a5252953` LI-BB Bouzidi (`wall=libb`) · `313611ca4` `src/geometry/` consolidation (§6 FACTORED) ·
+`22672591d` units module grafted onto v0.3 · `ac4785c9c` physical-units STL (`Units{}` block, parse-time dim↔LU).
+Worktree `Kraken.jl-geometry-stl` = branch `feat/units-on-v03` @ `ac4785c9c` (= v0.3 HEAD), has BOTH `src/geometry/` + `src/units/`.
+**Next = M-GEO-5** (mandate §9): 3D physical-units STL + populate units descriptor fields `kappa_max`/`L_up`/`L_down` (currently defaults). See prompt F + boss.md (2026-05-30 entries) + mandate §9.
+**Full-suite baseline on v0.3: 34570 pass / 7 PRE-EXISTING fails (test_conservative_tree_streaming_2d:619-622 + test_multiblock_exchange:161/162/186 — AMR/multiblock, NOT geometry) / 0 errored.** Any geometry change must keep exactly these 7.
 
 **Next dispatchable**:
 - **M7** RheoTool thermal Rayleigh-Bénard (buoyantBoussinesqPimpleFoam, Ra 1e3-1e5) — dep M5 ✓.
@@ -106,6 +110,43 @@ Tâche :
    reporte-moi GREEN/YELLOW/RED. Pas de commit sans mon OK.
 
 NE lance pas le Department-style spawn. C'est Codex direct (Layer 2).
+```
+
+---
+
+## F. KRK-GEO M-GEO-5 — 3D physical-units STL + units descriptor fields
+
+```
+/orchestrator Reprends la piste KRK-GEO (géométrie STL). La chaîne 2D est
+complète et mergée sur dev/v0.3-campaign (HEAD ac4785c9c) : STL via .krk +
+LI-BB (wall=libb) + src/geometry/ + units intégré + STL en unités physiques
+(bloc Units{}, lowering dim→LU au parsing, runner intouché).
+
+Mission M-GEO-5 (déjà scopée dans mandate §9), deux objectifs couplés :
+1. 3D : étendre le câblage units→LU de M-GEO-4 (actuellement 2D-only) au STL 3D.
+   Chemin 3D : voxelize_3d, precompute_q_wall_from_stl_3d, _apply_geometry_3d!
+   (tous dans src/geometry/), fused_trt_libb_v2_step_3d! (kernels/li_bb_3d_v2.jl).
+   dx_real est dimension-agnostique → surtout un exemple STL D3Q19 + le scale 3D.
+2. Peupler les champs du GeometryDescriptor laissés en défaut : kappa_max
+   (courbure max, calculée depuis le STL), L_up/L_down (extents amont/aval du
+   domaine vs centroïde obstacle). Ils vivent dans src/geometry/descriptor.jl
+   et alimentent units.compile (Units.jl::_normalize_geometry les lit).
+
+Discipline (ce qui a marché toute la chaîne) :
+- Lis mandate §9 (M-GEO-5) + .orchestrator/memory/boss.md (entrées 2026-05-30).
+- Plan-then-Implement : agent Plan (read-only) → tu me présentes le design →
+  validation → Codex via run-engineer.sh sur le worktree Kraken.jl-geometry-stl
+  (branche feat/units-on-v03 @ ac4785c9c). Câblage parse-time si possible.
+- Gate = JE relance la suite complète moi-même : baseline 34570 pass / 7 échecs
+  PRÉ-EXISTANTS (conservative_tree_streaming:619-622 + multiblock_exchange:161/162/186).
+  Doit rester exactement ces 7, zéro nouveau, zéro errored.
+- Validation M-GEO-5 : STL 3D physique-mm ≡ jumeau LU 3D écrit à la main (masque +
+  écoulement) ; kappa_max/L_up/L_down non-triviaux (pas des défauts) dans l'audit units.
+- Commit (jamais sans mon OK) + FF-merge vers dev/v0.3-campaign. RIEN poussé.
+- Worktrees v0.3 ont du WIP benchmarks non-committé pré-existant — ne pas committer.
+
+Charge kraken-architect + orchestrator. Stage les .krk physiques de M-GEO-4
+(examples/geometry_stl/cylinder_stl_mm.krk + _lu.krk) comme modèle 2D.
 ```
 
 ---
