@@ -4,6 +4,29 @@ using Literate
 using PlutoStaticHTML
 using Kraken
 
+const DOCS_LINKCHECK = lowercase(get(ENV, "DOCUMENTER_LINKCHECK", "false")) in ("1", "true", "yes")
+
+function lint_implication_maps()
+    agent_dir = joinpath(@__DIR__, "agent")
+    linter = joinpath(@__DIR__, "..", "scripts", "lint-implication-map.sh")
+    isfile(linter) || error("Track-C linter not found: $(linter)")
+    isdir(agent_dir) || error("Track-C agent docs directory not found: $(agent_dir)")
+
+    maps = sort(filter(name -> endswith(name, "-implication.md"), readdir(agent_dir; join = true)))
+    isempty(maps) && error("No Track-C implication maps found under $(agent_dir)")
+
+    for map in maps
+        @info "Linting Track-C implication map" map
+        try
+            run(`bash $linter $map`)
+        catch err
+            error("Track-C implication map lint failed: $(map)\n$(sprint(showerror, err))")
+        end
+    end
+end
+
+lint_implication_maps()
+
 # --- Living-documentation helpers (Phase 4.1A) ---
 # Loaded into Main so Literate.jl preprocessing and @example blocks
 # can call extract_function / krk_download / api_page_data directly.
@@ -132,6 +155,30 @@ makedocs(;
         "Getting started" => "getting_started.md",
         "Concepts" => "concepts_index.md",
         "Capabilities" => "capabilities.md",
+        "Users" => [
+            "KRK reference" => "users/krk-reference.md",
+            "Axis tutorials" => [
+                "Cartesian cavity" => "users/tutorials/cartesian-cavity.md",
+                "Thermal natural convection" => "users/tutorials/thermal-natural-convection.md",
+                "Sphere drag 3D" => "users/tutorials/sphere-drag-3d.md",
+            ],
+            "Benchmarks" => [
+                "Cartesian cavity" => "users/benchmarks/cartesian-cavity.md",
+                "Thermal natural convection" => "users/benchmarks/thermal-natural-convection.md",
+                "Sphere drag 3D" => "users/benchmarks/sphere-drag-3d.md",
+            ],
+        ],
+        "API" => [
+            "Units" => "api/units.md",
+            "Geometry" => "api/geometry.md",
+            "LBM" => "api/lbm.md",
+            "Physics: Newtonian" => "api/physics-newtonian.md",
+            "Physics: Viscoelastic" => "api/physics-viscoelastic.md",
+            "Physics: Thermal" => "api/physics-thermal.md",
+            "Boundary conditions" => "api/bc.md",
+            "Backend" => "api/backend.md",
+            "KRK I/O" => "api/io-krk.md",
+        ],
         # v0.1.0 scope: single-phase LBM (2D/3D), thermal, grid refinement,
         # spatial BCs, .krk DSL. Out-of-scope pages (phasefield, VOF/PLIC,
         # rheology, viscoelastic, Shan-Chen, species) are excluded here.
@@ -195,7 +242,8 @@ makedocs(;
         ],
     ],
     remotes = nothing,
-    warnonly = true,
+    linkcheck = DOCS_LINKCHECK,
+    warnonly = DOCS_LINKCHECK ? Documenter.except(:linkcheck) : true,
     checkdocs = :none,
 )
 

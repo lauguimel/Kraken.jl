@@ -1,9 +1,9 @@
 name: Documentation
 on:
   push:
-    branches: [main]
+    branches: [main, dev/v0.3-campaign]
   pull_request:
-    branches: [main]
+    branches: [main, dev/v0.3-campaign]
 permissions:
   contents: write
 jobs:
@@ -15,11 +15,14 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v2
-      - run: |
+      - name: Instantiate docs environment
+        run: |
           julia --project=docs -e '
             using Pkg
             Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()'
-      - run: julia --project=docs docs/make.jl
+      - name: Build docs and check links
+        run: julia --project=docs docs/make.jl
         env:
+          DOCUMENTER_LINKCHECK: "true"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
