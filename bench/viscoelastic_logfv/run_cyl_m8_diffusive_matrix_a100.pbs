@@ -1,0 +1,122 @@
+#!/bin/bash -l
+#PBS -N M8_CYL_MATRIX
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=08:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M8 — Oldroyd-B cylinder RheoTool benchmark matrix on Aqua A100 (F64 CUDA).
+#
+# Resolves two coupled questions in ONE job:
+#   (1) M8 GATE: Kraken Cd vs rheoTool at Wi in {0.1, 0.5, 1.0}, at Kraken's
+#       finest resolution R=50. rT fine-mesh refs (RHEOTOOL_CD_SWEEP_M28.csv):
+#       Wi0.1=130.43, Wi0.5=119.71, Wi1.0=120.40.
+#   (2) wall_bc PICK: halfwayBB (LI-BB pre-phase, current default) vs
+#       bouzidi_fl (post-collision LI-BB). Local Metal-F32 R=10 Wi=1 signal:
+#       halfwayBB Cd=112.86 (-7.8% vs rT R10=122.25), bouzidi_fl Cd=124.03
+#       (+1.5%, FINITE) -> bouzidi lifts the coarse-R gap. This job tests
+#       whether that holds/overshoots at R=50 AND whether bouzidi stays FINITE
+#       at R>=30 F64 (M34 history: bouzidi_fl_twopass NaN'd at R>=40 F64;
+#       single-pass bouzidi_fl at F64 is UNTESTED at R>=30 -> this job tests it).
+#
+# Diffusive scaling (M61): nu_total=0.15 fixed (tau=0.95 at the R=30 anchor),
+#   u_mean = Re_R * nu_total / R  ->  R=50:0.003  R=30:0.005  R=10:0.015.
+#   lambda = Wi * R / u_mean is computed per case by the driver.
+#
+# Matrix: 2 wall_bc x 3 R x 3 Wi = 18 cases (driver sweeps the 3 Wi per call).
+#   Ordering: R=50 FIRST (the M8 fine-mesh gate), then 30, then 10; halfwayBB
+#   before bouzidi_fl. Per-case CSV + rolling SUMMARY.csv per cell are written
+#   as each case finishes -> a walltime-truncated run still yields R=50 data.
+#   KRAKEN_SAVE_FIELDS=1 persists (ux,uy,tau*,rho,is_solid) for wall decomposition.
+#
+# Cost (A100 F64, 300k steps): R=50 ~8min, R=30 ~5min, R=10 ~3min per Wi.
+#   Per cell (3 Wi): ~24/15/9 min; x2 wall_bc; total ~96 min + precompile ~10 min.
+#   8h walltime = comfortable margin (bouzidi substep ramping headroom).
+#
+# Submit from repo root:
+#   qsub bench/viscoelastic_logfv/run_cyl_m8_diffusive_matrix_a100.pbs
+# Fast turnaround (R=50 gate only):
+#   qsub -v KRAKEN_R_ONLY=50 bench/viscoelastic_logfv/run_cyl_m8_diffusive_matrix_a100.pbs
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+JOBID="${PBS_JOBID:-manual}"
+R_ONLY="${KRAKEN_R_ONLY:-}"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+echo "=== M8 cylinder matrix starting at $(date) ==="
+echo "Matrix: wall_bc in {halfwayBB,bouzidi_fl} x R in {50,30,10} x Wi in {0.1,0.5,1.0}"
+echo "Fixed: beta=0.59 Re=1 bsd=1.0 nu_total=0.15 (diffusive, tau=0.95) muscl_superbee qwall"
+
+# One invocation = one (wall_bc, R) cell; the driver sweeps Wi in {0.1,0.5,1.0}.
+run_cell() {
+    local wall_bc=$1
+    local R=$2
+    local u_mean=$3
+    echo ""
+    echo "--- M8 wall_bc=$wall_bc R=$R u_mean=$u_mean Wi={0.1,0.5,1.0} $(date) ---"
+    KRAKEN_BACKEND=cuda \
+    KRAKEN_FT=float64 \
+    KRAKEN_R_LIST=$R \
+    KRAKEN_U_MEAN=$u_mean \
+    KRAKEN_WI_LIST=0.1,0.5,1.0 \
+    KRAKEN_RE_LIST=1.0 \
+    KRAKEN_BETA_LIST=0.59 \
+    KRAKEN_BSD_LIST=1.0 \
+    KRAKEN_L_UP_LIST=15.0 \
+    KRAKEN_L_DOWN_LIST=15.0 \
+    KRAKEN_EMBEDDED_GRADIENT=0 \
+    KRAKEN_EMBEDDED_ADVECTION=0 \
+    KRAKEN_EMBEDDED_FORCE=0 \
+    KRAKEN_EMBEDDED_DRAG=0 \
+    KRAKEN_EMBEDDED_GEOMETRY=qwall \
+    KRAKEN_ADVECTION_SCHEME=muscl_superbee \
+    KRAKEN_WALL_BC=$wall_bc \
+    KRAKEN_MAX_STEPS_BASE=300000 \
+    KRAKEN_AVG_WINDOW_FRAC=0.2 \
+    KRAKEN_SAVE_FIELDS=1 \
+    KRAKEN_OUTPUT_DIR="tmp/m8_matrix/${JOBID}/${wall_bc}_R${R}" \
+    julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl || \
+        echo "!!! cell wall_bc=$wall_bc R=$R FAILED (continuing) $(date)"
+}
+
+# Critical-first ordering: R=50 (M8 gate), then 30, then 10; halfway then bouzidi.
+for R in 50 30 10; do
+    if [ -n "$R_ONLY" ] && [ "$R" != "$R_ONLY" ]; then continue; fi
+    case "$R" in
+        50) u=0.003 ;;
+        30) u=0.005 ;;
+        10) u=0.015 ;;
+    esac
+    run_cell halfwayBB  "$R" "$u"
+    run_cell bouzidi_fl "$R" "$u"
+done
+
+echo ""
+echo "=== M8 matrix job complete $(date) ==="
+echo "Cd summary (Cd_kraken = col 26):"
+for wall in halfwayBB bouzidi_fl; do
+    for R in 50 30 10; do
+        d="tmp/m8_matrix/${JOBID}/${wall}_R${R}"
+        for f in "$d"/cyl_bigsweep_v2_*.csv; do
+            [ -f "$f" ] || continue
+            wi=$(awk -F, 'NR==2 {print $5}' "$f")
+            cd_val=$(awk -F, 'NR==2 {print $26}' "$f")
+            nanf=$(awk -F, 'NR==2 {print $(NF-2)}' "$f")
+            echo "  $wall R=$R Wi=$wi : Cd=$cd_val nan=$nanf"
+        done
+    done
+done

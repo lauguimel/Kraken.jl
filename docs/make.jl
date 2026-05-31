@@ -168,6 +168,7 @@ makedocs(;
             "benchmarks/accuracy.md",
             "benchmarks/external.md",
             "benchmarks/hardware.md",
+            "benchmarks/viscoelastic_cylinder.md",
         ],
         ".krk DSL reference" => [
             "krk/overview.md",

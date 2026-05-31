@@ -1,0 +1,24 @@
+# Oldroyd-B cylinder smoke for the M8 viscoelastic benchmark wiring.
+# The production driver rebuilds the cylinder channel from R, L_up, and L_down.
+Simulation cylinder_oldroyd_b D2Q9
+
+Define R = 8
+Define Re = 1
+Define Wi = 1
+Define L_up = 15
+Define L_down = 15
+Define bsd_fraction = 1.0
+Define u_mean = 0.01875
+
+Domain L = 240 x 32  N = 240 x 32
+Physics R = R Re = Re Wi = Wi L_up = L_up L_down = L_down bsd_fraction = bsd_fraction u_mean = u_mean
+Rheology oldroyd_b { nu_s = 0.0885 nu_p = 0.0615 lambda = Wi*R/u_mean }
+Module viscoelastic
+
+Obstacle cylinder wall(radius = R) { (x - L_up*R)^2 + (y - (4*R - 1)/2)^2 <= R^2 }
+Boundary west velocity(ux = u_mean, uy = 0)
+Boundary east pressure(rho = 1)
+Boundary south wall
+Boundary north wall
+
+Run 20 steps

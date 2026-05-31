@@ -49,9 +49,11 @@ The runner selects a backend driver based on `setup.modules`, `setup.lattice`,
 5. `:thermal in modules`         → `run_rayleigh_benard_2d`,
    `run_natural_convection_2d`, or a thermal-conduction fallback
    depending on the case name
-6. `setup.lattice === :D3Q19`    → `run_cavity_3d` if the case name
+6. `:viscoelastic in modules`    → `run_viscoelastic_logfv_cylinder_coupled_2d`
+   when the case name contains `cylinder`
+7. `setup.lattice === :D3Q19`    → `run_cavity_3d` if the case name
    contains `cavity_3d`, otherwise an informative error
-7. Default (`:D2Q9`, no modules) → generic single-phase LBM loop
+8. Default (`:D2Q9`, no modules) → generic single-phase LBM loop
    (existing behavior, compatible with all cavity/Poiseuille/Couette/
    Taylor-Green/cylinder examples).
 
@@ -120,6 +122,8 @@ function run_simulation(setup::SimulationSetup;
                             callback=callback, callback_every=callback_every)
     elseif :thermal in setup.modules
         return _run_thermal(setup; backend=backend, T=T)
+    elseif :viscoelastic in setup.modules
+        return _run_viscoelastic(setup; backend=backend, T=T)
     elseif setup.lattice === :D3Q19
         return _run_d3q19(setup; backend=backend, T=T)
     end
@@ -1804,6 +1808,103 @@ function _compute_nusselt_from_patches(domain::RefinedDomain{T},
         return sum(Nu_arr[2:end-1]) / max(Ny_c - 2, 1)
     end
     return T(NaN)
+end
+
+function _ve_numeric_param(setup::SimulationSetup, key::Symbol, default=nothing)
+    if haskey(setup.physics.params, key)
+        return Float64(setup.physics.params[key])
+    elseif haskey(setup.user_vars, key)
+        return Float64(setup.user_vars[key])
+    elseif default !== nothing
+        return Float64(default)
+    end
+    throw(ArgumentError(
+        "viscoelastic dispatch: missing parameter `$key`. " *
+        "Provide it as `Define $key = ...` or `Physics $key = ...`."))
+end
+
+function _ve_symbol_param(setup::SimulationSetup, key::Symbol, default::Symbol)
+    if haskey(setup.physics.params, key) || haskey(setup.user_vars, key)
+        throw(ArgumentError(
+            "viscoelastic dispatch: `$key` is symbolic, but `.krk` Define/Physics " *
+            "values are numeric in the current parser. Omit `$key` to use `:$default` " *
+            "or call the Julia driver directly."))
+    end
+    return default
+end
+
+function _ve_oldroydb_rheology(setup::SimulationSetup)
+    idx = findfirst(rs -> rs.model === :oldroyd_b, setup.rheology)
+    idx !== nothing && return setup.rheology[idx]
+    throw(ArgumentError(
+        "viscoelastic dispatch: cylinder requires " *
+        "`Rheology oldroyd_b { nu_s = ..., nu_p = ..., lambda = ... }`."))
+end
+
+function _ve_rheology_param(rs::RheologySetup, key::Symbol)
+    haskey(rs.params, key) && return Float64(rs.params[key])
+    throw(ArgumentError(
+        "viscoelastic dispatch: Rheology $(rs.model) is missing `$key`."))
+end
+
+function _ve_cylinder_obstacle_radius(setup::SimulationSetup)
+    for region in setup.regions
+        region_name = lowercase(region.name)
+        (occursin("cylinder", region_name) || occursin("circle", region_name)) || continue
+        for key in (:radius, :R)
+            if haskey(region.bc_values, key)
+                return Float64(evaluate(region.bc_values[key]))
+            end
+        end
+    end
+    return nothing
+end
+
+"""Dispatch viscoelastic cases to the existing production log-FV driver."""
+function _run_viscoelastic(setup::SimulationSetup;
+                           backend=KernelAbstractions.CPU(), T=Float64)
+    name = lowercase(setup.name)
+    if !occursin("cylinder", name)
+        throw(ArgumentError(
+            "viscoelastic dispatch: unrecognized case name '$(setup.name)'. " *
+            "Known cases: cylinder."))
+    end
+
+    rs = _ve_oldroydb_rheology(setup)
+    radius_from_obstacle = _ve_cylinder_obstacle_radius(setup)
+    R = radius_from_obstacle === nothing ?
+        _ve_numeric_param(setup, :R) : Float64(radius_from_obstacle)
+    nu_s = _ve_rheology_param(rs, :nu_s)
+    nu_p = _ve_rheology_param(rs, :nu_p)
+    lambda = _ve_rheology_param(rs, :lambda)
+    Re = _ve_numeric_param(setup, :Re, 1.0)
+    nu_total = nu_s + nu_p
+    u_mean = _ve_numeric_param(setup, :u_mean, nu_total * Re / R)
+    L_up = _ve_numeric_param(setup, :L_up, 15.0)
+    L_down = _ve_numeric_param(setup, :L_down, 15.0)
+    bsd_fraction = _ve_numeric_param(setup, :bsd_fraction, 1.0)
+    wall_bc = _ve_symbol_param(setup, :wall_bc, :halfwayBB)
+    advection_scheme = _ve_symbol_param(setup, :advection_scheme, :muscl_superbee)
+    avg_window = round(Int, 0.2 * setup.max_steps)
+
+    result = run_viscoelastic_logfv_cylinder_coupled_2d(;
+        radius=R,
+        L_up=L_up,
+        L_down=L_down,
+        nu_s=nu_s,
+        nu_p=nu_p,
+        lambda=lambda,
+        u_mean=u_mean,
+        bsd_fraction=bsd_fraction,
+        polymer_model=:oldroydb,
+        wall_bc=wall_bc,
+        advection_scheme=advection_scheme,
+        max_steps=setup.max_steps,
+        avg_window=avg_window,
+        backend=backend,
+        T=T,
+    )
+    return merge(result, (setup=setup,))
 end
 
 """Dispatch thermal cases (non-refined) to the appropriate thermal driver."""

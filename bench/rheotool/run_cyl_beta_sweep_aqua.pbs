@@ -1,0 +1,107 @@
+#!/bin/bash -l
+#PBS -N rT_cyl_beta
+#PBS -l select=2:ncpus=1:mpiprocs=1:mem=4GB
+#PBS -l place=pack:group=vnode
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M8 double-check — rheoTool fresh reference Cd for the beta-sweep, to compare
+# against Kraken's beta-sweep (run_cyl_m8_beta_highwi_a100.pbs).
+#
+# Sweep: beta in {0.59, 0.3, 0.1, 0.01} x Wi in {0.5, 1.0} = 8 cases.
+#   Base case = bench/rheotool/cylinder_wi1.0_shrunk15R (Oldroyd-BLog,
+#   etaS=0.59, etaP=0.41, lambda=1.0 -> Cd=120.38 at t=20; the existing
+#   M8/M61 fine-mesh reference). For each case clone the base and set, with
+#   eta0=1 fixed:  etaS=beta, etaP=1-beta, lambda=Wi (this geometry: Wi=lambda).
+#   beta=0.01 Wi=1 is the hardest corner; rheoTool may also struggle there
+#   (log-conf + stabilization=coupling) — a non-converged/divergent case is
+#   documented honestly, not hidden.
+#
+# Aqua infra: OF9_RT.sh wrapper (~/bin) -> Apptainer sandbox
+#   /scratch/$USER/openfoam9-sandbox (rheoTool v1.4 / OpenFOAM-9). Per M60b
+#   fix: OF9_RT.sh -d is dead; only $HOME auto-mounts RW -> cd to abs $HOME path.
+# 8 MPI ranks (matches the working R10/R50 job pattern, halved per-case mesh
+#   is small post-shrink so 8 is ample).
+#
+# Submit from repo root:
+#   qsub bench/rheotool/run_cyl_beta_sweep_aqua.pbs
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+which OF9_RT.sh
+ls /scratch/$USER/openfoam9-sandbox/opt/openfoam9 > /dev/null
+
+NCORES=2  # MUST match the base case system/decomposeParDict numberOfSubdomains
+          # (shrunk15R ships =2). Mismatch -> rheoFoam "procdirs != processors"
+          # MPI_ABORT. Small post-shrink mesh -> 2 cores ample (R10/R50 ran 2c).
+BASE="bench/rheotool/cylinder_wi1.0_shrunk15R"
+[ -d "$BASE" ] || { echo "ERROR: base case $BASE not found"; exit 1; }
+RESULTS_ROOT="${KRAKEN_RHEOTOOL_RESULTS:-results/rheotool/cyl_beta_sweep_${PBS_JOBID:-manual}}"
+mkdir -p "$RESULTS_ROOT"
+echo "=== rheoTool beta-sweep start $(date) | results=$RESULTS_ROOT | cores=$NCORES ==="
+
+run_one() {
+    local beta=$1 wi=$2
+    local etaP
+    etaP=$(awk -v b="$beta" 'BEGIN{printf "%.6g", 1.0 - b}')
+    local tag="beta${beta}_wi${wi}"
+    local dest="$RESULTS_ROOT/$tag"
+    echo "--- $(date) | $tag : etaS=$beta etaP=$etaP lambda=$wi ---"
+    rm -rf "$dest"; cp -r "$BASE" "$dest"
+    local abs_dest; abs_dest=$(cd "$dest" && pwd)
+
+    # Set constitutive params (eta0=1: etaS=beta, etaP=1-beta; lambda=Wi).
+    # Line form: "etaS  etaS [1 -1 -1 0 0 0 0] 0.59;" — match the VALUE that
+    # follows the dimension bracket, NOT the digits inside [...] (a naive
+    # [^0-9.]* would stop at the "1" in "[1 ...]" and corrupt the dimensions).
+    local cp="$abs_dest/constant/constitutiveProperties"
+    sed -i -E "s/(etaS[[:space:]]+etaS[[:space:]]+\[[^]]*\][[:space:]]+)[0-9.eE+-]+;/\1${beta};/"  "$cp"
+    sed -i -E "s/(etaP[[:space:]]+etaP[[:space:]]+\[[^]]*\][[:space:]]+)[0-9.eE+-]+;/\1${etaP};/"  "$cp"
+    sed -i -E "s/(lambda[[:space:]]+lambda[[:space:]]+\[[^]]*\][[:space:]]+)[0-9.eE+-]+;/\1${wi};/" "$cp"
+    echo "  constitutive now:"; grep -E "etaS|etaP|lambda" "$cp" | sed 's/^/    /'
+
+    # Match decomposition to NCORES. The base case ships numberOfSubdomains=2
+    # (built for the 2-core R10/R50 job); a -np mismatch makes rheoFoam abort
+    # with "number of processor directories != number of processors". method
+    # is scotch (no n-coeffs to edit). Force the dict to NCORES before decompose.
+    sed -i -E "s/(numberOfSubdomains[[:space:]]+)[0-9]+;/\1${NCORES};/" \
+        "$abs_dest/system/decomposeParDict"
+    echo "  decomposeParDict: $(grep numberOfSubdomains "$abs_dest/system/decomposeParDict")"
+
+    # Clean stale artifacts, keep 0/ system/ constant/.
+    ( cd "$abs_dest" && rm -rf 0.* 1.* 2.* 3.* 4.* 5.* 6.* 7.* 8.* 9.* 10 15 20 \
+        processor* dynamicCode Cd.txt log.* constant/polyMesh/* 2>/dev/null || true )
+
+    OF9_RT.sh -- "
+        cd '$abs_dest' && \
+        blockMesh > log.blockMesh 2>&1 && \
+        mirrorMesh -noFunctionObjects -overwrite > log.mirrorMesh 2>&1 && \
+        decomposePar -force > log.decomposePar 2>&1 && \
+        mpirun -np $NCORES rheoFoam -parallel > log.rheoFoam 2>&1 && \
+        reconstructPar -latestTime > log.reconstructPar 2>&1 && \
+        touch valid_run \
+    " || echo "  !!! $tag rheoFoam FAILED/diverged (continuing)"
+
+    if [ -f "$abs_dest/Cd.txt" ]; then
+        echo "  Cd.txt tail:"; tail -3 "$abs_dest/Cd.txt" | sed 's/^/    /'
+        cp "$abs_dest/Cd.txt" "$RESULTS_ROOT/${tag}_Cd.txt"
+    else
+        echo "  (no Cd.txt — case did not complete)"
+    fi
+    echo "$(date) | $tag done"
+}
+
+for beta in 0.59 0.3 0.1 0.01; do
+    for wi in 0.5 1.0; do
+        run_one "$beta" "$wi"
+    done
+done
+
+echo "=== rheoTool beta-sweep DONE $(date) ==="
+echo "Final Cd per case:"
+for f in "$RESULTS_ROOT"/*_Cd.txt; do
+    [ -f "$f" ] || continue
+    echo "  $(basename "$f" _Cd.txt) : $(tail -1 "$f")"
+done
