@@ -1,23 +1,44 @@
 # Kraken.jl
 
-**GPU-native Lattice Boltzmann Method (LBM) framework in Julia.**
+```@raw html
+<div align="center">
+  <img src="assets/logo.png" alt="Kraken.jl logo" width="320"/>
+</div>
+```
 
-Kraken.jl provides a composable, high-performance LBM solver for incompressible
-flows with automatic GPU acceleration via
-[KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl).
+**A GPU-native Lattice Boltzmann framework in Julia — write your solver once, run it on NVIDIA, Apple Silicon, AMD, or CPU.**
 
-## Key Features
+Kraken.jl is a composable, high-performance Lattice Boltzmann (LBM) solver for
+incompressible and thermal flows. Kernels are written once against
+[KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) and
+dispatched automatically to whatever hardware you have — no vendor-specific code
+in the physics layer.
 
-- **Multi-backend GPU**: write once, run on CUDA, Metal (Apple Silicon), AMD ROCm, and CPU
-- **D2Q9 & D3Q19 lattices**: standard lattice Boltzmann velocity sets
-- **BGK collision**: single-relaxation-time with Guo forcing scheme
-- **Boundary conditions**: bounce-back, Zou-He velocity/pressure, periodic
-- **Thermal LBM**: double distribution function with Boussinesq coupling
-- **Axisymmetric LBM**: cylindrical coordinates via Li et al. (2010) scheme
-- **Momentum exchange**: drag/lift computation for immersed bodies
-- **VTK output**: write fields to `.vti` / `.pvd` for ParaView visualization
+```@raw html
+<div align="center">
+  <img src="assets/showcases/vonkarman_re200.gif" alt="Von Kármán vortex street at Re = 200" width="48%"/>
+  <img src="assets/showcases/taylor_green_decay.gif" alt="Taylor–Green vortex decay" width="48%"/>
+  <br/>
+  <em>Left: von Kármán vortex street past a cylinder (Re = 200). Right: Taylor–Green vortex decay.</em>
+</div>
+```
 
-## Quick Start
+## Why Kraken
+
+- **One solver, every backend.** The same kernel runs on CUDA, Metal (Apple
+  Silicon), AMD ROCm, and multi-threaded CPU — selected at runtime.
+- **Composable physics.** BGK and MRT collision, Guo body forcing, thermal
+  double-distribution coupling, and axisymmetric flows share one kinetic core.
+- **Validated against the literature.** Lid-driven cavity (Ghia et al. 1982),
+  natural convection (de Vahl Davis 1983), and 3D sphere drag (Clift et al.
+  1978) are cross-checked in the [benchmarks](benchmarks/accuracy.md), several
+  against an independent OpenFOAM run.
+- **Configuration without code.** Describe a full run in a single declarative
+  [`.krk` file](krk/overview.md) and launch it from the command line.
+- **Built for inspection.** Fields stream to VTK (`.vti` / `.pvd`) for ParaView,
+  and stay in memory for direct postprocessing.
+
+## Quick start
 
 ```julia
 using Kraken
@@ -29,27 +50,44 @@ config = LBMConfig(D2Q9(); Nx=N, Ny=N, ν=ν, u_lid=0.1, max_steps=30000)
 result = run_cavity_2d(config)
 ```
 
-## Documentation
+The same simulation can be written declaratively in a `.krk` file and launched
+from a shell:
 
-- **[Installation](@ref)** — set up Kraken.jl and GPU backends
-- **Theory** — from kinetic theory to lattice Boltzmann (10 progressive chapters)
-- **Examples** — validated simulations with plots and convergence studies
-- **Benchmarks** — performance and accuracy measurements
-- **[API Reference](api/config.md)** — complete function reference
+```
+# cavity.krk — lid-driven cavity at Re = 100
+Simulation cavity D2Q9
+Domain     L = 1.0 x 1.0   N = 128 x 128
+Physics    nu = 0.128
+Boundary   north velocity(ux = 0.1, uy = 0)
+Boundary   south wall
+Boundary   east  wall
+Boundary   west  wall
+Run        30000 steps
+```
 
-## Physics Capabilities
+```bash
+krk cavity.krk
+```
+
+## Where to go next
+
+- **[Installation](@ref)** — set up Kraken.jl and its GPU backends.
+- **[Getting started](getting_started.md)** — from zero to a running simulation.
+- **[Concepts](concepts_index.md)** — the ideas behind the solver.
+- **Theory** — ten progressive chapters, from kinetic theory to lattice Boltzmann.
+- **Tutorials & examples** — validated runs with plots and convergence studies.
+- **[Benchmarks](benchmarks/accuracy.md)** — accuracy and performance measurements.
+- **[`.krk` DSL reference](krk/overview.md)** — the declarative configuration language.
+- **[API reference](api/config.md)** — every public function, documented.
+
+## Physics capabilities
 
 | Capability | Lattice | Driver |
 |:-----------|:--------|:-------|
 | Lid-driven cavity | D2Q9, D3Q19 | `run_cavity_2d`, `run_cavity_3d` |
 | Channel flow (Poiseuille) | D2Q9 | `run_poiseuille_2d` |
 | Couette flow | D2Q9 | `run_couette_2d` |
-| Taylor-Green vortex | D2Q9 | `run_taylor_green_2d` |
+| Taylor–Green vortex | D2Q9 | `run_taylor_green_2d` |
 | Cylinder drag | D2Q9 | `run_cylinder_2d` |
 | Thermal convection | D2Q9 | `run_rayleigh_benard_2d` |
 | Axisymmetric pipe flow | D2Q9 | `run_hagen_poiseuille_2d` |
-
-## References
-
-```@bibliography
-```
