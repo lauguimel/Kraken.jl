@@ -12,7 +12,7 @@ Boussinesq coupling
 
 **Download:** [`rayleigh_benard.krk`](../assets/krk/rayleigh_benard.krk)
 
-**Hardware:** Apple M2, ~90s wall-clock at 128×64 (Ra = 10⁵)
+**Hardware:** Apple M3 Max, ~90s wall-clock at 128×64 (Ra = 10⁵)
 
 ![Rayleigh-Benard temperature field](../assets/figures/rayleigh_benard_temperature.png)
 

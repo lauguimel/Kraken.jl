@@ -14,7 +14,7 @@ EditURL = "01_poiseuille_2d.jl"
 
 **Download:** [`poiseuille.krk`](../assets/krk/poiseuille.krk)
 
-**Hardware:** Apple M2, ~10s wall-clock at N = 4×32
+**Hardware:** Apple M3 Max, ~10s wall-clock at N = 4×32
 
 ![Poiseuille velocity profile](../assets/figures/poiseuille_profile.png)
 

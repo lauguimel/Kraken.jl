@@ -6,7 +6,7 @@ measuring the error against known analytical or reference solutions at
 increasing resolution.
 
 All runs use single-relaxation-time (BGK) collision on a D2Q9 lattice.
-Hardware: Apple M2 (CPU); see the [Hardware](@ref) page.
+Hardware: Apple M3 Max (CPU); see the [Hardware](@ref) page.
 
 ## 1. Poiseuille channel flow
 

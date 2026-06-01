@@ -8,7 +8,7 @@ The standard metric for LBM codes is **Mega Lattice Updates Per Second**
 ```
 
 We benchmark Kraken's BGK D2Q9 lid-driven cavity solver across grid sizes
-on CPU (Apple M2, single-thread) and GPU (NVIDIA H100 80 GB PCIe on the
+on CPU (Apple M3 Max, single-thread) and GPU (NVIDIA H100 80 GB PCIe on the
 QUT AQUA cluster). Hardware details are on the [Hardware](@ref) page.
 
 ## Results

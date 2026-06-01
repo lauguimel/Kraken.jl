@@ -8,7 +8,7 @@
 #
 # **Download:** [`cavity_3d.krk`](../assets/krk/cavity_3d.krk)
 #
-# **Hardware:** Apple M2, ~5 min wall-clock at N = 64³ (CPU) /
+# **Hardware:** Apple M3 Max, ~5 min wall-clock at N = 64³ (CPU) /
 # NVIDIA H100, ~30s at N = 64³
 #
 # ![Cavity 3D streamlines](../assets/figures/cavity_3d_umag.png)

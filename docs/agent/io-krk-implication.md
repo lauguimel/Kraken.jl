@@ -1,9 +1,9 @@
 ---
 module: io-krk
-path: src/io/
+path: src/io/krk/
 owner_concern: krk-parsing
 status: implemented
-last_verified: 2026-05-31
+last_verified: 2026-06-02
 depends_on:
   - geometry
   - physics-viscoelastic
@@ -14,12 +14,20 @@ depends_on:
 The `io-krk` module is the **single owner** of the `.krk` declarative simulation
 DSL: tokenizing the text, evaluating the sandboxed expression language, and
 lowering it into a plain-old-data `SimulationSetup` struct that the runner
-consumes. Two source files: `src/io/expression.jl` (the sandboxed math
-mini-language, `KrakenExpr`) and `src/io/kraken_parser.jl` (the directive
-parser, ~2010 LOC, oversized — SPLIT candidate per mandate §3; the sanity-check,
-LBM-advisor, and directive-parser concerns should fission). Both are included at
-package top level (`Kraken.jl` lines 129/133) and export their public names
-directly into `Kraken` — there is no `Kraken.IO` submodule.
+consumes. As of the KRK-SHIP-002 S2 refactor the formerly-monolithic
+`kraken_parser.jl` (~2010 LOC) was fissioned into `src/io/krk/`; the live
+source files are:
+
+- `src/io/expression.jl` — the sandboxed math mini-language (`KrakenExpr`).
+- `src/io/krk/parser.jl` — the dispatch loop and tokenizer (`_parse_kraken_internal_single`, `_preprocess_lines`, `_strip_comment`, `_first_word`, `_resolve_setup_paths`, `_copy_setup_with_mesh`).
+- `src/io/krk/directives.jl` — the individual `_parse_<directive>` extractors (`_parse_domain`, `_parse_physics`, `_parse_boundary`, `_parse_refine`, `_parse_output`, `_parse_mesh`, `_parse_setup`, `_apply_setup_helpers!`, `_probe_U_ref`).
+- `src/io/krk/rheology.jl` — `build_rheology_model` (model `Symbol` → constructor + thermal coupling).
+- `src/io/krk/setup_lbm.jl` — the offline LBM advisor (`lbm_params`, `lbm_params_table`) and the `SimulationSetup` lowering.
+- `src/io/krk/diagnostics.jl` — `sanity_check` + the seven `_check_*!` helpers + `_emit_issues` and `_print_parameter_summary`.
+- `src/io/krk/units_bridge.jl` — the physical-unit ↔ lattice-unit bridge for `Setup`-derived parameters.
+
+All are included at package top level (`Kraken.jl` lines 104–110) and export
+their public names directly into `Kraken` — there is no `Kraken.IO` submodule.
 
 ## Public surface
 
@@ -75,11 +83,11 @@ malformed-input rabbit-holes. Receipts:
 For a `.krk` parse bug (wrong value, spurious/missing error, expression glitch),
 inspect in this order:
 
-1. `src/io/kraken_parser.jl` → `_parse_kraken_internal_single` — the dispatch loop over directives; confirm the keyword is reaching the right `_parse_*` and that the first/second-pass `Define`/`Module` pre-scans ran. Most "directive ignored" bugs are here.
-2. `src/io/kraken_parser.jl` → the specific `_parse_<directive>` (`_parse_domain`, `_parse_physics`, `_parse_boundary`, `_parse_refine`, `_parse_rheology`, `_parse_output`, `_parse_mesh`, `_parse_setup`) — regex-level extraction bugs (a value not matching, a missing capture group).
-3. `src/io/kraken_parser.jl` → `_preprocess_lines` / `_strip_comment` / `_first_word` — for "the whole line is wrong" / tokenization bugs (brace joining, comment stripping, multi-line blocks).
+1. `src/io/krk/parser.jl` → `_parse_kraken_internal_single` — the dispatch loop over directives; confirm the keyword is reaching the right `_parse_*` and that the first/second-pass `Define`/`Module` pre-scans ran. Most "directive ignored" bugs are here.
+2. `src/io/krk/directives.jl` → the specific `_parse_<directive>` (`_parse_domain`, `_parse_physics`, `_parse_boundary`, `_parse_refine`, `_parse_output`, `_parse_mesh`, `_parse_setup`) — regex-level extraction bugs (a value not matching, a missing capture group).
+3. `src/io/krk/parser.jl` → `_preprocess_lines` / `_strip_comment` / `_first_word` — for "the whole line is wrong" / tokenization bugs (brace joining, comment stripping, multi-line blocks).
 4. `src/io/expression.jl` → `parse_kraken_expr` / `validate_ast!` / `_substitute_constants` / `_compile_expr` — for "expression rejected" or "expression evaluates wrong"; check the whitelist and that user vars made it into `all_allowed`.
-5. `src/io/kraken_parser.jl` → `_apply_setup_helpers!` / `_probe_U_ref` — for wrong auto-derived `ν`/`alpha`/`gbeta_DT` from `Setup reynolds`/`rayleigh` and the U_ref probe.
-6. `src/io/kraken_parser.jl` → `sanity_check` + the seven `_check_*!` helpers + `_emit_issues` — for a spurious/missing/throwing sanity issue (read the `:category`).
-7. `src/io/kraken_parser.jl` → `build_rheology_model` — only for `Rheology`-sourced bugs (model symbol → constructor, thermal coupling selection).
-8. `src/io/kraken_parser.jl` → `_resolve_setup_paths` / `_copy_setup_with_mesh` — for relative-path / mesh-source resolution (file-vs-text entry difference).
+5. `src/io/krk/directives.jl` → `_apply_setup_helpers!` / `_probe_U_ref` (and `src/io/krk/units_bridge.jl`) — for wrong auto-derived `ν`/`alpha`/`gbeta_DT` from `Setup reynolds`/`rayleigh` and the U_ref probe.
+6. `src/io/krk/diagnostics.jl` → `sanity_check` + the seven `_check_*!` helpers + `_emit_issues` — for a spurious/missing/throwing sanity issue (read the `:category`).
+7. `src/io/krk/rheology.jl` → `build_rheology_model` — only for `Rheology`-sourced bugs (model symbol → constructor, thermal coupling selection).
+8. `src/io/krk/parser.jl` → `_resolve_setup_paths` / `_copy_setup_with_mesh` — for relative-path / mesh-source resolution (file-vs-text entry difference).

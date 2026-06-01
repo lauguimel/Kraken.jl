@@ -26,15 +26,21 @@ in the physics layer.
 ## Why Kraken
 
 - **One solver, every backend.** The same kernel runs on CUDA, Metal (Apple
-  Silicon), AMD ROCm, and multi-threaded CPU — selected at runtime.
+  Silicon), AMD ROCm, and multi-threaded CPU — selected at runtime, with no
+  vendor-specific code in the physics layer.
+- **Fast where it counts.** A single H100 sustains **7675 MLUPS** for D2Q9 BGK,
+  and up to **24 000 MLUPS** with the fused Float32 kernels — see the
+  [performance benchmarks](benchmarks/performance.md).
 - **Composable physics.** BGK and MRT collision, Guo body forcing, thermal
   double-distribution coupling, and axisymmetric flows share one kinetic core.
 - **Validated against the literature.** Lid-driven cavity (Ghia et al. 1982),
   natural convection (de Vahl Davis 1983), and 3D sphere drag (Clift et al.
   1978) are cross-checked in the [benchmarks](benchmarks/accuracy.md), several
-  against an independent OpenFOAM run.
+  against an independent OpenFOAM run — the cavity centreline matches Ghia to
+  **better than 0.5 %** at Re = 100 and 400.
 - **Configuration without code.** Describe a full run in a single declarative
-  [`.krk` file](krk/overview.md) and launch it from the command line.
+  [`.krk` file](krk/overview.md) and launch it from the command line — no Julia
+  required to drive a simulation.
 - **Built for inspection.** Fields stream to VTK (`.vti` / `.pvd`) for ParaView,
   and stay in memory for direct postprocessing.
 
@@ -91,3 +97,19 @@ krk cavity.krk
 | Cylinder drag | D2Q9 | `run_cylinder_2d` |
 | Thermal convection | D2Q9 | `run_rayleigh_benard_2d` |
 | Axisymmetric pipe flow | D2Q9 | `run_hagen_poiseuille_2d` |
+
+## Showcase gallery
+
+```@raw html
+<div align="center">
+  <img src="assets/showcases/cavity_re1000.gif" alt="Lid-driven cavity at Re = 1000" width="48%"/>
+  <img src="assets/showcases/rayleigh_benard_ra1e5.gif" alt="Rayleigh–Bénard convection at Ra = 1e5" width="48%"/>
+  <br/>
+  <em>Left: lid-driven cavity at Re = 1000 (primary vortex + corner eddies).
+  Right: Rayleigh–Bénard convection cells at Ra = 1e5.</em>
+</div>
+```
+
+All four animations on this page are produced by the validated drivers shown in
+the table above; reproduce them from the [examples](examples/04_cavity_2d.md)
+and [benchmarks](benchmarks/accuracy.md).

@@ -9,7 +9,7 @@
 #
 # **Download:** [`cavity.krk`](../assets/krk/cavity.krk)
 #
-# **Hardware:** Apple M2, ~30s wall-clock at N = 128×128
+# **Hardware:** Apple M3 Max, ~30s wall-clock at N = 128×128
 #
 # ![Cavity centerline profiles](../assets/figures/cavity_centerlines.png)
 #

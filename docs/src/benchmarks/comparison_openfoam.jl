@@ -49,7 +49,7 @@
 
 # ## Pre-computed results
 #
-# The table below summarises results obtained on a workstation (Apple M2 Max,
+# The table below summarises results obtained on a workstation (Apple M3 Max,
 # 32 GB) for Kraken and on the same machine under Rosetta 2 for OpenFOAM 11.
 #
 # | Case         | N    | Kraken ``\varepsilon_{L_2}`` | OF ``\varepsilon_{L_2}`` | Kraken time (s) | OF time (s) |

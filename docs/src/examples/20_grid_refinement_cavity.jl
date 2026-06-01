@@ -8,7 +8,7 @@
 #
 # **Download:** [`grid_refinement_cavity.krk`](../assets/krk/grid_refinement_cavity.krk)
 #
-# **Hardware:** Apple M2, ~5 min wall-clock at 64² base + 2:1 patch
+# **Hardware:** Apple M3 Max, ~5 min wall-clock at 64² base + 2:1 patch
 #
 # **Note:** as of v0.1.0 the .krk runner does not yet dispatch on non-thermal
 # refined cases; use the Julia API directly. See the runner source for

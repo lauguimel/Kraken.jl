@@ -12,7 +12,7 @@ EditURL = "02_couette_2d.jl"
 
 **Download:** [`couette.krk`](../assets/krk/couette.krk)
 
-**Hardware:** Apple M2, ~10s wall-clock at N = 4×32
+**Hardware:** Apple M3 Max, ~10s wall-clock at N = 4×32
 
 ![Couette velocity profile](../assets/figures/couette_profile.png)
 

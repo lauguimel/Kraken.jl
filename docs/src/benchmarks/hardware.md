@@ -10,7 +10,7 @@ that maps to an entry in
 
 | Property | Value |
 |:---------|:------|
-| Model    | Apple M2 |
+| Model    | Apple M3 Max |
 | Cores    | 8 (4P + 4E) |
 | RAM      | 16 GB unified |
 | OS       | macOS 14 |

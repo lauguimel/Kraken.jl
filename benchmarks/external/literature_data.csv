@@ -2,7 +2,7 @@ code,case,N,backend,precision,metric,value,unit,source_doi,notes
 Kraken.jl,bgk_2d,1024,H100 PCIe,f64,MLUPS,5631,MLUPS,,baseline (3 separate kernels)
 Kraken.jl,bgk_2d,1024,H100 PCIe,f64,MLUPS,12840,MLUPS,,fused stream+collide+macro
 Kraken.jl,bgk_2d,1024,H100 PCIe,f32,MLUPS,24041,MLUPS,,AA-pattern + Float32
-Kraken.jl,bgk_2d,256,CPU (M2),f64,MLUPS,26.5,MLUPS,,single-thread Apple M2
+Kraken.jl,bgk_2d,256,CPU (M3 Max),f64,MLUPS,26.5,MLUPS,,single-thread Apple M3 Max
 Kraken.jl,poiseuille,128,any,f64,convergence_order,2.0,--,,Poiseuille flow
 Kraken.jl,cavity_Re100,128,any,f64,error_vs_Ghia,<1,%,,vs Ghia et al. 1982
 Kraken.jl,cavity_Re100,64,any,f64,error_vs_Ghia,~5,%,,vs Ghia et al. 1982

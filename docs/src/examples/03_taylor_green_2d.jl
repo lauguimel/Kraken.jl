@@ -8,7 +8,7 @@
 #
 # **Download:** [`taylor_green.krk`](../assets/krk/taylor_green.krk)
 #
-# **Hardware:** Apple M2, ~5s wall-clock at N = 64×64
+# **Hardware:** Apple M3 Max, ~5s wall-clock at N = 64×64
 #
 # ![Taylor-Green vorticity](../assets/figures/taylor_green_vorticity.png)
 #

@@ -12,7 +12,7 @@ EditURL = "07_heat_conduction.jl"
 
 **Download:** [`heat_conduction.krk`](../assets/krk/heat_conduction.krk)
 
-**Hardware:** Apple M2, ~15s wall-clock at 128×32
+**Hardware:** Apple M3 Max, ~15s wall-clock at 128×32
 
 ![Heat conduction profile](../assets/figures/heat_profile.png)
 

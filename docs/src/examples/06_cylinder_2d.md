@@ -12,7 +12,7 @@ immersed solid via inline geometry predicate
 
 **Download:** [`cylinder.krk`](../assets/krk/cylinder.krk)
 
-**Hardware:** Apple M2, ~45s wall-clock at 200×50
+**Hardware:** Apple M3 Max, ~45s wall-clock at 200×50
 
 ![Cylinder velocity magnitude](../assets/figures/cylinder_umag.png)
 

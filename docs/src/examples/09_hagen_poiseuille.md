@@ -12,7 +12,7 @@ EditURL = "09_hagen_poiseuille.jl"
 
 **Download:** [`hagen_poiseuille.krk`](../assets/krk/hagen_poiseuille.krk)
 
-**Hardware:** Apple M2, ~10s wall-clock at Nz = 4, Nr = 32
+**Hardware:** Apple M3 Max, ~10s wall-clock at Nz = 4, Nr = 32
 
 ![Hagen-Poiseuille profile](../assets/figures/hagen_poiseuille_profile.png)
 

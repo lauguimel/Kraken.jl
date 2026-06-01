@@ -1,9 +1,9 @@
 ---
 module: bc
-path: src/kernels/
+path: src/bc/
 owner_concern: boundary-condition
 status: implemented
-last_verified: 2026-05-31
+last_verified: 2026-06-02
 depends_on:
   - lbm
   - io-krk
@@ -18,11 +18,22 @@ distribution: no-slip walls (halfway bounce-back), interpolated bounce-back
 moving walls, and the zero-gradient (Neumann) outlet. It spans two regimes:
 **standalone post-stream kernels** (`src/kernels/boundary_2d.jl`,
 `boundary_spatial_2d.jl`, `boundary_3d.jl`) called by the legacy generic runner,
-and the **fused / per-face dispatch** path (`li_bb_2d.jl` + `li_bb_2d_v2.jl` +
-`boundary_rebuild.jl`) where the BC is woven into the collide kernel via the
-`BCSpec2D`/`BCSpec3D` type-dispatch system. Inflow/outflow orchestration lives
-inline in `src/simulation_runner.jl` (the `BoundaryHandler` struct + the
-`_apply_*` helpers + the `_mesh_drag_*` body-fitted path).
+and the **fused / per-face dispatch** path where the BC is woven into the
+collide kernel via the `BCSpec2D`/`BCSpec3D` type-dispatch system. As of the
+KRK-SHIP-002 S8 refactor the per-face dispatch layer was carved out of
+`kernels/boundary_rebuild.jl` into a dedicated `src/bc/` module:
+
+- `src/bc/specs.jl` — the `AbstractBC` tag types (`HalfwayBB`, `InterfaceBC`, `ZouHeVelocity`, `ZouHeTangentialVelocity`, `ZouHePressure`) and the `BCSpec2D`/`BCSpec3D` per-face spec structs.
+- `src/bc/rebuild_2d.jl` — `apply_bc_rebuild_2d!` per-face dispatch + the scalar/spatial Zou-He launches for 2D.
+- `src/bc/rebuild_3d.jl` — `apply_bc_rebuild_3d!` and the 3D analogues.
+- `src/bc/moments.jl` — `_update_bc_moments_2d!` / boundary-row moment recompute kernels.
+- `src/bc/handlers.jl` — the runner-facing `BoundaryHandler` struct, `_build_boundary_handlers`, and `_apply_boundary_conditions!`.
+
+The fused cut-link kernels themselves (`li_bb_2d.jl`, `li_bb_2d_v2.jl`,
+`li_bb_3d_v2.jl`) remain in `src/kernels/`, as does the body-fitted outflow path
+(`_mesh_drag_*` now in `src/kernels/mesh_drag_2d.jl`). High-level inflow/outflow
+orchestration lives in `src/simulation_runner.jl` (carved to ~410 LOC in the
+S1 refactor), which calls into `src/bc/handlers.jl`.
 
 ## Public surface
 
@@ -34,14 +45,14 @@ Standalone post-stream BC kernels (all exported, called as `Kraken.apply_*`):
 - Per-node spatial variants in `boundary_spatial_2d.jl`: `apply_zou_he_north_spatial_2d!`, `apply_zou_he_south_spatial_2d!`, `apply_zou_he_west_spatial_2d!`, `apply_zou_he_pressure_east_spatial_2d!` (take `ux_arr`/`uy_arr`/`rho_arr` device arrays; skip the two corner nodes `i∈{1,Nx}`).
 - 3D analogues exported from `boundary_3d.jl`: `apply_bounce_back_walls_3d!`, `apply_bounce_back_wall_3d!`, `apply_zou_he_{top,bottom,west,east,south,north}_3d!`, `apply_zou_he_pressure_{east,top}_3d!`.
 
-Fused LI-BB / per-face dispatch surface (exported from `li_bb_2d.jl`,
-`li_bb_2d_v2.jl`, `boundary_rebuild.jl`):
+Fused LI-BB / per-face dispatch surface (fused kernels in `li_bb_2d.jl`,
+`li_bb_2d_v2.jl`; spec + dispatch + handlers in `src/bc/`):
 
 - `fused_trt_libb_step!(f_out, f_in, ρ, ux, uy, is_solid, q_wall, uw_x, uw_y, Nx, Ny, ν; Λ=3/16)` — single-launch TRT collide + pull-stream + interpolated bounce-back on cut links flagged by `q_wall`. `fused_trt_libb_v2_step!(...)` — same signature, DSL-assembled spec that fixes the double-BC bug (see Failure modes). `fused_trt_libb_v2_step_3d!` — 3D analogue.
 - `precompute_q_wall_cylinder(Nx, Ny, …)`, `precompute_q_wall_annulus`, `precompute_q_wall_sphere_3d`, `dq_wall_dR_cylinder` — build the `q_wall[Nx,Ny,9]` cut-fraction array (sentinel 0 = uncut, value in (0,1] = cut link). `wall_velocity_rotating_cylinder`, `wall_velocity_rotating_inner` — per-link moving-wall velocity arrays.
 - BC tag types: `AbstractBC` and concrete tags `HalfwayBB` (no-op fallback), `InterfaceBC` (multiblock ghost-owned edge), `ZouHeVelocity(profile, physical_dir)`, `ZouHeTangentialVelocity(profile)` (moving south/north wall), `ZouHePressure(ρ_out, physical_dir)`, plus the runner-local `MeshDragOutflow` (zero-gradient body-fit outlet).
 - `BCSpec2D(; west, east, south, north)` / `BCSpec3D(; west, east, south, north, bottom, top)` — per-face spec, all faces default `HalfwayBB`. `apply_bc_rebuild_2d!(f_out, f_in, bcspec, ν, Nx, Ny; sp_field, sm_field, ρ_out, ux_out, uy_out)` / `apply_bc_rebuild_3d!` — dispatch per face, launch the matching kernel, optionally recompute boundary-row moments. `rebuild_inlet_outlet_libb_2d!`, `rebuild_inlet_outlet_libb_3d!` — legacy hard-coded (ZouHe-vel west + ZouHe-pressure east) variant.
-- Runner-level: `BoundaryHandler` struct (one per face; holds the compiled `ux_fn/uy_fn/rho_fn`, spatial/time-dep flags, and pre-allocated device arrays) is built by `_build_boundary_handlers` and applied each step by `_apply_boundary_conditions!` in `simulation_runner.jl`.
+- Runner-level: `BoundaryHandler` struct (one per face; holds the compiled `ux_fn/uy_fn/rho_fn`, spatial/time-dep flags, and pre-allocated device arrays) is built by `_build_boundary_handlers` and applied each step by `_apply_boundary_conditions!`, both now in `src/bc/handlers.jl` (driven from `simulation_runner.jl`).
 
 ## Reads from
 
@@ -122,14 +133,16 @@ re-deriving:
 For a suspected BC bug (wrong wall profile, spurious momentum, drag off, NaN at a
 face), inspect in this order:
 
-1. `src/simulation_runner.jl` — the orchestration: `_build_boundary_handlers` /
-   `_apply_boundary_conditions!` (which face gets which `apply_*`), the
-   `_mesh_drag_bc` → `BCSpec2D` mapping, and `_apply_wall_bc!` (no-op — confirm
-   the wall is really streaming-handled). 80 % of "BC not applied / wrong face"
-   bugs are a wiring issue here, not in a kernel.
-2. `src/kernels/boundary_rebuild.jl` — the `AbstractBC`/`BCSpec2D` type defs and
-   `apply_bc_rebuild_2d!` per-face dispatch; check `InterfaceBC` loop bounds for
-   corner/interface bugs and `_update_bc_moments_2d!` for a wrong boundary ρ/u.
+1. `src/bc/handlers.jl` (driven from `src/simulation_runner.jl`) — the
+   orchestration: `_build_boundary_handlers` / `_apply_boundary_conditions!`
+   (which face gets which `apply_*`), the `_mesh_drag_bc` → `BCSpec2D` mapping
+   (`src/kernels/mesh_drag_2d.jl`), and `_apply_wall_bc!` (no-op — confirm the
+   wall is really streaming-handled). 80 % of "BC not applied / wrong face" bugs
+   are a wiring issue here, not in a kernel.
+2. `src/bc/specs.jl` + `src/bc/rebuild_2d.jl` — the `AbstractBC`/`BCSpec2D` type
+   defs (specs) and `apply_bc_rebuild_2d!` per-face dispatch (rebuild_2d); check
+   `InterfaceBC` loop bounds for corner/interface bugs and `_update_bc_moments_2d!`
+   (`src/bc/moments.jl`) for a wrong boundary ρ/u.
 3. `src/kernels/boundary_2d.jl` — the scalar Zou-He closures and the BB index
    reflections; verify the opposite-direction pairing and the `±ρ·u` momentum
    terms for a uniform-BC bug.
