@@ -68,7 +68,10 @@ include("kernels/li_bb_3d_v2.jl")
 
 # --- Modular BC system (uses TRT rates + feq helpers; compiles face
 #     kernels per BC type via Julia dispatch).
-include("kernels/boundary_rebuild.jl")
+include("bc/specs.jl")
+include("bc/rebuild_2d.jl")
+include("bc/moments.jl")
+include("bc/rebuild_3d.jl")
 
 # --- GPU-native drag reductions (replace host-side per-step transfers)
 include("kernels/drag_gpu.jl")
