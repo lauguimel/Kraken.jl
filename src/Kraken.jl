@@ -160,6 +160,18 @@ include("kernels/boundary_spatial_2d.jl")
 include("geometry/Geometry.jl")
 include("drivers/obstacle_3d.jl")
 
+# --- Carved .krk runner support ---
+include("kernels/mesh_drag_2d.jl")
+include("drivers/gmsh_slbm_drag.jl")
+include("bc/handlers.jl")
+include("io/output_emit.jl")
+include("drivers/run_advection.jl")
+include("drivers/run_twophase_vof.jl")
+include("drivers/run_d3q19.jl")
+include("drivers/run_refined.jl")
+include("drivers/run_refined_3d.jl")
+include("drivers/run_thermal.jl")
+
 # --- Generic simulation runner ---
 include("simulation_runner.jl")
 
