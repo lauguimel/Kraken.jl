@@ -164,6 +164,7 @@ makedocs(;
                 "Viscoelastic cylinder" => "users/tutorials/viscoelastic-cylinder.md",
             ],
             "Benchmarks" => [
+                "Validation matrix" => "users/benchmarks/validation-matrix.md",
                 "Cartesian cavity" => "users/benchmarks/cartesian-cavity.md",
                 "Thermal natural convection" => "users/benchmarks/thermal-natural-convection.md",
                 "Sphere drag 3D" => "users/benchmarks/sphere-drag-3d.md",
