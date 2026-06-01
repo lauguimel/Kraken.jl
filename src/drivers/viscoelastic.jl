@@ -146,6 +146,7 @@ function run_viscoelastic_cylinder_2d(;
     Fx_p_sum = 0.0
     Fy_p_sum = 0.0
     n_avg = 0
+    poly_drag_cache = build_polymeric_drag_cache_2d(tau_p_xx, is_solid, Nx, Ny)
 
     for step in 1:max_steps
         # 1. Stream
@@ -159,8 +160,9 @@ function run_viscoelastic_cylinder_2d(;
         # 3b. Polymeric drag via stress integral on cylinder surface
         if step > max_steps - avg_window
             drag_s = compute_drag_mea_2d(f_in, f_out, is_solid, Nx, Ny)
-            drag_p = compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
-                                                is_solid, Nx, Ny)
+            drag_p = compute_polymeric_drag_2d_gpu_cached(poly_drag_cache,
+                                                           tau_p_xx, tau_p_xy,
+                                                           tau_p_yy)
             Fx_s_sum += drag_s.Fx;  Fy_s_sum += drag_s.Fy
             Fx_p_sum += drag_p.Fx;  Fy_p_sum += drag_p.Fy
             n_avg += 1

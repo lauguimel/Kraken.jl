@@ -114,6 +114,40 @@ struct CutLinkList3D{IT<:AbstractVector{Int32}, WT<:AbstractVector}
 end
 
 """
+    PolymericDragSurface2D
+
+Device-side list of polymeric stress drag links. Each slot represents
+one `(i, j, q)` contribution from a fluid cell to a neighbouring solid
+cell, in the same `j, i, q=2:9` order as `compute_polymeric_drag_2d`.
+"""
+struct PolymericDragSurface2D{IT<:AbstractVector{Int32}}
+    list_i::IT
+    list_j::IT
+    list_i2::IT
+    list_j2::IT
+    list_cx::IT
+    list_cy::IT
+    list_extrapolate::IT
+    Nlinks::Int
+end
+
+"""
+    PolymericDragCache2D
+
+Cached polymeric drag surface plus device/host reduction buffers.
+Build once for a static `is_solid` mask with
+`build_polymeric_drag_cache_2d`, then reuse each sampled step via
+`compute_polymeric_drag_2d_gpu_cached`.
+"""
+struct PolymericDragCache2D{S, VT<:AbstractVector, HT<:AbstractVector{Float64}}
+    surface::S
+    Fx_link::VT
+    Fy_link::VT
+    Fx_buf::HT
+    Fy_buf::HT
+end
+
+"""
     build_cut_link_list_2d(q_wall_h::Array{T,3}; backend=CPU())
                           -> CutLinkList
 
@@ -169,6 +203,143 @@ function build_cut_link_list_3d(q_wall_h::AbstractArray{T,4}; backend=CPU()) whe
     copyto!(li, is_h); copyto!(lj, js_h); copyto!(lk, ks_h)
     copyto!(lq, qs_h); copyto!(lw, qws_h)
     return CutLinkList3D(li, lj, lk, lq, lw, N)
+end
+
+"""
+    build_polymeric_drag_surface_2d(is_solid, Nx, Ny; backend=get_backend(is_solid),
+                                    extrapolate=true)
+
+Precompute the static fluid-solid links used by `compute_polymeric_drag_2d`.
+The uploaded device lists preserve the host loop order and encode whether
+the wall extrapolation uses the fluid-side neighbour or falls back to the
+current cell.
+"""
+function build_polymeric_drag_surface_2d(is_solid, Nx::Integer, Ny::Integer;
+                                           backend=KernelAbstractions.get_backend(is_solid),
+                                           extrapolate::Bool=true)
+    solid = Array(is_solid)
+    cxv = (0, 1, 0, -1,  0, 1, -1, -1,  1)
+    cyv = (0, 0, 1,  0, -1, 1,  1, -1, -1)
+    is_h = Int32[]; js_h = Int32[]
+    i2s_h = Int32[]; j2s_h = Int32[]
+    cxs_h = Int32[]; cys_h = Int32[]
+    extrap_h = Int32[]
+
+    @inbounds for j in 1:Ny, i in 1:Nx
+        if !solid[i, j]
+            for q in 2:9
+                cx = cxv[q]
+                cy = cyv[q]
+                ni = i + cx
+                nj = j + cy
+                if 1 <= ni <= Nx && 1 <= nj <= Ny && solid[ni, nj]
+                    i2 = i - cx
+                    j2 = j - cy
+                    use_extrapolation =
+                        extrapolate && 1 <= i2 <= Nx && 1 <= j2 <= Ny && !solid[i2, j2]
+                    push!(is_h, Int32(i)); push!(js_h, Int32(j))
+                    push!(i2s_h, Int32(use_extrapolation ? i2 : i))
+                    push!(j2s_h, Int32(use_extrapolation ? j2 : j))
+                    push!(cxs_h, Int32(cx)); push!(cys_h, Int32(cy))
+                    push!(extrap_h, Int32(use_extrapolation ? 1 : 0))
+                end
+            end
+        end
+    end
+
+    N = length(is_h)
+    li = KernelAbstractions.allocate(backend, Int32, N)
+    lj = KernelAbstractions.allocate(backend, Int32, N)
+    li2 = KernelAbstractions.allocate(backend, Int32, N)
+    lj2 = KernelAbstractions.allocate(backend, Int32, N)
+    lcx = KernelAbstractions.allocate(backend, Int32, N)
+    lcy = KernelAbstractions.allocate(backend, Int32, N)
+    le = KernelAbstractions.allocate(backend, Int32, N)
+    copyto!(li, is_h); copyto!(lj, js_h)
+    copyto!(li2, i2s_h); copyto!(lj2, j2s_h)
+    copyto!(lcx, cxs_h); copyto!(lcy, cys_h)
+    copyto!(le, extrap_h)
+    return PolymericDragSurface2D(li, lj, li2, lj2, lcx, lcy, le, N)
+end
+
+"""
+    build_polymeric_drag_cache_2d(tau_template, is_solid, Nx, Ny; extrapolate=true)
+
+Build a GPU/CPU-backend cache for polymeric drag. `tau_template` supplies
+the backend; `is_solid` is copied to host once while constructing the
+static surface list.
+"""
+function build_polymeric_drag_cache_2d(tau_template, is_solid,
+                                         Nx::Integer, Ny::Integer;
+                                         extrapolate::Bool=true)
+    backend = KernelAbstractions.get_backend(tau_template)
+    surface = build_polymeric_drag_surface_2d(is_solid, Nx, Ny;
+                                              backend=backend,
+                                              extrapolate=extrapolate)
+    Fx_link = KernelAbstractions.allocate(backend, Float64, surface.Nlinks)
+    Fy_link = KernelAbstractions.allocate(backend, Float64, surface.Nlinks)
+    Fx_buf = zeros(Float64, surface.Nlinks)
+    Fy_buf = zeros(Float64, surface.Nlinks)
+    return PolymericDragCache2D(surface, Fx_link, Fy_link, Fx_buf, Fy_buf)
+end
+
+@kernel function _polymeric_drag_2d_surface_kernel!(Fx_link, Fy_link,
+                                                     @Const(list_i), @Const(list_j),
+                                                     @Const(list_i2), @Const(list_j2),
+                                                     @Const(list_cx), @Const(list_cy),
+                                                     @Const(list_extrapolate),
+                                                     @Const(tau_p_xx),
+                                                     @Const(tau_p_xy),
+                                                     @Const(tau_p_yy))
+    n = @index(Global)
+    T = eltype(Fx_link)
+    @inbounds begin
+        i = Int(list_i[n]); j = Int(list_j[n])
+        cx = T(list_cx[n]); cy = T(list_cy[n])
+        if list_extrapolate[n] == 1
+            i2 = Int(list_i2[n]); j2 = Int(list_j2[n])
+            txx_w = T(1.5) * T(tau_p_xx[i, j]) - T(0.5) * T(tau_p_xx[i2, j2])
+            txy_w = T(1.5) * T(tau_p_xy[i, j]) - T(0.5) * T(tau_p_xy[i2, j2])
+            tyy_w = T(1.5) * T(tau_p_yy[i, j]) - T(0.5) * T(tau_p_yy[i2, j2])
+        else
+            txx_w = T(tau_p_xx[i, j])
+            txy_w = T(tau_p_xy[i, j])
+            tyy_w = T(tau_p_yy[i, j])
+        end
+        Fx_link[n] = txx_w * cx + txy_w * cy
+        Fy_link[n] = txy_w * cx + tyy_w * cy
+    end
+end
+
+"""
+    compute_polymeric_drag_2d_gpu_cached(cache, tau_p_xx, tau_p_xy, tau_p_yy)
+
+Evaluate polymeric drag from current stress fields using a precomputed
+surface cache. Only the compact per-link reduction buffers are copied
+back to host.
+"""
+function compute_polymeric_drag_2d_gpu_cached(cache::PolymericDragCache2D,
+                                               tau_p_xx, tau_p_xy, tau_p_yy)
+    surface = cache.surface
+    surface.Nlinks == 0 && return (Fx=0.0, Fy=0.0)
+    backend = KernelAbstractions.get_backend(tau_p_xx)
+    _polymeric_drag_2d_surface_kernel!(backend)(cache.Fx_link, cache.Fy_link,
+                                                 surface.list_i, surface.list_j,
+                                                 surface.list_i2, surface.list_j2,
+                                                 surface.list_cx, surface.list_cy,
+                                                 surface.list_extrapolate,
+                                                 tau_p_xx, tau_p_xy, tau_p_yy;
+                                                 ndrange=(surface.Nlinks,))
+    copyto!(cache.Fx_buf, cache.Fx_link)
+    copyto!(cache.Fy_buf, cache.Fy_link)
+
+    Fx = 0.0
+    Fy = 0.0
+    @inbounds for n in eachindex(cache.Fx_buf)
+        Fx -= cache.Fx_buf[n]
+        Fy -= cache.Fy_buf[n]
+    end
+    return (Fx=Fx, Fy=Fy)
 end
 
 # --- 2D: Mei-Luo-Shyy MEA on cut-link list ---
