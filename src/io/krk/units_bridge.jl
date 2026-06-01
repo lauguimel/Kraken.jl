@@ -1,8 +1,8 @@
 function _apply_units_bridge!(units::UnitsSetup, lattice::Symbol, domain::DomainSetup,
                               regions::Vector{GeometryRegion},
                               boundaries::Vector{BoundarySetup},
-                              physics_params::Dict{Symbol,Float64},
-                              user_vars::Dict{Symbol,Float64})
+                              physics_params::Dict{Symbol,<:Any},
+                              user_vars::Dict{Symbol,Any})
     _validate_units_domain!(domain, lattice)
     haskey(physics_params, :nu) && throw(ArgumentError(
         "Units block owns Physics nu. Use `Physics nu = auto` or omit `nu`."))
@@ -114,7 +114,7 @@ function _units_bc_namedtuple(boundaries::Vector{BoundarySetup},
 end
 
 function _inject_units_velocity!(boundaries::Vector{BoundarySetup},
-                                 user_vars::Dict{Symbol,Float64})
+                                 user_vars::Dict{Symbol,Any})
     for b in boundaries
         b.type === :velocity || continue
         for (key, expr) in collect(b.values)
@@ -124,4 +124,3 @@ function _inject_units_velocity!(boundaries::Vector{BoundarySetup},
     end
     return nothing
 end
-

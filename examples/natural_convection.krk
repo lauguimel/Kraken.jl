@@ -1,0 +1,9 @@
+# Natural convection in a differentially heated square cavity.
+# Hot west wall, cold east wall, adiabatic north/south walls.
+#
+# Run via:
+#   run_simulation("examples/natural_convection.krk")
+
+Preset natural_convection_2d
+
+Run 100 steps

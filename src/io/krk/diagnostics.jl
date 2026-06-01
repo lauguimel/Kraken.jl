@@ -450,14 +450,15 @@ end
 
 Expand a `Preset <name>` directive into a list of .krk lines.
 Known presets: `cavity_2d`, `poiseuille_2d`, `couette_2d`,
-`taylor_green_2d`, `rayleigh_benard_2d`.
+`taylor_green_2d`, `rayleigh_benard_2d`, `natural_convection_2d`.
 """
 function _expand_preset(line::String)
     tokens = split(line)
     length(tokens) >= 2 || throw(ArgumentError("Preset needs a name: $line"))
     name = tokens[2]
     known = ("cavity_2d", "poiseuille_2d", "couette_2d",
-             "taylor_green_2d", "rayleigh_benard_2d")
+             "taylor_green_2d", "rayleigh_benard_2d",
+             "natural_convection_2d")
     if name ∉ known
         sug = _suggest_name(name, known)
         msg = "Unknown Preset '$name'"
@@ -519,6 +520,18 @@ function _preset_lines(name::AbstractString)
             "Boundary south wall T = 1.0",
             "Boundary north wall T = 0.0",
             "Run 20000 steps",
+        ]
+    elseif name == "natural_convection_2d"
+        return [
+            "Simulation natural_convection_2d D2Q9",
+            "Domain L = 1.0 x 1.0  N = 64 x 64",
+            "Physics nu = 0.05 Pr = 0.71 Ra = 1e3",
+            "Module thermal",
+            "Boundary west wall T = 1.0",
+            "Boundary east wall T = 0.0",
+            "Boundary south wall",
+            "Boundary north wall",
+            "Run 10000 steps",
         ]
     end
     return String[]

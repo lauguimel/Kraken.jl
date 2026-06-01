@@ -61,7 +61,7 @@ end
 Parse a `Setup key = value ...` directive. Known keys:
 `reynolds`, `rayleigh`, `prandtl`, `L_ref`, `U_ref`.
 """
-function _parse_setup(line::String, user_vars::Dict{Symbol,Float64})
+function _parse_setup(line::String, user_vars::Dict{Symbol,Any})
     out = Dict{Symbol, Float64}()
     known = (:reynolds, :rayleigh, :prandtl, :L_ref, :U_ref)
     for m in eachmatch(r"(\w+)\s*=\s*([\w.eE+\-*/()]+)", line)
@@ -89,7 +89,7 @@ end
 Mutate `physics_params` to add auto-computed `nu`, `alpha`, `gbeta_DT` from
 `reynolds`/`rayleigh`/`prandtl` helpers. Errors if conflicts exist.
 """
-function _apply_setup_helpers!(physics_params::Dict{Symbol,Float64},
+function _apply_setup_helpers!(physics_params::Dict{Symbol,<:Any},
                                helpers::Dict{Symbol,Float64},
                                domain,
                                boundaries::Vector{BoundarySetup})
@@ -455,4 +455,3 @@ function lbm_params_table(; Re::Real, N_range, U_ref::Real=0.01)
         println("Low-Re limit: Re = $Re < 0.1, best possible τ ≈ $(round(τ_min_possible, digits=1)) (N=10, Ma=0.1)")
     end
 end
-

@@ -17,7 +17,7 @@ function _parse_simulation(line::String)
 end
 
 """Parse: Domain L = <Lx> x <Ly> N = <Nx> x <Ny>  (values can be expressions/variables)"""
-function _parse_domain(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}())
+function _parse_domain(line::String, user_vars::Dict{Symbol,Any}=Dict{Symbol,Any}())
     # Extract L = ... x ... and N = ... x ...  (accept variable names and numbers)
     lm = match(r"L\s*=\s*([\w.eE+-]+)\s*x\s*([\w.eE+-]+)(?:\s*x\s*([\w.eE+-]+))?", line)
     nm = match(r"N\s*=\s*([\w.eE+-]+)\s*x\s*([\w.eE+-]+)(?:\s*x\s*([\w.eE+-]+))?", line)
@@ -36,17 +36,21 @@ function _parse_domain(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol
     return DomainSetup(Lx, Ly, Lz, Nx, Ny, Nz)
 end
 
-"""Evaluate a domain value: either a number literal or a user variable."""
-function _eval_domain_value(s::AbstractString, user_vars::Dict{Symbol,Float64})
+"""Evaluate a domain value: either a number literal or a numeric user variable."""
+function _eval_domain_value(s::AbstractString, user_vars::Dict{Symbol,Any})
     val = tryparse(Float64, s)
     val !== nothing && return val
     sym = Symbol(s)
-    haskey(user_vars, sym) && return user_vars[sym]
+    if haskey(user_vars, sym)
+        value = user_vars[sym]
+        value isa Real && return Float64(value)
+        throw(ArgumentError("Define '$s' is symbolic and cannot be used as a numeric Domain value."))
+    end
     throw(ArgumentError("Unknown variable '$s' in Domain. Define it with 'Define $s = ...' or pass as kwarg."))
 end
 
 """Parse: Units { length = mm L_ref = ... R_LU = ... Re = ... scaling = ... }"""
-function _parse_units_block(line::String, user_vars::Dict{Symbol,Float64})
+function _parse_units_block(line::String, user_vars::Dict{Symbol,Any})
     brace_m = match(r"\{(.+)\}", line)
     brace_m === nothing && throw(ArgumentError("Missing { ... } in Units block: $line"))
     vals = Dict{Symbol,Any}()
@@ -76,30 +80,28 @@ function _parse_units_block(line::String, user_vars::Dict{Symbol,Float64})
                       Float64(get(vals, :L_down, NaN)))
 end
 
-function _eval_units_number(s::AbstractString, user_vars::Dict{Symbol,Float64})
+function _eval_units_number(s::AbstractString, user_vars::Dict{Symbol,Any})
     val = tryparse(Float64, s)
     val !== nothing && return val
     sym = Symbol(s)
-    haskey(user_vars, sym) && return user_vars[sym]
+    if haskey(user_vars, sym)
+        value = user_vars[sym]
+        value isa Real && return Float64(value)
+        throw(ArgumentError("Define '$s' is symbolic and cannot be used as a numeric Units value."))
+    end
     return Float64(evaluate(parse_kraken_expr(s, user_vars)))
 end
 
 """Parse: Physics <key> = <value> ...  (values can be expressions with user vars)"""
-function _parse_physics(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}();
+function _parse_physics(line::String, user_vars::Dict{Symbol,Any}=Dict{Symbol,Any}();
                         allow_auto_nu::Bool=false)
-    params = Dict{Symbol, Float64}()
+    params = Dict{Symbol, Any}()
     # Match all key = value pairs (value can be a number or an expression)
     for m in eachmatch(r"(\w+)\s*=\s*([\w.eE+\-*/()]+)", line)
         key = Symbol(m.captures[1])
         val_str = strip(String(m.captures[2]))
         allow_auto_nu && key === :nu && val_str == "auto" && continue
-        # Try literal first, then evaluate as expression with user vars
-        val = tryparse(Float64, val_str)
-        if val === nothing
-            expr = parse_kraken_expr(val_str, user_vars)
-            val = Float64(evaluate(expr))
-        end
-        params[key] = val
+        params[key] = _parse_numeric_or_symbolic_value(val_str, user_vars)
     end
     return params
 end
@@ -109,17 +111,44 @@ function _parse_define(line::String)
     m = match(r"^Define\s+(\w+)\s*=\s*(.+)$", line)
     m === nothing && throw(ArgumentError("Cannot parse Define: $line"))
     key = Symbol(m.captures[1])
-    val = parse(Float64, strip(m.captures[2]))
+    raw = strip(m.captures[2])
+    val = tryparse(Float64, raw)
+    if val === nothing
+        _is_symbolic_bareword(raw) || throw(ArgumentError(
+            "Define '$key' must be a numeric literal or symbolic bareword, got '$raw'"))
+        val = Symbol(raw)
+    end
     return key, val
 end
 
+_is_symbolic_bareword(s::AbstractString) = occursin(r"^[A-Za-z_]\w*$", s)
+
+function _parse_numeric_or_symbolic_value(val_str::AbstractString,
+                                          user_vars::Dict{Symbol,Any})
+    val = tryparse(Float64, val_str)
+    val !== nothing && return val
+
+    if _is_symbolic_bareword(val_str)
+        sym = Symbol(val_str)
+        if haskey(user_vars, sym)
+            user_val = user_vars[sym]
+            user_val isa Real && return Float64(user_val)
+            user_val isa Symbol && return user_val
+        end
+        return sym
+    end
+
+    expr = parse_kraken_expr(val_str, user_vars)
+    return Float64(evaluate(expr))
+end
+
 """Parse: Obstacle <name> [wall(...)] { <condition> } or stl(..., wall=libb)"""
-function _parse_obstacle(line::String, user_vars::Dict{Symbol,Float64})
+function _parse_obstacle(line::String, user_vars::Dict{Symbol,Any})
     return _parse_geometry_region(line, :obstacle, user_vars)
 end
 
 """Parse: Fluid <name> { <condition> }"""
-function _parse_fluid(line::String, user_vars::Dict{Symbol,Float64})
+function _parse_fluid(line::String, user_vars::Dict{Symbol,Any})
     return _parse_geometry_region(line, :fluid, user_vars)
 end
 
@@ -130,7 +159,7 @@ Adaptive conservative-tree fields are optional and intentionally explicit:
 `criterion = gradient(ux) > 0.02`, `update_every = 50`, `pad = 2`,
 `max_growth = 1`, `shrink_margin = 1`, `balance = 1`.
 """
-function _parse_refine(line::String, user_vars::Dict{Symbol,Float64})
+function _parse_refine(line::String, user_vars::Dict{Symbol,Any})
     # Extract name (second word)
     after_kw = strip(replace(line, r"^\w+" => ""))
     name_m = match(r"^(\w+)", after_kw)
@@ -174,7 +203,7 @@ end
 function _parse_refine_int_option(content::AbstractString,
                                   key::AbstractString,
                                   default::Int,
-                                  user_vars::Dict{Symbol,Float64})
+                                  user_vars::Dict{Symbol,Any})
     m = match(Regex("\\b" * key * "\\s*=\\s*([\\w.eE+\\-*/()]+)"), content)
     m === nothing && return default
     value = round(Int, _eval_number(strip(m.captures[1]), user_vars))
@@ -182,7 +211,7 @@ function _parse_refine_int_option(content::AbstractString,
 end
 
 function _parse_refine_criterion(content::AbstractString,
-                                 user_vars::Dict{Symbol,Float64})
+                                 user_vars::Dict{Symbol,Any})
     occursin(r"\bcriterion\s*=", content) || return nothing
     m = match(r"criterion\s*=\s*(\w+)\((\w+)\)\s*(>=|>)\s*([\w.eE+\-*/()]+)", content)
     m === nothing && throw(ArgumentError(
@@ -212,17 +241,21 @@ function _parse_refine_criterion(content::AbstractString,
 end
 
 """Evaluate a number string, substituting user variables."""
-function _eval_number(s::AbstractString, user_vars::Dict{Symbol,Float64})
+function _eval_number(s::AbstractString, user_vars::Dict{Symbol,Any})
     # Try direct parse first
     v = tryparse(Float64, s)
     v !== nothing && return v
     # Try user variable
     sym = Symbol(s)
-    haskey(user_vars, sym) && return user_vars[sym]
+    if haskey(user_vars, sym)
+        value = user_vars[sym]
+        value isa Real && return Float64(value)
+        throw(ArgumentError("Define '$s' is symbolic and cannot be used as a numeric value"))
+    end
     throw(ArgumentError("Cannot evaluate '$s' as a number"))
 end
 
-function _parse_geometry_region(line::String, kind::Symbol, user_vars::Dict{Symbol,Float64})
+function _parse_geometry_region(line::String, kind::Symbol, user_vars::Dict{Symbol,Any})
     # Extract name (second word after keyword)
     after_kw = strip(replace(line, r"^\w+" => ""))
     name_m = match(r"^(\w+)", after_kw)
@@ -281,7 +314,7 @@ _resolve_axisym_face(face::AbstractString) =
     face == "axis" ? "south" : String(face)
 
 """Parse: Boundary <face> <type>(<params>) or Boundary <axis> periodic"""
-function _parse_boundary(line::String, user_vars::Dict{Symbol,Float64};
+function _parse_boundary(line::String, user_vars::Dict{Symbol,Any};
                          is_axisym::Bool=false)
     # Remove keyword
     rest = strip(replace(line, r"^Boundary\s+" => ""))
@@ -425,7 +458,7 @@ end
 
 """Parse key = value pairs from a string and add to dict."""
 function _parse_kv_pairs!(values::Dict{Symbol,KrakenExpr}, s::AbstractString,
-                          user_vars::Dict{Symbol,Float64})
+                          user_vars::Dict{Symbol,Any})
     for pm in eachmatch(r"(\w+)\s*=\s*(\S+)", s)
         k = Symbol(pm.captures[1])
         v = strip(String(pm.captures[2]))
@@ -434,7 +467,7 @@ function _parse_kv_pairs!(values::Dict{Symbol,KrakenExpr}, s::AbstractString,
 end
 
 """Parse: Initial { field = expr ... }"""
-function _parse_initial(line::String, user_vars::Dict{Symbol,Float64})
+function _parse_initial(line::String, user_vars::Dict{Symbol,Any})
     brace_m = match(r"\{(.+)\}", line)
     brace_m === nothing && throw(ArgumentError("Missing { ... } in Initial: $line"))
     content = strip(String(brace_m.captures[1]))
@@ -463,7 +496,7 @@ Examples:
     Rheology liquid  power_law   { K = 0.1  n = 0.5  nu_min = 1e-6 }
     Rheology gas     newtonian   { nu = 0.01 }
 """
-function _parse_rheology(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symbol,Float64}())
+function _parse_rheology(line::String, user_vars::Dict{Symbol,Any}=Dict{Symbol,Any}())
     # Extract brace block if present
     params = Dict{Symbol, Float64}()
     brace_m = match(r"\{(.+)\}", line)
@@ -507,4 +540,3 @@ function _parse_rheology(line::String, user_vars::Dict{Symbol,Float64}=Dict{Symb
 
     return RheologySetup(phase, model, params)
 end
-

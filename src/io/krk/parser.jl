@@ -20,8 +20,12 @@ end
 Physical parameters (nu, Pr, Ra, etc.) and optional body force expressions.
 """
 struct PhysicsSetup
-    params::Dict{Symbol, Float64}
+    params::Dict{Symbol, Any}
     body_force::Dict{Symbol, KrakenExpr}  # :Fx, :Fy, :Fz
+
+    function PhysicsSetup(params, body_force::Dict{Symbol, KrakenExpr})
+        return new(Dict{Symbol, Any}(params), body_force)
+    end
 end
 
 """
@@ -181,7 +185,7 @@ struct SimulationSetup
     lattice::Symbol
     domain::DomainSetup
     physics::PhysicsSetup
-    user_vars::Dict{Symbol, Float64}
+    user_vars::Dict{Symbol, Any}
     regions::Vector{GeometryRegion}
     boundaries::Vector{BoundarySetup}
     initial::Union{InitialSetup, Nothing}
@@ -194,27 +198,64 @@ struct SimulationSetup
     rheology::Vector{RheologySetup}                # per-phase rheology models
     mesh::Any                                      # Mesh-directive descriptor (body-fitted / Gmsh); `nothing` for the Cartesian path. Consumed by run_simulation (`setup.mesh !== nothing`) + _run_gmsh_slbm_drag. The producing parser is not built yet (KRK-GEO).
     units::Union{UnitsSetup, Nothing}              # Parse-time physical-units descriptor. Runner ignores it; fields above are already raw LU.
+    collision::Symbol                              # Generic 2D collision selector; default preserves the historical BGK path.
+    wall_bc::Symbol                                # Generic 2D wall selector; default preserves historical halfway bounce-back.
+
+    function SimulationSetup(name, lattice, domain, physics, user_vars, regions,
+                             boundaries, initial, modules, max_steps, outputs,
+                             diagnostics, refinements, velocity_field, rheology,
+                             mesh, units, collision, wall_bc)
+        return new(name, lattice, domain, physics, Dict{Symbol, Any}(user_vars),
+                   regions, boundaries, initial, modules, max_steps, outputs,
+                   diagnostics, refinements, velocity_field, rheology, mesh,
+                   units, Symbol(collision), Symbol(wall_bc))
+    end
 end
 
-# Backward-compatible constructors: `mesh` and `units` default to `nothing`, so existing
-# 15-argument call site (parser line ~469, tests) keeps working unchanged. Only
-# `_override_max_steps` threads the 16-argument form. This completes commit
-# 682e3f3c0, which referenced `setup.mesh` in the runner without ever adding the
-# field to this struct — leaving `run_simulation` broken for every .krk on the
-# v0.3 / paper lineage.
+# Backward-compatible constructors: `mesh`, `units`, `collision`, and `wall_bc`
+# default to the historical Cartesian 2D path, so existing 15/16/17-argument
+# call sites keep working unchanged.
 SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
                 initial, modules, max_steps, outputs, diagnostics, refinements,
                 velocity_field, rheology) =
     SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
                     initial, modules, max_steps, outputs, diagnostics, refinements,
-                    velocity_field, rheology, nothing, nothing)
+                    velocity_field, rheology, nothing, nothing, :bgk, :halfwaybb)
 
 SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
                 initial, modules, max_steps, outputs, diagnostics, refinements,
                 velocity_field, rheology, mesh) =
     SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
                     initial, modules, max_steps, outputs, diagnostics, refinements,
-                    velocity_field, rheology, mesh, nothing)
+                    velocity_field, rheology, mesh, nothing, :bgk, :halfwaybb)
+
+SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
+                initial, modules, max_steps, outputs, diagnostics, refinements,
+                velocity_field, rheology, mesh, units) =
+    SimulationSetup(name, lattice, domain, physics, user_vars, regions, boundaries,
+                    initial, modules, max_steps, outputs, diagnostics, refinements,
+                    velocity_field, rheology, mesh, units, :bgk, :halfwaybb)
+
+function _numeric_user_vars(user_vars::Dict{Symbol, Any})
+    out = Dict{Symbol, Float64}()
+    for (key, value) in user_vars
+        value isa Real && (out[key] = Float64(value))
+    end
+    return out
+end
+
+parse_kraken_expr(source::AbstractString, user_vars::Dict{Symbol, Any}) =
+    parse_kraken_expr(source, _numeric_user_vars(user_vars))
+
+_canonical_knob_symbol(value::Symbol) = Symbol(lowercase(String(value)))
+
+function _physics_symbol_option(params::Dict{Symbol, Any}, key::Symbol,
+                                default::Symbol)
+    value = get(params, key, default)
+    value isa Symbol || throw(ArgumentError(
+        "Physics $key must be a symbolic token, got '$value'"))
+    return _canonical_knob_symbol(value)
+end
 
 # --- Tokenization: strip comments, join multi-line blocks ---
 
@@ -386,7 +427,7 @@ end
 
 function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     # --- First pass: collect Define defaults ---
-    user_vars = Dict{Symbol, Float64}()
+    user_vars = Dict{Symbol, Any}()
     for line in lines
         _first_word(line) == "Define" || continue
         k, v = _parse_define(line)
@@ -411,7 +452,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     name = ""
     lattice = :D2Q9
     domain = nothing
-    physics_params = Dict{Symbol, Float64}()
+    physics_params = Dict{Symbol, Any}()
     body_force = Dict{Symbol, KrakenExpr}()
     regions = GeometryRegion[]
     boundaries = BoundarySetup[]
@@ -531,12 +572,19 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
                                        physics_params, user_vars)
     end
 
+    collision = _physics_symbol_option(physics_params, :collision, :bgk)
+    wall_bc = _physics_symbol_option(physics_params, :wall_bc, :halfwaybb)
+    # TODO(K1-followup): wire advection_scheme dispatch.
+    # TODO(K1-followup): wire formulation dispatch.
+    # TODO(K1-followup): wire gas_model dispatch.
+
     physics = PhysicsSetup(physics_params, body_force)
 
     setup = SimulationSetup(name, lattice, domain, physics, user_vars,
                             regions, boundaries, initial, modules,
                             max_steps, outputs, diagnostics, refinements,
-                            velocity_field, rheology_setups, nothing, units_setup)
+                            velocity_field, rheology_setups, nothing, units_setup,
+                            collision, wall_bc)
 
     # --- Validate face names against lattice dimensionality ---
     _validate_faces_vs_lattice(setup)
@@ -546,4 +594,3 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
 
     return [setup]
 end
-

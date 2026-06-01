@@ -88,7 +88,65 @@ function _override_max_steps(setup::SimulationSetup, new_max::Int)
         setup.user_vars, setup.regions, setup.boundaries, setup.initial,
         setup.modules, new_max,
         setup.outputs, setup.diagnostics, setup.refinements,
-        setup.velocity_field, setup.rheology, setup.mesh)
+        setup.velocity_field, setup.rheology, setup.mesh, setup.units,
+        setup.collision, setup.wall_bc)
+end
+
+_krk_selector_symbol(sym::Symbol) = Symbol(lowercase(String(sym)))
+
+function _normalize_collision_selector(sym::Symbol)
+    mode = _krk_selector_symbol(sym)
+    mode in (:bgk, :trt) || throw(ArgumentError(
+        "Unsupported Physics collision='$sym'. Supported generic 2D values: bgk, trt."))
+    return mode
+end
+
+function _normalize_wall_bc_selector(sym::Symbol)
+    mode = _krk_selector_symbol(sym)
+    mode in (:halfwaybb, :halfway_bb, :halfway) && return :halfwaybb
+    mode === :libb && return :libb
+    throw(ArgumentError(
+        "Unsupported Physics wall_bc='$sym'. Supported generic 2D values: halfwaybb, libb."))
+end
+
+function _setup_with_global_stl_libb(setup::SimulationSetup)
+    regions = GeometryRegion[]
+    sizehint!(regions, length(setup.regions))
+    found_stl_obstacle = false
+    for region in setup.regions
+        if region.kind === :obstacle && region.stl !== nothing
+            found_stl_obstacle = true
+            push!(regions, GeometryRegion(region.name, region.kind, region.condition,
+                                          region.stl, :libb, region.bc_values))
+        else
+            push!(regions, region)
+        end
+    end
+    found_stl_obstacle || throw(ArgumentError(
+        "Physics wall_bc=libb in the generic 2D path currently requires an STL Obstacle. " *
+        "Analytic-obstacle LI-BB dispatch is deferred."))
+    # TODO(K1-followup): add LI-BB q-wall dispatch for analytic obstacles.
+    return SimulationSetup(setup.name, setup.lattice, setup.domain, setup.physics,
+                           setup.user_vars, regions, setup.boundaries,
+                           setup.initial, setup.modules, setup.max_steps,
+                           setup.outputs, setup.diagnostics, setup.refinements,
+                           setup.velocity_field, setup.rheology, setup.mesh,
+                           setup.units, setup.collision, :libb)
+end
+
+function _ensure_generic_trt_supported!(setup::SimulationSetup, has_body_force::Bool,
+                                        has_rheology::Bool)
+    if has_body_force || has_rheology
+        throw(ArgumentError(
+            "Physics collision=trt in the generic 2D path currently supports only " *
+            "Newtonian flow without body force."))
+    end
+    bad = findfirst(bc -> bc.type !== :wall, setup.boundaries)
+    bad === nothing && return nothing
+    bc = setup.boundaries[bad]
+    throw(ArgumentError(
+        "Physics collision=trt in the generic 2D path currently supports only " *
+        "static wall boundaries; got $(bc.face) $(bc.type)."))
 end
 
 """
@@ -139,6 +197,8 @@ function run_simulation(setup::SimulationSetup;
     dy = dom.Ly / Ny
     ν = setup.physics.params[:nu]
     ω = T(1.0 / (3.0 * ν + 0.5))
+    collision = _normalize_collision_selector(setup.collision)
+    wall_bc = _normalize_wall_bc_selector(setup.wall_bc)
 
     # --- Initialize state ---
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0,
@@ -150,7 +210,8 @@ function run_simulation(setup::SimulationSetup;
 
     # --- Apply geometry ---
     _apply_geometry!(is_solid, setup, dx, dy)
-    stl_libb = _has_stl_libb_obstacle(setup)
+    libb_setup = wall_bc === :libb ? _setup_with_global_stl_libb(setup) : setup
+    stl_libb = _has_stl_libb_obstacle(libb_setup)
 
     # --- Apply initial conditions ---
     if setup.initial !== nothing
@@ -191,6 +252,8 @@ function run_simulation(setup::SimulationSetup;
     if stl_libb && (has_body_force || has_rheology)
         error("STL wall=libb in the generic .krk runner supports only Newtonian flow without body force")
     end
+    use_trt_step = !stl_libb && collision === :trt
+    use_trt_step && _ensure_generic_trt_supported!(setup, has_body_force, has_rheology)
 
     # --- Build boundary handlers ---
     bc_handlers = _build_boundary_handlers(setup, dx, dy, Nx, Ny, T, backend)
@@ -199,11 +262,11 @@ function run_simulation(setup::SimulationSetup;
     libb_uw_y = nothing
     libb_bcspec = nothing
     if stl_libb
-        q_wall_cpu = _precompute_stl_libb_q_wall_2d(Array(is_solid), setup, dx, dy, T)
+        q_wall_cpu = _precompute_stl_libb_q_wall_2d(Array(is_solid), libb_setup, dx, dy, T)
         libb_q_wall = _copy_to_backend(backend, T, q_wall_cpu)
         libb_uw_x = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
         libb_uw_y = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
-        libb_bcspec = _build_libb_bc_rebuild_spec_2d(setup, dx, dy, Nx, Ny, T, backend)
+        libb_bcspec = _build_libb_bc_rebuild_spec_2d(libb_setup, dx, dy, Nx, Ny, T, backend)
     end
 
     # --- Setup output ---
@@ -230,6 +293,8 @@ function run_simulation(setup::SimulationSetup;
                                      libb_q_wall, libb_uw_x, libb_uw_y,
                                      Nx, Ny, T(ν))
             apply_bc_rebuild_2d!(f_out, f_in, libb_bcspec, ν, Nx, Ny)
+        elseif use_trt_step
+            fused_trt_step!(f_out, f_in, ρ, ux, uy, is_solid, Nx, Ny, T(ν))
         else
             # 1. Stream
             stream_fn!(f_out, f_in, Nx, Ny)

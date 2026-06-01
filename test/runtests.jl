@@ -19,6 +19,7 @@ using Kraken
     include("test_cylinder.jl")
     include("test_expression.jl")
     include("test_kraken_parser.jl")
+    include("test_krk_symbolic.jl")
     include("test_simulation_runner.jl")
     include("test_stl.jl")
     include("test_geometry_stl_krk.jl")
