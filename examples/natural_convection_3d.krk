@@ -1,0 +1,17 @@
+# Natural convection in a differentially heated cubic cavity.
+# Hot west wall, cold east wall, adiabatic on the other faces.
+#
+# Run via:
+#   run_simulation("examples/natural_convection_3d.krk")
+
+Simulation natural_convection_3d D3Q19
+Domain L = 1.0 x 1.0 x 1.0  N = 16 x 16 x 16
+Physics nu = 0.05 Pr = 0.71 Ra = 1e3
+Boundary west wall T = 1.0
+Boundary east wall T = 0.0
+Boundary south wall
+Boundary north wall
+Boundary bottom wall
+Boundary top wall
+
+Run 200 steps

@@ -30,9 +30,18 @@ function _run_d3q19(setup::SimulationSetup;
                            max_steps=setup.max_steps)
         result = run_cavity_3d(config; backend=backend, T=T)
         return merge(result, (setup=setup,))
+    elseif occursin("natural_convection", name) || occursin("fusegi", name)
+        params = setup.physics.params
+        Ra = Float64(get(params, :Ra, 1e4))
+        Pr = Float64(get(params, :Pr, 0.71))
+        result = run_natural_convection_3d(; N=dom.Nx, Ra=Ra, Pr=Pr,
+                                            max_steps=setup.max_steps,
+                                            backend=backend, FT=T)
+        return merge(result, (setup=setup,))
     else
         throw(ArgumentError(
-            "D3Q19 dispatch: only `cavity_3d` is supported in v0.1.0 " *
+            "D3Q19 dispatch: only `cavity_3d`, `natural_convection`, and " *
+            "`fusegi` are supported in v0.1.0 " *
             "(got case name: $(setup.name)). Use the Julia API for other 3D cases."))
     end
 end
