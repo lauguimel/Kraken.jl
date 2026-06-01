@@ -49,6 +49,10 @@ end
 """Dispatch axisymmetric cases. Only Hagen-Poiseuille is supported in v0.1.0."""
 function _run_axisymmetric(setup::SimulationSetup;
                            backend=KernelAbstractions.CPU(), T=Float64)
+    @warn("Axisymmetric support is EXPERIMENTAL and NOT validated in v0.2: " *
+          "this is the legacy multiphase path, not benchmarked to the " *
+          "reference tolerance. Results are not release-grade. True " *
+          "axisymmetric LBM is planned for a later release.", maxlog=1)
     name = lowercase(setup.name)
     dom  = setup.domain
     params = setup.physics.params
