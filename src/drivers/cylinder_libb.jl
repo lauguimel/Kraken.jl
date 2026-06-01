@@ -41,9 +41,6 @@ function compute_drag_libb_2d(f_post, q_wall, Nx::Int, Ny::Int)
     return (Fx = Fx, Fy = Fy)
 end
 
-# Opposite direction lookup for D2Q9 (q=1..9).
-const _D2Q9_OPP = (1, 4, 5, 2, 3, 8, 9, 6, 7)
-
 """
     compute_drag_libb_mei_2d(f_pre, q_wall, uw_link_x, uw_link_y, Nx, Ny)
         -> (Fx, Fy)
