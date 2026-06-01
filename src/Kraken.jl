@@ -99,7 +99,12 @@ include("multiblock/multiblock.jl")
 
 # --- Parser ---
 include("io/expression.jl")
-include("io/kraken_parser.jl")
+include("io/krk/parser.jl")
+include("io/krk/directives.jl")
+include("io/krk/rheology.jl")
+include("io/krk/units_bridge.jl")
+include("io/krk/setup_lbm.jl")
+include("io/krk/diagnostics.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
