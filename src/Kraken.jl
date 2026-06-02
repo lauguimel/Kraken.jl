@@ -63,8 +63,11 @@ include("kernels/dsl/bricks_3d.jl")
 include("kernels/dsl/lbm_builder.jl")
 
 # --- Kernels built from the DSL (must come after li_bb_2d.jl + DSL) ---
+include("diagnostics/trace.jl")
 include("kernels/li_bb_2d_v2.jl")
 include("kernels/li_bb_3d_v2.jl")
+include("fvfd/FVFD.jl")
+include("kernels/logconformation_fv_2d.jl")
 
 # --- Modular BC system (uses TRT rates + feq helpers; compiles face
 #     kernels per BC type via Julia dispatch).
@@ -86,7 +89,10 @@ include("drivers/thermal.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
+include("drivers/viscoelastic_spec.jl")
 include("drivers/viscoelastic.jl")
+include("drivers/step_geometry_2d.jl")
+include("drivers/viscoelastic_logfv_2d.jl")
 
 # --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
 include("curvilinear/mesh.jl")
@@ -231,7 +237,7 @@ export apply_fixed_temp_south_3d!, apply_fixed_temp_north_3d!
 export apply_fixed_temp_bottom_3d!, apply_fixed_temp_top_3d!
 export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
-export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
+export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_hermite_step!, fused_trt_libb_v2_guo_field_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
 export dq_wall_dR_cylinder
 export precompute_q_wall_sphere_3d, compute_drag_libb_3d, run_sphere_libb_3d
 export precompute_q_wall_annulus
@@ -543,6 +549,47 @@ export compute_polymeric_force_2d!
 export evolve_stress_2d!, evolve_logconf_2d!
 export compute_stress_from_conf_2d!, compute_stress_from_logconf_2d!
 export run_viscoelastic_cylinder_2d
+export run_viscoelastic_logfv_channel_2d, run_viscoelastic_logfv_frozen_channel_cde_2d
+export run_viscoelastic_logfv_frozen_circle_shear_cde_2d
+export run_viscoelastic_logfv_frozen_circle_tangential_shear_cde_2d
+export run_viscoelastic_logfv_poiseuille_frozen_force_2d
+export run_viscoelastic_logfv_poiseuille_coupled_2d
+export run_viscoelastic_logfv_square_periodic_2d
+export run_viscoelastic_logfv_bfs_passive_2d, run_viscoelastic_logfv_bfs_coupled_2d
+export run_viscoelastic_logfv_contraction_coupled_2d
+export run_viscoelastic_logfv_square_channel_coupled_2d
+export run_viscoelastic_logfv_cylinder_coupled_2d
+export FVFDDomainBC2D, FVFDFieldBC2D, FVFDEmbeddedBoundary2D, FVFDPatch2D, FVFDGeometry2D
+export fvfd_domain_bc_code, fvfd_periodicx_wally_bcspec_2d, fvfd_openx_wally_bcspec_2d
+export fvfd_empty_embedded_boundary_2d, fvfd_embedded_boundary_from_qwall_2d
+export fvfd_embedded_boundary_from_halfplane_2d, fvfd_geometry_from_halfplane_2d
+export fvfd_embedded_boundary_from_circle_2d, fvfd_geometry_from_circle_2d
+export fvfd_transfer_field_bc_2d, fvfd_transfer_embedded_boundary_2d
+export fvfd_geometry_from_lbm_2d, fvfd_transfer_geometry_2d
+export fvfd_velocity_gradient_2d!, fvfd_velocity_gradient_embedded_2d!
+export fvfd_tensor_divergence_2d!, fvfd_tensor_divergence_embedded_2d!
+export fvfd_embedded_wall_traction_2d!
+export WallGradientOrder, WallGradientSides, apply_halfway_wall_gradient_correction!
+export fvfd_bsd_force_2d!
+export fvfd_cell_velocity_to_faces_2d!, fvfd_cell_velocity_to_faces_embedded_2d!
+export fvfd_advect_upwind_2d!, fvfd_advect_upwind_embedded_2d!
+export fvfd_sym2_advect_upwind_2d!, fvfd_sym2_advect_upwind_embedded_2d!
+export LogFVDomainBC2D, LogFVFieldBC2D, logfv_domain_bc_code
+export logfv_periodicx_wally_bcspec_2d, logfv_openx_wally_bcspec_2d,
+       logfv_wallxwally_bcspec_2d
+export fvfd_wallxwally_bcspec_2d
+export logfv_cell_velocity_to_faces_bc_aware_2d!, logfv_cell_velocity_to_faces_embedded_2d!
+export StepChannelGeometry2D, step_channel_geometry_2d
+export contraction_step_geometry_2d, backward_facing_step_geometry_2d,
+       square_obstacle_channel_geometry_2d
+export transfer_step_geometry_2d, parabolic_face_profile_2d
+export oldroydb_inlet_conformation_profile_2d, default_step_bcspec_2d
+export AbstractPolymerModel, LogConfOldroydB, update_polymer_stress!
+export uses_log_conformation
+export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
+       CNEBBFieldEquilibrium,
+       CNEBBEqGradient, CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,
+       ExtrapEqWallBC, LogFieldWallBC, NoPolymerWallBC, apply_polymer_wall_bc!
 
 # Spatial boundary kernels
 export apply_zou_he_north_spatial_2d!, apply_zou_he_south_spatial_2d!

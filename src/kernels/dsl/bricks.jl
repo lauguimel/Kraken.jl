@@ -296,6 +296,112 @@ emit_code(::CollideTRTDirect) = quote
     f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7)
 end
 
+"TRT collision with per-cell Guo body force, written directly to f_out."
+struct CollideTRTDirectGuoField <: LBMBrick end
+required_args(::CollideTRTDirectGuoField) =
+    (:f_out, :s_plus, :s_minus, :Fx_field, :Fy_field)
+emit_code(::CollideTRTDirectGuoField) = quote
+    fx = Fx_field[i, j]
+    fy = Fy_field[i, j]
+    if fx != zero(T) || fy != zero(T)
+        inv_ρ = one(T) / ρ
+        ux = (ρ * ux + fx / T(2)) * inv_ρ
+        uy = (ρ * uy + fy / T(2)) * inv_ρ
+        usq = ux * ux + uy * uy
+    end
+
+    feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
+    feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
+    feq3 = feq_2d(Val(3), ρ, ux, uy, usq)
+    feq4 = feq_2d(Val(4), ρ, ux, uy, usq)
+    feq5 = feq_2d(Val(5), ρ, ux, uy, usq)
+    feq6 = feq_2d(Val(6), ρ, ux, uy, usq)
+    feq7 = feq_2d(Val(7), ρ, ux, uy, usq)
+    feq8 = feq_2d(Val(8), ρ, ux, uy, usq)
+    feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
+    a = (s_plus + s_minus) * T(0.5)
+    b = (s_plus - s_minus) * T(0.5)
+    guo_pref = one(T) - s_plus / T(2)
+
+    Sq1 = T(4.0 / 9.0) * ((-ux) * fx + (-uy) * fy) * T(3)
+    Sq2 = T(1.0 / 9.0) * ((one(T) - ux) * fx + (-uy) * fy) * T(3) +
+          T(1.0 / 9.0) * ux * fx * T(9)
+    Sq3 = T(1.0 / 9.0) * ((-ux) * fx + (one(T) - uy) * fy) * T(3) +
+          T(1.0 / 9.0) * uy * fy * T(9)
+    Sq4 = T(1.0 / 9.0) * ((-one(T) - ux) * fx + (-uy) * fy) * T(3) +
+          T(1.0 / 9.0) * ux * fx * T(9)
+    Sq5 = T(1.0 / 9.0) * ((-ux) * fx + (-one(T) - uy) * fy) * T(3) +
+          T(1.0 / 9.0) * uy * fy * T(9)
+    Sq6 = T(1.0 / 36.0) * ((one(T) - ux) * fx + (one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (ux + uy) * (fx + fy) * T(9)
+    Sq7 = T(1.0 / 36.0) * ((-one(T) - ux) * fx + (one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (-ux + uy) * (-fx + fy) * T(9)
+    Sq8 = T(1.0 / 36.0) * ((-one(T) - ux) * fx + (-one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (-ux - uy) * (-fx - fy) * T(9)
+    Sq9 = T(1.0 / 36.0) * ((one(T) - ux) * fx + (-one(T) - uy) * fy) * T(3) +
+          T(1.0 / 36.0) * (ux - uy) * (fx - fy) * T(9)
+
+    f_out[i, j, 1] = fp1 - s_plus * (fp1 - feq1) + guo_pref * Sq1
+    f_out[i, j, 2] = fp2 - a * (fp2 - feq2) - b * (fp4 - feq4) + guo_pref * Sq2
+    f_out[i, j, 4] = fp4 - a * (fp4 - feq4) - b * (fp2 - feq2) + guo_pref * Sq4
+    f_out[i, j, 3] = fp3 - a * (fp3 - feq3) - b * (fp5 - feq5) + guo_pref * Sq3
+    f_out[i, j, 5] = fp5 - a * (fp5 - feq5) - b * (fp3 - feq3) + guo_pref * Sq5
+    f_out[i, j, 6] = fp6 - a * (fp6 - feq6) - b * (fp8 - feq8) + guo_pref * Sq6
+    f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6) + guo_pref * Sq8
+    f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9) + guo_pref * Sq7
+    f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7) + guo_pref * Sq9
+end
+
+"TRT collision with Liu/Yu Hermite stress source written directly to f_out."
+struct CollideTRTDirectHermite <: LBMBrick end
+required_args(::CollideTRTDirectHermite) =
+    (:f_out, :s_plus, :s_minus, :q_wall,
+     :tau_p_xx, :tau_p_xy, :tau_p_yy, :source_scale, :source_on_cutlinks)
+emit_code(::CollideTRTDirectHermite) = quote
+    feq1 = feq_2d(Val(1), ρ, ux, uy, usq)
+    feq2 = feq_2d(Val(2), ρ, ux, uy, usq)
+    feq3 = feq_2d(Val(3), ρ, ux, uy, usq)
+    feq4 = feq_2d(Val(4), ρ, ux, uy, usq)
+    feq5 = feq_2d(Val(5), ρ, ux, uy, usq)
+    feq6 = feq_2d(Val(6), ρ, ux, uy, usq)
+    feq7 = feq_2d(Val(7), ρ, ux, uy, usq)
+    feq8 = feq_2d(Val(8), ρ, ux, uy, usq)
+    feq9 = feq_2d(Val(9), ρ, ux, uy, usq)
+    a = (s_plus + s_minus) * T(0.5)
+    b = (s_plus - s_minus) * T(0.5)
+
+    cut_link = false
+    if !source_on_cutlinks
+        for qsrc in 2:9
+            cut_link |= q_wall[i, j, qsrc] > zero(T)
+        end
+    end
+    txx = tau_p_xx[i, j]
+    txy = tau_p_xy[i, j]
+    tyy = tau_p_yy[i, j]
+    local_source_scale = cut_link ? zero(T) : source_scale
+    pre = -s_plus * T(9.0 / 2.0) * local_source_scale
+    cs2 = T(1 / 3)
+    wr = T(4 / 9)
+    wa = T(1 / 9)
+    we = T(1 / 36)
+    T1 = pre * wr * (-cs2 * (txx + tyy))
+    T2 = pre * wa * ((one(T) - cs2) * txx - cs2 * tyy)
+    T3 = pre * wa * (-cs2 * txx + (one(T) - cs2) * tyy)
+    T6 = pre * we * ((one(T) - cs2) * txx + (one(T) - cs2) * tyy + T(2) * txy)
+    T7 = pre * we * ((one(T) - cs2) * txx + (one(T) - cs2) * tyy - T(2) * txy)
+
+    f_out[i, j, 1] = fp1 - s_plus * (fp1 - feq1) + T1
+    f_out[i, j, 2] = fp2 - a * (fp2 - feq2) - b * (fp4 - feq4) + T2
+    f_out[i, j, 4] = fp4 - a * (fp4 - feq4) - b * (fp2 - feq2) + T2
+    f_out[i, j, 3] = fp3 - a * (fp3 - feq3) - b * (fp5 - feq5) + T3
+    f_out[i, j, 5] = fp5 - a * (fp5 - feq5) - b * (fp3 - feq3) + T3
+    f_out[i, j, 6] = fp6 - a * (fp6 - feq6) - b * (fp8 - feq8) + T6
+    f_out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6) + T6
+    f_out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9) + T7
+    f_out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7) + T7
+end
+
 # ------------------------------------------------------------------
 # Collisions — intermediate write (for fused_trt_libb)
 # ------------------------------------------------------------------
@@ -446,6 +552,331 @@ emit_code(::ApplyLiBBPrePhase) = quote
     if qw9 > zero(T)
         δ7 =  T(1/6) * (-uw_link_x[i, j, 9] + uw_link_y[i, j, 9])
         fp7 = _libb_branch(qw9, f_in[i, j, 9], fp9, f_in[i, j, 7], δ7)
+    end
+end
+
+@inline function _bouzidi_fl_post_value(qw::T, f_q_here::T, f_q_ff::T,
+                                        f_qbar_here::T, delta::T,
+                                        has_ff::Bool) where {T}
+    if qw <= T(0.5)
+        if has_ff
+            two_qw = T(2) * qw
+            return two_qw * f_q_here + (one(T) - two_qw) * f_q_ff + delta
+        else
+            return f_q_here + delta
+        end
+    else
+        inv_two_qw = one(T) / (T(2) * qw)
+        return inv_two_qw * f_q_here + (one(T) - inv_two_qw) * f_qbar_here +
+               delta * inv_two_qw
+    end
+end
+
+"Post-collision Bouzidi-FL interpolated bounce-back. Runs after collision has written f_out, then overwrites f_out[i,j,qbar] on flagged cut links. The wall-cell terms use current-step post-collision values from f_out; the q <= 0.5 far-fluid term uses lag-1 f_in at x_f - c_q, with halfway-BB fallback when that neighbour is unavailable. The moving-wall correction follows the existing _libb_branch scaling convention."
+struct ApplyBouzidiFLPostCollide <: LBMBrick end
+required_args(::ApplyBouzidiFLPostCollide) =
+    (:f_out, :f_in, :q_wall, :uw_link_x, :uw_link_y, :is_solid, :ρ_out, :Nx, :Ny)
+phase(::ApplyBouzidiFLPostCollide) = :fluid
+emit_code(::ApplyBouzidiFLPostCollide) = quote
+    rho_w = ρ_out[i, j]
+    half = T(0.5)
+
+    f2_here = f_out[i, j, 2]
+    f3_here = f_out[i, j, 3]
+    f4_here = f_out[i, j, 4]
+    f5_here = f_out[i, j, 5]
+    f6_here = f_out[i, j, 6]
+    f7_here = f_out[i, j, 7]
+    f8_here = f_out[i, j, 8]
+    f9_here = f_out[i, j, 9]
+
+    qw2 = q_wall[i, j, 2]
+    if qw2 > zero(T)
+        delta4 = -(T(2) / T(3)) * rho_w * uw_link_x[i, j, 2]
+        has_ff2 = false
+        f2_ff = f2_here
+        if qw2 <= half
+            i2_ff = i - 1
+            j2_ff = j
+            has_ff2 = i2_ff >= 1 && i2_ff <= Nx && j2_ff >= 1 && j2_ff <= Ny && !is_solid[i2_ff, j2_ff]
+            f2_ff = has_ff2 ? f_in[i2_ff, j2_ff, 2] : f2_here
+        end
+        f_out[i, j, 4] = _bouzidi_fl_post_value(qw2, f2_here, f2_ff, f4_here, delta4, qw2 <= half && has_ff2)
+    end
+
+    qw4 = q_wall[i, j, 4]
+    if qw4 > zero(T)
+        delta2 = (T(2) / T(3)) * rho_w * uw_link_x[i, j, 4]
+        has_ff4 = false
+        f4_ff = f4_here
+        if qw4 <= half
+            i4_ff = i + 1
+            j4_ff = j
+            has_ff4 = i4_ff >= 1 && i4_ff <= Nx && j4_ff >= 1 && j4_ff <= Ny && !is_solid[i4_ff, j4_ff]
+            f4_ff = has_ff4 ? f_in[i4_ff, j4_ff, 4] : f4_here
+        end
+        f_out[i, j, 2] = _bouzidi_fl_post_value(qw4, f4_here, f4_ff, f2_here, delta2, qw4 <= half && has_ff4)
+    end
+
+    qw3 = q_wall[i, j, 3]
+    if qw3 > zero(T)
+        delta5 = -(T(2) / T(3)) * rho_w * uw_link_y[i, j, 3]
+        has_ff3 = false
+        f3_ff = f3_here
+        if qw3 <= half
+            i3_ff = i
+            j3_ff = j - 1
+            has_ff3 = i3_ff >= 1 && i3_ff <= Nx && j3_ff >= 1 && j3_ff <= Ny && !is_solid[i3_ff, j3_ff]
+            f3_ff = has_ff3 ? f_in[i3_ff, j3_ff, 3] : f3_here
+        end
+        f_out[i, j, 5] = _bouzidi_fl_post_value(qw3, f3_here, f3_ff, f5_here, delta5, qw3 <= half && has_ff3)
+    end
+
+    qw5 = q_wall[i, j, 5]
+    if qw5 > zero(T)
+        delta3 = (T(2) / T(3)) * rho_w * uw_link_y[i, j, 5]
+        has_ff5 = false
+        f5_ff = f5_here
+        if qw5 <= half
+            i5_ff = i
+            j5_ff = j + 1
+            has_ff5 = i5_ff >= 1 && i5_ff <= Nx && j5_ff >= 1 && j5_ff <= Ny && !is_solid[i5_ff, j5_ff]
+            f5_ff = has_ff5 ? f_in[i5_ff, j5_ff, 5] : f5_here
+        end
+        f_out[i, j, 3] = _bouzidi_fl_post_value(qw5, f5_here, f5_ff, f3_here, delta3, qw5 <= half && has_ff5)
+    end
+
+    qw6 = q_wall[i, j, 6]
+    if qw6 > zero(T)
+        delta8 = -(T(1) / T(6)) * rho_w * (uw_link_x[i, j, 6] + uw_link_y[i, j, 6])
+        has_ff6 = false
+        f6_ff = f6_here
+        if qw6 <= half
+            i6_ff = i - 1
+            j6_ff = j - 1
+            has_ff6 = i6_ff >= 1 && i6_ff <= Nx && j6_ff >= 1 && j6_ff <= Ny && !is_solid[i6_ff, j6_ff]
+            f6_ff = has_ff6 ? f_in[i6_ff, j6_ff, 6] : f6_here
+        end
+        f_out[i, j, 8] = _bouzidi_fl_post_value(qw6, f6_here, f6_ff, f8_here, delta8, qw6 <= half && has_ff6)
+    end
+
+    qw8 = q_wall[i, j, 8]
+    if qw8 > zero(T)
+        delta6 = (T(1) / T(6)) * rho_w * (uw_link_x[i, j, 8] + uw_link_y[i, j, 8])
+        has_ff8 = false
+        f8_ff = f8_here
+        if qw8 <= half
+            i8_ff = i + 1
+            j8_ff = j + 1
+            has_ff8 = i8_ff >= 1 && i8_ff <= Nx && j8_ff >= 1 && j8_ff <= Ny && !is_solid[i8_ff, j8_ff]
+            f8_ff = has_ff8 ? f_in[i8_ff, j8_ff, 8] : f8_here
+        end
+        f_out[i, j, 6] = _bouzidi_fl_post_value(qw8, f8_here, f8_ff, f6_here, delta6, qw8 <= half && has_ff8)
+    end
+
+    qw7 = q_wall[i, j, 7]
+    if qw7 > zero(T)
+        delta9 = -(T(1) / T(6)) * rho_w * (-uw_link_x[i, j, 7] + uw_link_y[i, j, 7])
+        has_ff7 = false
+        f7_ff = f7_here
+        if qw7 <= half
+            i7_ff = i + 1
+            j7_ff = j - 1
+            has_ff7 = i7_ff >= 1 && i7_ff <= Nx && j7_ff >= 1 && j7_ff <= Ny && !is_solid[i7_ff, j7_ff]
+            f7_ff = has_ff7 ? f_in[i7_ff, j7_ff, 7] : f7_here
+        end
+        f_out[i, j, 9] = _bouzidi_fl_post_value(qw7, f7_here, f7_ff, f9_here, delta9, qw7 <= half && has_ff7)
+    end
+
+    qw9 = q_wall[i, j, 9]
+    if qw9 > zero(T)
+        delta7 = (T(1) / T(6)) * rho_w * (-uw_link_x[i, j, 9] + uw_link_y[i, j, 9])
+        has_ff9 = false
+        f9_ff = f9_here
+        if qw9 <= half
+            i9_ff = i - 1
+            j9_ff = j + 1
+            has_ff9 = i9_ff >= 1 && i9_ff <= Nx && j9_ff >= 1 && j9_ff <= Ny && !is_solid[i9_ff, j9_ff]
+            f9_ff = has_ff9 ? f_in[i9_ff, j9_ff, 9] : f9_here
+        end
+        f_out[i, j, 7] = _bouzidi_fl_post_value(qw9, f9_here, f9_ff, f7_here, delta7, qw9 <= half && has_ff9)
+    end
+end
+
+"""
+Two-pass Bouzidi-FL interpolated bounce-back (pass-2 brick).
+
+Runs after pass-1 (`_TRT_LIBB_V2_GUO_FIELD_SPEC`) has globally synchronised:
+`f_out` and `ρ_out` now hold the *current step's* post-collision values
+everywhere (no cross-thread race, no lag-1). Reads `f_q_here = f_out[i, j, q]`,
+`f_q_ff = f_out[i_ff, j_ff, q]`, and `rho_w = ρ_out[i, j]` — all lag-0. Writes
+`f_out[i, j, qbar]` on flagged cut links. Eliminates the q ≤ 0.5 lag mismatch
+and the secondary lag-1 ρ_w issue documented in
+`bench/viscoelastic_audit/M30_PHASE2B_AUDIT_VERDICT.md`.
+"""
+struct ApplyBouzidiFLPostCollideTwoPass <: LBMBrick end
+required_args(::ApplyBouzidiFLPostCollideTwoPass) =
+    (:f_out, :q_wall, :uw_link_x, :uw_link_y, :is_solid, :ρ_out, :Nx, :Ny)
+phase(::ApplyBouzidiFLPostCollideTwoPass) = :fluid
+emit_code(::ApplyBouzidiFLPostCollideTwoPass) = quote
+    rho_w = ρ_out[i, j]
+    half = T(0.5)
+
+    f2_here = f_out[i, j, 2]
+    f3_here = f_out[i, j, 3]
+    f4_here = f_out[i, j, 4]
+    f5_here = f_out[i, j, 5]
+    f6_here = f_out[i, j, 6]
+    f7_here = f_out[i, j, 7]
+    f8_here = f_out[i, j, 8]
+    f9_here = f_out[i, j, 9]
+
+    qw2 = q_wall[i, j, 2]
+    if qw2 > zero(T)
+        delta4 = -(T(2) / T(3)) * rho_w * uw_link_x[i, j, 2]
+        has_ff2 = false
+        f2_ff = f2_here
+        if qw2 <= half
+            i2_ff = i - 1
+            j2_ff = j
+            has_ff2 = i2_ff >= 1 && i2_ff <= Nx && j2_ff >= 1 && j2_ff <= Ny && !is_solid[i2_ff, j2_ff]
+            f2_ff = has_ff2 ? f_out[i2_ff, j2_ff, 2] : f2_here
+        end
+        f_out[i, j, 4] = _bouzidi_fl_post_value(qw2, f2_here, f2_ff, f4_here, delta4, qw2 <= half && has_ff2)
+    end
+
+    qw4 = q_wall[i, j, 4]
+    if qw4 > zero(T)
+        delta2 = (T(2) / T(3)) * rho_w * uw_link_x[i, j, 4]
+        has_ff4 = false
+        f4_ff = f4_here
+        if qw4 <= half
+            i4_ff = i + 1
+            j4_ff = j
+            has_ff4 = i4_ff >= 1 && i4_ff <= Nx && j4_ff >= 1 && j4_ff <= Ny && !is_solid[i4_ff, j4_ff]
+            f4_ff = has_ff4 ? f_out[i4_ff, j4_ff, 4] : f4_here
+        end
+        f_out[i, j, 2] = _bouzidi_fl_post_value(qw4, f4_here, f4_ff, f2_here, delta2, qw4 <= half && has_ff4)
+    end
+
+    qw3 = q_wall[i, j, 3]
+    if qw3 > zero(T)
+        delta5 = -(T(2) / T(3)) * rho_w * uw_link_y[i, j, 3]
+        has_ff3 = false
+        f3_ff = f3_here
+        if qw3 <= half
+            i3_ff = i
+            j3_ff = j - 1
+            has_ff3 = i3_ff >= 1 && i3_ff <= Nx && j3_ff >= 1 && j3_ff <= Ny && !is_solid[i3_ff, j3_ff]
+            f3_ff = has_ff3 ? f_out[i3_ff, j3_ff, 3] : f3_here
+        end
+        f_out[i, j, 5] = _bouzidi_fl_post_value(qw3, f3_here, f3_ff, f5_here, delta5, qw3 <= half && has_ff3)
+    end
+
+    qw5 = q_wall[i, j, 5]
+    if qw5 > zero(T)
+        delta3 = (T(2) / T(3)) * rho_w * uw_link_y[i, j, 5]
+        has_ff5 = false
+        f5_ff = f5_here
+        if qw5 <= half
+            i5_ff = i
+            j5_ff = j + 1
+            has_ff5 = i5_ff >= 1 && i5_ff <= Nx && j5_ff >= 1 && j5_ff <= Ny && !is_solid[i5_ff, j5_ff]
+            f5_ff = has_ff5 ? f_out[i5_ff, j5_ff, 5] : f5_here
+        end
+        f_out[i, j, 3] = _bouzidi_fl_post_value(qw5, f5_here, f5_ff, f3_here, delta3, qw5 <= half && has_ff5)
+    end
+
+    qw6 = q_wall[i, j, 6]
+    if qw6 > zero(T)
+        delta8 = -(T(1) / T(6)) * rho_w * (uw_link_x[i, j, 6] + uw_link_y[i, j, 6])
+        has_ff6 = false
+        f6_ff = f6_here
+        if qw6 <= half
+            i6_ff = i - 1
+            j6_ff = j - 1
+            has_ff6 = i6_ff >= 1 && i6_ff <= Nx && j6_ff >= 1 && j6_ff <= Ny && !is_solid[i6_ff, j6_ff]
+            f6_ff = has_ff6 ? f_out[i6_ff, j6_ff, 6] : f6_here
+        end
+        f_out[i, j, 8] = _bouzidi_fl_post_value(qw6, f6_here, f6_ff, f8_here, delta8, qw6 <= half && has_ff6)
+    end
+
+    qw8 = q_wall[i, j, 8]
+    if qw8 > zero(T)
+        delta6 = (T(1) / T(6)) * rho_w * (uw_link_x[i, j, 8] + uw_link_y[i, j, 8])
+        has_ff8 = false
+        f8_ff = f8_here
+        if qw8 <= half
+            i8_ff = i + 1
+            j8_ff = j + 1
+            has_ff8 = i8_ff >= 1 && i8_ff <= Nx && j8_ff >= 1 && j8_ff <= Ny && !is_solid[i8_ff, j8_ff]
+            f8_ff = has_ff8 ? f_out[i8_ff, j8_ff, 8] : f8_here
+        end
+        f_out[i, j, 6] = _bouzidi_fl_post_value(qw8, f8_here, f8_ff, f6_here, delta6, qw8 <= half && has_ff8)
+    end
+
+    qw7 = q_wall[i, j, 7]
+    if qw7 > zero(T)
+        delta9 = -(T(1) / T(6)) * rho_w * (-uw_link_x[i, j, 7] + uw_link_y[i, j, 7])
+        has_ff7 = false
+        f7_ff = f7_here
+        if qw7 <= half
+            i7_ff = i + 1
+            j7_ff = j - 1
+            has_ff7 = i7_ff >= 1 && i7_ff <= Nx && j7_ff >= 1 && j7_ff <= Ny && !is_solid[i7_ff, j7_ff]
+            f7_ff = has_ff7 ? f_out[i7_ff, j7_ff, 7] : f7_here
+        end
+        f_out[i, j, 9] = _bouzidi_fl_post_value(qw7, f7_here, f7_ff, f9_here, delta9, qw7 <= half && has_ff7)
+    end
+
+    qw9 = q_wall[i, j, 9]
+    if qw9 > zero(T)
+        delta7 = (T(1) / T(6)) * rho_w * (-uw_link_x[i, j, 9] + uw_link_y[i, j, 9])
+        has_ff9 = false
+        f9_ff = f9_here
+        if qw9 <= half
+            i9_ff = i - 1
+            j9_ff = j + 1
+            has_ff9 = i9_ff >= 1 && i9_ff <= Nx && j9_ff >= 1 && j9_ff <= Ny && !is_solid[i9_ff, j9_ff]
+            f9_ff = has_ff9 ? f_out[i9_ff, j9_ff, 9] : f9_here
+        end
+        f_out[i, j, 7] = _bouzidi_fl_post_value(qw9, f9_here, f9_ff, f7_here, delta7, qw9 <= half && has_ff9)
+    end
+end
+
+"""
+Cut-link-only ρ recompute (pass-3 brick for `:bouzidi_fl_twopass`).
+
+After pass-2 has overwritten `f_out[i, j, qbar]` on flagged cut links, the
+stale `ρ_out` written by pass-1 (which summed the pre-Bouzidi-FL pops) is no
+longer consistent with `f_out` at those cells. Downstream readers — the
+log-FV polymer pipeline + the next step's Guo body force `f → ρ` chain — see
+a `rho_w` that contradicts the cut-link f-set, the inconsistency identified
+in `bench/viscoelastic_audit/M34_FIX_DIAG_VERDICT.md` as the residual cause
+of the +1.6 % Cd bias at R=30 Wi=0.1 and the divergence at R=60 Wi=0.1 / R=30
+Wi=1.0. This brick re-sums `f_out[i, j, 1..9]` and overwrites `ρ_out[i, j]`
+ONLY on cells with at least one cut link (`q_wall[i, j, q] > 0` for some
+q ∈ 2..9). Non-cut-link cells (including solids and pure-fluid bulk) keep
+the pass-1 `ρ_out` bit-exact. M34v3, 2026-05-22.
+"""
+struct ApplyCutLinkRhoRecompute <: LBMBrick end
+required_args(::ApplyCutLinkRhoRecompute) =
+    (:f_out, :ρ_out, :q_wall, :is_solid, :Nx, :Ny)
+phase(::ApplyCutLinkRhoRecompute) = :fluid
+emit_code(::ApplyCutLinkRhoRecompute) = quote
+    if !is_solid[i, j]
+        any_cut = false
+        @inbounds for qsrc in 2:9
+            if q_wall[i, j, qsrc] > zero(T)
+                any_cut = true
+                break
+            end
+        end
+        if any_cut
+            ρ_out[i, j] = f_out[i, j, 1] + f_out[i, j, 2] + f_out[i, j, 3] +
+                          f_out[i, j, 4] + f_out[i, j, 5] + f_out[i, j, 6] +
+                          f_out[i, j, 7] + f_out[i, j, 8] + f_out[i, j, 9]
+        end
     end
 end
 
