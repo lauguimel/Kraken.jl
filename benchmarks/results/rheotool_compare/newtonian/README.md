@@ -36,12 +36,16 @@ u-centerline clears the strict < 1 % gate.
   `*_rel` = `‖pred−ref‖ / ‖ref‖` (primary acceptance metric) and `*_absRMS` =
   `‖pred−ref‖ / √n`. vs-Ghia rows are interpolated onto Ghia's 17 stations;
   `kraken_vs_icofoam` onto a dense 129-point grid.
-- `comparison.png` — u(y) (top row) and v(x) (bottom row) overlays at
-  Re = 100/400/1000; Kraken solid, icoFoam dashed, Ghia open circles. Also
-  copied to `docs/src/users/benchmarks/newtonian-rheotool.png`.
+- `comparison.png` — classic centerline profiles side by side (u along the
+  vertical centerline x = 0.5; v along the horizontal centerline y = 0.5), all
+  three Re overlaid (seaborn `crest`): Kraken solid line, Ghia (1982) open
+  circles. icoFoam remains in the CSVs and `error_norms.csv` above as the FVM
+  cross-check, but is omitted from the plot for legibility. Also copied to
+  `docs/src/users/benchmarks/newtonian-rheotool.png`.
 - `plot.py` — **self-contained reproducer**: reads the three CSVs in this
-  directory and regenerates `comparison.png` (numpy + matplotlib only, no
-  external paths). Run `python plot.py`.
+  directory and regenerates `comparison.png` (csv + matplotlib + seaborn; LaTeX
+  if a system `latex` is present, else mathtext — no external paths). Run
+  `python plot.py`.
 - `cavity.krk` — the Kraken case file for the lid-driven cavity. Reproduce the
   Kraken centerlines with `run_simulation("cavity.krk")` (sweep `Re` via the
   `Physics nu` line; Re = 100/400/1000 ⇒ the grids in the table above).
