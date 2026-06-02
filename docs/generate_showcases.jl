@@ -13,8 +13,24 @@ using Kraken
 using CairoMakie
 using KernelAbstractions
 
+# CairoMakie re-exports the Colors/ColorTypes stack (Colorant, RGBf, cgrad),
+# so no separate `using Colors` is needed (and Colors is not a direct dep here).
+const Colorant = CairoMakie.Colorant
+
 const OUTDIR = joinpath(@__DIR__, "src", "assets", "showcases")
 mkpath(OUTDIR)
+
+# --- Dark theme (matches the Documenter dark page background #1f2424) ---
+
+const BG_DARK    = parse(Colorant, "#1f2424")              # page background
+const FG_LIGHT   = RGBf(0.92, 0.92, 0.92)                  # titles / labels / spines
+const FG_DIM     = RGBf(0.55, 0.55, 0.55)                  # ticks / gridlines
+
+# Dark-centred diverging colormap for signed fields: the zero blends into the
+# page background, only strong ± values pop. Replaces the light-centred :RdBu.
+const CMAP_DIVERGING = cgrad([parse(Colorant, "#4ea1d3"),
+                              parse(Colorant, "#1f2424"),
+                              parse(Colorant, "#ff6b6b")])
 
 # --- Utility ---
 
@@ -35,15 +51,30 @@ function make_gif(frames::Vector{<:Matrix}, path::String;
         vmax = vmin + one(vmin)
     end
 
-    fig = Figure(; size=figsize)
-    ax = Axis(fig[1, 1]; title=title, aspect=DataAspect())
+    fig = Figure(; size=figsize, backgroundcolor=BG_DARK)
+    ax = Axis(fig[1, 1]; title=title, aspect=DataAspect(),
+              backgroundcolor=BG_DARK,
+              titlecolor=FG_LIGHT,
+              xlabelcolor=FG_LIGHT, ylabelcolor=FG_LIGHT,
+              xticklabelcolor=FG_LIGHT, yticklabelcolor=FG_LIGHT,
+              leftspinecolor=FG_LIGHT, rightspinecolor=FG_LIGHT,
+              topspinecolor=FG_LIGHT, bottomspinecolor=FG_LIGHT,
+              xtickcolor=FG_DIM, ytickcolor=FG_DIM,
+              xgridcolor=FG_DIM, ygridcolor=FG_DIM)
     obs = Observable(frames[1])
     heatmap!(ax, obs; colormap=colormap, colorrange=(vmin, vmax))
-    Colorbar(fig[1, 2]; colormap=colormap, limits=(vmin, vmax))
+    Colorbar(fig[1, 2]; colormap=colormap, limits=(vmin, vmax),
+             ticklabelcolor=FG_LIGHT, labelcolor=FG_LIGHT, tickcolor=FG_DIM,
+             leftspinecolor=FG_LIGHT, rightspinecolor=FG_LIGHT,
+             topspinecolor=FG_LIGHT, bottomspinecolor=FG_LIGHT)
 
     record(fig, path, 1:length(frames); framerate=fps) do i
         obs[] = frames[i]
     end
+    # Save a representative still frame (last frame) so the dark styling can be
+    # verified without playing the GIF.
+    obs[] = frames[end]
+    save(replace(path, ".gif" => "_frame.png"), fig)
     @info "Saved $(path) ($(length(frames)) frames, $(filesize(path)) bytes)"
 end
 
@@ -120,7 +151,7 @@ function showcase_vonkarman(; backend=CPU())
         vlim = 1.0  # fallback
     end
     make_gif(frames, joinpath(OUTDIR, "vonkarman_re200.gif");
-             fps=15, colormap=:RdBu, title="Von Karman vortex street (Re=200)",
+             fps=15, colormap=CMAP_DIVERGING, title="Von Karman vortex street (Re=200)",
              figsize=(800, 300), clims=(-vlim, vlim))
 end
 
@@ -241,7 +272,7 @@ function showcase_taylor_green(; backend=CPU())
 
     vlim = maximum(abs, frames[1]) * 0.8
     make_gif(frames, joinpath(OUTDIR, "taylor_green_decay.gif");
-             fps=15, colormap=:RdBu, title="Taylor-Green vortex decay (N=256)",
+             fps=15, colormap=CMAP_DIVERGING, title="Taylor-Green vortex decay (N=256)",
              figsize=(600, 600), clims=(-vlim, vlim))
 end
 
@@ -288,7 +319,7 @@ function showcase_cavity(; backend=CPU())
     end
 
     make_gif(frames, joinpath(OUTDIR, "cavity_re1000.gif");
-             fps=10, colormap=:viridis, title="Lid-driven cavity (Re=1000, 256x256)",
+             fps=10, colormap=:magma, title="Lid-driven cavity (Re=1000, 256x256)",
              figsize=(600, 600))
 end
 
