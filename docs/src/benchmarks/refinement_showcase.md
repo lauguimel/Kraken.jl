@@ -8,6 +8,8 @@ work across CPU, CUDA and Metal backends, and the 2D tests pass. A
 convection, Cd for cylinder flow) is **not yet demonstrated** and is
 tracked as a v0.2.0 item.
 
+![Mass conservation of the AMR conservative-tree path: the relative mass drift stays at machine precision (~1e-13) across grid sizes, for both the route-native and the Cartesian-equivalent paths — the validated conservation property.](refinement_showcase.png)
+
 ## What works in v0.1.0
 
 - `Refine { region = [...], ratio = r }` blocks in `.krk` files
