@@ -89,7 +89,12 @@ against literature (Alves et al. 2001, Hulsen et al. 2005, RheoTool).
 - `β = ν_s/(ν_s + ν_p)` : viscosity ratio (β=0.59 standard for confined cylinder)
 - `Wi = lambda·u_in/radius` : Weissenberg number
 - `Re = u_in·2·radius/(ν_s + ν_p)` : Reynolds number
-- `formulation`: `:logconf` (default, stable at high Wi) or `:stress`
+- `formulation`: `:stress` (default) — evolves τ_p directly (UCM); accurate at
+  low Wi (validated in `test/test_viscoelastic.jl`) but can blow up (NaN) at
+  high Wi. `:logconf` evolves Θ=log(C); it currently has a known singular-source
+  bug at isotropy (Θ=0, never activates from rest) and is tracked `@test_broken`
+  in `test/test_viscoelastic.jl` — not yet reliable. Neither formulation is
+  robust across the full Wi range; this driver's VE is not release-hardened.
 
 Returns `(ux, uy, ρ, Cd, Fx_drag, Fy_drag, tau_p_xx, tau_p_xy, tau_p_yy,
           Theta_xx, Theta_xy, Theta_yy, Re, Wi, beta)`.
