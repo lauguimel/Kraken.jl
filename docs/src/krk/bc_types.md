@@ -26,7 +26,7 @@ Boundary <face> wall T = 1.0
 
 **Example**
 
-```text
+```krk
 Boundary south wall
 Boundary north wall T = 0.0
 ```
@@ -50,7 +50,7 @@ Boundary <face> velocity(ux = <expr>, uy = <expr> [, uz = <expr>])
 
 **Example**
 
-```text
+```krk
 Boundary north velocity(ux = 0.1, uy = 0)
 Boundary west  velocity(ux = 0.1*(1 - ((y - Ly/2)/(Ly/2))^2), uy = 0)
 Boundary west  velocity(ux = 0.1*(1 + 0.05*sin(2*pi*t/100)), uy = 0)
@@ -76,7 +76,7 @@ Boundary <face> pressure(rho = <expr>)
 
 **Example**
 
-```text
+```krk
 Boundary east pressure(rho = 1.0)
 Boundary west pressure(rho = 1.001)      # slight drop drives a Poiseuille flow
 ```
@@ -100,7 +100,7 @@ Boundary y periodic                     # shorthand: north + south
 
 **Example**
 
-```text
+```krk
 Boundary x periodic
 Boundary y periodic
 ```
@@ -120,8 +120,9 @@ end
 
 ## `symmetry`
 
-Mirror-symmetry BC. In this branch it is parser-recognized but not a
-validated public runtime boundary for the generic runners.
+Mirror-symmetry BC. Accepted by the parser mainly for axisymmetric cases,
+where the kernel enforces the axis condition internally. Non-axisymmetric
+runners may treat it as a no-op.
 
 **Syntax**
 
@@ -131,13 +132,15 @@ Boundary <face> symmetry
 
 **Example**
 
-```text
-Boundary south symmetry
+```krk
+Module axisymmetric
+Boundary axis symmetry        # resolved to 'south' via the axisym alias
 ```
 
 **Notes**
 
-- See [Aliases](aliases.md) for the face-name table and parser-only aliases.
+- See [Aliases](aliases.md) for the `wall`/`axis`/`z` axisymmetric face
+  aliases.
 
 ## BC parser excerpt
 

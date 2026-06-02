@@ -29,7 +29,31 @@ const _D2Q9_CY = SVector{9, Int32}(0, 0, 1,  0, -1, 1,  1, -1, -1)
 const _D2Q9_OPP = SVector{9, Int32}(1, 4, 5, 2, 3, 8, 9, 6, 7)
 
 weights(::D2Q9) = _D2Q9_W
+"""
+    velocities_x(::D2Q9)
+
+Public function in the lattice trait API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.velocities_x)
+```
+"""
 velocities_x(::D2Q9) = _D2Q9_CX
+"""
+    velocities_y(::D2Q9)
+
+Public function in the lattice trait API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.velocities_y)
+```
+"""
 velocities_y(::D2Q9) = _D2Q9_CY
 opposite(::D2Q9) = _D2Q9_OPP
 

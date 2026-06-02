@@ -407,14 +407,25 @@ let
     Nx, Ny = size(ux)
     umag = @. sqrt(ux^2 + uy^2)
 
-    fig = Figure(size=(800, 350))
-    ax = Axis(fig[1, 1]; title="Velocity magnitude — Re=$Re",
-              xlabel="x", ylabel="y", aspect=DataAspect())
-    hm = heatmap!(ax, 1:Nx, 1:Ny, umag; colormap=:viridis,
+    # Dark Documenter-theme styling (#1f2424 bg, magma sequential field, light
+    # text) to match the dark vitrine. Saved as PNG — the per-cell heatmap
+    # exports to a multi-MB SVG, so raster it directly.
+    DARK = "#1f2424"
+    fig = Figure(size=(800, 350), backgroundcolor=DARK)
+    ax = Axis(fig[1, 1]; backgroundcolor=DARK,
+              title="Velocity magnitude — Re=$Re", titlecolor="gray92",
+              xlabel="x", ylabel="y", xlabelcolor="gray92", ylabelcolor="gray92",
+              xticklabelcolor="gray85", yticklabelcolor="gray85",
+              xtickcolor="gray70", ytickcolor="gray70",
+              leftspinecolor="gray55", rightspinecolor="gray55",
+              topspinecolor="gray55", bottomspinecolor="gray55",
+              aspect=DataAspect())
+    hm = heatmap!(ax, 1:Nx, 1:Ny, umag; colormap=:magma,
                   colorrange=(0, 1.5 * u_in))
-    Colorbar(fig[1, 2], hm; label="|u|")
-    save(joinpath(OUTDIR, "cylinder_umag.svg"), fig)
-    println("  ✓ cylinder_umag.svg")
+    Colorbar(fig[1, 2], hm; label="|u|", labelcolor="gray92",
+             ticklabelcolor="gray85", tickcolor="gray70")
+    save(joinpath(OUTDIR, "cylinder_umag.png"), fig, px_per_unit=2)
+    println("  ✓ cylinder_umag.png")
 
     # --- 6c. Drag comparison bar chart ---
     Cd_ref = 5.58

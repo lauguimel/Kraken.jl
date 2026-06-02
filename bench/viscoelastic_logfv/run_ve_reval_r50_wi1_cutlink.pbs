@@ -1,0 +1,68 @@
+#!/bin/bash -l
+#PBS -N VE_REVAL_R50_WI1
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m ae
+
+# VE re-validation on v0.3 (CUDA F64) AFTER the cut-link polymer-drag port
+# (commit ca1caf0a1). Single worst-case Wi=1.0 canary first.
+# Does v0.3 + the NEW cut-link compute_polymeric_drag_2d reproduce M8's Cd?
+#   M8 (dev-viscoelastic) cut-link, R=50 beta=0.59 halfwayBB: Wi=1.0 Cd=119.24 Cd_p=14.16
+#   RheoTool ref:  Wi=1.0 = 120.40  ->  M8 gap = -0.96%
+#   The v0.3 MASK reval (job 22198851) gave Wi=1.0 Cd=118.23 Cd_p=41.77 (-1.79%, FAIL).
+# SUCCESS: Cd_p drops to ~14 (not ~42) and Cd ~119.24 (< 1% vs RheoTool 120.40).
+# halfwayBB ONLY; R=50 only; Wi=1.0 ONLY.
+#
+# Submit from repo root:  qsub bench/viscoelastic_logfv/run_ve_reval_r50_wi1_cutlink.pbs
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+JOBID="${PBS_JOBID:-manual}"
+nvidia-smi || true
+
+# Compile gate (catches Julia-version portability issues on the fresh rsync).
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+# Fail-fast CUDA check.
+julia --project=. -e 'using CUDA; @assert CUDA.functional() "CUDA not functional"; println("CUDA OK ", CUDA.name(CUDA.device()))'
+
+run_cell() {
+    local R=$1 u_mean=$2 steps=$3 tag=$4
+    echo ""
+    echo "--- VE-REVAL R=$R steps=$steps $tag Wi={1.0} $(date) ---"
+    KRAKEN_BACKEND=cuda KRAKEN_FT=float64 \
+    KRAKEN_R_LIST=$R KRAKEN_U_MEAN=$u_mean \
+    KRAKEN_WI_LIST=1.0 KRAKEN_RE_LIST=1.0 KRAKEN_BETA_LIST=0.59 KRAKEN_BSD_LIST=1.0 \
+    KRAKEN_L_UP_LIST=15.0 KRAKEN_L_DOWN_LIST=15.0 \
+    KRAKEN_EMBEDDED_GRADIENT=0 KRAKEN_EMBEDDED_ADVECTION=0 KRAKEN_EMBEDDED_FORCE=0 \
+    KRAKEN_EMBEDDED_DRAG=0 KRAKEN_EMBEDDED_GEOMETRY=qwall \
+    KRAKEN_ADVECTION_SCHEME=muscl_superbee KRAKEN_WALL_BC=halfwayBB \
+    KRAKEN_MAX_STEPS_BASE=$steps KRAKEN_AVG_WINDOW_FRAC=0.2 KRAKEN_SAVE_FIELDS=0 \
+    KRAKEN_OUTPUT_DIR="tmp/ve_reval/${JOBID}/${tag}_R${R}" \
+    julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl || \
+        echo "!!! cell R=$R $tag FAILED (continuing) $(date)"
+}
+
+# Quick runtime smoke (R=8, 5000 steps) — validates the deploy RUNS on CUDA F64.
+run_cell 8 0.01875 5000 smoke
+# The real gate: R=50 F64, 300k steps, Wi=1.0.
+run_cell 50 0.003 300000 reval
+
+echo ""
+echo "=== VE-REVAL complete $(date) ==="
+echo "Cd_kraken=col26 Cd_s=col27 Cd_p=col28 nan=col(NF-2):"
+for tag in smoke reval; do
+  for f in tmp/ve_reval/${JOBID}/${tag}_R*/cyl_bigsweep_v2_*.csv; do
+    [ -f "$f" ] || continue
+    awk -F, 'NR==2 {printf "  %s Wi=%s : Cd=%s Cd_s=%s Cd_p=%s nan=%s\n", FILENAME, $5, $26, $27, $28, $(NF-2)}' "$f"
+  done
+done

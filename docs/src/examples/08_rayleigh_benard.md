@@ -10,9 +10,9 @@ Boussinesq coupling
 **Validates against:** De Vahl Davis (1983) — Nusselt number vs Rayleigh
 [`10.1002/fld.1650030305`](https://doi.org/10.1002/fld.1650030305)
 
-**Download:** <a href="../assets/krk/rayleigh_benard.krk" download><code>rayleigh_benard.krk</code></a>
+**Download:** [`rayleigh_benard.krk`](../assets/krk/rayleigh_benard.krk)
 
-**Hardware:** local CPU baseline, ~90s wall-clock at 128×64 (Ra = 10⁵)
+**Hardware:** Apple M3 Max, ~90s wall-clock at 128×64 (Ra = 10⁵)
 
 ![Rayleigh-Benard temperature field](../assets/figures/rayleigh_benard_temperature.png)
 
@@ -136,21 +136,6 @@ compared to the linear conductive profile.
 Nx_dom, Ny_dom = size(Temp)
 ```
 
-### Plot: Temperature field
-
-```julia
-using CairoMakie
-
-fig = Figure(size=(800, 400))
-ax = Axis(fig[1, 1];
-    title  = "Temperature field — Ra = $(Int(Ra))",
-    xlabel = "x", ylabel = "y", aspect = DataAspect())
-hm = heatmap!(ax, 1:Nx_dom, 1:Ny_dom, Temp; colormap = :coolwarm)
-Colorbar(fig[1, 2], hm; label = "T")
-save(joinpath(@__DIR__, "rayleigh_benard_temperature.svg"), fig)
-fig
-```
-
 ![Temperature field at steady state.  The mushroom-shaped plumes are the
 hallmark of Rayleigh--Bénard convection.  Hot fluid rises (red), cold fluid
 sinks (blue).](rayleigh_benard_temperature.svg)
@@ -166,19 +151,6 @@ onset.
 
 ```julia
 umag = @. sqrt(ux^2 + uy^2)
-```
-
-### Plot: Velocity magnitude
-
-```julia
-fig2 = Figure(size=(800, 400))
-ax2 = Axis(fig2[1, 1];
-    title  = "Velocity magnitude — Ra = $(Int(Ra))",
-    xlabel = "x", ylabel = "y", aspect = DataAspect())
-hm2 = heatmap!(ax2, 1:Nx_dom, 1:Ny_dom, umag; colormap = :viridis)
-Colorbar(fig2[1, 2], hm2; label = "|u|")
-save(joinpath(@__DIR__, "rayleigh_benard_velocity.svg"), fig2)
-fig2
 ```
 
 ![Velocity magnitude showing the convection roll
@@ -217,8 +189,8 @@ thermal boundary layers; in the bulk, the profile is nearly flat.
 | ``\mathrm{Pr} \neq 1`` handling | yes |
 
 This example confirms that Kraken correctly couples the thermal and flow
-solvers. For the exact public scope of this branch, see the
-[capabilities matrix](../capabilities.md).
+solvers.  The next step in complexity is
+[Hagen--Poiseuille flow](09_hagen_poiseuille.md), which introduces axisymmetric geometry.
 
 
 ## References

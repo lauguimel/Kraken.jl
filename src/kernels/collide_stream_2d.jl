@@ -62,6 +62,18 @@ end
 
 # --- Public API ---
 
+"""
+    stream_2d!(f_out, f_in, Nx, Ny; sync=false)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.stream_2d!)
+```
+"""
 function stream_2d!(f_out, f_in, Nx, Ny; sync=false)
     backend = KernelAbstractions.get_backend(f_in)
     kernel! = stream_2d_kernel!(backend)
@@ -69,6 +81,18 @@ function stream_2d!(f_out, f_in, Nx, Ny; sync=false)
     sync && KernelAbstractions.synchronize(backend)
 end
 
+"""
+    collide_2d!(f, is_solid, ω; sync=false)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.collide_2d!)
+```
+"""
 function collide_2d!(f, is_solid, ω; sync=false)
     backend = KernelAbstractions.get_backend(f)
     Nx, Ny = size(f, 1), size(f, 2)

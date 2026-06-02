@@ -1,0 +1,16 @@
+# M-GEO-4 raw-LU twin of cylinder_stl_mm.krk.
+# Hand-scaled values: STL scale=20.0, u_LU=0.005, nu=0.02.
+
+Simulation mgeo4_stl_cylinder_lu D2Q9
+
+Domain L = 80 x 20  N = 80 x 20
+Physics nu = 0.02
+
+Obstacle cyl wall=libb stl(file = "examples/geometry_stl/cylinder.stl", scale = 20.0, z_slice = 0.5)
+
+Boundary west  velocity(ux = 0.005, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 30 steps

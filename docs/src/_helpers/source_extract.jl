@@ -78,7 +78,9 @@ end
 
 function _byte_slice(src::String, n)
     r = JuliaSyntax.byte_range(n)
-    return String(src[first(r):last(r)])
+    # Slice by raw UTF-8 bytes: JuliaSyntax byte ranges may end on the last
+    # byte of a multi-byte char (e.g. `λ`), which is not a valid String index.
+    return String(codeunits(src)[first(r):last(r)])
 end
 
 function _line_of(src::String, byte::Int)

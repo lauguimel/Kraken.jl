@@ -1,0 +1,22 @@
+# AMR D nested Poiseuille channel canary.
+# ratio = 16 is intentionally used to exercise automatic 2:1 nesting:
+# channel_core_L1 -> channel_core_L2 -> channel_core_L3 -> channel_core.
+
+Simulation amr_d_poiseuille_nested4_channel D2Q9
+
+Define Fx = 1e-7
+Define omega = 1.0
+Define rho0 = 1.0
+
+Domain L = 16 x 12  N = 16 x 12
+Physics nu = 0.16666666666666666 Fx = 1e-7
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north wall
+
+Refine channel_core { region = [7.5, 4.5, 8.5, 5.5], ratio = 16 }
+
+Run 8 steps
+Diagnostics every 4 [step, ux, uy, mass]

@@ -1,0 +1,5 @@
+Ra,solver,mesh,latestTime,Nu_snGrad,Nu_volGrad,Nu_dvd,Nu_snGrad_err_pct,umax_of,umax_dvd,vmax_of,vmax_dvd
+1e3,buoyantBoussinesqSimpleFoam,128x128,5000,1.1107,1.1107,1.117,-0.56,2.5645,3.649,2.6476,3.697
+1e4,buoyantBoussinesqSimpleFoam,128x128,5000,1.9857,1.9859,2.238,-11.27,19.5427,16.178,21.9677,19.617
+1e5,buoyantBoussinesqSimpleFoam,192x192,8000,4.4821,4.4814,4.509,-0.60,33.2371,34.730,65.5686,68.590
+1e4,buoyantBoussinesqSimpleFoam_UNCONVERGED,192x192,6000,1.551,NA,2.238,-30.70,NA,16.178,NA,19.617

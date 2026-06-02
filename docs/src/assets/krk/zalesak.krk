@@ -1,0 +1,26 @@
+# Zalesak disk — notched disk in rigid-body rotation
+# Classic VOF advection test (Zalesak, 1979)
+
+Simulation zalesak D2Q9
+
+Define N = 100
+Define R = 15
+Define cx = 50
+Define cy = 75
+Define w = 5
+Define omega = 0.02
+
+Domain L = N x N  N = N x N
+
+Physics nu = 0.1
+Module advection_only
+
+Velocity { ux = -(y - 50)*omega  uy = (x - 50)*omega }
+
+# Notched disk (smooth tanh; slot carved separately in init_C_fn)
+Initial { C = 0.5*(1 - tanh((sqrt((x-cx)^2 + (y-cy)^2) - R) / 2)) }
+
+Boundary x periodic
+Boundary y periodic
+
+Run 314 steps

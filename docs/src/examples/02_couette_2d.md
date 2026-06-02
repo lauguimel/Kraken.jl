@@ -10,9 +10,9 @@ EditURL = "02_couette_2d.jl"
 **Validates against:** analytical linear profile
 ``u_x(y) = u_\text{wall}\, y / L_y``
 
-**Download:** <a href="../assets/krk/couette.krk" download><code>couette.krk</code></a>
+**Download:** [`couette.krk`](../assets/krk/couette.krk)
 
-**Hardware:** local CPU baseline, ~10s wall-clock at N = 4×32
+**Hardware:** Apple M3 Max, ~10s wall-clock at N = 4×32
 
 ![Couette velocity profile](../assets/figures/couette_profile.png)
 
@@ -124,7 +124,7 @@ where the wall sits between nodes and the effective height is also
 
 ## Simulation File
 
-Download: <a href="../assets/krk/couette.krk" download><code>couette.krk</code></a>
+Download: [`couette.krk`](../assets/krk/couette.krk)
 
 ```
 # Couette flow: linear velocity profile
@@ -181,15 +181,6 @@ j_fluid = 2:Ny-1
 y_phys  = [j - 1 for j in j_fluid]              # on-node (Zou-He)
 u_ana   = [u_wall * (1 - y / H) for y in y_phys]
 u_num   = [ux[2, j] for j in j_fluid]
-
-using CairoMakie
-fig = Figure(size=(500, 400))
-ax = Axis(fig[1, 1], xlabel="y", ylabel="ux", title="Couette — Ny = $Ny")
-lines!(ax, y_phys, u_ana, label="Analytical")
-scatter!(ax, y_phys, u_num, markersize=6, label="LBM")
-axislegend(ax, position=:lt)
-save(joinpath(@__DIR__, "couette_profile.svg"), fig)
-fig
 ```
 
 ![Couette flow velocity profile at Ny = 32.  Blue line: analytical linear profile ux(y) = u_wall (1 - y/H).  Orange dots: LBM simulation.  The numerical solution is indistinguishable from the analytical line because the D2Q9 equilibrium exactly reproduces linear velocity profiles.  The velocity equals u_wall = 0.05 at the bottom and zero at the top.](couette_profile.svg)
@@ -230,14 +221,6 @@ for Ny_i in Ny_list
     L2   = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
     push!(errors, L2)
 end
-
-fig2 = Figure(size=(500, 400))
-ax2 = Axis(fig2[1, 1], xlabel="Ny", ylabel="L₂ error", title="Couette convergence", xscale=log10, yscale=log10)
-scatterlines!(ax2, Float64.(Ny_list), errors, label="LBM")
-lines!(ax2, Float64.(Ny_list), errors[1] .* (Ny_list[1] ./ Ny_list).^2, linestyle=:dash, color=:gray, label="slope 2")
-axislegend(ax2)
-save(joinpath(@__DIR__, "couette_convergence.svg"), fig2)
-fig2
 ```
 
 ![Convergence of the Couette flow simulation.  Log-log plot of relative L2 error vs grid resolution Ny.  Blue dots: LBM results hovering near 1e-14 to 1e-15 at all resolutions.  Grey dashed line: reference slope of 2 for comparison.  Unlike Poiseuille flow, there is no convergence trend because the error is already at machine precision at all resolutions.](couette_convergence.svg)

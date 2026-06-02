@@ -1,0 +1,21 @@
+# AMR D convergence Poiseuille with a vertical X band, scale 1 template.
+
+Simulation amr_d_poiseuille_xband_scale1 D2Q9
+
+Define scale = 1
+Define Fx = 5e-5
+Define omega = 1.0
+Define rho0 = 1.0
+
+Domain L = 18 x 14  N = 18 x 14
+Physics nu = 0.16666666666666666 Fx = 5e-5
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north wall
+
+Refine xband { region = [6, 0, 12, 14], ratio = 2 }
+
+Run 80 steps
+Diagnostics every 20 [step, ux, uy]

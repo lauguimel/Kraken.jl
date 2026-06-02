@@ -1,0 +1,44 @@
+#!/bin/bash
+# =============================================================================
+# E1 certification — Aqua (QUT) PBS Pro job: Kraken CUDA-F64 BGK D2Q9 MLUPS gate
+# =============================================================================
+#
+# LOCKED gotchas baked in below:
+#   * gpu_mem=60gb  -> 40GB A100 nodes OOM the big F64 case (N=2048 F64); ask
+#     for >=60GB so the scheduler lands us on an 80GB A100 / H100.
+#   * set -o pipefail + PIPESTATUS -> a Julia crash behind `tee` still fails
+#     the PBS job (otherwise tee's rc=0 masks the failure).
+#   * cd "$HOME/..." -> only $HOME is mounted read-write on Aqua; always use the
+#     absolute $HOME path, never /scratch /work /data (read-only in containers).
+# =============================================================================
+
+#PBS -N kraken_e1_certify
+#PBS -l select=1:ncpus=8:ngpus=1:gpu_mem=60gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o kraken_e1_certify.log
+
+set -o pipefail
+
+# Only $HOME is RW on Aqua — use the absolute $HOME path.
+cd "$HOME/Kraken.jl-v0.3-campaign" || exit 1
+
+# Load Julia. NOTE: the exact module name may differ on Aqua (e.g.
+# `julia/1.10`, `juliaup`); adjust to whatever `module avail julia` reports.
+module load julia
+
+# Instantiate the project environment (resolves + precompiles deps).
+julia --project=. -e 'using Pkg; Pkg.instantiate()' 2>&1 | tee -a kraken_e1_certify.log
+rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ]; then
+    echo "Pkg.instantiate() failed (rc=$rc)" | tee -a kraken_e1_certify.log
+    exit "$rc"
+fi
+
+# Run the certification benchmark on CUDA in Float64.
+KRK_BENCH_BACKEND=cuda \
+    julia --project=. bench/certification/cavity_bgk_cuda/run_certification.jl \
+    2>&1 | tee -a kraken_e1_certify.log
+rc=${PIPESTATUS[0]}
+
+exit "$rc"

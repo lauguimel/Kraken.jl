@@ -3,51 +3,73 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.1.1] — 2026-05-14
+## v0.2.0
 
-Patch release.
+Multiphysics release.
 
-### Fixed
-- **Guo body force convention**: `collide_guo_2d!` is now explicitly declared
-  as Convention I (integrated), and the post-collision readout uses
-  `compute_macroscopic_2d!` instead of `compute_macroscopic_forced_2d!`. The
-  previous pairing accumulated a `+gx/2`-per-step offset on the periodic-box
-  mean velocity (5e-6 over 500 steps for `gx = 1e-5`). Production callsites
-  updated in `src/simulation_runner.jl` and `src/drivers/basic.jl`. A
-  regression test (`test/test_guo_convention_pairs.jl`) covers both the
-  fixed production pair and the historically broken pair as a sentinel.
+- **Units module** (LU ↔ physical): explicit conversion between lattice
+  units and physical SI quantities for setup and post-processing.
+- **Geometry / STL immersed boundary**: arbitrary solid geometries via STL
+  import with cut-link (interpolated bounce-back) boundary treatment.
+- **Viscoelastic Oldroyd-B cylinder**: validated to within <1% of RheoTool
+  reference drag.
+- **Thermal natural convection**: validated against the de Vahl Davis
+  differentially heated cavity benchmark.
+- **GPU certification**: reference benchmarks certified on GPU backends.
 
-### Internal
-- Docstring on `collide_guo_2d!` documenting its Convention I status and the
-  canonical pair member `compute_macroscopic_2d!`.
+## [0.1.0] — 2026-04-14
 
-## [0.1.0] — 2026-04-27
+### Added (since audit, 2026-04-13/14)
+- **Unified .krk dispatch for refinement** (2D + 3D, isothermal + thermal)
+  via `_run_refined` / `_run_refined_3d` — no dedicated driver needed.
+- **Fine-grid sanity checks**: `τ_T_fine` (thermal refinement) and `N/Re`
+  on refined patches, with `[2D]/[3D]` tag in the parameter summary.
+- **Thermal BL resolution check**: warns when `N_eff < 3·Ra^(1/4)`,
+  accounting for refinement ratios near thermal walls.
+- **Capabilities matrix page** (`docs/src/capabilities.md`) listing every
+  feature with status, links to theory/examples/API.
+- **CLI wrapper** (`bin/krk`), VSCode `.krk` syntax highlighting, ASCII
+  kwargs aliases (nu/rho/sigma/tau/…).
 
-First public release. Scope: single-phase Newtonian + thermal (DDF) flows.
+### Fixed (since audit)
+- **Metal GPU refinement crash**: `trunc(Int,...)` replaced by
+  `unsafe_trunc(Int,...)` in all 2D refinement, thermal-refinement, and
+  dual-grid kernels (previously allocated on GPU → InvalidIRError).
+- **3D FH kernels**: `stencil_clamped` guard removed — it forced α=0 at
+  domain boundaries, which inflated Nu ~70% for 3D natconv refined.
+  Root cause (prev buffer size) was already fixed in 534bb62.
+- **test/Project.toml**: declares `KernelAbstractions` (was missing,
+  causing `Pkg.test()` to error on Poiseuille 3D / thermal / species).
+- **CI test suite**: `test_rheology.jl` and `test_viscoelastic.jl` added
+  to `runtests.jl` (were present but not wired in).
 
-### Features
-- **Core LBM solver**: D2Q9 and D3Q19 lattices, BGK collision,
-  Guo discrete forcing, streaming (periodic, wall)
+## [0.1.0-dev] — 2026-04-10
+
+### Added
+- **Core LBM solver**: D2Q9 and D3Q19 lattices, BGK and MRT collision,
+  Guo forcing, streaming (periodic, wall, axisymmetric)
 - **Boundary conditions**: Zou-He velocity/pressure (2D+3D), bounce-back,
-  spatially varying and time-dependent BCs via KrakenExpr expressions
+  spatially varying BCs via KrakenExpr expressions
 - **Thermal LBM**: double distribution function with Boussinesq coupling,
-  Rayleigh-Benard and natural convection drivers (2D+3D)
+  Rayleigh-Benard and natural convection drivers
+- **Axisymmetric LBM**: Li et al. (2010) collision kernel,
+  Hagen-Poiseuille pipe flow driver
+- **Grid refinement**: patch-based with Filippova-Hanel rescaling,
+  temporal interpolation, bilinear prolongation/restriction
 - **.krk configuration DSL**: declarative simulation setup, presets
   (cavity_2d, poiseuille_2d, couette_2d, taylor_green_2d, rayleigh_benard_2d),
-  parametric overrides, sanity checks, spell-correction
-- **GPU backends**: CPU, CUDA, Metal via KernelAbstractions.jl
-- **I/O**: VTK output (.vti/.pvd), diagnostics logger
+  Reynolds/Rayleigh helpers, sanity checks, spell-correction, parameter sweeps
+- **GPU backends**: CPU, CUDA (H100/A100 tested), Metal (Apple Silicon)
+  via KernelAbstractions.jl — single-source GPU portability
+- **I/O**: VTK output (.vti/.pvd), STL import + voxelizer, diagnostics logger
 - **Post-processing**: extract_line, probe, field_error, domain_stats
-- **VS Code extension**: `.krk` syntax highlighting, IntelliSense, validation
-- **CLI wrapper**: `bin/kraken run/info` for command-line usage
-- **Documentation**: theory pages, 9 validated examples, API reference
+- **Documentation**: 13 theory pages, 11 validated examples-tutorials,
+  dual API reference (Julia + .krk DSL), getting-started guide, cookbook
+- **Benchmarks**: convergence studies (Poiseuille order 2, Taylor-Green order 2,
+  cavity vs Ghia 1982), MLUPS performance (7675 MLUPS on H100)
 
-### Validated benchmarks
-- Poiseuille flow (2nd order convergence)
-- Couette flow (machine precision)
-- Taylor-Green vortex decay
-- Lid-driven cavity 2D (Ghia et al. 1982)
-- Lid-driven cavity 3D
-- Cylinder flow (drag validation)
-- Heat conduction (1D profile)
-- Rayleigh-Benard convection (De Vahl Davis 1983)
+### Known limitations
+- Multiphase, rheology, viscoelastic, and species transport are implemented
+  but not included in the v0.1.0 scope (available on dev branch)
+- .krk runner does not dispatch on non-thermal refined cases
+- Grid refinement cavity benchmark requires the Julia API directly

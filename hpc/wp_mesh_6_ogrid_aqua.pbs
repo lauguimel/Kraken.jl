@@ -1,0 +1,18 @@
+#!/bin/bash -l
+#PBS -N wp_mesh_6_ogrid
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=H100
+#PBS -l walltime=08:00:00
+#PBS -j oe
+#PBS -m n
+cd $PBS_O_WORKDIR
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS=8
+nvidia-smi || { echo "GPU missing"; exit 1; }
+julia --version
+julia --project=. -e 'using Pkg; Pkg.add(["Interpolations", "Gmsh"]); Pkg.instantiate()'
+echo "=========================="
+echo "Cylinder Re=100 — approach E-full (8-block body-fitted O-grid-in-rectangle)"
+echo "=========================="
+julia --project=. hpc/wp_mesh_6_ogrid_aqua.jl 2>&1 | tee wp_mesh_6_ogrid.log
+echo "Done."

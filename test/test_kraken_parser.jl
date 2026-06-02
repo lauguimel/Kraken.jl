@@ -1,4 +1,3 @@
-using Logging
 using Test
 
 # Use Kraken if available, otherwise include directly for standalone testing
@@ -388,7 +387,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 100 steps
         """
         io = IOBuffer()
-        Logging.with_logger(Logging.ConsoleLogger(io)) do
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
@@ -452,7 +451,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 100 steps
         """
         io = IOBuffer()
-        Logging.with_logger(Logging.ConsoleLogger(io)) do
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
@@ -635,7 +634,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 10 steps
         """
         io = IOBuffer()
-        Logging.with_logger(Logging.ConsoleLogger(io)) do
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
@@ -655,7 +654,7 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 10 steps
         """
         io = IOBuffer()
-        Logging.with_logger(Logging.ConsoleLogger(io)) do
+        Base.CoreLogging.with_logger(Base.CoreLogging.ConsoleLogger(io)) do
             parse_kraken(text)
         end
         out = String(take!(io))
@@ -717,6 +716,16 @@ const EXAMPLES_DIR = joinpath(@__DIR__, "..", "examples")
         Run 10 steps
         """
         @test_throws ArgumentError parse_kraken(bad_wall)
+    end
+
+    @testset "Hagen-Poiseuille example parses" begin
+        setup = load_kraken(joinpath(EXAMPLES_DIR, "hagen_poiseuille.krk"))
+        @test setup.name == "hagen_poiseuille"
+        @test :axisymmetric in setup.modules
+        @test haskey(setup.physics.body_force, :Fz)
+        faces = Set(b.face for b in setup.boundaries)
+        @test :west in faces && :east in faces
+        @test :north in faces && :south in faces
     end
 
     @testset "Output png parses" begin

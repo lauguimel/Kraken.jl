@@ -1,0 +1,31 @@
+# AMR D nested cylinder lift target: off-centre cylinder in a channel.
+# Static spec and mesh quicklook must work now. Runtime fields are intentionally
+# pending until nested open-channel obstacle routing is closed.
+
+Simulation amr_d_cylinder_lift_nested4_probe D2Q9
+
+Define Re = 80
+Define u_in = 0.04
+Define omega = 1.9230769230769231
+Define rho0 = 1.0
+Define cx = 10.0
+Define cy = 6.5
+Define R = 2.0
+Define cx_leaf = 160.5
+Define cy_leaf = 104.5
+Define radius_leaf = 32
+
+Domain L = 32 x 16  N = 32 x 16
+Physics nu = 0.00625 Fx = 0
+
+Obstacle cylinder { (x - cx)^2 + (y - cy)^2 <= R^2 }
+
+Boundary west velocity(ux = 0.04, uy = 0)
+Boundary east pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Refine cylinder_wake { region = [4, 1, 24, 13], ratio = 16 }
+
+Run 200000 steps
+Diagnostics every 200 [step, ux, uy, rho, mass, drag, lift, cd, cl]

@@ -6,9 +6,9 @@
 # **Validates against:** analytical 1D steady-state profile
 # ``T(x) = 1 - x/L``
 #
-# **Download:** <a href="../assets/krk/heat_conduction.krk" download><code>heat_conduction.krk</code></a>
+# **Download:** [`heat_conduction.krk`](../assets/krk/heat_conduction.krk)
 #
-# **Hardware:** local CPU baseline, ~15s wall-clock at 128×32
+# **Hardware:** Apple M3 Max, ~15s wall-clock at 128×32
 #
 # ![Heat conduction profile](../assets/figures/heat_profile.png)
 #
@@ -129,20 +129,6 @@ T_num   = [Temp[64, j] for j in j_fluid]      # mid-column
 # the thermal collision operator and the Dirichlet temperature boundary
 # conditions are correctly implemented.
 #
-# ### Plot: Numerical vs analytical temperature profile
-
-using CairoMakie
-
-fig = Figure(size=(600, 450))
-ax = Axis(fig[1, 1];
-    title  = "1D heat conduction — temperature profile",
-    xlabel = "y / H", ylabel = "T")
-lines!(ax, y_phys, T_ana; color = :black, linewidth = 2, label = "Analytical")
-scatter!(ax, y_phys, T_num; color = :steelblue, markersize = 8, label = "LBM (DDF)")
-axislegend(ax; position = :rt)
-save(joinpath(@__DIR__, "heat_profile.svg"), fig)
-fig
-
 # ![Comparison of the LBM temperature profile (symbols) with the analytical
 # linear solution (solid line).  The agreement is
 # excellent.](heat_profile.svg)

@@ -25,7 +25,7 @@ All Kraken.jl numbers are from the AQUA H100 80 GB PCIe unless noted.
 | Baseline (3 kernels) | H100 PCIe | D2Q9 | f64 | 5,631 | |
 | Fused stream+collide+macro | H100 PCIe | D2Q9 | f64 | 12,840 | |
 | AA-pattern + Float32 | H100 PCIe | D2Q9 | f32 | 24,041 | |
-| Single-thread | Apple M2 | D2Q9 | f64 | 27 | |
+| Single-thread | Apple M3 Max | D2Q9 | f64 | 27 | |
 
 > **D2Q9 vs D3Q19 caveat:** Kraken.jl numbers are D2Q9 (9 distributions,
 > 2×9×8 = 144 bytes/cell f64). The other codes benchmark D3Q19
@@ -51,7 +51,7 @@ All Kraken.jl numbers are from the AQUA H100 80 GB PCIe unless noted.
 
 | Code | Language | Backend | Lattice | N | MLUPS | Source |
 |------|----------|---------|---------|---|------:|--------|
-| Kraken.jl | Julia | Apple M2 (1 core) | D2Q9 | 256 | 27 | this work |
+| Kraken.jl | Julia | Apple M3 Max (1 core) | D2Q9 | 256 | 27 | this work |
 | Palabos | C++ | Xeon (1 core) | D3Q19 | 128 | 3.5 | [Latt 2021](https://doi.org/10.1016/j.camwa.2020.03.022) |
 | Palabos | C++ | Xeon (24 cores) | D3Q19 | 128 | 55 | [Latt 2021](https://doi.org/10.1016/j.camwa.2020.03.022) |
 | OpenLB | C++ | Xeon (1 core) | D3Q19 | 128 | 4.2 | [Krause 2021](https://doi.org/10.1016/j.camwa.2020.04.033) |

@@ -1,0 +1,25 @@
+# AMR D convergence backward-facing step, scale 1 template.
+
+Simulation amr_d_bfs_scale1 D2Q9
+
+Define scale = 1
+Define u_in = 0.03
+Define omega = 1.0
+Define rho0 = 1.0
+Define step_i_leaf = 16
+Define step_height_leaf = 8
+
+Domain L = 28 x 14  N = 28 x 14
+Physics nu = 0.16666666666666666
+
+Obstacle step { x <= 8 && y <= 4 }
+
+Boundary west velocity(ux = 0.03, uy = 0)
+Boundary east pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Refine step_band { region = [0, 0, 12, 8], ratio = 2 }
+
+Run 80 steps
+Diagnostics every 20 [step, ux, uy]

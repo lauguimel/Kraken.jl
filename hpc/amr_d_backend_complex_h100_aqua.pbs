@@ -1,0 +1,44 @@
+#!/bin/bash -l
+#PBS -N kraken_amrD_h100
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=H100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -V
+
+set -euo pipefail
+
+WORKDIR="${PBS_O_WORKDIR:-$HOME/Kraken.jl}"
+cd "$WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-8}"
+export KRK_AMR_D_BACKEND="${KRK_AMR_D_BACKEND:-cuda}"
+export KRK_AMR_D_BENCH_T="${KRK_AMR_D_BENCH_T:-float64}"
+export KRK_AMR_D_BENCH_STEPS="${KRK_AMR_D_BENCH_STEPS:-1200}"
+export KRK_AMR_D_BENCH_AVG_WINDOW="${KRK_AMR_D_BENCH_AVG_WINDOW:-300}"
+export KRK_AMR_D_BENCH_FLOWS="${KRK_AMR_D_BENCH_FLOWS:-bfs,square,cylinder}"
+export KRK_AMR_D_BENCH_TAG="${KRK_AMR_D_BENCH_TAG:-aqua_h100_${PBS_JOBID%%.*}}"
+
+echo "========================================"
+echo "Job: ${PBS_JOBID:-local}"
+echo "Node: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo N/A)"
+echo "Start: $(date)"
+echo "Backend: $KRK_AMR_D_BACKEND"
+echo "Precision: $KRK_AMR_D_BENCH_T"
+echo "Steps: $KRK_AMR_D_BENCH_STEPS"
+echo "Flows: $KRK_AMR_D_BENCH_FLOWS"
+echo "Tag: $KRK_AMR_D_BENCH_TAG"
+echo "========================================"
+
+nvidia-smi || true
+
+julia --project=. -e 'using Pkg; Pkg.instantiate(); using CUDA; CUDA.versioninfo()'
+julia --project=. benchmarks/amr_d_backend_complex_benchmark_2d.jl
+
+echo "========================================"
+echo "End: $(date)"
+echo "Results:"
+ls -lh benchmarks/results/amr_d_backend_complex_benchmark_2d_${KRK_AMR_D_BENCH_TAG}.csv
+echo "========================================"

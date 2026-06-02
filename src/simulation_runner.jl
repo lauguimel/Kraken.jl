@@ -1,28 +1,5 @@
 # --- Generic simulation runner for .krk config files ---
 
-"""
-    BoundaryHandler
-
-Pre-compiled boundary condition data for one face.
-"""
-struct BoundaryHandler
-    face::Symbol
-    type::Symbol
-    # Pre-compiled expression functions (or nothing)
-    ux_fn::Union{Function, Nothing}
-    uy_fn::Union{Function, Nothing}
-    rho_fn::Union{Function, Nothing}
-    # Flags
-    is_spatial_ux::Bool
-    is_spatial_uy::Bool
-    is_time_dep_ux::Bool
-    is_time_dep_uy::Bool
-    is_time_dep_rho::Bool
-    # Pre-allocated arrays for spatial BCs (on backend)
-    ux_arr::Union{AbstractArray, Nothing}
-    uy_arr::Union{AbstractArray, Nothing}
-    rho_arr::Union{AbstractArray, Nothing}
-end
 
 """
     run_simulation(filename::String; backend=CPU(), T=Float64,
@@ -34,12 +11,26 @@ Pass `max_steps` to override the `Run N steps` directive (useful for tests).
 
 Returns a NamedTuple with final fields on CPU: `(ρ, ux, uy, setup)`.
 
-## Dispatch rules (v0.1.0)
-1. `:thermal in modules`      → `run_rayleigh_benard_2d`,
+## Dispatch rules
+The runner selects a backend driver based on `setup.modules`, `setup.lattice`,
+`setup.refinements`, and the `setup.name` (case name):
+
+1. `:advection_only in modules`  → pure VOF advection (no LBM solve)
+2. `:twophase_vof   in modules`  → two-phase LBM with surface tension
+3. `:axisymmetric   in modules`  → `run_hagen_poiseuille_2d` if the case
+   name contains `hagen_poiseuille`, otherwise an informative error
+4. `!isempty(setup.refinements)` → refined-grid drivers. Only refined
+   natural convection is currently supported via the .krk runner;
+   other refined cases raise an informative error (run them via the
+   Julia API — see `create_refined_domain` / `create_thermal_patch_arrays`).
+5. `:thermal in modules`         → `run_rayleigh_benard_2d`,
    `run_natural_convection_2d`, or a thermal-conduction fallback
-2. `setup.lattice === :D3Q19` → `run_cavity_3d`
-3. Default (`:D2Q9`, no modules) → generic single-phase LBM loop
-   (cavity/Poiseuille/Couette/Taylor-Green/cylinder examples).
+   depending on the case name
+6. `setup.lattice === :D3Q19`    → `run_cavity_3d` if the case name
+   contains `cavity_3d`, otherwise an informative error
+7. Default (`:D2Q9`, no modules) → generic single-phase LBM loop
+   (existing behavior, compatible with all cavity/Poiseuille/Couette/
+   Taylor-Green/cylinder examples).
 
 # Example
 ```julia
@@ -74,7 +65,65 @@ function _override_max_steps(setup::SimulationSetup, new_max::Int)
         setup.user_vars, setup.regions, setup.boundaries, setup.initial,
         setup.modules, new_max,
         setup.outputs, setup.diagnostics, setup.refinements,
-        setup.velocity_field, setup.rheology)
+        setup.velocity_field, setup.rheology, setup.mesh, setup.units,
+        setup.collision, setup.wall_bc)
+end
+
+_krk_selector_symbol(sym::Symbol) = Symbol(lowercase(String(sym)))
+
+function _normalize_collision_selector(sym::Symbol)
+    mode = _krk_selector_symbol(sym)
+    mode in (:bgk, :trt) || throw(ArgumentError(
+        "Unsupported Physics collision='$sym'. Supported generic 2D values: bgk, trt."))
+    return mode
+end
+
+function _normalize_wall_bc_selector(sym::Symbol)
+    mode = _krk_selector_symbol(sym)
+    mode in (:halfwaybb, :halfway_bb, :halfway) && return :halfwaybb
+    mode === :libb && return :libb
+    throw(ArgumentError(
+        "Unsupported Physics wall_bc='$sym'. Supported generic 2D values: halfwaybb, libb."))
+end
+
+function _setup_with_global_stl_libb(setup::SimulationSetup)
+    regions = GeometryRegion[]
+    sizehint!(regions, length(setup.regions))
+    found_stl_obstacle = false
+    for region in setup.regions
+        if region.kind === :obstacle && region.stl !== nothing
+            found_stl_obstacle = true
+            push!(regions, GeometryRegion(region.name, region.kind, region.condition,
+                                          region.stl, :libb, region.bc_values))
+        else
+            push!(regions, region)
+        end
+    end
+    found_stl_obstacle || throw(ArgumentError(
+        "Physics wall_bc=libb in the generic 2D path currently requires an STL Obstacle. " *
+        "Analytic-obstacle LI-BB dispatch is deferred."))
+    # TODO(K1-followup): add LI-BB q-wall dispatch for analytic obstacles.
+    return SimulationSetup(setup.name, setup.lattice, setup.domain, setup.physics,
+                           setup.user_vars, regions, setup.boundaries,
+                           setup.initial, setup.modules, setup.max_steps,
+                           setup.outputs, setup.diagnostics, setup.refinements,
+                           setup.velocity_field, setup.rheology, setup.mesh,
+                           setup.units, setup.collision, :libb)
+end
+
+function _ensure_generic_trt_supported!(setup::SimulationSetup, has_body_force::Bool,
+                                        has_rheology::Bool)
+    if has_body_force || has_rheology
+        throw(ArgumentError(
+            "Physics collision=trt in the generic 2D path currently supports only " *
+            "Newtonian flow without body force."))
+    end
+    bad = findfirst(bc -> bc.type !== :wall, setup.boundaries)
+    bad === nothing && return nothing
+    bc = setup.boundaries[bad]
+    throw(ArgumentError(
+        "Physics collision=trt in the generic 2D path currently supports only " *
+        "static wall boundaries; got $(bc.face) $(bc.type)."))
 end
 
 """
@@ -95,19 +144,27 @@ function run_simulation(setup::SimulationSetup;
     sanity_check(setup)
 
     # --- Dispatch to specialized runners based on modules ---
-    # v0.1.0 scope: Newtonian single-phase + thermal (DDF)
-    unsupported = intersect(setup.modules,
-        [:advection_only, :twophase_vof, :axisymmetric, :rheology, :viscoelastic, :species])
-    if !isempty(unsupported)
-        error("Module(s) $(unsupported) not supported in v0.1.0. " *
-              "See the development branch `lbm` for advanced physics.")
-    end
-    if !isempty(setup.refinements)
-        error("Grid refinement is not supported in v0.1.0. " *
-              "See the development branch `lbm` for this feature.")
-    end
-    if :thermal in setup.modules
+    if setup.mesh !== nothing
+        if :slbm_drag in setup.modules
+            return _run_gmsh_slbm_drag(setup; backend=backend, T=T,
+                                       callback=callback,
+                                       callback_every=callback_every)
+        end
+        error("Mesh directive is present, but no mesh-capable runner was selected. " *
+              "For Gmsh cylinder drag use `Module slbm_drag`.")
+    elseif :advection_only in setup.modules
+        return _run_advection_only(setup; backend=backend, T=T)
+    elseif :twophase_vof in setup.modules
+        return _run_twophase_vof(setup; backend=backend, T=T)
+    elseif :axisymmetric in setup.modules
+        return _run_axisymmetric(setup; backend=backend, T=T)
+    elseif !isempty(setup.refinements)
+        return _run_refined(setup; backend=backend, T=T,
+                            callback=callback, callback_every=callback_every)
+    elseif :thermal in setup.modules
         return _run_thermal(setup; backend=backend, T=T)
+    elseif :viscoelastic in setup.modules
+        return _run_viscoelastic(setup; backend=backend, T=T)
     elseif setup.lattice === :D3Q19
         return _run_d3q19(setup; backend=backend, T=T)
     end
@@ -119,6 +176,8 @@ function run_simulation(setup::SimulationSetup;
     dy = dom.Ly / Ny
     ν = setup.physics.params[:nu]
     ω = T(1.0 / (3.0 * ν + 0.5))
+    collision = _normalize_collision_selector(setup.collision)
+    wall_bc = _normalize_wall_bc_selector(setup.wall_bc)
 
     # --- Initialize state ---
     config = LBMConfig(D2Q9(); Nx=Nx, Ny=Ny, ν=ν, u_lid=0.0,
@@ -130,6 +189,8 @@ function run_simulation(setup::SimulationSetup;
 
     # --- Apply geometry ---
     _apply_geometry!(is_solid, setup, dx, dy)
+    libb_setup = wall_bc === :libb ? _setup_with_global_stl_libb(setup) : setup
+    stl_libb = _has_stl_libb_obstacle(libb_setup)
 
     # --- Apply initial conditions ---
     if setup.initial !== nothing
@@ -150,8 +211,42 @@ function run_simulation(setup::SimulationSetup;
             T(evaluate(setup.physics.body_force[:Fy])) : T(0)
     end
 
+    # --- Non-Newtonian rheology ---
+    has_rheology = !isempty(setup.rheology)
+    rheology_model = nothing
+    tau_field = nothing
+    Fx_field = nothing
+    Fy_field = nothing
+    if has_rheology
+        rs = first(r for r in setup.rheology if r.phase in (:default, :liquid))
+        rheology_model = build_rheology_model(rs; FT=T)
+        tau_field = KernelAbstractions.ones(backend, T, Nx, Ny)  # initial tau = 1
+        if has_body_force
+            Fx_field = KernelAbstractions.zeros(backend, T, Nx, Ny)
+            Fy_field = KernelAbstractions.zeros(backend, T, Nx, Ny)
+            Fx_field .= Fx_val
+            Fy_field .= Fy_val
+        end
+    end
+    if stl_libb && (has_body_force || has_rheology)
+        error("STL wall=libb in the generic .krk runner supports only Newtonian flow without body force")
+    end
+    use_trt_step = !stl_libb && collision === :trt
+    use_trt_step && _ensure_generic_trt_supported!(setup, has_body_force, has_rheology)
+
     # --- Build boundary handlers ---
     bc_handlers = _build_boundary_handlers(setup, dx, dy, Nx, Ny, T, backend)
+    libb_q_wall = nothing
+    libb_uw_x = nothing
+    libb_uw_y = nothing
+    libb_bcspec = nothing
+    if stl_libb
+        q_wall_cpu = _precompute_stl_libb_q_wall_2d(Array(is_solid), libb_setup, dx, dy, T)
+        libb_q_wall = _copy_to_backend(backend, T, q_wall_cpu)
+        libb_uw_x = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+        libb_uw_y = KernelAbstractions.zeros(backend, T, Nx, Ny, 9)
+        libb_bcspec = _build_libb_bc_rebuild_spec_2d(libb_setup, dx, dy, Nx, Ny, T, backend)
+    end
 
     # --- Setup output ---
     vtk_out = _find_output(setup, :vtk)
@@ -170,22 +265,41 @@ function run_simulation(setup::SimulationSetup;
 
     # --- Time loop ---
     for step in 1:setup.max_steps
-        # 1. Stream
-        stream_fn!(f_out, f_in, Nx, Ny)
-
-        # 2. Apply boundary conditions
-        _apply_boundary_conditions!(f_out, bc_handlers, step, Nx, Ny, dx, dy, dom, T)
-
-        # 3. Collide
-        if has_body_force
-            collide_guo_2d!(f_out, is_solid, ω, Fx_val, Fy_val)
+        if stl_libb
+            # Fused TRT LI-BB performs pull-streaming, wall treatment, collision,
+            # and moment writes. Face BCs are rebuilt from f_in afterwards.
+            fused_trt_libb_v2_step!(f_out, f_in, ρ, ux, uy, is_solid,
+                                     libb_q_wall, libb_uw_x, libb_uw_y,
+                                     Nx, Ny, T(ν))
+            apply_bc_rebuild_2d!(f_out, f_in, libb_bcspec, ν, Nx, Ny)
+        elseif use_trt_step
+            fused_trt_step!(f_out, f_in, ρ, ux, uy, is_solid, Nx, Ny, T(ν))
         else
-            collide_2d!(f_out, is_solid, ω)
-        end
+            # 1. Stream
+            stream_fn!(f_out, f_in, Nx, Ny)
 
-        # 4. Macroscopic quantities. collide_guo_2d! is Convention I
-        # (integrated), so post-collision raw moments are already physical.
-        compute_macroscopic_2d!(ρ, ux, uy, f_out)
+            # 2. Apply boundary conditions
+            _apply_boundary_conditions!(f_out, bc_handlers, step, Nx, Ny, dx, dy, dom, T)
+
+            # 3. Collide
+            if has_rheology && has_body_force
+                collide_rheology_guo_2d!(f_out, is_solid, rheology_model, tau_field,
+                                          Fx_field, Fy_field)
+            elseif has_rheology
+                collide_rheology_2d!(f_out, is_solid, rheology_model, tau_field)
+            elseif has_body_force
+                collide_guo_2d!(f_out, is_solid, ω, Fx_val, Fy_val)
+            else
+                collide_2d!(f_out, is_solid, ω)
+            end
+
+            # 4. Macroscopic quantities
+            if has_body_force
+                compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, Fx_val, Fy_val)
+            else
+                compute_macroscopic_2d!(ρ, ux, uy, f_out)
+            end
+        end
 
         # 5. Swap
         f_in, f_out = f_out, f_in
@@ -214,201 +328,157 @@ function run_simulation(setup::SimulationSetup;
     _maybe_save_gif(gif_out, gif_frames, setup, output_dir)
 
     # Return on CPU
-    return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), setup=setup)
-end
-
-# --- Internal helpers ---
-
-"""Select streaming kernel based on boundary periodicity."""
-function _select_streaming_kernel(setup::SimulationSetup)
-    faces = Dict(b.face => b.type for b in setup.boundaries)
-    periodic_x = get(faces, :west, :wall) == :periodic || get(faces, :east, :wall) == :periodic
-    periodic_y = get(faces, :south, :wall) == :periodic || get(faces, :north, :wall) == :periodic
-
-    if periodic_x && periodic_y
-        return stream_fully_periodic_2d!
-    elseif periodic_x
-        return stream_periodic_x_wall_y_2d!
-    else
-        return stream_2d!
+    result = (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), setup=setup)
+    if has_rheology
+        result = merge(result, (tau_field=Array(tau_field),))
     end
+    return result
 end
 
-"""Build pre-compiled boundary handlers."""
-function _build_boundary_handlers(setup::SimulationSetup, dx, dy, Nx, Ny, ::Type{T},
-                                  backend) where T
-    handlers = BoundaryHandler[]
-
-    for bc in setup.boundaries
-        bc.type == :periodic && continue
-
-        # Determine face size for array allocation
-        face_size = (bc.face in (:north, :south)) ? Nx : Ny
-
-        ux_fn = haskey(bc.values, :ux) ? bc.values[:ux].func : nothing
-        uy_fn = haskey(bc.values, :uy) ? bc.values[:uy].func : nothing
-        rho_fn = haskey(bc.values, :rho) ? bc.values[:rho].func : nothing
-
-        is_sp_ux = haskey(bc.values, :ux) && is_spatial(bc.values[:ux])
-        is_sp_uy = haskey(bc.values, :uy) && is_spatial(bc.values[:uy])
-        is_td_ux = haskey(bc.values, :ux) && is_time_dependent(bc.values[:ux])
-        is_td_uy = haskey(bc.values, :uy) && is_time_dependent(bc.values[:uy])
-        is_td_rho = haskey(bc.values, :rho) && is_time_dependent(bc.values[:rho])
-
-        needs_spatial = is_sp_ux || is_sp_uy || is_td_ux || is_td_uy
-
-        ux_arr = needs_spatial ? KernelAbstractions.zeros(backend, T, face_size) : nothing
-        uy_arr = needs_spatial ? KernelAbstractions.zeros(backend, T, face_size) : nothing
-        rho_arr = (haskey(bc.values, :rho) && (is_spatial(bc.values[:rho]) || is_td_rho)) ?
-            KernelAbstractions.zeros(backend, T, face_size) : nothing
-
-        # Pre-compute static spatial arrays
-        if needs_spatial && !is_td_ux && !is_td_uy
-            _fill_bc_arrays!(ux_arr, uy_arr, ux_fn, uy_fn, bc.face,
-                             dx, dy, Nx, Ny, setup.domain, T)
-        end
-
-        push!(handlers, BoundaryHandler(
-            bc.face, bc.type,
-            ux_fn, uy_fn, rho_fn,
-            is_sp_ux, is_sp_uy,
-            is_td_ux, is_td_uy, is_td_rho,
-            ux_arr, uy_arr, rho_arr
-        ))
+function _ve_numeric_param(setup::SimulationSetup, key::Symbol, default=nothing)
+    if haskey(setup.physics.params, key)
+        return Float64(setup.physics.params[key])
+    elseif haskey(setup.user_vars, key)
+        return Float64(setup.user_vars[key])
+    elseif default !== nothing
+        return Float64(default)
     end
-
-    return handlers
+    throw(ArgumentError(
+        "viscoelastic dispatch: missing parameter `$key`. " *
+        "Provide it as `Define $key = ...` or `Physics $key = ...`."))
 end
 
-"""Fill BC arrays with spatial profile for a given face."""
-function _fill_bc_arrays!(ux_arr, uy_arr, ux_fn, uy_fn, face::Symbol,
-                          dx, dy, Nx, Ny, domain::DomainSetup, ::Type{T};
-                          t::Float64=0.0) where T
-    Lx, Ly = domain.Lx, domain.Ly
-
-    if face in (:north, :south)
-        cpu_ux = zeros(T, Nx)
-        cpu_uy = zeros(T, Nx)
-        y_val = face == :south ? dy / 2 : Ly - dy / 2
-        for i in 1:Nx
-            x_val = (i - 0.5) * dx
-            kw = (; x=x_val, y=y_val, Lx=Lx, Ly=Ly,
-                    Nx=Float64(Nx), Ny=Float64(Ny), dx=dx, dy=dy, t=t)
-            ux_fn !== nothing && (cpu_ux[i] = T(Base.invokelatest(ux_fn; kw...)))
-            uy_fn !== nothing && (cpu_uy[i] = T(Base.invokelatest(uy_fn; kw...)))
-        end
-        ux_arr !== nothing && copyto!(ux_arr, cpu_ux)
-        uy_arr !== nothing && copyto!(uy_arr, cpu_uy)
-    else  # :west or :east
-        cpu_ux = zeros(T, Ny)
-        cpu_uy = zeros(T, Ny)
-        x_val = face == :west ? dx / 2 : Lx - dx / 2
-        for j in 1:Ny
-            y_val = (j - 0.5) * dy
-            kw = (; x=x_val, y=y_val, Lx=Lx, Ly=Ly,
-                    Nx=Float64(Nx), Ny=Float64(Ny), dx=dx, dy=dy, t=t)
-            ux_fn !== nothing && (cpu_ux[j] = T(Base.invokelatest(ux_fn; kw...)))
-            uy_fn !== nothing && (cpu_uy[j] = T(Base.invokelatest(uy_fn; kw...)))
-        end
-        ux_arr !== nothing && copyto!(ux_arr, cpu_ux)
-        uy_arr !== nothing && copyto!(uy_arr, cpu_uy)
+function _ve_symbol_param(setup::SimulationSetup, key::Symbol, default::Symbol)
+    if haskey(setup.physics.params, key) || haskey(setup.user_vars, key)
+        throw(ArgumentError(
+            "viscoelastic dispatch: `$key` is symbolic, but `.krk` Define/Physics " *
+            "values are numeric in the current parser. Omit `$key` to use `:$default` " *
+            "or call the Julia driver directly."))
     end
+    return default
 end
 
-"""Apply boundary conditions at a given timestep."""
-function _apply_boundary_conditions!(f, handlers::Vector{BoundaryHandler},
-                                     step::Int, Nx, Ny, dx, dy,
-                                     domain::DomainSetup, ::Type{T}) where T
-    for h in handlers
-        h.type == :periodic && continue
-
-        if h.type == :wall && h.ux_fn === nothing && h.uy_fn === nothing
-            # Pure wall — handled by streaming bounce-back, but apply explicit
-            # bounce-back for faces not covered by the streaming kernel
-            _apply_wall_bc!(f, h.face, Nx, Ny)
-        elseif h.type == :velocity
-            # Re-evaluate time-dependent BCs
-            if h.is_time_dep_ux || h.is_time_dep_uy
-                _fill_bc_arrays!(h.ux_arr, h.uy_arr, h.ux_fn, h.uy_fn, h.face,
-                                 dx, dy, Nx, Ny, domain, T;
-                                 t=Float64(step))
-            end
-
-            if h.ux_arr !== nothing  # spatial BC
-                _apply_velocity_spatial!(f, h, Nx, Ny)
-            else  # scalar BC
-                ux_val = h.ux_fn !== nothing ? Base.invokelatest(h.ux_fn; t=Float64(step)) : 0.0
-                uy_val = h.uy_fn !== nothing ? Base.invokelatest(h.uy_fn; t=Float64(step)) : 0.0
-                _apply_velocity_scalar!(f, h.face, ux_val, uy_val, Nx, Ny)
-            end
-        elseif h.type == :pressure
-            rho_val = h.rho_fn !== nothing ? Base.invokelatest(h.rho_fn; t=Float64(step)) : 1.0
-            _apply_pressure_bc!(f, h.face, rho_val, Nx, Ny)
-        end
-    end
+function _ve_oldroydb_rheology(setup::SimulationSetup)
+    idx = findfirst(rs -> rs.model === :oldroyd_b, setup.rheology)
+    idx !== nothing && return setup.rheology[idx]
+    throw(ArgumentError(
+        "viscoelastic dispatch: cylinder requires " *
+        "`Rheology oldroyd_b { nu_s = ..., nu_p = ..., lambda = ... }`."))
 end
 
-"""Apply wall BC on a specific face."""
-function _apply_wall_bc!(f, face::Symbol, Nx, Ny)
-    # stream_2d! already handles bounce-back at domain edges.
-    # For periodic streaming kernels, explicit bounce-back is needed.
-    # The bounce-back is embedded in the streaming step for wall boundaries.
-    # Nothing extra needed here — the streaming kernel handles it.
+function _ve_rheology_param(rs::RheologySetup, key::Symbol)
+    haskey(rs.params, key) && return Float64(rs.params[key])
+    throw(ArgumentError(
+        "viscoelastic dispatch: Rheology $(rs.model) is missing `$key`."))
 end
 
-"""Apply scalar velocity BC."""
-function _apply_velocity_scalar!(f, face::Symbol, ux_val, uy_val, Nx, Ny)
-    if face == :north
-        apply_zou_he_north_2d!(f, ux_val, Nx, Ny)
-    elseif face == :south
-        apply_zou_he_south_2d!(f, ux_val, Nx)
-    elseif face == :west
-        apply_zou_he_west_2d!(f, ux_val, Nx, Ny)
-    end
-end
-
-"""Apply spatial velocity BC."""
-function _apply_velocity_spatial!(f, h::BoundaryHandler, Nx, Ny)
-    if h.face == :north
-        apply_zou_he_north_spatial_2d!(f, h.ux_arr, h.uy_arr, Nx, Ny)
-    elseif h.face == :south
-        apply_zou_he_south_spatial_2d!(f, h.ux_arr, h.uy_arr, Nx)
-    elseif h.face == :west
-        apply_zou_he_west_spatial_2d!(f, h.ux_arr, h.uy_arr, Nx, Ny)
-    end
-end
-
-"""Apply pressure BC."""
-function _apply_pressure_bc!(f, face::Symbol, rho_val, Nx, Ny)
-    if face == :east
-        apply_zou_he_pressure_east_2d!(f, Nx, Ny; ρ_out=rho_val)
-    end
-end
-
-"""Build is_solid mask from geometry regions (expression-based predicates)."""
-function _apply_geometry!(is_solid, setup::SimulationSetup, dx, dy)
-    Nx, Ny = setup.domain.Nx, setup.domain.Ny
-    Lx, Ly = setup.domain.Lx, setup.domain.Ly
-
-    has_fluid_region = any(r -> r.kind == :fluid, setup.regions)
-    solid_cpu = has_fluid_region ? ones(Bool, Nx, Ny) : zeros(Bool, Nx, Ny)
-
+function _ve_cylinder_obstacle_radius(setup::SimulationSetup)
     for region in setup.regions
-        for j in 1:Ny, i in 1:Nx
-            x = (i - 0.5) * dx
-            y = (j - 0.5) * dy
-            result = evaluate(region.condition; x=x, y=y, z=0.0,
-                             Lx=Lx, Ly=Ly, dx=dx, dy=dy)
-            if region.kind == :fluid && result
-                solid_cpu[i, j] = false
-            elseif region.kind == :obstacle && result
-                solid_cpu[i, j] = true
+        region_name = lowercase(region.name)
+        (occursin("cylinder", region_name) || occursin("circle", region_name)) || continue
+        for key in (:radius, :R)
+            if haskey(region.bc_values, key)
+                return Float64(evaluate(region.bc_values[key]))
             end
         end
     end
-
-    copyto!(is_solid, solid_cpu)
+    return nothing
 end
+
+"""Dispatch viscoelastic cases to the existing production log-FV driver."""
+function _run_viscoelastic(setup::SimulationSetup;
+                           backend=KernelAbstractions.CPU(), T=Float64)
+    name = lowercase(setup.name)
+    if !occursin("cylinder", name)
+        throw(ArgumentError(
+            "viscoelastic dispatch: unrecognized case name '$(setup.name)'. " *
+            "Known cases: cylinder."))
+    end
+
+    rs = _ve_oldroydb_rheology(setup)
+    radius_from_obstacle = _ve_cylinder_obstacle_radius(setup)
+    R = radius_from_obstacle === nothing ?
+        _ve_numeric_param(setup, :R) : Float64(radius_from_obstacle)
+    nu_s = _ve_rheology_param(rs, :nu_s)
+    nu_p = _ve_rheology_param(rs, :nu_p)
+    lambda = _ve_rheology_param(rs, :lambda)
+    Re = _ve_numeric_param(setup, :Re, 1.0)
+    nu_total = nu_s + nu_p
+    u_mean = _ve_numeric_param(setup, :u_mean, nu_total * Re / R)
+    L_up = _ve_numeric_param(setup, :L_up, 15.0)
+    L_down = _ve_numeric_param(setup, :L_down, 15.0)
+    bsd_fraction = _ve_numeric_param(setup, :bsd_fraction, 1.0)
+    wall_bc = _ve_symbol_param(setup, :wall_bc, :halfwayBB)
+    advection_scheme = _ve_symbol_param(setup, :advection_scheme, :muscl_superbee)
+    avg_window = round(Int, 0.2 * setup.max_steps)
+
+    result = run_viscoelastic_logfv_cylinder_coupled_2d(;
+        radius=R,
+        L_up=L_up,
+        L_down=L_down,
+        nu_s=nu_s,
+        nu_p=nu_p,
+        lambda=lambda,
+        u_mean=u_mean,
+        bsd_fraction=bsd_fraction,
+        polymer_model=:oldroydb,
+        wall_bc=wall_bc,
+        advection_scheme=advection_scheme,
+        max_steps=setup.max_steps,
+        avg_window=avg_window,
+        backend=backend,
+        T=T,
+    )
+    return merge(result, (setup=setup,))
+end
+
+# --- Gmsh multi-block SLBM drag runner ---
+
+function _setup_number(setup::SimulationSetup, keys, default)
+    key_tuple = keys isa Tuple ? keys : (keys,)
+    for key in key_tuple
+        haskey(setup.physics.params, key) && return setup.physics.params[key]
+        haskey(setup.user_vars, key) && return setup.user_vars[key]
+    end
+    return default
+end
+
+function _copy_to_backend(backend, ::Type{T}, host::AbstractArray) where T
+    dev = KernelAbstractions.allocate(backend, T, size(host)...)
+    copyto!(dev, T.(host))
+    return dev
+end
+
+function _copy_bool_to_backend(backend, host::AbstractArray{Bool})
+    dev = KernelAbstractions.allocate(backend, Bool, size(host)...)
+    copyto!(dev, host)
+    return dev
+end
+
+function _allocate_block_state_as(block::Block, ::Type{T}, backend, ng::Int) where T
+    nx = block.mesh.Nξ + 2 * ng
+    ny = block.mesh.Nη + 2 * ng
+    f = KernelAbstractions.allocate(backend, T, nx, ny, 9); fill!(f, zero(T))
+    rho = KernelAbstractions.allocate(backend, T, nx, ny); fill!(rho, one(T))
+    ux = KernelAbstractions.allocate(backend, T, nx, ny); fill!(ux, zero(T))
+    uy = KernelAbstractions.allocate(backend, T, nx, ny); fill!(uy, zero(T))
+    return BlockState2D{T, typeof(f), typeof(rho)}(f, rho, ux, uy,
+                                                    block.mesh.Nξ, block.mesh.Nη, ng)
+end
+
+@inline function _edge_node(block::Block, edge::Symbol, r::Int)
+    edge === :west  && return 1, r
+    edge === :east  && return block.mesh.Nξ, r
+    edge === :south && return r, 1
+    edge === :north && return r, block.mesh.Nη
+    error("unknown edge $edge")
+end
+
+function _parabolic_channel_u(y, Ly, u_max)
+    yy = clamp(Float64(y), 0.0, Float64(Ly))
+    return 4.0 * Float64(u_max) * yy * (Float64(Ly) - yy) / Float64(Ly)^2
+end
+
 
 """Apply initial conditions from expressions."""
 function _apply_initial_conditions!(f_in, f_out, setup::SimulationSetup,
@@ -436,175 +506,4 @@ function _apply_initial_conditions!(f_in, f_out, setup::SimulationSetup,
 
     copyto!(f_in, f_cpu)
     copyto!(f_out, f_cpu)
-end
-
-"""Write VTK output."""
-function _write_output(ρ, ux, uy, setup::SimulationSetup, out::OutputSetup,
-                       pvd, output_dir, dx, step;
-                       extra_fields=Dict{String,Any}())
-    fields_dict = Dict{String, Matrix{Float64}}()
-    field_set = Set(out.fields)
-
-    if :rho in field_set
-        fields_dict["rho"] = Array(ρ)
-    end
-    if :ux in field_set
-        fields_dict["ux"] = Array(ux)
-    end
-    if :uy in field_set
-        fields_dict["uy"] = Array(uy)
-    end
-
-    # Merge extra fields (C, phi, kappa, etc.)
-    for (k, v) in extra_fields
-        if Symbol(k) in field_set
-            fields_dict[k] = v isa AbstractArray ? Array(v) : v
-        end
-    end
-
-    Nx, Ny = setup.domain.Nx, setup.domain.Ny
-    fname = joinpath(output_dir, "$(setup.name)_$(lpad(step, 8, '0'))")
-    write_vtk_to_pvd(pvd, fname, Nx, Ny, dx, fields_dict, Float64(step))
-end
-
-# --- PNG/GIF output helpers ---
-
-"""Compute a requested field from macroscopic arrays."""
-function _compute_field(field::Symbol, ρ, ux, uy)
-    if field == Symbol("|u|")
-        return sqrt.(Array(ux).^2 .+ Array(uy).^2)
-    elseif field == :rho
-        return Array(ρ)
-    elseif field == :ux
-        return Array(ux)
-    elseif field == :uy
-        return Array(uy)
-    else
-        return Array(ρ)  # fallback
-    end
-end
-
-"""Emit a warning if png/gif output is requested but CairoMakie is not loaded."""
-function _check_image_backend(png_out, gif_out)
-    need = png_out !== nothing || gif_out !== nothing
-    if need && _png_saver[] === nothing
-        @warn "Output png/gif requested but CairoMakie is not loaded. " *
-              "Add `using CairoMakie` before `using Kraken` to enable PNG/GIF output."
-    end
-end
-
-"""Initialize GIF frame storage."""
-function _init_gif_frames(gif_out)
-    gif_out === nothing && return Dict{Symbol, Vector{Matrix{Float64}}}()
-    frames = Dict{Symbol, Vector{Matrix{Float64}}}()
-    for f in gif_out.fields
-        frames[f] = Matrix{Float64}[]
-    end
-    return frames
-end
-
-"""Save a PNG snapshot if it's time and the backend is loaded."""
-function _maybe_save_png(png_out, ρ, ux, uy, setup, output_dir, step)
-    png_out === nothing && return
-    _png_saver[] === nothing && return
-    step % png_out.interval != 0 && return
-
-    dir = isempty(output_dir) ? setup_output_dir(png_out.directory) : output_dir
-    for field_name in png_out.fields
-        data = _compute_field(field_name, ρ, ux, uy)
-        fname = joinpath(dir, "$(setup.name)_$(field_name)_$(lpad(step, 8, '0')).png")
-        _png_saver[](fname, data, string(field_name))
-    end
-end
-
-"""Collect a GIF frame if it's time."""
-function _maybe_collect_gif(gif_out, gif_frames, ρ, ux, uy, step)
-    gif_out === nothing && return
-    _gif_saver[] === nothing && return
-    step % gif_out.interval != 0 && return
-
-    for field_name in gif_out.fields
-        data = _compute_field(field_name, ρ, ux, uy)
-        push!(gif_frames[field_name], copy(data))
-    end
-end
-
-"""Assemble and save GIF after simulation completes."""
-function _maybe_save_gif(gif_out, gif_frames, setup, output_dir)
-    gif_out === nothing && return
-    _gif_saver[] === nothing && return
-
-    dir = isempty(output_dir) ? setup_output_dir(gif_out.directory) : output_dir
-    for field_name in gif_out.fields
-        frames = gif_frames[field_name]
-        isempty(frames) && continue
-        fname = joinpath(dir, "$(setup.name)_$(field_name).gif")
-        _gif_saver[](fname, frames, string(field_name); fps=gif_out.fps)
-    end
-end
-
-# ===========================================================================
-# Dispatch helpers for 3D / thermal cases
-# ===========================================================================
-
-
-"""Dispatch D3Q19 cases to the appropriate 3D driver."""
-function _run_d3q19(setup::SimulationSetup;
-                    backend=KernelAbstractions.CPU(), T=Float64)
-    name = lowercase(setup.name)
-    dom  = setup.domain
-    ν    = setup.physics.params[:nu]
-    if occursin("cavity_3d", name) || occursin("cavity3d", name)
-        u_lid = 0.1
-        for b in setup.boundaries
-            if b.type == :velocity && haskey(b.values, :ux)
-                try
-                    u_lid = Float64(evaluate(b.values[:ux]))
-                catch
-                end
-                break
-            end
-        end
-        config = LBMConfig(D3Q19(); Nx=dom.Nx, Ny=dom.Ny, Nz=dom.Nz,
-                           ν=Float64(ν), u_lid=u_lid,
-                           max_steps=setup.max_steps)
-        result = run_cavity_3d(config; backend=backend, T=T)
-        return merge(result, (setup=setup,))
-    else
-        throw(ArgumentError(
-            "D3Q19 dispatch: only `cavity_3d` is supported in v0.1.0 " *
-            "(got case name: $(setup.name)). Use the Julia API for other 3D cases."))
-    end
-end
-
-"""Dispatch thermal cases to the appropriate thermal driver."""
-function _run_thermal(setup::SimulationSetup;
-                      backend=KernelAbstractions.CPU(), T=Float64)
-    name   = lowercase(setup.name)
-    dom    = setup.domain
-    params = setup.physics.params
-    Ra = Float64(get(params, :Ra, 1e4))
-    Pr = Float64(get(params, :Pr, 0.71))
-
-    if occursin("rayleigh_benard", name) || occursin("rayleigh-benard", name)
-        result = run_rayleigh_benard_2d(; Nx=dom.Nx, Ny=dom.Ny, Ra=Ra, Pr=Pr,
-                                         max_steps=setup.max_steps,
-                                         backend=backend, FT=T)
-        return merge(result, (setup=setup,))
-    elseif occursin("natural_convection", name)
-        result = run_natural_convection_2d(; N=dom.Nx, Ra=Ra, Pr=Pr,
-                                            max_steps=setup.max_steps,
-                                            backend=backend, FT=T)
-        return merge(result, (setup=setup,))
-    elseif occursin("heat_conduction", name) || occursin("conduction", name)
-        result = run_rayleigh_benard_2d(; Nx=dom.Nx, Ny=dom.Ny,
-                                         Ra=1e-8, Pr=Pr,
-                                         max_steps=setup.max_steps,
-                                         backend=backend, FT=T)
-        return merge(result, (setup=setup,))
-    else
-        throw(ArgumentError(
-            "thermal dispatch: unrecognized case name '$(setup.name)'. " *
-            "Known cases: rayleigh_benard, natural_convection, heat_conduction."))
-    end
 end

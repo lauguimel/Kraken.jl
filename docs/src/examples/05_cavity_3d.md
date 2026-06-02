@@ -10,9 +10,9 @@ EditURL = "05_cavity_3d.jl"
 **Validates against:** Ku, Hirsh & Taylor (1987) — centerline profiles
 [`10.1016/0021-9991(87)90193-8`](https://doi.org/10.1016/0021-9991(87)90193-8)
 
-**Download:** <a href="../assets/krk/cavity_3d.krk" download><code>cavity_3d.krk</code></a>
+**Download:** [`cavity_3d.krk`](../assets/krk/cavity_3d.krk)
 
-**Hardware:** local CPU baseline, ~5 min wall-clock at N = 64³ (CPU) /
+**Hardware:** Apple M3 Max, ~5 min wall-clock at N = 64³ (CPU) /
 NVIDIA H100, ~30s at N = 64³
 
 ![Cavity 3D streamlines](../assets/figures/cavity_3d_umag.png)
@@ -139,21 +139,6 @@ At this resolution the vortex is slightly less well-defined than in the
 2D case because of the limited number of grid points.  The spanwise
 confinement (walls at ``z = 1`` and ``z = N``) also modifies the flow
 compared to the infinite-span 2D solution.
-
-### Plot: Mid-plane velocity magnitude
-
-```julia
-using CairoMakie
-
-fig = Figure(size=(600, 500))
-ax = Axis(fig[1, 1];
-    title  = "Velocity magnitude |u|/u_lid  (z = N/2)",
-    xlabel = "x", ylabel = "y", aspect = DataAspect())
-hm = heatmap!(ax, 1:N, 1:N, umag; colormap = :viridis)
-Colorbar(fig[1, 2], hm; label = "|u|/u_lid")
-save(joinpath(@__DIR__, "cavity_3d_umag.svg"), fig)
-fig
-```
 
 ![Velocity magnitude in the z = N/2 mid-plane of the 3D lid-driven cavity.  The primary vortex is visible with fast flow near the lid and a quiet core.  Resolution is N = 24 (coarse demonstration grid).](cavity_3d_umag.svg)
 
