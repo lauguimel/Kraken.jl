@@ -25,9 +25,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+from matplotlib.colors import LinearSegmentedColormap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
+# Diverging cmap centred on the theme bg: near-zero blends into the page,
+# only strong +/- values pop. Avoids the white block of light-centred RdBu.
+DIVR = LinearSegmentedColormap.from_list("dark_div", ["#4ea1d3", DARK, "#ff6b6b"])
 
 # Domain geometry (lattice units L x H) and cylinder placement.
 LX, LY = 10.0, 2.5
@@ -38,6 +43,9 @@ plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["Computer Modern Roman", "DejaVu Serif"],
     "mathtext.fontset": "cm",
+    "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+    "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+    "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
     "font.size": 11,
     "axes.labelsize": 12,
     "axes.titlesize": 12,
@@ -71,8 +79,8 @@ def main():
     omega = np.ma.array(duy_dx - dux_dy, mask=inside)
 
     panels = [
-        (speed_n, r"$|U|/U_{\mathrm{in}}$", "viridis", False),
-        (omega, r"$\omega_z$  (vorticity)", "RdBu_r", True),
+        (speed_n, r"$|U|/U_{\mathrm{in}}$", "magma", False),
+        (omega, r"$\omega_z$  (vorticity)", DIVR, True),
     ]
     fig, axes = plt.subplots(2, 1, figsize=(11, 6.4), constrained_layout=True)
 
@@ -84,15 +92,16 @@ def main():
             vmin, vmax = 0.0, np.nanpercentile(field.compressed(), 99.5)
         pcm = ax.pcolormesh(X, Y, field, cmap=cmap, shading="auto",
                             vmin=vmin, vmax=vmax)
-        ax.streamplot(x, y, uxm.filled(0.0), uym.filled(0.0), color="k",
+        ax.streamplot(x, y, uxm.filled(0.0), uym.filled(0.0), color="white",
                       linewidth=0.8, density=1.5, arrowsize=0.8)
-        ax.add_patch(Circle((CX, CY), R, facecolor="0.75", edgecolor="k",
+        ax.add_patch(Circle((CX, CY), R, facecolor="0.75", edgecolor="0.92",
                             linewidth=0.8, zorder=5))
         ax.set(xlabel=r"$x$", ylabel=r"$y$", title=label, aspect="equal")
         ax.set_xlim(0, LX)
         ax.set_ylim(0, LY)
         cbar = fig.colorbar(pcm, ax=ax, fraction=0.018, pad=0.02)
-        cbar.ax.tick_params(labelsize=9)
+        cbar.ax.tick_params(labelsize=9, color="0.7")
+        cbar.outline.set_edgecolor("0.55")
 
     fig.suptitle("Flow past a cylinder ($Re=20$) --- velocity field "
                  + ("\\& streamlines (Kraken)" if _USETEX

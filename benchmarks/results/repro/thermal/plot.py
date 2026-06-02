@@ -34,6 +34,7 @@ from matplotlib.lines import Line2D
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
 
 # Rayleigh sweep (ordered) and a human-readable LaTeX exponent label.
 RA = [1e3, 1e4, 1e5]
@@ -89,20 +90,25 @@ def load_openfoam():
 
 
 def main():
-    sns.set_theme(style="whitegrid", context="talk", font="serif")
-    plt.rcParams.update({"text.usetex": _USETEX, "font.family": "serif",
-                         "mathtext.fontset": "cm"})
-    palette = sns.color_palette("crest", len(RA))
+    sns.set_theme(style="ticks", context="talk", font="serif")
+    plt.rcParams.update({
+        "text.usetex": _USETEX, "font.family": "serif", "mathtext.fontset": "cm",
+        "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+        "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+        "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
+    })
+    palette = sns.color_palette("bright", len(RA))  # vivid; pops on dark
 
     nu_k, nu_ref, ladder = load_kraken()
     of = load_openfoam()
 
     def draw_nu(axn):
+        axn.grid(True, color="0.45", alpha=0.4, lw=0.6)
         ra_sorted = sorted(nu_k)
-        axn.plot(ra_sorted, [nu_k[r] for r in ra_sorted], "-", color="0.35",
+        axn.plot(ra_sorted, [nu_k[r] for r in ra_sorted], "-", color="0.8",
                  lw=2.0, zorder=1)
         for color, ra in zip(palette, ra_sorted):
-            axn.plot(ra, nu_k[ra], "s", color=color, ms=11, mec="0.2", mew=1.0,
+            axn.plot(ra, nu_k[ra], "s", color=color, ms=11, mec="0.92", mew=1.0,
                      zorder=4)
             axn.plot(ra, nu_ref[ra], ls="none", marker="o", mfc="none",
                      mec=color, ms=13, mew=2.0, zorder=3)
@@ -115,27 +121,30 @@ def main():
                 title=r"$\overline{\mathrm{Nu}}$ vs $\mathrm{Ra}$ "
                       r"--- heated cavity")
         solver_handles = [
-            Line2D([0], [0], color="0.3", lw=2.0, marker="s", ms=10, mec="0.2",
+            Line2D([0], [0], color="0.9", lw=2.0, marker="s", ms=10, mec="0.92",
                    label="Kraken (LBM)"),
-            Line2D([0], [0], color="0.3", ls="none", marker="o", mfc="none",
-                   mec="0.3", ms=11, mew=2.0, label="de Vahl Davis (1983)"),
-            Line2D([0], [0], color="0.3", ls="none", marker="^", mfc="none",
-                   mec="0.3", ms=10, mew=2.0,
+            Line2D([0], [0], color="0.9", ls="none", marker="o", mfc="none",
+                   mec="0.9", ms=11, mew=2.0, label="de Vahl Davis (1983)"),
+            Line2D([0], [0], color="0.9", ls="none", marker="^", mfc="none",
+                   mec="0.9", ms=10, mew=2.0,
                    label=r"OpenFOAM buoyantBoussinesq"),
         ]
-        axn.legend(handles=solver_handles, loc="upper left", fontsize=11,
-                   title="Solver", framealpha=0.9)
+        leg = axn.legend(handles=solver_handles, loc="upper left", fontsize=11,
+                         title="Solver", facecolor=DARK, edgecolor="0.5",
+                         labelcolor="0.9", framealpha=0.85)
+        leg.get_title().set_color("0.9")
 
     def draw_conv(axc):
+        axc.grid(True, color="0.45", alpha=0.4, lw=0.6)
         if ladder:
             Ns = [n for n, _ in ladder]
             errs = [e for _, e in ladder]
-            lad_palette = sns.color_palette("crest", len(Ns))
-            axc.plot(Ns, errs, "-", color="0.35", lw=2.0, zorder=1)
+            lad_palette = sns.color_palette("bright", len(Ns))
+            axc.plot(Ns, errs, "-", color="0.8", lw=2.0, zorder=1)
             for color, n, e in zip(lad_palette, Ns, errs):
-                axc.plot(n, e, "o", color=color, ms=11, mec="0.2", mew=1.0,
+                axc.plot(n, e, "o", color=color, ms=11, mec="0.92", mew=1.0,
                          zorder=3)
-        axc.axhline(1.0, color="k", ls="--", lw=1.4, zorder=2)
+        axc.axhline(1.0, color="0.9", ls="--", lw=1.4, zorder=2)
         axc.text(0.97, 1.06, r"$1\%$ gate",
                  transform=axc.get_yaxis_transform(), ha="right", va="bottom",
                  fontsize=11)

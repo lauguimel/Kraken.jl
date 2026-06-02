@@ -33,6 +33,7 @@ from matplotlib.lines import Line2D
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
 
 
 def _load(name):
@@ -43,9 +44,13 @@ def _load(name):
 
 
 def main():
-    sns.set_theme(style="whitegrid", context="talk", font="serif")
-    plt.rcParams.update({"text.usetex": _USETEX, "font.family": "serif",
-                         "mathtext.fontset": "cm"})
+    sns.set_theme(style="ticks", context="talk", font="serif")
+    plt.rcParams.update({
+        "text.usetex": _USETEX, "font.family": "serif", "mathtext.fontset": "cm",
+        "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+        "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+        "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
+    })
 
     rows = _load("sphere_drag_conv.csv") + _load("sphere_drag_conv_lowblock.csv")
 
@@ -72,18 +77,19 @@ def main():
     # Clift, Grace & Weber (1978) standard drag curve at Re = 20.
     clift = 1.2 * (1 + 0.15 * 20 ** 0.687)
 
-    palette = sns.color_palette("crest", len(beta))
+    palette = sns.color_palette("bright", len(beta))  # vivid; pops on dark
 
     fig, ax = plt.subplots(figsize=(8.4, 6.2), constrained_layout=True)
+    ax.grid(True, color="0.45", alpha=0.4, lw=0.6)
 
-    ax.plot(bb * 100, fit, "-", color="0.35", lw=2.2, zorder=1)
+    ax.plot(bb * 100, fit, "-", color="0.8", lw=2.2, zorder=1)
     for color, (b, c) in zip(palette, zip(beta, cd)):
-        ax.plot(b * 100, c, "o", color=color, ms=12, mec="0.2", mew=1.0, zorder=4)
+        ax.plot(b * 100, c, "o", color=color, ms=12, mec="0.92", mew=1.0, zorder=4)
     if r8:
-        ax.plot([b for b, _ in r8], [c for _, c in r8], "s", color="0.45",
+        ax.plot([b for b, _ in r8], [c for _, c in r8], "s", color="0.7",
                 ms=11, mfc="none", mew=2.0, zorder=3)
-    ax.axhline(clift, color="k", ls="--", lw=1.5, zorder=2)
-    ax.plot(0, c0, "D", color="#a50f15", ms=13, mec="0.2", mew=1.0, zorder=5)
+    ax.axhline(clift, color="0.9", ls="--", lw=1.5, zorder=2)
+    ax.plot(0, c0, "D", color="#ff6b6b", ms=13, mec="0.92", mew=1.0, zorder=5)
 
     ax.set_xlabel(r"blockage ratio $D/W$  [\%]" if _USETEX
                   else r"blockage ratio $D/W$  [%]")
@@ -93,16 +99,18 @@ def main():
     ax.set_xlim(-1.2, max(21, beta.max() * 100 * 1.05))
 
     handles = [
-        Line2D([0], [0], color="0.3", lw=2.2, marker="o", ms=11, mec="0.2",
+        Line2D([0], [0], color="0.9", lw=2.2, marker="o", ms=11, mec="0.92",
                label=fr"Kraken STL, $R=16$ (CUDA F64), fit $R^2={r2:.4f}$"),
-        Line2D([0], [0], color="0.45", ls="none", marker="s", mfc="none",
+        Line2D([0], [0], color="0.7", ls="none", marker="s", mfc="none",
                ms=10, mew=2.0, label=r"Kraken STL, $R=8$ (resolution probe)"),
-        Line2D([0], [0], color="#a50f15", ls="none", marker="D", ms=11,
-               mec="0.2", label=fr"extrapolated $\beta\to 0$: $C_d={c0:.2f}$"),
-        Line2D([0], [0], color="k", ls="--", lw=1.5,
+        Line2D([0], [0], color="#ff6b6b", ls="none", marker="D", ms=11,
+               mec="0.92", label=fr"extrapolated $\beta\to 0$: $C_d={c0:.2f}$"),
+        Line2D([0], [0], color="0.9", ls="--", lw=1.5,
                label=fr"Clift (1978) free stream: $C_d={clift:.2f}$"),
     ]
-    ax.legend(handles=handles, loc="upper left", fontsize=11, framealpha=0.9)
+    leg = ax.legend(handles=handles, loc="upper left", fontsize=11,
+                    facecolor=DARK, edgecolor="0.5", labelcolor="0.9",
+                    framealpha=0.85)
 
     out = os.path.join(HERE, "comparison.png")
     fig.savefig(out, dpi=150)

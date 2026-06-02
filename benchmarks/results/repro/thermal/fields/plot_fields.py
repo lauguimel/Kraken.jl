@@ -29,12 +29,16 @@ import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
 
 plt.rcParams.update({
     "text.usetex": _USETEX,
     "font.family": "serif",
     "font.serif": ["Computer Modern Roman", "DejaVu Serif"],
     "mathtext.fontset": "cm",
+    "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+    "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+    "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
     "font.size": 11,
     "axes.labelsize": 12,
     "axes.titlesize": 12,
@@ -60,8 +64,8 @@ def main():
     speed_n = speed / umax
 
     panels = [
-        (T, r"$T$  (temperature)", "coolwarm", 0.0, 1.0),
-        (speed_n, r"$|U|/U_{\max}$", "viridis", 0.0, None),
+        (T, r"$T$  (temperature)", "inferno", 0.0, 1.0),
+        (speed_n, r"$|U|/U_{\max}$", "magma", 0.0, None),
     ]
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.6), constrained_layout=True)
 
@@ -70,13 +74,14 @@ def main():
             vmax = np.nanpercentile(field, 99.5)
         pcm = ax.pcolormesh(X, Y, field, cmap=cmap, shading="auto",
                             vmin=vmin, vmax=vmax)
-        ax.streamplot(x, y, ux, uy, color="k", linewidth=0.8,
+        ax.streamplot(x, y, ux, uy, color="white", linewidth=0.8,
                       density=1.5, arrowsize=0.8)
         ax.set(xlabel=r"$x/H$", ylabel=r"$y/H$", title=label, aspect="equal")
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         cbar = fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
-        cbar.ax.tick_params(labelsize=9)
+        cbar.ax.tick_params(labelsize=9, color="0.7")
+        cbar.outline.set_edgecolor("0.55")
 
     fig.suptitle("Differentially heated cavity ($Ra=10^4$) --- temperature "
                  + ("\\& streamlines (Kraken)" if _USETEX

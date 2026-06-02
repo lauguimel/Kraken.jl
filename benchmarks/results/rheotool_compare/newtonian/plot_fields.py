@@ -23,15 +23,23 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
+# Diverging cmap centred on the theme bg: near-zero blends into the page,
+# only strong +/- values pop. Avoids the white block of light-centred RdBu.
+DIVR = LinearSegmentedColormap.from_list("dark_div", ["#4ea1d3", DARK, "#ff6b6b"])
 
 plt.rcParams.update({
     "text.usetex": _USETEX,
     "font.family": "serif",
     "font.serif": ["Computer Modern Roman", "DejaVu Serif"],
     "mathtext.fontset": "cm",
+    "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+    "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+    "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
     "font.size": 11,
     "axes.labelsize": 12,
     "axes.titlesize": 12,
@@ -60,8 +68,8 @@ def main():
     omega = duy_dx - dux_dy
 
     panels = [
-        (speed_n, r"$|U|/U_{\mathrm{lid}}$", "viridis", False),
-        (omega, r"$\omega_z$  (vorticity)", "RdBu_r", True),
+        (speed_n, r"$|U|/U_{\mathrm{lid}}$", "magma", False),
+        (omega, r"$\omega_z$  (vorticity)", DIVR, True),
     ]
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.6), constrained_layout=True)
 
@@ -73,13 +81,14 @@ def main():
             vmin, vmax = 0.0, np.nanpercentile(field, 99.5)
         pcm = ax.pcolormesh(X, Y, field, cmap=cmap, shading="auto",
                             vmin=vmin, vmax=vmax)
-        ax.streamplot(x, y, ux, uy, color="k", linewidth=0.8,
+        ax.streamplot(x, y, ux, uy, color="white", linewidth=0.8,
                       density=1.5, arrowsize=0.8)
         ax.set(xlabel=r"$x/L$", ylabel=r"$y/L$", title=label, aspect="equal")
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         cbar = fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
-        cbar.ax.tick_params(labelsize=9)
+        cbar.ax.tick_params(labelsize=9, color="0.7")
+        cbar.outline.set_edgecolor("0.55")
 
     fig.suptitle("Lid-driven cavity --- velocity field \\& streamlines (Kraken)"
                  if _USETEX else

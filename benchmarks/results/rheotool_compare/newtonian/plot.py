@@ -31,6 +31,7 @@ from matplotlib.lines import Line2D
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = [100, 400, 1000]
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
 
 
 def load(re):
@@ -56,10 +57,14 @@ def _draw(ax, series, color):
 
 
 def main():
-    sns.set_theme(style="whitegrid", context="talk", font="serif")
-    plt.rcParams.update({"text.usetex": _USETEX, "font.family": "serif",
-                         "mathtext.fontset": "cm"})
-    palette = sns.color_palette("crest", len(RES))
+    sns.set_theme(style="ticks", context="talk", font="serif")
+    plt.rcParams.update({
+        "text.usetex": _USETEX, "font.family": "serif", "mathtext.fontset": "cm",
+        "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+        "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+        "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
+    })
+    palette = sns.color_palette("bright", len(RES))  # vivid; pops on dark
     fig, (axu, axv) = plt.subplots(1, 2, figsize=(14, 6.2), constrained_layout=True)
 
     for color, re in zip(palette, RES):
@@ -67,6 +72,8 @@ def main():
         _draw(axu, d["u_vert"], color)
         _draw(axv, d["v_horiz"], color)
 
+    for ax in (axu, axv):
+        ax.grid(True, color="0.45", alpha=0.4, lw=0.6)
     axu.set(xlabel=r"$|U|/U_{\mathrm{lid}}$", ylabel=r"$y/L$",
             title=r"$u$ along vertical centerline $u_{x=0.5}$")
     axv.set(xlabel=r"$|U|/U_{\mathrm{lid}}$", ylabel=r"$x/L$",
@@ -75,16 +82,20 @@ def main():
     re_handles = [Line2D([0], [0], color=c, lw=3.2, label=fr"$Re = {re}$")
                   for c, re in zip(palette, RES)]
     solver_handles = [
-        Line2D([0], [0], color="0.3", lw=2.4, ls="-", label="Kraken (LBM)"),
-        Line2D([0], [0], color="0.3", ls="none", marker="o", mfc="none",
-               mec="0.3", ms=8, mew=1.6, label="Ghia (1982)"),
+        Line2D([0], [0], color="0.9", lw=2.4, ls="-", label="Kraken (LBM)"),
+        Line2D([0], [0], color="0.9", ls="none", marker="o", mfc="none",
+               mec="0.9", ms=8, mew=1.6, label="Ghia (1982)"),
     ]
     def _legends(ax, re_loc, solver_loc):
-        leg_re = ax.legend(handles=re_handles, loc=re_loc,
-                           fontsize=10, title="Reynolds", framealpha=0.9)
+        leg_re = ax.legend(handles=re_handles, loc=re_loc, fontsize=10,
+                           title="Reynolds", facecolor=DARK, edgecolor="0.5",
+                           labelcolor="0.9", framealpha=0.85)
+        leg_re.get_title().set_color("0.9")
         ax.add_artist(leg_re)
-        ax.legend(handles=solver_handles, loc=solver_loc,
-                  fontsize=10, title="Solver", framealpha=0.9)
+        leg2 = ax.legend(handles=solver_handles, loc=solver_loc, fontsize=10,
+                         title="Solver", facecolor=DARK, edgecolor="0.5",
+                         labelcolor="0.9", framealpha=0.85)
+        leg2.get_title().set_color("0.9")
 
     # Right (v) panel: legends in the opposite corners to the left (u) panel.
     _legends(axu, re_loc="lower right", solver_loc="upper left")

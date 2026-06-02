@@ -5,12 +5,12 @@ Self-contained: reads ``field_ux.csv`` / ``field_uy.csv`` and the polymeric
 stress components ``field_tau_p_xx.csv`` / ``field_tau_p_yy.csv`` (Kraken 2-D
 fields on their native regular lattice, one row per x-index) next to this
 script and renders a publication figure -- a polymer-stress scalar background
-with black streamlines of the in-plane flow overlaid, revealing the
+with white streamlines of the in-plane flow overlaid, revealing the
 viscoelastic wake (the elongated stress trail of stretched polymer downstream
 of the cylinder).
 
 Left panel:  the trace of the polymeric stress, tr(tau_p) = tau_xx + tau_yy
-             (signed, RdBu_r).
+             (signed, dark-centred diverging cmap).
 Right panel: the normal stress tau_p,xx, which peaks in the downstream wake.
 
 The Kraken lattice is already a regular grid, so no interpolation is needed:
@@ -31,9 +31,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+from matplotlib.colors import LinearSegmentedColormap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
+# Diverging cmap centred on the theme bg: near-zero blends into the page,
+# only strong +/- values pop. Avoids the white block of light-centred RdBu.
+DIVR = LinearSegmentedColormap.from_list("dark_div", ["#4ea1d3", DARK, "#ff6b6b"])
 
 # Domain geometry (lattice units) and cylinder placement.
 NX, NY = 240.0, 80.0
@@ -44,6 +49,9 @@ plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["Computer Modern Roman", "DejaVu Serif"],
     "mathtext.fontset": "cm",
+    "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+    "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+    "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
     "font.size": 11,
     "axes.labelsize": 12,
     "axes.titlesize": 12,
@@ -77,8 +85,8 @@ def main():
 
     panels = [
         (trace, r"$\mathrm{tr}\,\boldsymbol{\tau}_p = \tau_{xx}+\tau_{yy}$",
-         "RdBu_r", True),
-        (txxm, r"$\tau_{p,xx}$  (normal stress)", "RdBu_r", True),
+         DIVR, True),
+        (txxm, r"$\tau_{p,xx}$  (normal stress)", DIVR, True),
     ]
     fig, axes = plt.subplots(2, 1, figsize=(11, 6.4), constrained_layout=True)
 
@@ -88,16 +96,17 @@ def main():
         vmin = -vmax
         pcm = ax.pcolormesh(X, Y, field, cmap=cmap, shading="auto",
                             vmin=vmin, vmax=vmax)
-        ax.streamplot(x, y, uxm.filled(0.0), uym.filled(0.0), color="k",
+        ax.streamplot(x, y, uxm.filled(0.0), uym.filled(0.0), color="white",
                       linewidth=0.8, density=1.5, arrowsize=0.8)
-        ax.add_patch(Circle((CX, CY), R, facecolor="0.75", edgecolor="k",
+        ax.add_patch(Circle((CX, CY), R, facecolor="0.75", edgecolor="0.92",
                             linewidth=0.8, zorder=5))
         ax.set(xlabel=r"$x$ (lattice units)", ylabel=r"$y$",
                title=label, aspect="equal")
         ax.set_xlim(0, nx - 1)
         ax.set_ylim(0, ny - 1)
         cbar = fig.colorbar(pcm, ax=ax, fraction=0.022, pad=0.02)
-        cbar.ax.tick_params(labelsize=9)
+        cbar.ax.tick_params(labelsize=9, color="0.7")
+        cbar.outline.set_edgecolor("0.55")
 
     fig.suptitle("Viscoelastic flow past a cylinder ($Wi=0.5$, Oldroyd-B) --- "
                  + ("polymer stress \\& streamlines (Kraken)" if _USETEX

@@ -31,6 +31,7 @@ import seaborn as sns
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
+DARK = "#1f2424"  # Documenter dark theme background
 
 # Published / derived reference ceilings (see README + the docs page).
 # A100-40GB peak HBM 1.555 TB/s, 304 bytes/update F64 D2Q9 -> 5115 MLUPS.
@@ -49,9 +50,13 @@ def _load():
 
 
 def main():
-    sns.set_theme(style="whitegrid", context="talk", font="serif")
-    plt.rcParams.update({"text.usetex": _USETEX, "font.family": "serif",
-                         "mathtext.fontset": "cm"})
+    sns.set_theme(style="ticks", context="talk", font="serif")
+    plt.rcParams.update({
+        "text.usetex": _USETEX, "font.family": "serif", "mathtext.fontset": "cm",
+        "figure.facecolor": DARK, "axes.facecolor": DARK, "savefig.facecolor": DARK,
+        "text.color": "0.92", "axes.labelcolor": "0.92", "axes.titlecolor": "0.96",
+        "axes.edgecolor": "0.55", "xtick.color": "0.85", "ytick.color": "0.85",
+    })
 
     rows = sorted(_load(), key=lambda r: int(r["N"]))
     Ns = [int(r["N"]) for r in rows]
@@ -61,10 +66,11 @@ def main():
     fig, (axn, axb) = plt.subplots(1, 2, figsize=(14, 6.2), constrained_layout=True)
 
     # --- left: MLUPS vs N -------------------------------------------------
-    palette = sns.color_palette("crest", len(Ns))
-    axn.plot(Ns, mlups, "-", color="0.35", lw=2.0, zorder=1)
+    axn.grid(True, color="0.45", alpha=0.4, lw=0.6)
+    palette = sns.color_palette("bright", len(Ns))  # vivid; pops on dark
+    axn.plot(Ns, mlups, "-", color="0.8", lw=2.0, zorder=1)
     for color, n, m in zip(palette, Ns, mlups):
-        axn.plot(n, m, "o", color=color, ms=13, mec="0.2", mew=1.0, zorder=3)
+        axn.plot(n, m, "o", color=color, ms=13, mec="0.92", mew=1.0, zorder=3)
         axn.annotate(fr"${m:.0f}$", (n, m), textcoords="offset points",
                      xytext=(0, 12), ha="center", fontsize=11)
     axn.set_xscale("log", base=2)
@@ -76,21 +82,22 @@ def main():
     axn.set_ylim(0, best * 1.18)
 
     # --- right: Kraken best vs roofline / published bars ------------------
+    axb.grid(True, axis="x", color="0.45", alpha=0.4, lw=0.6)
     bars = [("Kraken (best)", best, "kraken")] + REFERENCES
     labels = [b[0] for b in bars]
     vals = [b[1] for b in bars]
     kinds = [b[2] for b in bars]
-    bar_palette = sns.color_palette("crest", len(bars))
+    bar_palette = sns.color_palette("bright", len(bars))  # vivid; pops on dark
     colors = []
     for k, c in zip(kinds, bar_palette):
         if k == "kraken":
-            colors.append("#a50f15")
+            colors.append("#ff6b6b")
         elif k == "ceiling":
-            colors.append("0.55")
+            colors.append("0.6")
         else:
             colors.append(c)
     ypos = range(len(bars))
-    axb.barh(list(ypos), vals, color=colors, edgecolor="0.2", height=0.62)
+    axb.barh(list(ypos), vals, color=colors, edgecolor="0.85", height=0.62)
     for y, v in zip(ypos, vals):
         ratio = v / best if v != best else None
         txt = fr"${v:.0f}$"
