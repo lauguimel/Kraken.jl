@@ -60,6 +60,7 @@ using Kraken
     include("test_postprocess.jl")
     include("test_rheology.jl")
     include("test_viscoelastic.jl")
+    include("test_viscoelastic_krk.jl")
 
     @testset "Kraken.Units" begin
         include("test_units.jl")
