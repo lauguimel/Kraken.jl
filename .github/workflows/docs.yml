@@ -1,9 +1,11 @@
 name: Documentation
 on:
   push:
-    branches: [main, dev/v0.3-campaign]
+    branches: [main, dev/v0.3-campaign, 'release/**']
+    tags: ['v*']
   pull_request:
     branches: [main, dev/v0.3-campaign]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -24,5 +26,5 @@ jobs:
       - name: Build docs and check links
         run: julia --project=docs docs/make.jl
         env:
-          DOCUMENTER_LINKCHECK: "true"
+          DOCUMENTER_LINKCHECK: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,7 +1,7 @@
 # Kraken.jl
 
 [![Build Status](https://github.com/lauguimel/Kraken.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/lauguimel/Kraken.jl/actions/workflows/CI.yml)
-[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://lauguimel.github.io/Kraken.jl/dev)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://lauguimel.github.io/Kraken.jl/stable)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A GPU-portable Lattice Boltzmann (LBM) framework written in Julia, targeting
