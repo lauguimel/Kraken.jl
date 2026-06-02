@@ -168,6 +168,7 @@ makedocs(;
                 "Cartesian cavity" => "users/benchmarks/cartesian-cavity.md",
                 "Thermal natural convection" => "users/benchmarks/thermal-natural-convection.md",
                 "Sphere drag 3D" => "users/benchmarks/sphere-drag-3d.md",
+                "Viscoelastic cylinder (Oldroyd-B)" => "users/benchmarks/viscoelastic-cylinder.md",
                 "GPU certification" => "users/benchmarks/gpu-certification.md",
             ],
         ],
