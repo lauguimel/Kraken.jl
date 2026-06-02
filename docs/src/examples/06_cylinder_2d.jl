@@ -162,7 +162,7 @@ err    = abs(Cd - Cd_ref) / Cd_ref * 100   ## percent error
 #   the freestream velocity
 # - The parabolic inlet profile is visible on the left boundary
 #
-# ![Velocity magnitude field for flow around a cylinder at Re = 20.  The stagnation point is visible upstream, with accelerated flow above and below the cylinder and a symmetric closed wake downstream.](cylinder_umag.svg)
+# ![Velocity magnitude field for flow around a cylinder at Re = 20.  The stagnation point is visible upstream, with accelerated flow above and below the cylinder and a symmetric closed wake downstream.](cylinder_umag.png)
 #
 # ---
 #
