@@ -11,7 +11,7 @@ using KernelAbstractions
 end
 
 function _logfv_compute_bsd_drag_2d(
-    dudx, dudy, dvdx, dvdy, is_solid, Nx::Integer, Ny::Integer;
+    dudx, dudy, dvdx, dvdy, q_wall, Nx::Integer, Ny::Integer;
     cx::Real,
     cy::Real,
     radius::Real,
@@ -37,8 +37,12 @@ function _logfv_compute_bsd_drag_2d(
     end
 
     return compute_polymeric_drag_2d(
-        tau_bsd_xx, tau_bsd_xy, tau_bsd_yy, is_solid, Nx_i, Ny_i;
+        tau_bsd_xx, tau_bsd_xy, tau_bsd_yy, q_wall, Nx_i, Ny_i;
+        cx=Float64(cx),
+        cy=Float64(cy),
+        radius=Float64(radius),
         extrapolate=true,
+        reconstruction_order,
     )
 end
 
@@ -491,8 +495,12 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
                 (Fx=Float64(sum(Array(drag_tx))), Fy=Float64(sum(Array(drag_ty))))
             else
                 compute_polymeric_drag_2d(
-                    tauxx, tauxy, tauyy, is_solid, Nx, Ny;
+                    tauxx, tauxy, tauyy, q_wall, Nx, Ny;
+                    cx=Float64(drag_cx),
+                    cy=Float64(drag_cy),
+                    radius=Float64(drag_radius),
                     extrapolate=true,
+                    reconstruction_order=2,
                 )
             end
             drag_bsd = if embedded_drag
@@ -507,7 +515,7 @@ function _run_viscoelastic_logfv_step_channel_coupled_2d(
                 (Fx=Float64(sum(Array(drag_tx))), Fy=Float64(sum(Array(drag_ty))))
             else
                 _logfv_compute_bsd_drag_2d(
-                    dudx, dudy, dvdx, dvdy, is_solid, Nx, Ny;
+                    dudx, dudy, dvdx, dvdy, q_wall, Nx, Ny;
                     cx=Float64(drag_cx),
                     cy=Float64(drag_cy),
                     radius=Float64(drag_radius),

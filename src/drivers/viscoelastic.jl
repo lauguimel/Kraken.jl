@@ -1,5 +1,151 @@
 # --- Viscoelastic simulation drivers (lbm branch, f[i,j,q] layout) ---
 
+const _D2Q9_CX_VISCO = (0, 1, 0, -1,  0, 1, -1, -1,  1)
+const _D2Q9_CY_VISCO = (0, 0, 1,  0, -1, 1,  1, -1, -1)
+
+"""
+    reconstruct_wall_link_value_2d(field, i, j, q, q_w; location=:cut, order=1)
+
+Reconstruct a smooth physical field at a wall-adjacent cell or at the
+cut-point of link `q`, using only interior fluid samples along `-c_q`.
+`location=:cell` evaluates at the wall-adjacent cell center (`x=0`);
+`location=:cut` evaluates at the cut point (`x=q_w`).  The samples are at
+`x=-1,-2` for linear reconstruction and `x=-1,-2,-3` for quadratic
+reconstruction. If the required interior samples are out of bounds, the
+function falls back to the nearest available lower-order reconstruction.
+"""
+function reconstruct_wall_link_value_2d(field::AbstractMatrix, i::Integer, j::Integer,
+                                        q::Integer, q_w::Real;
+                                        location::Symbol=:cut,
+                                        order::Integer=1)
+    Nx, Ny = size(field)
+    cxq = _D2Q9_CX_VISCO[q]
+    cyq = _D2Q9_CY_VISCO[q]
+    x = location === :cell ? 0.0 :
+        (location === :cut ? Float64(q_w) :
+         error("unknown reconstruction location $(location); expected :cell or :cut"))
+
+    i1 = i - cxq; j1 = j - cyq
+    1 <= i1 <= Nx && 1 <= j1 <= Ny || return Float64(field[i, j])
+    y1 = Float64(field[i1, j1])
+
+    i2 = i - 2cxq; j2 = j - 2cyq
+    1 <= i2 <= Nx && 1 <= j2 <= Ny || return y1
+    y2 = Float64(field[i2, j2])
+
+    if order >= 2
+        i3 = i - 3cxq; j3 = j - 3cyq
+        if 1 <= i3 <= Nx && 1 <= j3 <= Ny
+            y3 = Float64(field[i3, j3])
+            return 0.5 * (x + 2.0) * (x + 3.0) * y1 -
+                   (x + 1.0) * (x + 3.0) * y2 +
+                   0.5 * (x + 1.0) * (x + 2.0) * y3
+        end
+    end
+
+    return (x + 2.0) * y1 - (x + 1.0) * y2
+end
+
+"""
+    compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy, q_wall, Nx, Ny; cx, cy)
+        -> (Fx, Fy)
+
+Polymeric stress contribution to the drag on a solid surface.
+
+For a curved LI-BB surface, prefer the `q_wall` method. It evaluates tau at
+the actual cut point `x_w = x_f + q_w c_q`, computes the local circle normal
+from `(cx, cy)`, and integrates `tau * n ds` with arc-length weights over the
+ordered cut points. This is a surface quadrature, unlike the older
+solid-neighbour link count.
+
+Sign is consistent with `compute_drag_mea_2d`: in the Newtonian limit
+(Wi->0), tau_p is approximately 2 * nu_p * S, and Cd_p + Cd_solvent should
+equal the total Cd of a Newtonian fluid with nu_total = nu_s + nu_p.
+"""
+function compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy,
+                                     q_wall::AbstractArray{<:Real,3},
+                                     Nx::Integer, Ny::Integer;
+                                     cx::Real, cy::Real,
+                                     radius::Union{Nothing,Real}=nothing,
+                                     extrapolate::Bool=true,
+                                     reconstruction_order::Integer=1,
+                                     reconstruction_mode::Symbol=:interior)
+    txx = Array(tau_p_xx)
+    txy = Array(tau_p_xy)
+    tyy = Array(tau_p_yy)
+    qw = Array(q_wall)
+    cxv = _D2Q9_CX_VISCO
+    cyv = _D2Q9_CY_VISCO
+
+    points = Vector{NTuple{7,Float64}}()
+    @inbounds for j in 1:Ny, i in 1:Nx, q in 2:9
+        q_w = Float64(qw[i, j, q])
+        q_w > 0 || continue
+        xw = Float64(i - 1) + q_w * Float64(cxv[q])
+        yw = Float64(j - 1) + q_w * Float64(cyv[q])
+        rx = xw - Float64(cx)
+        ry = yw - Float64(cy)
+        r = hypot(rx, ry)
+        r > 0 || continue
+        nx = rx / r
+        ny = ry / r
+
+        txx_w = Float64(txx[i, j])
+        txy_w = Float64(txy[i, j])
+        tyy_w = Float64(tyy[i, j])
+        if extrapolate
+            if reconstruction_mode === :interior
+                txx_w = reconstruct_wall_link_value_2d(txx, i, j, q, q_w;
+                                                       location=:cut,
+                                                       order=reconstruction_order)
+                txy_w = reconstruct_wall_link_value_2d(txy, i, j, q, q_w;
+                                                       location=:cut,
+                                                       order=reconstruction_order)
+                tyy_w = reconstruct_wall_link_value_2d(tyy, i, j, q, q_w;
+                                                       location=:cut,
+                                                       order=reconstruction_order)
+            elseif reconstruction_mode === :wall_cell
+                ib = i - cxv[q]
+                jb = j - cyv[q]
+                if 1 <= ib <= Nx && 1 <= jb <= Ny
+                    txx_w += q_w * (txx_w - Float64(txx[ib, jb]))
+                    txy_w += q_w * (txy_w - Float64(txy[ib, jb]))
+                    tyy_w += q_w * (tyy_w - Float64(tyy[ib, jb]))
+                end
+            else
+                error("unknown reconstruction_mode $(reconstruction_mode); expected :interior or :wall_cell")
+            end
+        end
+
+        theta = atan(ry, rx)
+        push!(points, (theta, r, nx, ny, txx_w, txy_w, tyy_w))
+    end
+
+    isempty(points) && return (Fx=0.0, Fy=0.0)
+    sort!(points; by=first)
+    R = if isnothing(radius)
+        r_sum = 0.0
+        for p in points
+            r_sum += p[2]
+        end
+        r_sum / length(points)
+    else
+        Float64(radius)
+    end
+    Fx_p = 0.0
+    Fy_p = 0.0
+    npts = length(points)
+    @inbounds for k in 1:npts
+        theta_prev = k == 1 ? points[end][1] - 2pi : points[k - 1][1]
+        theta_next = k == npts ? points[1][1] + 2pi : points[k + 1][1]
+        ds = R * 0.5 * (theta_next - theta_prev)
+        _, _, nx, ny, txx_w, txy_w, tyy_w = points[k]
+        Fx_p += (txx_w * nx + txy_w * ny) * ds
+        Fy_p += (txy_w * nx + tyy_w * ny) * ds
+    end
+    return (Fx=Fx_p, Fy=Fy_p)
+end
+
 """
     compute_polymeric_drag_2d(tau_p_xx, tau_p_xy, tau_p_yy, is_solid, Nx, Ny)
         → (Fx, Fy)
