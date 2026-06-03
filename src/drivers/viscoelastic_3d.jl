@@ -14,9 +14,10 @@
 # source is active; the standard MEA on post-source f captures the full
 # σ_s + τ_p).
 #
-# Log-conformation 3D is NOT yet implemented (needs 3×3 symmetric
-# eigen-decomp). For now `polymer_model` must be `OldroydB`. The driver
-# refuses to silently run with `LogConfOldroydB` in 3D.
+# Log-conformation 3D has low-level Ψ kernels, but this sphere driver has
+# not yet wired the log-field inlet/outlet/wall treatment. For now
+# `polymer_model` must be `OldroydB`. The driver refuses to silently run
+# with `LogConfOldroydB` in 3D.
 
 """
     run_conformation_sphere_libb_3d(; Nx, Ny, Nz, radius, cx, cy, cz,
@@ -67,7 +68,7 @@ function run_conformation_sphere_libb_3d(;
         polymer_model = OldroydB(G=G_, λ=FT(lambda))
     end
     if uses_log_conformation(polymer_model)
-        error("3D log-conformation not yet implemented — pass an OldroydB model.")
+        error("3D log-conformation is not yet wired into the sphere driver; pass an OldroydB model.")
     end
     λ_p     = polymer_relaxation_time(polymer_model)
     ν_p_eff = polymer_modulus(polymer_model) * λ_p
