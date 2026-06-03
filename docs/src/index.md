@@ -19,6 +19,9 @@ hero:
     - theme: alt
       text: Validation matrix
       link: /users/benchmarks/validation-matrix
+    - theme: alt
+      text: Cite
+      link: /#citing-kraken
 
 features:
   - icon: <img width="64" src="/showcases/cavity_re1000.gif"/>
@@ -130,3 +133,24 @@ krk cavity.krk
 All four animations on this page are produced by the validated drivers shown in
 the table above; reproduce them from the [examples](examples/04_cavity_2d.md)
 and [benchmarks](benchmarks/accuracy.md).
+
+## Citing Kraken
+
+If you use Kraken.jl in your research, please cite it. The repository ships a
+[`CITATION.cff`](https://github.com/lauguimel/Kraken.jl/blob/main/CITATION.cff),
+so GitHub's **"Cite this repository"** button (top-right of the
+[repository](https://github.com/lauguimel/Kraken.jl)) gives a ready-made entry.
+
+```bibtex
+@software{kraken_jl,
+  author  = {Maitrejean, Guillaume and Sauret, Emilie},
+  title   = {{Kraken.jl}},
+  year    = {2026},
+  version = {0.2.0},
+  url     = {https://github.com/lauguimel/Kraken.jl}
+}
+```
+
+A citable **DOI** (Zenodo) will be added with the archived `v0.2.0` release —
+update the `doi` field in `CITATION.cff` and the `doi = {...}` line above once it
+is minted.
