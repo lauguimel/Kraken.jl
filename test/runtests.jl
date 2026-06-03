@@ -66,6 +66,7 @@ using Kraken
     @testset "Kraken.Units" begin
         include("test_units.jl")
         include("test_units_stability.jl")
+        include("test_units_steady_state.jl")
         include("test_units_audit.jl")
         include("test_units_krk.jl")
         include("test_units_thermal.jl")
