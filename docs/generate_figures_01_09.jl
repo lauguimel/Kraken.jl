@@ -407,10 +407,10 @@ let
     Nx, Ny = size(ux)
     umag = @. sqrt(ux^2 + uy^2)
 
-    # Dark Documenter-theme styling (#1f2424 bg, magma sequential field, light
-    # text) to match the dark vitrine. Saved as PNG — the per-cell heatmap
+    # Dark docs styling (#1b1b1f Vitepress page bg, magma sequential field, light
+    # text) to match the dark page. Saved as PNG — the per-cell heatmap
     # exports to a multi-MB SVG, so raster it directly.
-    DARK = "#1f2424"
+    DARK = "#1b1b1f"
     fig = Figure(size=(800, 350), backgroundcolor=DARK)
     ax = Axis(fig[1, 1]; backgroundcolor=DARK,
               title="Velocity magnitude — Re=$Re", titlecolor="gray92",
