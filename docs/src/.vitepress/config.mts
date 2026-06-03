@@ -36,18 +36,22 @@ function sections(...names: string[]): any[] {
 }
 
 const sectionedSidebar: Record<string, any[]> = {
-  '/users/': section('Users'),
-  '/users/tutorials/': section('Users'),
-  '/users/benchmarks/': section('Users'),
-  '/api/': sections('API', 'Julia API reference'),
-  '/theory/': section('Theory'),
-  '/examples/': section('Examples-tutorials'),
+  // Guide
+  '/installation': section('Guide'),
+  '/getting_started': section('Guide'),
+  '/concepts_index': section('Guide'),
+  '/capabilities': section('Guide'),
+  '/users/krk-reference': section('Guide'),
+  // Tutorials (case tutorials + Literate examples)
+  '/users/tutorials/': section('Tutorials'),
+  '/examples/': section('Tutorials'),
+  // Benchmarks (validation cases + performance)
+  '/users/benchmarks/': section('Benchmarks'),
   '/benchmarks/': section('Benchmarks'),
-  '/krk/': section('.krk DSL reference'),
-  '/installation': section('Installation'),
-  '/getting_started': section('Getting started'),
-  '/concepts_index': section('Concepts'),
-  '/capabilities': section('Capabilities'),
+  // Reference (.krk DSL + API + Julia API + Theory)
+  '/krk/': section('Reference'),
+  '/api/': section('Reference'),
+  '/theory/': section('Reference'),
   '/': flatSidebar,
 }
 
