@@ -101,6 +101,7 @@ include("kernels/viscoelastic_3d.jl")
 include("kernels/logconformation_lbm_3d.jl")
 include("drivers/viscoelastic_3d.jl")
 include("drivers/viscoelastic_couette_3d.jl")
+include("drivers/viscoelastic_poiseuille_3d.jl")
 include("drivers/step_geometry_2d.jl")
 include("drivers/viscoelastic_logfv_2d.jl")
 
@@ -559,6 +560,7 @@ export eigen_sym2x2, mat_exp_sym2x2, mat_log_sym2x2, decompose_velocity_gradient
 # 3D viscoelastic (Oldroyd-B confined sphere + planar Couette)
 export run_conformation_sphere_libb_3d
 export run_conformation_couette_libb_3d
+export run_conformation_poiseuille_libb_3d
 export eigen_sym3x3, mat_exp_sym3x3, mat_log_spd_sym3x3
 export apply_hermite_source_3d!, update_polymer_stress_3d!
 export init_conformation_field_3d!, collide_conformation_3d!
