@@ -94,7 +94,7 @@ u-profile (along the lid axis) carried the half-cell artifact.
 Full machine-readable data: `bench/cartesian_rheotool/cavity_comparison_table.csv`
 (both `L2_rel` and `L2_absRMS` columns for every entry).
 
-### Achieving < 1 %
+### Achieving the strict gate
 
 The strict **< 1 % relative-L2** gate **is met**. The earlier 2–3 % was *not* a BGK or
 resolution limitation — it was the half-cell coordinate artifact described under

@@ -1,6 +1,8 @@
 using Documenter
 using DocumenterCitations
+using DocumenterVitepress
 using Literate
+using NodeJS_20_jll
 using PlutoStaticHTML
 using Kraken
 
@@ -141,13 +143,12 @@ makedocs(;
     sitename = "Kraken.jl",
     modules = [Kraken],
     plugins = [bib],
-    format = Documenter.HTML(
-        prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical = "https://lauguimel.github.io/Kraken.jl",
-        edit_link = "lbm",
-        repolink = "https://github.com/lauguimel/Kraken.jl",
-        mathengine = Documenter.MathJax3(),
-        size_threshold = nothing,
+    format = DocumenterVitepress.MarkdownVitepress(
+        repo = "github.com/lauguimel/Kraken.jl",
+        devurl = "dev",
+        devbranch = "release/v0.2",
+        build_vitepress = false,
+        keep = :patch,
     ),
     pages = [
         "Home" => "index.md",
@@ -251,7 +252,147 @@ makedocs(;
     checkdocs = :none,
 )
 
-deploydocs(
-    repo = "github.com/lauguimel/Kraken.jl.git",
-    devbranch = "main",
-)
+# --- Prune orphan pages, then invoke Vitepress build manually ---
+# DocumenterVitepress copies all of `docs/src/` into `build/.documenter/`.
+# Keep the v0.2 navigation strict while preserving hidden pages that visible
+# pages link to, so Vitepress dead-link checks stay useful.
+const VITEPRESS_KEEP_HIDDEN = Set{String}([
+    "benchmarks/refinement_showcase.md",
+    "benchmarks/mlups_cpu_gpu.md",
+])
+
+function generated_sidebar_pages(config_path::AbstractString)
+    config = read(config_path, String)
+    pages = Set{String}()
+    for m in eachmatch(r"link: '/([^'#?]*)'", config)
+        link = String(m.captures[1])
+        isempty(link) && continue
+        push!(pages, link * ".md")
+    end
+    return pages
+end
+
+function prune_vitepress_markdown!(vp_input::AbstractString)
+    keep = union(
+        generated_sidebar_pages(joinpath(vp_input, ".vitepress", "config.mts")),
+        VITEPRESS_KEEP_HIDDEN,
+    )
+    for (root, _, files) in walkdir(vp_input)
+        for file in files
+            endswith(file, ".md") || continue
+            path = joinpath(root, file)
+            rel = replace(relpath(path, vp_input), '\\' => '/')
+            rel in keep || rm(path; force = true)
+        end
+    end
+end
+
+function prune_vitepress_bases!(build_dir::AbstractString)
+    bases_file = joinpath(build_dir, "bases.txt")
+    bases = isfile(bases_file) ? readlines(bases_file) : String[]
+    patch_base = r"^v\d+\.\d+\.\d+(?:[-+].*)?$"
+    if any(base -> occursin(patch_base, base), bases)
+        bases = filter(base -> base == "stable" || occursin(patch_base, base), bases)
+        open(bases_file, "w") do io
+            foreach(base -> println(io, base), bases)
+        end
+    end
+    return bases
+end
+
+function vitepress_base_url(deploy_abspath::AbstractString, base::AbstractString)
+    deploy_relpath = isempty(base) ? "" : "$(base)/"
+    return deploy_abspath == "/" ? "/$(deploy_relpath)" : "$(deploy_abspath)/$(deploy_relpath)"
+end
+
+function vitepress_current_version(bases)
+    patch_base = r"^v\d+\.\d+\.\d+(?:[-+].*)?$"
+    patch = findfirst(base -> occursin(patch_base, base), bases)
+    patch !== nothing && return bases[patch]
+    nonempty = filter(!isempty, bases)
+    return isempty(nonempty) ? "" : first(nonempty)
+end
+
+function npm_executable()
+    for candidate in ("/opt/homebrew/bin/npm", Sys.which("npm"))
+        candidate === nothing && continue
+        isfile(candidate) && return candidate
+    end
+    error("npm not found; install Node 20 or run through the docs CI setup-node step")
+end
+
+function build_vitepress_outputs!(vp_input::AbstractString)
+    build_dir = joinpath(@__DIR__, "build")
+    config_path = joinpath(vp_input, ".vitepress", "config.mts")
+    bases = prune_vitepress_bases!(build_dir)
+    isempty(bases) && return
+
+    template_config = read(config_path, String)
+    deploy_abspath_match = match(
+        r"__DEPLOY_ABSPATH__:\s*JSON\.stringify\('([^']*)'\)",
+        template_config,
+    )
+    deploy_abspath = deploy_abspath_match === nothing ? "/" : deploy_abspath_match.captures[1]
+    current_version = vitepress_current_version(bases)
+
+    cd(@__DIR__) do
+        tmpl_pkg = joinpath(dirname(pathof(DocumenterVitepress)), "..", "template", "package.json")
+        pkg_json = joinpath(@__DIR__, "package.json")
+        cleanup_pkg = !isfile(pkg_json)
+        cleanup_pkg && cp(tmpl_pkg, pkg_json)
+        try
+            npm_bin = npm_executable()
+            run(`$(npm_bin) install --no-audit --no-fund`)
+            for (i, base) in enumerate(bases)
+                base_url = vitepress_base_url(deploy_abspath, base)
+                config = replace(
+                    template_config,
+                    r"base: '[^']*'" => "base: '$(base_url)'",
+                    r"outDir: '../[^']*'" => "outDir: '../$(i)'",
+                )
+                write(config_path, config)
+                rm(joinpath(build_dir, string(i)); recursive = true, force = true)
+                run(`$(npm_bin) run env -- vitepress build $(vp_input)`)
+                open(joinpath(build_dir, string(i), "siteinfo.js"), "w") do io
+                    println(io, """var DOCUMENTER_CURRENT_VERSION = "$(current_version)";""")
+                end
+            end
+        finally
+            if cleanup_pkg
+                rm(pkg_json; force = true)
+                rm(joinpath(@__DIR__, "package-lock.json"); force = true)
+            end
+        end
+    end
+end
+
+let vp_input = joinpath(@__DIR__, "build", ".documenter")
+    rm(joinpath(vp_input, "_helpers"); recursive = true, force = true)
+    prune_vitepress_markdown!(vp_input)
+
+    # DocumenterVitepress rewrites `../assets/...` links inside `examples/`
+    # to `assets/...`. Mirror downloadable .krk files at that rewritten path
+    # so VitePress dead-link checks stay strict.
+    krk_src = joinpath(vp_input, "assets", "krk")
+    krk_dst = joinpath(vp_input, "examples", "assets", "krk")
+    if isdir(krk_src)
+        mkpath(krk_dst)
+        for file in readdir(krk_src; join = true)
+            endswith(file, ".krk") && cp(file, joinpath(krk_dst, basename(file)); force = true)
+        end
+    end
+
+    build_vitepress_outputs!(vp_input)
+end
+
+if startswith(get(ENV, "GITHUB_REF", ""), "refs/tags/v")
+    DocumenterVitepress.deploydocs(;
+        repo = "github.com/lauguimel/Kraken.jl.git",
+        target = joinpath(@__DIR__, "build"),
+        devbranch = "release/v0.2",
+        branch = "gh-pages",
+        push_preview = true,
+    )
+else
+    @info "Skipping docs deploy; deployment is restricted to v* tags"
+end

@@ -1,26 +1,43 @@
-# Kraken.jl
-
 ```@raw html
-<div align="center">
-  <img src="assets/logo.png" alt="Kraken.jl logo" width="320"/>
-</div>
-```
+---
+layout: home
 
-**A GPU-native Lattice Boltzmann framework in Julia — write your solver once, run it on NVIDIA, Apple Silicon, AMD, or CPU.**
+hero:
+  name: "Kraken.jl"
+  text: "GPU-native multiphysics LBM in Julia"
+  tagline: "Write a reproducible .krk case or a direct Julia driver, then run it on CUDA, Metal, AMD, or CPU backends."
+  image:
+    src: ./assets/showcases/vonkarman_re200.gif
+    alt: Von Kármán vortex street simulation
+  actions:
+    - theme: brand
+      text: Get started
+      link: /getting_started
+    - theme: alt
+      text: KRK reference
+      link: /users/krk-reference
+    - theme: alt
+      text: Validation matrix
+      link: /users/benchmarks/validation-matrix
 
-Kraken.jl is a composable, high-performance Lattice Boltzmann (LBM) solver for
-incompressible and thermal flows. Kernels are written once against
-[KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) and
-dispatched automatically to whatever hardware you have — no vendor-specific code
-in the physics layer.
-
-```@raw html
-<div align="center">
-  <img src="assets/showcases/vonkarman_re200.gif" alt="Von Kármán vortex street at Re = 200" width="48%"/>
-  <img src="assets/showcases/taylor_green_decay.gif" alt="Taylor–Green vortex decay" width="48%"/>
-  <br/>
-  <em>Left: von Kármán vortex street past a cylinder (Re = 200). Right: Taylor–Green vortex decay.</em>
-</div>
+features:
+  - icon: <img width="64" src="./assets/showcases/cavity_re1000.gif"/>
+    title: Reproducible cases
+    details: Canonical flows can be launched from declarative .krk files or direct Julia drivers.
+    link: /users/tutorials/cartesian-cavity
+  - icon: <img width="64" src="./assets/showcases/taylor_green_decay.gif"/>
+    title: Validated multiphysics
+    details: Cavity, thermal, sphere-drag, viscoelastic, and refinement checks are tracked in the v0.2 validation matrix.
+    link: /users/benchmarks/validation-matrix
+  - icon: <img width="64" src="./assets/showcases/rayleigh_benard_ra1e5.gif"/>
+    title: GPU certification
+    details: Backend checks document CPU, CUDA-class, and Apple Silicon execution paths.
+    link: /users/benchmarks/gpu-certification
+  - icon: <img width="64" src="./assets/showcases/vonkarman_re200.gif"/>
+    title: Grid refinement
+    details: Nested patches and route-native validation are documented for v0.2 refinement workflows.
+    link: /examples/20_grid_refinement_cavity
+---
 ```
 
 ## Why Kraken
@@ -102,8 +119,8 @@ krk cavity.krk
 
 ```@raw html
 <div align="center">
-  <img src="assets/showcases/cavity_re1000.gif" alt="Lid-driven cavity at Re = 1000" width="48%"/>
-  <img src="assets/showcases/rayleigh_benard_ra1e5.gif" alt="Rayleigh–Bénard convection at Ra = 1e5" width="48%"/>
+  <img src="./assets/showcases/cavity_re1000.gif" alt="Lid-driven cavity at Re = 1000" width="48%"/>
+  <img src="./assets/showcases/rayleigh_benard_ra1e5.gif" alt="Rayleigh–Bénard convection at Ra = 1e5" width="48%"/>
   <br/>
   <em>Left: lid-driven cavity at Re = 1000 (primary vortex + corner eddies).
   Right: Rayleigh–Bénard convection cells at Ra = 1e5.</em>
