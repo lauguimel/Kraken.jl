@@ -94,6 +94,14 @@ include("drivers/viscoelastic.jl")
 include("drivers/step_geometry_2d.jl")
 include("drivers/viscoelastic_logfv_2d.jl")
 
+# --- Steady shape-adjoint AD (core is Enzyme-free; reverse seams live in ext/) ---
+include("ad/ad_forward.jl")
+include("ad/ad_step.jl")
+include("ad/ad_qoi.jl")
+include("ad/ad_adjoint.jl")
+include("ad/ad_geometry.jl")
+include("ad/ad_api.jl")
+
 # --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
 include("curvilinear/mesh.jl")
 include("curvilinear/generators.jl")
@@ -239,6 +247,7 @@ export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
 export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_hermite_step!, fused_trt_libb_v2_guo_field_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
 export dq_wall_dR_cylinder
+export steady_shape_sensitivity
 export precompute_q_wall_sphere_3d, compute_drag_libb_3d, run_sphere_libb_3d
 export precompute_q_wall_annulus
 export wall_velocity_rotating_cylinder, wall_velocity_rotating_inner

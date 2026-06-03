@@ -1,6 +1,11 @@
 using Test
 using Kraken
 
+if get(ENV, "KRAKEN_AD_ONLY", "false") == "true"
+    include("ad/test_ad_sensitivity.jl")
+    exit()
+end
+
 @testset "Kraken.jl LBM" begin
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
@@ -61,6 +66,21 @@ using Kraken
     include("test_rheology.jl")
     include("test_viscoelastic.jl")
     include("test_viscoelastic_krk.jl")
+    # AD steady-sensitivity tests need the Enzyme extension (weakdep). Run only when Enzyme
+    # is loadable in this environment; skip cleanly otherwise (guard the LOAD, not the tests,
+    # so real AD test failures still surface when Enzyme IS present).
+    let enzyme_ok = try
+            @eval Main using Enzyme
+            true
+        catch
+            false
+        end
+        if enzyme_ok
+            include("ad/test_ad_sensitivity.jl")
+        else
+            @info "Skipping AD steady-sensitivity tests (Enzyme extension not loadable in this environment)"
+        end
+    end
 
     @testset "Kraken.Units" begin
         include("test_units.jl")
