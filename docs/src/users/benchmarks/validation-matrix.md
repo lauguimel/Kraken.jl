@@ -1,26 +1,15 @@
 # Validation matrix
 
-This page is the single, honest summary of where each public Kraken module
-stands against an external reference. For every module it states three things:
-the **analytical or published reference** the result is anchored to, an
-**independent other-solver comparison** where one exists, and the **tolerance
-actually met** against the mandate §3 acceptance bar. Every numeric cell is read
-from the linked benchmark page — no value is reproduced here that is not on one
-of those pages.
+The single summary of where each public Kraken module stands against an external
+reference. Every numeric cell is the headline metric of the linked benchmark page —
+no value is reproduced here that is not on one of those pages. Each row gives the
+**published/analytical reference**, an **independent other-solver comparison** where one
+exists, and the **tolerance met** against the mandate §3 acceptance bar.
 
-**On the reference anchor (§3 substitute clause).** The release policy is to
-validate each case against a literal reference-solver artifact where one is
-available or in production (RheoTool / OpenFOAM `icoFoam` / `buoyantBoussinesqSimpleFoam`).
-Where RheoTool does not cover a case, §3's escape clause applies: the
-authoritative anchor is then the canonical *published* data set, named
-explicitly with a justification. Three rows use that clause — the Cartesian
-cavity is anchored to **Ghia, Ghia & Shin (1982)** (with `icoFoam` as the
-independent cross-check), thermal natural convection to **de Vahl Davis (1983)**
-(with `buoyantBoussinesqSimpleFoam` corroboration), and 3D sphere drag to the
-**Clift, Grace & Weber (1978)** free-stream drag correlation, since there is no
-RheoTool tutorial for an unbounded Newtonian sphere. The only row anchored to a
-literal viscoelastic reference solver is the Oldroyd-B cylinder, validated
-against the `rheoFoam` `Cylinder/Oldroyd-BLog` tutorial.
+Where RheoTool covers a case it is the literal reference solver; where it does not, §3's
+escape clause anchors the row to the canonical published data set (Ghia 1982 for the
+cavity, de Vahl Davis 1983 for thermal, Clift et al. 1978 for sphere drag), each with an
+independent OpenFOAM cross-check where available.
 
 ## Matrix
 
@@ -35,22 +24,17 @@ against the `rheoFoam` `Cylinder/Oldroyd-BLog` tutorial.
 
 ## Notes
 
-- **"Result actually met" is the headline metric of each linked page**, not a
-  re-derivation. Follow the artifact link for the full error-norm tables,
-  methodology, mesh/backend details and caveats.
-- **3D rows carry larger residuals than their 2D counterparts** and are
-  documented as resolution-limited on their pages (sphere drag +8.9 %). 3D
-  natural convection is wired in v0.2 (`natural_convection_3d` preset) but only
-  smoke-validated; a quantitative 3D thermal benchmark is a future-release item.
-  The 2D rows above are the strict acceptance gates.
-- **The AMR conservation result and the AMR accuracy result are distinct.** Mass
-  conservation is exact to roundoff and field parity against the dense-leaf
-  oracle is bit-exact for a full-domain refined patch; the compact-patch cylinder
-  `C_d` still carries a near-interface transport gap (~6 %) that is reported, not
-  hidden, and motivates the subcycling integration tracked for the next release.
-- **Literal reference-solver backfill.** The Newtonian cavity row ships a
-  complete `benchmarks/results/rheotool_compare/newtonian/` bundle: both-solver
-  centerline CSVs (Kraken + icoFoam + Ghia), per-Re error norms, the case
-  `.krk`, and a self-contained `plot.py` that regenerates the figure from the
-  CSVs. The thermal and viscoelastic literal bundles are the next legs of the
-  same backfill.
+- **Follow the artifact link** for the full error-norm tables, methodology, mesh/backend
+  details and caveats — the matrix carries only the headline metric.
+- **3D rows carry larger residuals** and are documented as resolution-limited on their
+  pages (sphere drag +8.9 %). 3D natural convection is wired (`natural_convection_3d`
+  preset) but only smoke-validated; a quantitative 3D thermal benchmark is a future item.
+  The 2D rows are the strict acceptance gates.
+- **AMR conservation ≠ AMR accuracy.** Mass conservation is exact to roundoff and
+  full-domain patch parity is bit-exact, but the compact-patch cylinder `C_d` still
+  carries a near-interface transport gap (~6 %) — reported, not hidden, and motivating
+  the subcycling integration tracked for the next release.
+- **Literal reference-solver backfill.** The Newtonian cavity row ships a complete
+  `benchmarks/results/rheotool_compare/newtonian/` bundle (both-solver CSVs, per-Re error
+  norms, the `.krk`, and a self-contained `plot.py`). The thermal and viscoelastic
+  literal bundles are the next legs of the same backfill.
