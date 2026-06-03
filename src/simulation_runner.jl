@@ -385,14 +385,31 @@ function _ve_cylinder_obstacle_radius(setup::SimulationSetup)
     return nothing
 end
 
+function _ve_sphere_obstacle_radius(setup::SimulationSetup)
+    for region in setup.regions
+        region_name = lowercase(region.name)
+        (occursin("sphere", region_name) || occursin("sph", region_name) ||
+         occursin("ball", region_name)) || continue
+        for key in (:radius, :R)
+            if haskey(region.bc_values, key)
+                return Float64(evaluate(region.bc_values[key]))
+            end
+        end
+    end
+    return nothing
+end
+
 """Dispatch viscoelastic cases to the existing production log-FV driver."""
 function _run_viscoelastic(setup::SimulationSetup;
                            backend=KernelAbstractions.CPU(), T=Float64)
     name = lowercase(setup.name)
+    if setup.lattice === :D3Q19 || occursin("sphere", name)
+        return _run_viscoelastic_sphere_3d(setup; backend=backend, T=T)
+    end
     if !occursin("cylinder", name)
         throw(ArgumentError(
             "viscoelastic dispatch: unrecognized case name '$(setup.name)'. " *
-            "Known cases: cylinder."))
+            "Known cases: cylinder (2D), sphere (3D)."))
     end
 
     rs = _ve_oldroydb_rheology(setup)
@@ -428,6 +445,65 @@ function _run_viscoelastic(setup::SimulationSetup;
         avg_window=avg_window,
         backend=backend,
         T=T,
+    )
+    return merge(result, (setup=setup,))
+end
+
+"""Inlet centreline/plug velocity for the VE sphere: explicit `Define u_in`
+(or `u_mean`), else the west velocity BC `ux`, else error."""
+function _ve_sphere_inlet_velocity(setup::SimulationSetup)
+    for key in (:u_in, :u_mean)
+        if haskey(setup.physics.params, key) || haskey(setup.user_vars, key)
+            return _ve_numeric_param(setup, key)
+        end
+    end
+    for b in setup.boundaries
+        if b.type === :velocity && haskey(b.values, :ux)
+            return Float64(evaluate(b.values[:ux]))
+        end
+    end
+    throw(ArgumentError(
+        "viscoelastic sphere dispatch: missing inlet velocity. Provide " *
+        "`Define u_in = ...` or a `Boundary west velocity(ux = ...)`."))
+end
+
+"""Dispatch a 3D viscoelastic Oldroyd-B confined-sphere `.krk` case to the
+`run_conformation_sphere_libb_3d` driver. Geometry is rebuilt by the driver
+from `Nx/Ny/Nz`, `radius`, and (optional) `cx/cy/cz`; the `.krk` Obstacle
+supplies the radius, the Domain the grid, and the Rheology block the
+solvent/polymer viscosities and relaxation time."""
+function _run_viscoelastic_sphere_3d(setup::SimulationSetup;
+                                     backend=KernelAbstractions.CPU(), T=Float64)
+    rs = _ve_oldroydb_rheology(setup)
+    nu_s   = _ve_rheology_param(rs, :nu_s)
+    nu_p   = _ve_rheology_param(rs, :nu_p)
+    lambda = _ve_rheology_param(rs, :lambda)
+
+    radius_from_obstacle = _ve_sphere_obstacle_radius(setup)
+    R = radius_from_obstacle === nothing ?
+        _ve_numeric_param(setup, :R) : Float64(radius_from_obstacle)
+
+    dom = setup.domain
+    u_in = _ve_sphere_inlet_velocity(setup)
+
+    cx = haskey(setup.physics.params, :cx) || haskey(setup.user_vars, :cx) ?
+         _ve_numeric_param(setup, :cx) : nothing
+    cy = haskey(setup.physics.params, :cy) || haskey(setup.user_vars, :cy) ?
+         _ve_numeric_param(setup, :cy) : nothing
+    cz = haskey(setup.physics.params, :cz) || haskey(setup.user_vars, :cz) ?
+         _ve_numeric_param(setup, :cz) : nothing
+
+    tau_plus = _ve_numeric_param(setup, :tau_plus, 1.0)
+    inlet    = _ve_symbol_param(setup, :inlet, :parabolic_y)
+    avg_window = round(Int, 0.2 * setup.max_steps)
+
+    result = run_conformation_sphere_libb_3d(;
+        Nx=dom.Nx, Ny=dom.Ny, Nz=dom.Nz,
+        radius=R, cx=cx, cy=cy, cz=cz,
+        u_in=u_in, ν_s=nu_s, ν_p=nu_p, lambda=lambda,
+        inlet=inlet, tau_plus=tau_plus,
+        max_steps=setup.max_steps, avg_window=avg_window,
+        backend=backend, FT=T,
     )
     return merge(result, (setup=setup,))
 end
