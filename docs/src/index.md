@@ -7,7 +7,7 @@ hero:
   text: "GPU-native multiphysics LBM in Julia"
   tagline: "Write a reproducible .krk case or a direct Julia driver, then run it on CUDA, Metal, AMD, or CPU backends."
   image:
-    src: ./assets/showcases/vonkarman_re200.gif
+    src: /showcases/vonkarman_re200.gif
     alt: Von Kármán vortex street simulation
   actions:
     - theme: brand
@@ -21,19 +21,19 @@ hero:
       link: /users/benchmarks/validation-matrix
 
 features:
-  - icon: <img width="64" src="./assets/showcases/cavity_re1000.gif"/>
+  - icon: <img width="64" src="/showcases/cavity_re1000.gif"/>
     title: Reproducible cases
     details: Canonical flows can be launched from declarative .krk files or direct Julia drivers.
     link: /users/tutorials/cartesian-cavity
-  - icon: <img width="64" src="./assets/showcases/taylor_green_decay.gif"/>
+  - icon: <img width="64" src="/showcases/taylor_green_decay.gif"/>
     title: Validated multiphysics
     details: Cavity, thermal, sphere-drag, viscoelastic, and refinement checks are tracked in the v0.2 validation matrix.
     link: /users/benchmarks/validation-matrix
-  - icon: <img width="64" src="./assets/showcases/rayleigh_benard_ra1e5.gif"/>
+  - icon: <img width="64" src="/showcases/rayleigh_benard_ra1e5.gif"/>
     title: GPU certification
     details: Backend checks document CPU, CUDA-class, and Apple Silicon execution paths.
     link: /users/benchmarks/gpu-certification
-  - icon: <img width="64" src="./assets/showcases/vonkarman_re200.gif"/>
+  - icon: <img width="64" src="/showcases/vonkarman_re200.gif"/>
     title: Grid refinement
     details: Nested patches and route-native validation are documented for v0.2 refinement workflows.
     link: /examples/20_grid_refinement_cavity
