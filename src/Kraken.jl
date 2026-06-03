@@ -122,6 +122,7 @@ include("io/krk/rheology.jl")
 include("io/krk/units_bridge.jl")
 include("io/krk/setup_lbm.jl")
 include("io/krk/diagnostics.jl")
+include("ad/ad_krk.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
