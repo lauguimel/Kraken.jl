@@ -367,6 +367,78 @@ function apply_cnebb_conformation_3d!(g_post, g_pre, is_solid, C_field)
 end
 
 # ============================================================
+# CNEBB on the y-faces only (for periodic-xz channel / Couette)
+# ============================================================
+#
+# The general `apply_cnebb_conformation_3d!` treats ALL six domain edges as
+# walls. For a planar Couette / channel box that is periodic in x and z, only
+# the y-faces (j = 1 and j = Ny) are physical walls; the x/z edges must stay
+# periodic (the gradient stencil already wraps x and the streamer wraps x,z).
+# This variant applies the conservative NEBB reconstruction at j = 1 and
+# j = Ny only, leaving the periodic faces untouched.
+
+@kernel function apply_cnebb_y_walls_3d_kernel!(g_post, @Const(g_pre),
+                                                  C_field, Nx, Ny, Nz)
+    i, j, k = @index(Global, NTuple)
+    @inbounds if j == 1 || j == Ny
+        T = eltype(g_post)
+        # Wall normal sign: +y neighbour missing at j=1, -y neighbour at j=Ny.
+        # A source population q is "from the wall" iff stepping back by c_q
+        # crosses the y-face (j - cy_q outside [1,Ny]).
+        φ = g_post[i,j,k,1]
+        for q in 2:19
+            sj = j - _cy_q3(q)
+            src_solid = !(1 ≤ sj ≤ Ny)
+            φ += src_solid ? g_pre[i,j,k,_opp_q3(q)] : g_post[i,j,k,q]
+        end
+
+        usq = zero(T); zT = zero(T)
+        ge_q = (
+            feq_3d(Val(1),  φ, zT, zT, zT, usq), feq_3d(Val(2),  φ, zT, zT, zT, usq),
+            feq_3d(Val(3),  φ, zT, zT, zT, usq), feq_3d(Val(4),  φ, zT, zT, zT, usq),
+            feq_3d(Val(5),  φ, zT, zT, zT, usq), feq_3d(Val(6),  φ, zT, zT, zT, usq),
+            feq_3d(Val(7),  φ, zT, zT, zT, usq), feq_3d(Val(8),  φ, zT, zT, zT, usq),
+            feq_3d(Val(9),  φ, zT, zT, zT, usq), feq_3d(Val(10), φ, zT, zT, zT, usq),
+            feq_3d(Val(11), φ, zT, zT, zT, usq), feq_3d(Val(12), φ, zT, zT, zT, usq),
+            feq_3d(Val(13), φ, zT, zT, zT, usq), feq_3d(Val(14), φ, zT, zT, zT, usq),
+            feq_3d(Val(15), φ, zT, zT, zT, usq), feq_3d(Val(16), φ, zT, zT, zT, usq),
+            feq_3d(Val(17), φ, zT, zT, zT, usq), feq_3d(Val(18), φ, zT, zT, zT, usq),
+            feq_3d(Val(19), φ, zT, zT, zT, usq))
+
+        for q in 2:19
+            sj = j - _cy_q3(q)
+            if !(1 ≤ sj ≤ Ny)
+                oq = _opp_q3(q)
+                g_post[i,j,k,q] = ge_q[q] + (g_post[i,j,k,oq] - ge_q[oq])
+            end
+        end
+
+        nonrest = zero(T)
+        for q in 2:19
+            nonrest += g_post[i,j,k,q]
+        end
+        g_post[i,j,k,1] = φ - nonrest
+        C_field[i,j,k] = φ
+    end
+end
+
+"""
+    apply_cnebb_conformation_y_walls_3d!(g_post, g_pre, C_field)
+
+CNEBB conformation wall BC on the y-faces (j = 1 and j = Ny) only — the
+periodic-xz analogue of `apply_cnebb_conformation_3d!`. Reconstructs the
+solid-sourced populations at the two y-walls and leaves the periodic x/z faces
+untouched. Use for planar Couette / Poiseuille channels.
+"""
+function apply_cnebb_conformation_y_walls_3d!(g_post, g_pre, C_field)
+    backend = KernelAbstractions.get_backend(g_post)
+    Nx, Ny, Nz = size(C_field)
+    kernel! = apply_cnebb_y_walls_3d_kernel!(backend)
+    kernel!(g_post, g_pre, C_field, Nx, Ny, Nz; ndrange=(Nx, Ny, Nz))
+    KernelAbstractions.synchronize(backend)
+end
+
+# ============================================================
 # Inlet / outlet conformation reset (3D)
 # ============================================================
 

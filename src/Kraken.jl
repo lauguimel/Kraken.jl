@@ -30,6 +30,7 @@ include("kernels/equilibrium_helpers_3d.jl")
 include("kernels/collide_stream_2d.jl")
 include("kernels/collide_stream_3d.jl")
 include("kernels/stream_periodic_2d.jl")
+include("kernels/stream_periodic_3d.jl")
 include("kernels/collide_guo_2d.jl")
 include("kernels/collide_guo_3d.jl")
 include("kernels/macroscopic.jl")
@@ -99,6 +100,7 @@ include("kernels/conformation_lbm_3d.jl")
 include("kernels/viscoelastic_3d.jl")
 include("kernels/logconformation_lbm_3d.jl")
 include("drivers/viscoelastic_3d.jl")
+include("drivers/viscoelastic_couette_3d.jl")
 include("drivers/step_geometry_2d.jl")
 include("drivers/viscoelastic_logfv_2d.jl")
 
@@ -204,6 +206,7 @@ export opposite, cs2, equilibrium
 # Kernels
 export stream_2d!, collide_2d!, stream_3d!, collide_3d!
 export stream_periodic_x_wall_y_2d!, stream_fully_periodic_2d!, stream_periodic_x_axisym_2d!
+export stream_periodic_xz_wall_y_3d!, stream_periodic_xz_movingwall_y_3d!
 export stream_axisym_inlet_2d!
 export collide_guo_2d!, collide_guo_field_2d!
 export collide_guo_3d!, collide_guo_field_3d!
@@ -553,12 +556,14 @@ export collide_twophase_rheology_2d!
 
 # Viscoelastic
 export eigen_sym2x2, mat_exp_sym2x2, mat_log_sym2x2, decompose_velocity_gradient
-# 3D viscoelastic (Oldroyd-B confined sphere)
+# 3D viscoelastic (Oldroyd-B confined sphere + planar Couette)
 export run_conformation_sphere_libb_3d
+export run_conformation_couette_libb_3d
 export eigen_sym3x3, mat_exp_sym3x3, mat_log_spd_sym3x3
 export apply_hermite_source_3d!, update_polymer_stress_3d!
 export init_conformation_field_3d!, collide_conformation_3d!
 export compute_conformation_macro_3d!, apply_cnebb_conformation_3d!
+export apply_cnebb_conformation_y_walls_3d!
 export reset_conformation_inlet_3d!, reset_conformation_outlet_3d!
 export compute_polymeric_force_2d!
 export evolve_stress_2d!, evolve_logconf_2d!

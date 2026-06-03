@@ -62,6 +62,7 @@ using Kraken
     include("test_viscoelastic.jl")
     include("test_viscoelastic_krk.jl")
     include("test_viscoelastic_sphere_3d.jl")
+    include("test_viscoelastic_couette_3d.jl")
 
     @testset "Kraken.Units" begin
         include("test_units.jl")
