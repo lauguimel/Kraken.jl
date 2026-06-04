@@ -95,8 +95,9 @@ include("drivers/step_geometry_2d.jl")
 include("drivers/viscoelastic_logfv_2d.jl")
 
 # --- Steady shape-adjoint AD (core is Enzyme-free; reverse seams live in ext/) ---
-include("ad/ad_forward.jl")
 include("ad/ad_step.jl")
+include("ad/ad_thermal_step.jl")
+include("ad/ad_forward.jl")
 include("ad/ad_qoi.jl")
 include("ad/ad_adjoint.jl")
 include("ad/ad_geometry.jl")

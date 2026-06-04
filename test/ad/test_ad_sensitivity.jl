@@ -646,6 +646,462 @@ function _run_antidrift()
             cd_fused=fused.Cd, cd_fused_delta=abs(cd_inline - fused.Cd))
 end
 
+function _thermal_params_with_beta(p, beta_g)
+    return Kraken.ADNatconvParams(p.Nx, p.Ny, p.omega_f, p.omega_T,
+                                  Float64(beta_g), p.T_ref, p.T_hot,
+                                  p.T_cold, p.Ra, p.Pr)
+end
+
+function _thermal_forward_from(p; L=nothing, q_hot=0.5, q_cold=0.7,
+                               tol=1e-11, max_steps=120_000, w_init=nothing)
+    L_f = Float64(L === nothing ? Float64(p.Nx - 1) + q_hot + q_cold : L)
+    geom = Kraken.ad_cavity_wall_geometry(p.Nx, p.Ny, L_f; q_hot=q_hot)
+    w_in = w_init === nothing ?
+           Kraken.ad_initial_thermal_w(p, geom.x_cold, geom.q_hot) :
+           copy(w_init)
+    w_out = similar(w_in)
+    residual = Inf
+    n_iter = 0
+    converged = false
+    for step in 1:max_steps
+        Kraken.ad_thermal_cut_step!(w_out, w_in, geom.q_wall, geom.q_wall, p)
+        residual = Kraken.ad_relative_step_residual(w_out, w_in)
+        n_iter = step
+        if residual < tol
+            converged = true
+            break
+        end
+        w_in, w_out = w_out, w_in
+    end
+    return (; w_star=copy(w_out), q_wall=geom.q_wall, dq_dL=geom.dq_dL,
+            q_hot=geom.q_hot, q_cold=geom.q_cold, L=L_f, params=p,
+            Nu=Kraken.nu_pure(w_out, geom.q_wall, p),
+            n_iter, residual=Float64(residual), converged)
+end
+
+function _thermal_dense_fd_vjp(w, v, q_wall, p; h=1e-6)
+    grad = zeros(Float64, length(w))
+    wp = copy(w)
+    wm = copy(w)
+    outp = similar(w)
+    outm = similar(w)
+    @inbounds for idx in eachindex(w)
+        old = w[idx]
+        wp[idx] = old + h
+        wm[idx] = old - h
+        Kraken.ad_thermal_cut_step!(outp, wp, q_wall, q_wall, p)
+        Kraken.ad_thermal_cut_step!(outm, wm, q_wall, q_wall, p)
+        s = 0.0
+        for jdx in eachindex(v, outp, outm)
+            s += v[jdx] * (outp[jdx] - outm[jdx])
+        end
+        grad[idx] = s / (2h)
+        wp[idx] = old
+        wm[idx] = old
+    end
+    return grad
+end
+
+function _run_tc0()
+    N = 3
+    p = Kraken.ad_natconv_params(; N, Ra=1e3, Pr=0.71)
+    geom = Kraken.ad_cavity_wall_geometry(N, N, Float64(N - 1) + 1.2;
+                                          q_hot=0.5)
+    rng = MersenneTwister(0x7c0)
+    w = Kraken.ad_initial_thermal_w(p, geom.x_cold, geom.q_hot)
+    @inbounds for idx in eachindex(w)
+        w[idx] += 1e-4 * randn(rng)
+    end
+    nf = Kraken.ad_thermal_nlat(p)
+    vf = zeros(Float64, length(w))
+    vg = zeros(Float64, length(w))
+    vf[1:nf] .= randn(rng, nf)
+    vg[(nf + 1):end] .= randn(rng, nf)
+
+    ad_f = Kraken._ad_thermal_vjp_GtT(w, vf, geom.q_wall, geom.q_wall, p)
+    fd_f = _thermal_dense_fd_vjp(w, vf, geom.q_wall, p)
+    ad_g = Kraken._ad_thermal_vjp_GtT(w, vg, geom.q_wall, geom.q_wall, p)
+    fd_g = _thermal_dense_fd_vjp(w, vg, geom.q_wall, p)
+
+    rel_f = norm(ad_f .- fd_f) / max(norm(fd_f), eps(Float64))
+    rel_g = norm(ad_g .- fd_g) / max(norm(fd_g), eps(Float64))
+    thermal_to_flow = norm(@view ad_f[(nf + 1):end])
+    flow_to_thermal = norm(@view ad_g[1:nf])
+    return (; N, rel=max(rel_f, rel_g), rel_f, rel_g,
+            thermal_to_flow, flow_to_thermal)
+end
+
+function _thermal_scalarLG_beta(w_star, lambda, beta_g, q_wall,
+                                Nx::Int, Ny::Int, omega_f, omega_T,
+                                T_ref, T_hot, T_cold, Ra, Pr)
+    p = Kraken.ADNatconvParams(Nx, Ny, omega_f, omega_T, beta_g,
+                               T_ref, T_hot, T_cold, Ra, Pr)
+    out = zeros(Float64, length(w_star))
+    Kraken.ad_thermal_cut_step!(out, w_star, q_wall, q_wall, p)
+    return _dot_arrays(lambda, out)
+end
+
+function _thermal_lambda_dot_dG_dbeta(w_star, lambda, q_wall, p)
+    ret = Enzyme.autodiff(Enzyme.Reverse, _thermal_scalarLG_beta,
+                          Enzyme.Active,
+                          Enzyme.Const(w_star),
+                          Enzyme.Const(lambda),
+                          Enzyme.Active(p.beta_g),
+                          Enzyme.Const(q_wall),
+                          Enzyme.Const(p.Nx), Enzyme.Const(p.Ny),
+                          Enzyme.Const(p.omega_f), Enzyme.Const(p.omega_T),
+                          Enzyme.Const(p.T_ref), Enzyme.Const(p.T_hot),
+                          Enzyme.Const(p.T_cold), Enzyme.Const(p.Ra),
+                          Enzyme.Const(p.Pr))
+    return Float64(ret[1][3])
+end
+
+function _thermal_adjoint_for_rhs(base, p, rhs; gmres_tol=1e-10,
+                                  linear_tol=1e-9, max_restarts=8)
+    apply_GtT = v -> Kraken._ad_thermal_vjp_GtT(base.w_star, v,
+                                                base.q_wall, base.q_wall, p)
+    rhohat = Kraken.ad_richardson_rhohat(apply_GtT, rhs; n_iter=80)
+    mass = Kraken.ad_thermal_mass_gradient(p)
+    adj = Kraken.ad_gauge_augmented_adjoint(apply_GtT, rhs, mass;
+                                            tol=gmres_tol,
+                                            restart=min(256, length(rhs) + 1),
+                                            max_restarts=max_restarts,
+                                            linear_tol=linear_tol,
+                                            rhohat=rhohat)
+    return (; rhs, adj, rhohat)
+end
+
+function _thermal_adjoint(base, p; gmres_tol=1e-10, linear_tol=1e-9,
+                          max_restarts=8)
+    rhs = Kraken._ad_dNudw(base.w_star, base.q_wall, p)
+    return _thermal_adjoint_for_rhs(base, p, rhs; gmres_tol=gmres_tol,
+                                    linear_tol=linear_tol,
+                                    max_restarts=max_restarts)
+end
+
+function _thermal_fd_dNu_dbeta(p, base, h; tol=1e-10, max_steps=120_000)
+    plus_p = _thermal_params_with_beta(p, p.beta_g + h)
+    minus_p = _thermal_params_with_beta(p, p.beta_g - h)
+    plus = _thermal_forward_from(plus_p; L=base.L, q_hot=base.q_hot,
+                                 tol=tol, max_steps=max_steps,
+                                 w_init=base.w_star)
+    minus = _thermal_forward_from(minus_p; L=base.L, q_hot=base.q_hot,
+                                  tol=tol, max_steps=max_steps,
+                                  w_init=base.w_star)
+    value = (plus.converged && minus.converged) ?
+        (plus.Nu - minus.Nu) / (2h) : NaN
+    return (; value, plus, minus, h=Float64(h))
+end
+
+function _run_tc1()
+    N = 8
+    p = Kraken.ad_natconv_params(; N, Ra=1e3, Pr=0.71)
+    L = Float64(N - 1) + 1.2
+    base = _thermal_forward_from(p; L, q_hot=0.5, tol=1e-10,
+                                 max_steps=120_000)
+    adjinfo = _thermal_adjoint(base, p; gmres_tol=1e-10,
+                               linear_tol=1e-8, max_restarts=8)
+    dnudbeta = _thermal_lambda_dot_dG_dbeta(base.w_star,
+                                            adjinfo.adj.lambda,
+                                            base.q_wall, p)
+    fd1 = _thermal_fd_dNu_dbeta(p, base, 1e-4)
+    fd2 = _thermal_fd_dNu_dbeta(p, base, 5e-5)
+    rel1 = _relerr(dnudbeta, fd1.value)
+    rel2 = _relerr(dnudbeta, fd2.value)
+    rel = min(rel1, rel2)
+    fd = rel2 <= rel1 ? fd2 : fd1
+    return (; N, base, adj=adjinfo.adj, dnudbeta, fd, fd1, fd2,
+            rel, fd_consistency=_relerr(fd1.value, fd2.value))
+end
+
+function _thermal_temperature(w, p, i::Int, j::Int)
+    goff = Kraken.ad_thermal_nlat(p)
+    s = 0.0
+    @inbounds for q in 1:9
+        s += Kraken.ad_thermal_readpop(w, goff, i, j, q, p.Nx, p.Ny)
+    end
+    return s
+end
+
+function _thermal_hot_flux(w, q_wall, p, q_hot::Real)
+    alpha = 0.05 / p.Pr
+    s = 0.0
+    @inbounds for j in 1:p.Ny
+        s += alpha * (p.T_hot - _thermal_temperature(w, p, 1, j)) / q_hot
+    end
+    z = 0.0
+    @inbounds for idx in eachindex(q_wall)
+        z += 0.0 * q_wall[idx]
+    end
+    return s / p.Ny + z
+end
+
+function _thermal_dQdw(w_star, q_wall, p, q_hot::Real)
+    dwd = zeros(Float64, length(w_star))
+    Enzyme.autodiff(Enzyme.Reverse, _thermal_hot_flux, Enzyme.Active,
+                    Enzyme.Duplicated(copy(w_star), dwd),
+                    Enzyme.Const(q_wall), Enzyme.Const(p),
+                    Enzyme.Const(q_hot))
+    return dwd
+end
+
+function _thermal_lambda_dot_dG_dqwalls(w_star, lambda, q_flow, q_therm, p)
+    out = zeros(Float64, length(w_star))
+    dqw_flow = zeros(Float64, size(q_flow))
+    dqw_therm = zeros(Float64, size(q_therm))
+    Enzyme.autodiff(Enzyme.Reverse, Kraken.ad_thermal_cut_step!,
+                    Enzyme.Duplicated(out, copy(lambda)),
+                    Enzyme.Const(w_star),
+                    Enzyme.Duplicated(copy(q_flow), dqw_flow),
+                    Enzyme.Duplicated(copy(q_therm), dqw_therm),
+                    Enzyme.Const(p))
+    return (; flow=dqw_flow, thermal=dqw_therm)
+end
+
+@inline _tc2_temp_at(g, i::Int, j::Int) =
+    g[i, j, 1] + g[i, j, 2] + g[i, j, 3] +
+    g[i, j, 4] + g[i, j, 5] + g[i, j, 6] +
+    g[i, j, 7] + g[i, j, 8] + g[i, j, 9]
+
+@inline function _tc2_write_equilibrium!(g, i::Int, j::Int, temp)
+    T = typeof(temp)
+    @inbounds for q in 1:9
+        g[i, j, q] = T(WT[q]) * temp
+    end
+    return nothing
+end
+
+@inline _tc2_mean3(a, b, c) = (a + b + c) / 3.0
+@inline _tc2_west_cut(q_wall, j::Int) =
+    _tc2_mean3(q_wall[1, j, 4], q_wall[1, j, 7], q_wall[1, j, 8])
+@inline _tc2_east_cut(q_wall, Nx::Int, j::Int) =
+    _tc2_mean3(q_wall[Nx, j, 2], q_wall[Nx, j, 6], q_wall[Nx, j, 9])
+
+@inline function _tc2_dirichlet_ghost(temp_here, temp_wall, q_wall_link)
+    T = typeof(temp_here)
+    q = T(q_wall_link)
+    return (T(temp_wall) - (one(T) - q) * temp_here) / q
+end
+
+function _tc2_slab_geometry(Nx::Int, Ny::Int, L::Real; q_hot::Real=0.5)
+    qh = Float64(q_hot)
+    qc = Float64(L) - (Float64(Nx - 1) + qh)
+    if !(0.0 < qh <= 1.0 && 0.0 < qc <= 1.0)
+        throw(ArgumentError("TC2 slab L=$(Float64(L)) gives q_hot=$qh q_cold=$qc"))
+    end
+    q_wall = zeros(Float64, Nx, Ny, 9)
+    dq_dL = zeros(Float64, Nx, Ny, 9)
+    @inbounds for j in 1:Ny
+        q_wall[1, j, 4] = qh
+        q_wall[1, j, 7] = qh
+        q_wall[1, j, 8] = qh
+        q_wall[Nx, j, 2] = qc
+        q_wall[Nx, j, 6] = qc
+        q_wall[Nx, j, 9] = qc
+        dq_dL[Nx, j, 2] = 1.0
+        dq_dL[Nx, j, 6] = 1.0
+        dq_dL[Nx, j, 9] = 1.0
+    end
+    return (; q_wall, dq_dL, q_hot=qh, q_cold=qc)
+end
+
+function _tc2_analytic_temp(i::Int, L::Real, q_hot::Real,
+                            T_hot::Real, T_cold::Real)
+    x = Float64(q_hot) + Float64(i - 1)
+    return Float64(T_hot) -
+           (Float64(T_hot) - Float64(T_cold)) * x / Float64(L)
+end
+
+function _tc2_initial_g(Nx::Int, Ny::Int, L::Real, q_hot::Real,
+                        T_hot::Real, T_cold::Real)
+    g = zeros(Float64, Nx, Ny, 9)
+    @inbounds for j in 1:Ny, i in 1:Nx
+        t = _tc2_analytic_temp(i, L, q_hot, T_hot, T_cold)
+        t += 1e-3 * sin(2.0 * pi * i / Nx) * cos(pi * j / (Ny + 1))
+        _tc2_write_equilibrium!(g, i, j, t)
+    end
+    return g
+end
+
+function _tc2_thermal_G!(g_out, g, q_wall, Nx::Int, Ny::Int,
+                         relax::Real, T_hot::Real, T_cold::Real)
+    @inbounds for j in 1:Ny, i in 1:Nx
+        t_here = _tc2_temp_at(g, i, j)
+        t_west = if i == 1
+            _tc2_dirichlet_ghost(t_here, T_hot, _tc2_west_cut(q_wall, j))
+        else
+            _tc2_temp_at(g, i - 1, j)
+        end
+        t_east = if i == Nx
+            _tc2_dirichlet_ghost(t_here, T_cold, _tc2_east_cut(q_wall, Nx, j))
+        else
+            _tc2_temp_at(g, i + 1, j)
+        end
+        _tc2_write_equilibrium!(g_out, i, j,
+                                (1.0 - relax) * t_here +
+                                relax * 0.5 * (t_west + t_east))
+    end
+    return nothing
+end
+
+function _tc2_forward(Nx::Int, Ny::Int, L::Real, q_wall;
+                      q_hot::Real, T_hot::Real, T_cold::Real,
+                      relax::Real=0.92, tol::Real=1e-13,
+                      max_steps::Int=80_000)
+    g_in = _tc2_initial_g(Nx, Ny, L, q_hot, T_hot, T_cold)
+    g_out = similar(g_in)
+    residual = Inf
+    n_iter = 0
+    converged = false
+    for step in 1:max_steps
+        _tc2_thermal_G!(g_out, g_in, q_wall, Nx, Ny, relax, T_hot, T_cold)
+        residual = _relative_residual(g_out, g_in)
+        n_iter = step
+        if residual < tol
+            converged = true
+            break
+        end
+        g_in, g_out = g_out, g_in
+    end
+    return (; g_star=copy(g_out), n_iter, residual, converged)
+end
+
+function _tc2_hot_flux(g, q_wall, Nx::Int, Ny::Int, alpha::Real,
+                       T_hot::Real, q_hot::Real)
+    s = 0.0
+    @inbounds for j in 1:Ny
+        s += Float64(alpha) * (Float64(T_hot) - _tc2_temp_at(g, 1, j)) /
+             Float64(q_hot)
+    end
+    z = 0.0
+    @inbounds for idx in eachindex(q_wall)
+        z += 0.0 * q_wall[idx]
+    end
+    return s / Ny + z
+end
+
+function _tc2_dQdg(g_star, q_wall, Nx::Int, Ny::Int, alpha::Real,
+                   T_hot::Real, q_hot::Real)
+    dg = zeros(Float64, size(g_star))
+    Enzyme.autodiff(Enzyme.Reverse, _tc2_hot_flux, Enzyme.Active,
+                    Enzyme.Duplicated(copy(g_star), dg),
+                    Enzyme.Const(q_wall), Enzyme.Const(Nx),
+                    Enzyme.Const(Ny), Enzyme.Const(alpha),
+                    Enzyme.Const(T_hot), Enzyme.Const(q_hot))
+    return dg
+end
+
+function _tc2_Gt_vjp(g_star, v, q_wall, Nx::Int, Ny::Int,
+                     relax::Real, T_hot::Real, T_cold::Real)
+    out = zeros(Float64, size(g_star))
+    dg = zeros(Float64, size(g_star))
+    Enzyme.autodiff(Enzyme.Reverse, _tc2_thermal_G!,
+                    Enzyme.Duplicated(out, copy(v)),
+                    Enzyme.Duplicated(copy(g_star), dg),
+                    Enzyme.Const(q_wall), Enzyme.Const(Nx),
+                    Enzyme.Const(Ny), Enzyme.Const(relax),
+                    Enzyme.Const(T_hot), Enzyme.Const(T_cold))
+    return dg
+end
+
+function _tc2_lambda_dot_dG_dqwall(g_star, lambda, q_wall,
+                                   Nx::Int, Ny::Int, relax::Real,
+                                   T_hot::Real, T_cold::Real)
+    out = zeros(Float64, size(g_star))
+    dqw = zeros(Float64, size(q_wall))
+    Enzyme.autodiff(Enzyme.Reverse, _tc2_thermal_G!,
+                    Enzyme.Duplicated(out, copy(lambda)),
+                    Enzyme.Const(g_star),
+                    Enzyme.Duplicated(copy(q_wall), dqw),
+                    Enzyme.Const(Nx), Enzyme.Const(Ny),
+                    Enzyme.Const(relax), Enzyme.Const(T_hot),
+                    Enzyme.Const(T_cold))
+    return dqw
+end
+
+function _run_tc2()
+    N = 8
+    Ny = 16
+    q_hot = 0.5
+    q_cold = 0.7
+    L = Float64(N - 1) + q_hot + q_cold
+    T_hot = 1.0
+    T_cold = 0.0
+    alpha = 0.1
+    relax = 0.92
+    geom = _tc2_slab_geometry(N, Ny, L; q_hot)
+    base = _tc2_forward(N, Ny, L, geom.q_wall; q_hot, T_hot, T_cold,
+                        relax, tol=1e-13)
+    delta_T = 1.0
+    q_value = _tc2_hot_flux(base.g_star, geom.q_wall, N, Ny, alpha,
+                            T_hot, q_hot)
+    q_exact = alpha * delta_T / L
+    rhs = _tc2_dQdg(base.g_star, geom.q_wall, N, Ny, alpha, T_hot, q_hot)
+    apply_GtT = v -> _tc2_Gt_vjp(base.g_star, v, geom.q_wall, N, Ny,
+                                 relax, T_hot, T_cold)
+    adj = Kraken.gmres_adjoint(apply_GtT, rhs; tol=1e-11,
+                               restart=min(256, length(rhs)),
+                               max_restarts=8, max_richardson=80,
+                               linear_tol=1e-9)
+    dqw = _tc2_lambda_dot_dG_dqwall(base.g_star, adj.lambda, geom.q_wall,
+                                   N, Ny, relax, T_hot, T_cold)
+    flux_gradient = _dot_arrays(dqw, geom.dq_dL)
+    analytic = -alpha * delta_T / (L * L)
+    return (; N, Ny, L, base, adj, q_value, q_exact,
+            q_rel=_relerr(q_value, q_exact), flux_gradient, analytic,
+            rel=_relerr(flux_gradient, analytic))
+end
+
+function _run_tc3()
+    N = 16
+    q_hot = 0.5
+    q_cold = 0.7
+    L = Float64(N - 1) + q_hot + q_cold
+    result = Kraken.steady_shape_sensitivity(; qoi=:nusselt,
+        wrt=:wall_position, N, Ra=1e3, Pr=0.71, L, q_hot, q_cold,
+        tol=1e-11, max_steps=450_000, fd_check=true, fd_h=0.01,
+        gmres_tol=1e-10, adjoint_tol=1e-10)
+    return (; N, L, result, fd=result.fd_check, rel=result.fd_check.relerr)
+end
+
+function _run_tc_krk()
+    path = normpath(joinpath(@__DIR__, "..", "..", "examples",
+                             "sensitivity_cavity_nusselt.krk"))
+    setup = Kraken.load_kraken(path)
+    krk = Kraken.run_simulation(setup)
+    direct = Kraken.steady_shape_sensitivity(;
+        qoi=setup.sensitivity.qoi,
+        wrt=setup.sensitivity.wrt,
+        N=setup.domain.Nx,
+        Ra=Float64(setup.physics.params[:Ra]),
+        Pr=Float64(setup.physics.params[:Pr]),
+        L=Float64(setup.user_vars[:L]),
+        q_hot=Float64(setup.user_vars[:q_hot]),
+        q_cold=Float64(setup.user_vars[:q_cold]),
+        T_hot=1.0,
+        T_cold=0.0,
+        tol=Float64(setup.user_vars[:tol]),
+        max_steps=setup.max_steps,
+        gmres_tol=Float64(setup.user_vars[:gmres_tol]),
+        adjoint_tol=Float64(setup.user_vars[:adjoint_tol]))
+    return (; path, setup, krk, direct,
+            rel=_relerr(krk.gradient, direct.gradient))
+end
+
+function _run_thermal_antidrift()
+    N = 8
+    base = Kraken.ad_thermal_forward_solve(; N, Ra=1e3, Pr=0.71,
+                                           L=Float64(N - 1) + 1.2,
+                                           q_hot=0.5, q_cold=0.7,
+                                           tol=1e-10,
+                                           max_steps=120_000)
+    nu_pure = Kraken.nu_pure(base.w_star, base.q_wall, base.params)
+    nu_driver = Kraken.nu_driver(base.w_star, base.params)
+    return (; N, base, nu_pure, nu_driver,
+            delta=abs(nu_pure - nu_driver),
+            rel=_relerr(nu_pure, nu_driver))
+end
+
 @testset "AD steady shape-adjoint" begin
     @test Base.get_extension(Kraken, :KrakenADExt) !== nothing
 
@@ -702,6 +1158,62 @@ end
         @test guard.cd_mei_delta < 1e-6
         @test guard.cd_fused_delta < 1e-6
         @info "AD anti-drift" grid="$(guard.Nx)x$(guard.Ny)" radius=guard.radius forward_iter=guard.base.n_iter mei_delta=guard.cd_mei_delta fused_delta=guard.cd_fused_delta seconds=elapsed
+    end
+end
+
+@testset "AD thermal (Nusselt)" begin
+    @test Base.get_extension(Kraken, :KrakenADExt) !== nothing
+
+    @testset "TC0 coupled one-step VJP" begin
+        elapsed = @elapsed tc0 = _run_tc0()
+        @test tc0.rel < 1e-6
+        @test tc0.thermal_to_flow > 1e-10
+        @test tc0.flow_to_thermal > 1e-10
+        @info "AD thermal TC0" grid="$(tc0.N)x$(tc0.N)" rel=tc0.rel thermal_to_flow=tc0.thermal_to_flow flow_to_thermal=tc0.flow_to_thermal seconds=elapsed
+    end
+
+    @testset "TC1 beta_g adjoint" begin
+        elapsed = @elapsed tc1 = _run_tc1()
+        @test tc1.base.converged
+        @test tc1.adj.converged
+        @test tc1.fd.plus.converged
+        @test tc1.fd.minus.converged
+        @test tc1.rel < 1e-4
+        @info "AD thermal TC1" grid="$(tc1.N)x$(tc1.N)" forward_iter=tc1.base.n_iter gradient=tc1.dnudbeta fd=tc1.fd.value rel=tc1.rel fd_consistency=tc1.fd_consistency seconds=elapsed
+    end
+
+    @testset "TC2 conduction geometry chain" begin
+        elapsed = @elapsed tc2 = _run_tc2()
+        @test tc2.base.converged
+        @test tc2.adj.converged
+        @test tc2.q_rel < 1e-8
+        @test tc2.rel < 1e-3
+        @info "AD thermal TC2" grid="$(tc2.N)x$(tc2.N)" L=tc2.L q=tc2.q_value q_exact=tc2.q_exact q_rel=tc2.q_rel gradient_flux=tc2.flux_gradient analytic=tc2.analytic rel=tc2.rel seconds=elapsed
+    end
+
+    @testset "TC3 cavity dNu/dL" begin
+        elapsed = @elapsed tc3 = _run_tc3()
+        @test tc3.result.solver.converged
+        @test tc3.fd.plus_converged
+        @test tc3.fd.minus_converged
+        @test tc3.rel < 2e-2
+        @info "AD thermal TC3" grid="$(tc3.N)x$(tc3.N)" L=tc3.L gradient=tc3.result.gradient fd=tc3.fd.value rel=tc3.rel seconds=elapsed
+    end
+
+    @testset "TC-krk cavity Nusselt Sensitivity" begin
+        elapsed = @elapsed tck = _run_tc_krk()
+        @test tck.setup.sensitivity == (; qoi=:nusselt, wrt=:wall_position)
+        @test tck.krk.solver.converged
+        @test tck.direct.solver.converged
+        @test tck.rel < 1e-8
+        @info "AD thermal TC-krk" path=tck.path krk_gradient=tck.krk.gradient api_gradient=tck.direct.gradient rel=tck.rel seconds=elapsed
+    end
+
+    @testset "anti-drift Nusselt bit mirror" begin
+        elapsed = @elapsed guard = _run_thermal_antidrift()
+        @test guard.base.converged
+        @test guard.delta < 1e-12
+        @info "AD thermal anti-drift" grid="$(guard.N)x$(guard.N)" forward_iter=guard.base.n_iter nu_pure=guard.nu_pure driver_Nu=guard.nu_driver delta=guard.delta seconds=elapsed
     end
 end
 

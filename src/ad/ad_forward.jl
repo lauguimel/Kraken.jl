@@ -119,3 +119,57 @@ function ad_forward_solve(; Nx::Int, Ny::Int,
     )
 end
 
+function ad_thermal_forward_solve(; N::Int,
+                                    Ra::Real,
+                                    Pr::Real,
+                                    L::Union{Nothing,Real}=nothing,
+                                    q_hot::Real=0.5,
+                                    q_cold::Real=0.7,
+                                    T_hot::Real=1.0,
+                                    T_cold::Real=0.0,
+                                    tol::Real=1e-11,
+                                    max_steps::Int=450_000,
+                                    w_init=nothing)
+    p = ad_natconv_params(; N=N, Ra=Ra, Pr=Pr,
+                          T_hot=T_hot, T_cold=T_cold)
+    L_f = Float64(isnothing(L) ? Float64(N - 1) + Float64(q_hot) + Float64(q_cold) : L)
+    geom = ad_cavity_wall_geometry(p.Nx, p.Ny, L_f; q_hot=q_hot)
+    w_in = w_init === nothing ?
+           ad_initial_thermal_w(p, geom.x_cold, geom.q_hot) : copy(w_init)
+    w_out = similar(w_in)
+    residual = Inf
+    n_iter = 0
+    converged = false
+
+    for step in 1:max_steps
+        ad_thermal_cut_step!(w_out, w_in, geom.q_wall, geom.q_wall, p)
+        residual = ad_relative_step_residual(w_out, w_in)
+        n_iter = step
+        if residual < Float64(tol)
+            converged = true
+            break
+        end
+        w_in, w_out = w_out, w_in
+    end
+
+    w_star = copy(w_out)
+    nusselt = nu_pure(w_star, geom.q_wall, p)
+    return (;
+        w_star=w_star,
+        q_wall=geom.q_wall,
+        dq_dL=geom.dq_dL,
+        params=p,
+        N=N,
+        Nx=p.Nx,
+        Ny=p.Ny,
+        Ra=Float64(Ra),
+        Pr=Float64(Pr),
+        L=L_f,
+        q_hot=geom.q_hot,
+        q_cold=geom.q_cold,
+        Nu=nusselt,
+        n_iter=n_iter,
+        residual=Float64(residual),
+        converged=converged,
+    )
+end

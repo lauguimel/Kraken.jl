@@ -1,0 +1,23 @@
+# Steady AD Nusselt sensitivity for a differentially heated cavity.
+
+Simulation sensitivity_cavity_nusselt D2Q9
+Domain L = 1.0 x 1.0  N = 16 x 16
+
+Define q_hot = 0.5
+Define q_cold = 0.7
+Define L = 16.2
+Define tol = 1e-11
+Define gmres_tol = 1e-10
+Define adjoint_tol = 1e-10
+
+Physics nu = 0.05 alpha = 0.07042253521126761 Pr = 0.71 Ra = 1e3
+Module thermal
+
+Boundary west  wall T = 1.0
+Boundary east  wall T = 0.0
+Boundary south wall
+Boundary north wall
+
+Run 450000 steps
+
+Sensitivity { qoi = nusselt, wrt = wall_position }

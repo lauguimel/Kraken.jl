@@ -26,6 +26,16 @@ function _krk_sensitivity_required_numeric(setup::SimulationSetup,
         "Sensitivity dispatch: missing $label. Provide it in Physics or Define."))
 end
 
+function _krk_sensitivity_optional_integer(setup::SimulationSetup,
+                                           keys::Tuple{Vararg{Symbol}})
+    value = _krk_sensitivity_optional_numeric(setup, keys)
+    value === nothing && return nothing
+    rounded = round(Int, value)
+    value == rounded || throw(ArgumentError(
+        "Sensitivity dispatch: `$(first(keys))` must be an integer, got $value."))
+    return rounded
+end
+
 function _krk_sensitivity_expr_kwargs(setup::SimulationSetup; x=0.0,
                                       y=setup.domain.Ly / 2, z=0.0, t=0.0)
     dom = setup.domain
@@ -104,18 +114,28 @@ function _krk_sensitivity_inlet(setup::SimulationSetup)
     return :parabolic
 end
 
-"""
-    run_krk_sensitivity(setup::SimulationSetup)
+function _krk_sensitivity_boundary_temperature(setup::SimulationSetup,
+                                               face::Symbol)
+    for bc in setup.boundaries
+        bc.face === face || continue
+        haskey(bc.values, :T) || continue
+        x = face === :east ? setup.domain.Lx : 0.0
+        kwargs = _krk_sensitivity_expr_kwargs(setup; x=x,
+                                             y=setup.domain.Ly / 2)
+        return Float64(evaluate(bc.values[:T]; kwargs...))
+    end
+    return nothing
+end
 
-Dispatch a `.krk` `Sensitivity` request to `steady_shape_sensitivity`.
-Returns the AD API NamedTuple: `(; value, gradient, qoi_value, solver,
-terms, n_iter, ...)`.
-"""
-function run_krk_sensitivity(setup::SimulationSetup)
-    request = setup.sensitivity
-    request === nothing && throw(ArgumentError(
-        "run_krk_sensitivity requires setup.sensitivity !== nothing"))
+function _krk_sensitivity_optional_temperature(setup::SimulationSetup,
+                                               keys::Tuple{Vararg{Symbol}},
+                                               face::Symbol)
+    value = _krk_sensitivity_optional_numeric(setup, keys)
+    value !== nothing && return value
+    return _krk_sensitivity_boundary_temperature(setup, face)
+end
 
+function _krk_sensitivity_drag_kwargs(setup::SimulationSetup, request)
     dom = setup.domain
     nu = _krk_sensitivity_required_numeric(setup, (:nu, Symbol("ν")),
                                            "viscosity `nu`")
@@ -140,6 +160,76 @@ function run_krk_sensitivity(setup::SimulationSetup)
     for key in (:tol, :gmres_tol, :adjoint_tol)
         value = _krk_sensitivity_optional_numeric(setup, (key,))
         value !== nothing && (kwargs[key] = value)
+    end
+
+    return kwargs
+end
+
+function _krk_sensitivity_nusselt_kwargs(setup::SimulationSetup, request)
+    :thermal in setup.modules || throw(ArgumentError(
+        "Sensitivity dispatch: qoi=nusselt requires `Module thermal`."))
+    setup.lattice === :D2Q9 || throw(ArgumentError(
+        "Sensitivity dispatch: qoi=nusselt currently supports D2Q9 only."))
+
+    dom = setup.domain
+    dom.Nx == dom.Ny || throw(ArgumentError(
+        "Sensitivity dispatch: qoi=nusselt requires a square cavity grid; " *
+        "got N=$(dom.Nx)x$(dom.Ny)."))
+
+    kwargs = Dict{Symbol, Any}(
+        :N => dom.Nx,
+        :Ra => _krk_sensitivity_required_numeric(setup, (:Ra, :rayleigh),
+                                                 "Rayleigh number `Ra`"),
+        :Pr => _krk_sensitivity_required_numeric(setup, (:Pr, :prandtl),
+                                                 "Prandtl number `Pr`"),
+        :qoi => request.qoi,
+        :wrt => request.wrt,
+        :max_steps => setup.max_steps,
+    )
+
+    for key in (:L, :wall_param, :wall_position)
+        value = _krk_sensitivity_optional_numeric(setup, (key,))
+        value !== nothing && (kwargs[key] = value)
+    end
+
+    for key in (:q_hot, :q_cold, :tol, :gmres_tol, :adjoint_tol, :fd_h)
+        value = _krk_sensitivity_optional_numeric(setup, (key,))
+        value !== nothing && (kwargs[key] = value)
+    end
+    for key in (:gmres_restart, :gmres_max_restarts)
+        value = _krk_sensitivity_optional_integer(setup, (key,))
+        value !== nothing && (kwargs[key] = value)
+    end
+
+    t_hot = _krk_sensitivity_optional_temperature(setup, (:T_hot, :Thot),
+                                                 :west)
+    t_cold = _krk_sensitivity_optional_temperature(setup, (:T_cold, :Tcold),
+                                                  :east)
+    t_hot !== nothing && (kwargs[:T_hot] = t_hot)
+    t_cold !== nothing && (kwargs[:T_cold] = t_cold)
+
+    return kwargs
+end
+
+"""
+    run_krk_sensitivity(setup::SimulationSetup)
+
+Dispatch a `.krk` `Sensitivity` request to `steady_shape_sensitivity`.
+Returns the AD API NamedTuple: `(; value, gradient, qoi_value, solver,
+terms, n_iter, ...)`.
+"""
+function run_krk_sensitivity(setup::SimulationSetup)
+    request = setup.sensitivity
+    request === nothing && throw(ArgumentError(
+        "run_krk_sensitivity requires setup.sensitivity !== nothing"))
+
+    kwargs = if request.qoi === :drag
+        _krk_sensitivity_drag_kwargs(setup, request)
+    elseif request.qoi === :nusselt
+        _krk_sensitivity_nusselt_kwargs(setup, request)
+    else
+        throw(ArgumentError(
+            "unsupported qoi=$(request.qoi); supported qoi values are :drag and :nusselt"))
     end
 
     return steady_shape_sensitivity(; kwargs...)

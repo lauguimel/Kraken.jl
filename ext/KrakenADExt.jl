@@ -4,6 +4,7 @@ using Kraken
 using Enzyme
 
 import Kraken: _ad_dJdf, _ad_vjp_GtT, _ad_dqwall_terms
+import Kraken: _ad_dNudw, _ad_thermal_vjp_GtT, _ad_thermal_dqwall_terms
 
 _short_error(err) = first(sprint(showerror, err), min(360, lastindex(sprint(showerror, err))))
 _short_string(msg) = first(msg, min(360, lastindex(msg)))
@@ -160,5 +161,63 @@ function _ad_dqwall_terms(f_star, lambda, q_wall, is_solid, u_profile,
     return (; explicit=explicit, implicit=implicit)
 end
 
-end # module KrakenADExt
+function _ad_dNudw(w_star, q_wall, p)
+    dwd = zeros(Float64, length(w_star))
+    Enzyme.autodiff(Enzyme.Reverse, Kraken.nu_pure, Enzyme.Active,
+                    Enzyme.Duplicated(copy(w_star), dwd),
+                    Enzyme.Const(q_wall),
+                    Enzyme.Const(p))
+    return dwd
+end
 
+function _ad_thermal_vjp_GtT(w_star, v, q_flow, q_therm, p)
+    out = zeros(Float64, length(w_star))
+    dout = copy(v)
+    dw = zeros(Float64, length(w_star))
+    Enzyme.autodiff(Enzyme.Reverse, Kraken.ad_thermal_cut_step!,
+                    Enzyme.Duplicated(out, dout),
+                    Enzyme.Duplicated(copy(w_star), dw),
+                    Enzyme.Const(q_flow),
+                    Enzyme.Const(q_therm),
+                    Enzyme.Const(p))
+    return dw
+end
+
+function _ad_dNu_dqwall(w_star, q_wall, p)
+    dqw = zeros(Float64, size(q_wall))
+    Enzyme.autodiff(Enzyme.Reverse, Kraken.nu_pure, Enzyme.Active,
+                    Enzyme.Const(w_star),
+                    Enzyme.Duplicated(copy(q_wall), dqw),
+                    Enzyme.Const(p))
+    return (; dqw=dqw, path="taped", error="")
+end
+
+function _lambda_dot_thermal_dG_dqwalls(w_star, lambda, q_flow, q_therm, p)
+    out = zeros(Float64, length(w_star))
+    dout = copy(lambda)
+    dqw_flow = zeros(Float64, size(q_flow))
+    dqw_therm = zeros(Float64, size(q_therm))
+    Enzyme.autodiff(Enzyme.Reverse, Kraken.ad_thermal_cut_step!,
+                    Enzyme.Duplicated(out, dout),
+                    Enzyme.Const(w_star),
+                    Enzyme.Duplicated(copy(q_flow), dqw_flow),
+                    Enzyme.Duplicated(copy(q_therm), dqw_therm),
+                    Enzyme.Const(p))
+    return (; flow=dqw_flow, thermal=dqw_therm, path="taped", error="")
+end
+
+function _ad_thermal_dqwall_terms(w_star, lambda, q_flow, q_therm, p, dq_dL)
+    explicit = _ad_dNu_dqwall(w_star, q_therm, p)
+    implicit = _lambda_dot_thermal_dG_dqwalls(w_star, lambda, q_flow, q_therm, p)
+    implicit_L = Kraken.ad_dot_arrays(implicit.flow, dq_dL) +
+                 Kraken.ad_dot_arrays(implicit.thermal, dq_dL)
+    dirfd = Kraken.directional_fd_thermal_lambdaG_qwalls(w_star, lambda,
+                                                         q_flow, q_therm,
+                                                         dq_dL, p)
+    rel = Kraken.ad_rel_delta(implicit_L, dirfd)
+    return (; explicit=explicit,
+            implicit=(; implicit..., directional_fd=dirfd,
+                      directional_rel=rel))
+end
+
+end # module KrakenADExt
