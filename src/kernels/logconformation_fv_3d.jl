@@ -1,0 +1,253 @@
+"""
+    logfv_oldroydb_subcycle_estimate_3d(max_grad_norm, lambda, dt=1; kwargs...)
+
+Estimate a single global subcycle count for the 3D local Oldroyd-B
+log-conformation constitutive step. The returned named tuple mirrors the 2D
+FVFD estimator and is intended to be evaluated on the host before launching
+the fixed-loop RK2 constitutive kernel.
+"""
+function logfv_oldroydb_subcycle_estimate_3d(
+    max_grad_norm::Real,
+    lambda::Real,
+    dt::Real=1;
+    relative_tolerance::Real=0.01,
+    max_deformation_increment::Real=0.05,
+    max_memory_deformation_increment::Real=Inf,
+    min_substeps::Integer=1,
+    max_substeps::Integer=64,
+)
+    max_grad_norm >= 0 || throw(ArgumentError("max_grad_norm must be non-negative"))
+    lambda > 0 || throw(ArgumentError("lambda must be positive"))
+    dt > 0 || throw(ArgumentError("dt must be positive"))
+    max_deformation_increment > 0 ||
+        throw(ArgumentError("max_deformation_increment must be positive"))
+    max_memory_deformation_increment > 0 ||
+        throw(ArgumentError("max_memory_deformation_increment must be positive"))
+    min_substeps >= 1 || throw(ArgumentError("min_substeps must be >= 1"))
+    max_substeps >= min_substeps ||
+        throw(ArgumentError("max_substeps must be >= min_substeps"))
+
+    relax_increment = dt / lambda
+    deformation_increment = dt * max_grad_norm
+    memory_deformation_increment = lambda * max_grad_norm
+    max_relax_increment = logfv_oldroydb_split_relax_increment(relative_tolerance)
+    relax_substeps = max(min_substeps, ceil(Int, relax_increment / max_relax_increment))
+    deformation_substeps = max(min_substeps, ceil(Int, deformation_increment / max_deformation_increment))
+    memory_deformation_substeps = max(
+        min_substeps,
+        ceil(Int, memory_deformation_increment / max_memory_deformation_increment),
+    )
+    raw_substeps = max(relax_substeps, deformation_substeps, memory_deformation_substeps)
+    recommended = min(raw_substeps, max_substeps)
+
+    return (;
+        recommended,
+        raw_substeps,
+        relax_substeps,
+        deformation_substeps,
+        memory_deformation_substeps,
+        clamped=raw_substeps > max_substeps,
+        relax_increment,
+        deformation_increment,
+        memory_deformation_increment,
+        max_relax_increment,
+        max_deformation_increment,
+        max_memory_deformation_increment,
+        relative_tolerance,
+    )
+end
+
+function logfv_recommended_oldroydb_substeps_3d(args...; kwargs...)
+    return logfv_oldroydb_subcycle_estimate_3d(args...; kwargs...).recommended
+end
+
+function logfv_max_grad_norm_3d(
+    duxdx, duxdy, duxdz,
+    duydx, duydy, duydz,
+    duzdx, duzdy, duzdz,
+)
+    h_duxdx = Array(duxdx); h_duxdy = Array(duxdy); h_duxdz = Array(duxdz)
+    h_duydx = Array(duydx); h_duydy = Array(duydy); h_duydz = Array(duydz)
+    h_duzdx = Array(duzdx); h_duzdy = Array(duzdy); h_duzdz = Array(duzdz)
+    max_norm2 = 0.0
+    @inbounds for idx in eachindex(h_duxdx)
+        norm2 =
+            Float64(h_duxdx[idx]) * Float64(h_duxdx[idx]) +
+            Float64(h_duxdy[idx]) * Float64(h_duxdy[idx]) +
+            Float64(h_duxdz[idx]) * Float64(h_duxdz[idx]) +
+            Float64(h_duydx[idx]) * Float64(h_duydx[idx]) +
+            Float64(h_duydy[idx]) * Float64(h_duydy[idx]) +
+            Float64(h_duydz[idx]) * Float64(h_duydz[idx]) +
+            Float64(h_duzdx[idx]) * Float64(h_duzdx[idx]) +
+            Float64(h_duzdy[idx]) * Float64(h_duzdy[idx]) +
+            Float64(h_duzdz[idx]) * Float64(h_duzdz[idx])
+        max_norm2 = max(max_norm2, norm2)
+    end
+    return sqrt(max_norm2)
+end
+
+@kernel function logfv_constitutive_step_log_3d_kernel!(
+    psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+    @Const(psixx), @Const(psixy), @Const(psixz),
+    @Const(psiyy), @Const(psiyz), @Const(psizz),
+    @Const(duxdx), @Const(duxdy), @Const(duxdz),
+    @Const(duydx), @Const(duydy), @Const(duydz),
+    @Const(duzdx), @Const(duzdy), @Const(duzdz),
+    lambda, dt, n_sub, Nx, Ny, Nz,
+)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny && k <= Nz
+            T = eltype(psixx_out)
+            pxx = psixx[i, j, k]
+            pxy = psixy[i, j, k]
+            pxz = psixz[i, j, k]
+            pyy = psiyy[i, j, k]
+            pyz = psiyz[i, j, k]
+            pzz = psizz[i, j, k]
+            l11 = duxdx[i, j, k]
+            l12 = duxdy[i, j, k]
+            l13 = duxdz[i, j, k]
+            l21 = duydx[i, j, k]
+            l22 = duydy[i, j, k]
+            l23 = duydz[i, j, k]
+            l31 = duzdx[i, j, k]
+            l32 = duzdy[i, j, k]
+            l33 = duzdz[i, j, k]
+            h = T(dt) / T(n_sub)
+            half_h = T(0.5) * h
+            lambda_t = T(lambda)
+            divu_transport = zero(T)
+
+            for _ in 1:n_sub
+                k1xx = logconf_source_with_divergence_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 1,
+                )
+                k1xy = logconf_source_with_divergence_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 2,
+                )
+                k1xz = logconf_source_with_divergence_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 3,
+                )
+                k1yy = logconf_source_with_divergence_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 4,
+                )
+                k1yz = logconf_source_with_divergence_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 5,
+                )
+                k1zz = logconf_source_with_divergence_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 6,
+                )
+
+                qxx = pxx + h * k1xx
+                qxy = pxy + h * k1xy
+                qxz = pxz + h * k1xz
+                qyy = pyy + h * k1yy
+                qyz = pyz + h * k1yz
+                qzz = pzz + h * k1zz
+
+                k2xx = logconf_source_with_divergence_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 1,
+                )
+                k2xy = logconf_source_with_divergence_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 2,
+                )
+                k2xz = logconf_source_with_divergence_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 3,
+                )
+                k2yy = logconf_source_with_divergence_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 4,
+                )
+                k2yz = logconf_source_with_divergence_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 5,
+                )
+                k2zz = logconf_source_with_divergence_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, 6,
+                )
+
+                pxx += half_h * (k1xx + k2xx)
+                pxy += half_h * (k1xy + k2xy)
+                pxz += half_h * (k1xz + k2xz)
+                pyy += half_h * (k1yy + k2yy)
+                pyz += half_h * (k1yz + k2yz)
+                pzz += half_h * (k1zz + k2zz)
+            end
+
+            psixx_out[i, j, k] = pxx
+            psixy_out[i, j, k] = pxy
+            psixz_out[i, j, k] = pxz
+            psiyy_out[i, j, k] = pyy
+            psiyz_out[i, j, k] = pyz
+            psizz_out[i, j, k] = pzz
+        end
+    end
+end
+
+function logfv_constitutive_step_log_3d!(
+    psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+    psixx, psixy, psixz, psiyy, psiyz, psizz,
+    duxdx, duxdy, duxdz,
+    duydx, duydy, duydz,
+    duzdx, duzdy, duzdz,
+    lambda, dt, n_sub;
+    sync::Bool=true,
+)
+    n_sub >= 1 || throw(ArgumentError("n_sub must be >= 1"))
+    backend = KernelAbstractions.get_backend(psixx_out)
+    Nx, Ny, Nz = size(psixx_out)
+    kernel! = logfv_constitutive_step_log_3d_kernel!(backend)
+    kernel!(
+        psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+        psixx, psixy, psixz, psiyy, psiyz, psizz,
+        duxdx, duxdy, duxdz,
+        duydx, duydy, duydz,
+        duzdx, duzdy, duzdz,
+        lambda, dt, Int(n_sub), Nx, Ny, Nz;
+        ndrange=(Nx, Ny, Nz),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+function logfv_constitutive_step_log_3d!(
+    psixx, psixy, psixz, psiyy, psiyz, psizz,
+    duxdx, duxdy, duxdz,
+    duydx, duydy, duydz,
+    duzdx, duzdy, duzdz,
+    lambda, dt, n_sub;
+    sync::Bool=true,
+)
+    return logfv_constitutive_step_log_3d!(
+        psixx, psixy, psixz, psiyy, psiyz, psizz,
+        psixx, psixy, psixz, psiyy, psiyz, psizz,
+        duxdx, duxdy, duxdz,
+        duydx, duydy, duydz,
+        duzdx, duzdy, duzdz,
+        lambda, dt, n_sub;
+        sync,
+    )
+end
