@@ -28,20 +28,26 @@ using KernelAbstractions
 # reproduces ν_eff = ν_total to 0.04% (subtest "(D) coupling correctness", the 3D
 # analogue of the 2D test 1c that lands 1.0002) — a hard @test below.
 #
-# Residual on the LIVE-conformation canary (β=0.5, Ny=32, peak Wi≈0.5): the
-# coupling delivers whatever τ_p the conformation solver produces, and the 3D
-# conformation TRT over-diffuses / UNDER-produces τ_p (defect #2, SEPARATE from
-# the coupling). At this point τ_p,xy is delivered at only ~63-89 % of ν_p·γ̇, so
-# the flow runs ~17 % FAST (ratio 1.17, vs 0.49 with the buggy source). The
-# residual collapses with resolution / lower Wi (Ny=64 → 1.035; Ny=64,Wi=0.05 →
-# 1.020 ∈ band), confirming it is conformation accuracy, NOT a coupling-amplitude
-# bug. Per the mission guardrail the live-conformation velocity / C-profile
-# matches stay @test_broken (defect #2, tracked); the coupling correctness, the
-# pure-solvent control, and the headline 3D invariants are hard @test.
+# ── WALL-GRADIENT FIX (KRK-VE-3D) ─────────────────────────────────────────
+# The 3D conformation kernel now uses a wall-aware (one-sided 2nd-order at the
+# y/z boundary rows) velocity-gradient stencil mirroring the validated 2D
+# `_wall_aware_dy_2d`. This CLOSES the uniform-simple-shear case (the Couette
+# canary recovers Cxy/N1 to roundoff). It does NOT close this Poiseuille canary,
+# whose residual is a SEPARATE mechanism (below).
 #
-# Separately, the conformation TRT over-diffuses C across y: the centre-line C_xx
-# settles ≈1.085 (analytical 1.0) and the near-wall C_xy under-predicts λ·γ̇_meas.
-# These profile-match assertions stay @test_broken (tracked, not forced green).
+# Residual on the LIVE-conformation canary (β=0.5, Ny=32, peak Wi≈0.5): the
+# velocity profile is PARABOLIC (γ̇ varies linearly across y), so C_xy(y) is a
+# curved field; the conformation TRT artificial diffusion κ=cs²(τ⁺−½) smooths
+# that curvature, UNDER-producing τ_p in the bulk of the channel — distinct from
+# the now-fixed wall half-shear truncation. τ_p,xy is delivered at only ~63-89 %
+# of ν_p·γ̇, so the flow runs ~13 % FAST (ratio 1.13, vs 0.49 with the old buggy
+# source). The residual collapses with resolution / lower Wi (a κ·λ/Ny² boundary-
+# layer effect), confirming conformation accuracy, NOT a coupling-amplitude bug.
+# Per the mission guardrail these live-conformation velocity / C-profile matches
+# stay @test_broken (curved-profile TRT diffusion, tracked, NOT forced green);
+# the coupling correctness, the pure-solvent control, and the headline 3D
+# invariants are hard @test. The centre-line C_xx settles ≈1.09 (analytical 1.0)
+# and the near-wall C_xy under-predicts λ·γ̇_meas by the same mechanism.
 #
 # Fast: CPU Float64, 6×32×6 box, 40 000 steps (converged — identical at 80 k).
 # ==========================================================================

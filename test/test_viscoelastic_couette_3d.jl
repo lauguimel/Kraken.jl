@@ -118,22 +118,19 @@ using KernelAbstractions
     @test abs(res.N2_c) < 1e-6 * abs(res.N1_c)
 
     # --- (B) Constitutive self-consistency vs Wi_local (≤ 2 %, N1 ≤ 4 %) --
-    # NOTE (KRK-VE-3D): the momentum coupling is now the validated 2D Guo ∇·τ_p
-    # body force (no standalone re-relaxed Hermite source). This makes the
-    # VELOCITY more accurate (γ̇_meas now within ~0.9 % of U/Ny, was ~2.6 %),
-    # which in turn UNMASKS the pre-existing conformation TRT under-production
-    # (defect #2): at the centre cell Cxy/λ sits ~2.5 % below the LOCAL γ̇, and
-    # N1 (a difference of stresses) ~5.6 %. The old Hermite coupling passed these
-    # only by an error cancellation — its curved profile depressed γ̇_meas onto
-    # the under-produced Cxy. Cxx and τ_xy (less sensitive) still hold ≤ 2 %.
-    # Per the mission guardrail (do NOT fix defect #2, do NOT loosen) the two
-    # defect-#2-sensitive assertions are tracked as @test_broken, matching how
-    # the Poiseuille canary tracks the same conformation under-production.
-    @test_broken rel(res.Cxy_c, Wl) < 0.02
+    # NOTE (KRK-VE-3D): the momentum coupling is the validated 2D Guo ∇·τ_p
+    # body force (no standalone re-relaxed Hermite source), AND the 3D
+    # conformation kernel now uses a wall-aware (one-sided 2nd-order at j=1,Ny)
+    # velocity-gradient stencil mirroring the validated 2D `_wall_aware_dy_2d`.
+    # Defect #2 (the naive clamped wall gradient returned HALF the true shear at
+    # the wall rows, depressing the BULK Cxy/N1 via TRT artificial diffusion) is
+    # CLOSED for uniform simple shear: Cxy and N1 now match to roundoff
+    # (Cxy_rel ≈ 5e-13, N1_rel ≈ 1e-12). All four constitutive checks pass.
+    @test rel(res.Cxy_c, Wl) < 0.02
     @test rel(res.Cxx_c, 1 + 2 * Wl^2) < 0.02
     @test rel(res.tau_xy_c, res.eta_total * res.gamma_dot_meas) < 0.02
     N1_target = 2 * res.eta_p * res.lambda * res.gamma_dot_meas^2
-    @test_broken rel(res.N1_c, N1_target) < 0.04
+    @test rel(res.N1_c, N1_target) < 0.04
 
     # --- Report (measured vs analytical, both references) ----------------
     @info "VE 3D planar-Couette canary — setup" Nx Ny Nz U_top γ̇_imposed=res.gamma_dot Wi_imposed=res.Wi beta λ max_steps t_diff=est.t_diff t_poly=est.t_poly

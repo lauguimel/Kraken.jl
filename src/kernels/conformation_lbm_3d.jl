@@ -33,6 +33,59 @@ using KernelAbstractions
 #  19 : (−y,−z)                        opp = 16
 
 # ------------------------------------------------------------------
+# Wall-aware first derivatives along y and z (3D port of the 2D
+# `_wall_aware_dy_2d`/`_wall_aware_dx_2d` helpers in conformation_lbm_2d.jl).
+#
+# A naive clamped central difference `(a[j+1]-a[j-1])/2` with
+# `jp=min(j+1,Ny); jm=max(j-1,1)` returns HALF the true gradient at the wall
+# rows (j=1, j=Ny) for a cell-centred linear profile, biasing the Oldroyd-B
+# production term there; the conformation LBM's artificial diffusion then
+# bleeds that wall deficit into the bulk (defect #2). These helpers use a
+# second-order one-sided stencil at the boundary rows (and a first-order
+# one-sided fallback), matching the validated 2D kernel. GPU-safe (no
+# allocation, branch-minimal, mirrors the 2D idiom verbatim).
+# ------------------------------------------------------------------
+@inline function _wall_aware_dy_3d(a, is_solid, i, j, k, Ny, ::Type{T}) where {T}
+    plus_ok = j < Ny && !is_solid[i, j + 1, k]
+    minus_ok = j > 1 && !is_solid[i, j - 1, k]
+    plus2_ok = j < Ny - 1 && plus_ok && !is_solid[i, j + 2, k]
+    minus2_ok = j > 2 && minus_ok && !is_solid[i, j - 2, k]
+    if plus_ok && minus_ok
+        return (a[i, j + 1, k] - a[i, j - 1, k]) / T(2)
+    elseif plus2_ok
+        return (-T(3) * a[i, j, k] + T(4) * a[i, j + 1, k] - a[i, j + 2, k]) / T(2)
+    elseif minus2_ok
+        return (T(3) * a[i, j, k] - T(4) * a[i, j - 1, k] + a[i, j - 2, k]) / T(2)
+    elseif plus_ok
+        return a[i, j + 1, k] - a[i, j, k]
+    elseif minus_ok
+        return a[i, j, k] - a[i, j - 1, k]
+    else
+        return zero(T)
+    end
+end
+
+@inline function _wall_aware_dz_3d(a, is_solid, i, j, k, Nz, ::Type{T}) where {T}
+    plus_ok = k < Nz && !is_solid[i, j, k + 1]
+    minus_ok = k > 1 && !is_solid[i, j, k - 1]
+    plus2_ok = k < Nz - 1 && plus_ok && !is_solid[i, j, k + 2]
+    minus2_ok = k > 2 && minus_ok && !is_solid[i, j, k - 2]
+    if plus_ok && minus_ok
+        return (a[i, j, k + 1] - a[i, j, k - 1]) / T(2)
+    elseif plus2_ok
+        return (-T(3) * a[i, j, k] + T(4) * a[i, j, k + 1] - a[i, j, k + 2]) / T(2)
+    elseif minus2_ok
+        return (T(3) * a[i, j, k] - T(4) * a[i, j, k - 1] + a[i, j, k - 2]) / T(2)
+    elseif plus_ok
+        return a[i, j, k + 1] - a[i, j, k]
+    elseif minus_ok
+        return a[i, j, k] - a[i, j, k - 1]
+    else
+        return zero(T)
+    end
+end
+
+# ------------------------------------------------------------------
 # Source term for component α∈{1..6} using all 6 macroscopic fields.
 # Returns the scalar S to be distributed as w_q · S.
 # ------------------------------------------------------------------
@@ -82,21 +135,22 @@ end
         u = ux[i, j, k]; v = uy[i, j, k]; w = uz[i, j, k]
         usq = u*u + v*v + w*w
 
-        # Velocity gradient (central diff, periodic-x, clamped y/z)
+        # Velocity gradient: periodic-x central diff; wall-aware (one-sided
+        # 2nd-order at the y/z boundary rows) for ∂/∂y and ∂/∂z so the
+        # Oldroyd-B production term sees the FULL shear rate at the walls
+        # (defect #2 fix — mirrors the validated 2D `_wall_aware_dy_2d`).
         ip = ifelse(i < Nx, i + 1, 1)
         im = ifelse(i > 1,  i - 1, Nx)
-        jp = min(j + 1, Ny); jm = max(j - 1, 1)
-        kp = min(k + 1, Nz); km = max(k - 1, 1)
 
         duxdx = (ux[ip,j,k] - ux[im,j,k]) / T(2)
-        duxdy = (ux[i,jp,k] - ux[i,jm,k]) / T(2)
-        duxdz = (ux[i,j,kp] - ux[i,j,km]) / T(2)
+        duxdy = _wall_aware_dy_3d(ux, is_solid, i, j, k, Ny, T)
+        duxdz = _wall_aware_dz_3d(ux, is_solid, i, j, k, Nz, T)
         duydx = (uy[ip,j,k] - uy[im,j,k]) / T(2)
-        duydy = (uy[i,jp,k] - uy[i,jm,k]) / T(2)
-        duydz = (uy[i,j,kp] - uy[i,j,km]) / T(2)
+        duydy = _wall_aware_dy_3d(uy, is_solid, i, j, k, Ny, T)
+        duydz = _wall_aware_dz_3d(uy, is_solid, i, j, k, Nz, T)
         duzdx = (uz[ip,j,k] - uz[im,j,k]) / T(2)
-        duzdy = (uz[i,jp,k] - uz[i,jm,k]) / T(2)
-        duzdz = (uz[i,j,kp] - uz[i,j,km]) / T(2)
+        duzdy = _wall_aware_dy_3d(uz, is_solid, i, j, k, Ny, T)
+        duzdz = _wall_aware_dz_3d(uz, is_solid, i, j, k, Nz, T)
 
         cxx = C_xx[i,j,k]; cxy = C_xy[i,j,k]; cxz = C_xz[i,j,k]
         cyy = C_yy[i,j,k]; cyz = C_yz[i,j,k]; czz = C_zz[i,j,k]
