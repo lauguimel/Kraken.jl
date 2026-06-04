@@ -6,10 +6,10 @@
 # Zou-He (bottom u_x = 0, top u_x = U) → uniform shear rate γ̇ = U / (Ny − 1).
 #
 # Reuses the geometry-agnostic 3D constitutive stack from the sphere driver:
-#   - `collide_3d!`                      BGK solvent collision (ω_s = 1/(3ν_s+½))
+#   - `compute_polymeric_force_3d!`      polymer body force F_poly = ∇·τ_p
+#   - `collide_guo_field_3d!`            BGK solvent collision + fused Guo force
 #   - `stream_periodic_xz_wall_y_3d!`    periodic-xz / y-wall streamer (NEW)
 #   - `apply_zou_he_south_3d!/north_3d!` moving walls in y
-#   - `apply_hermite_source_3d!`         injects τ_p into f post-collision
 #   - `collide_conformation_3d!` ×6      TRT conformation transport
 #   - `apply_cnebb_conformation_y_walls_3d!`  conformation wall BC (y-faces)
 #   - `update_polymer_stress_3d!`        Oldroyd-B τ_p = G·(C − I)
@@ -66,8 +66,7 @@ function run_conformation_couette_libb_3d(;
     ν_total = Float64(ν_s) + ν_p_eff
     beta    = Float64(ν_s) / ν_total
     Re = Float64(U) * H / ν_total
-    ω_s = 1.0 / (3.0 * Float64(ν_s) + 0.5)
-    s_plus_s = ω_s                    # BGK Hermite source rate
+    ω_s = 1.0 / (3.0 * Float64(ν_s) + 0.5)  # solvent rate; polymer via ∇·τ_p Guo force
 
     @info "Conformation Couette (3D)" Nx Ny Nz U γ̇ Wi beta λ_p Re tau_plus polymer_model=typeof(polymer_model)
 
@@ -129,22 +128,33 @@ function run_conformation_couette_libb_3d(;
     tau_p_yz = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
     tau_p_zz = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
 
+    # --- Polymer body force F_poly = ∇·τ_p (validated 2D Guo coupling) ---
+    # The polymer enters the momentum equation EXACTLY ONCE as a first-moment
+    # Guo body force at the solvent rate ω_s (lattice viscosity = ν_s), not via
+    # a standalone re-relaxed Hermite source. In the uniform-shear Couette bulk
+    # ∇·τ_p ≈ 0, so the moving walls set γ̇ and the constitutive checks hold; the
+    # force only matters in the near-wall stress gradient.
+    Fx_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fy_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fz_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+
     Uw = FT(U)
 
     for step in 1:max_steps
-        # --- Solvent: BGK collide → periodic-xz / y-wall stream → moving walls ---
-        collide_3d!(f_in, is_solid, FT(ω_s))
-        # Inject the Hermite polymer source post-collision (pre-stream).
-        apply_hermite_source_3d!(f_in, is_solid, s_plus_s,
-                                   tau_p_xx, tau_p_xy, tau_p_xz,
-                                   tau_p_yy, tau_p_yz, tau_p_zz)
+        # --- Polymer body force: F_poly = ∇·τ_p (periodic x AND z) ---
+        compute_polymeric_force_3d!(Fx_poly, Fy_poly, Fz_poly,
+                                      tau_p_xx, tau_p_xy, tau_p_xz,
+                                      tau_p_yy, tau_p_yz, tau_p_zz;
+                                      periodic_x=true, periodic_z=true)
+        # --- Solvent: BGK+Guo-field collide (force fused once) → moving walls ---
+        collide_guo_field_3d!(f_in, is_solid, Fx_poly, Fy_poly, Fz_poly, FT(ω_s))
         # Moving walls in y via half-way bounce-back + Ladd correction:
         # bottom (j=1) u=0, top (j=Ny) u=(U,0,0). Clean γ̇ = U/Ny, no Zou-He
         # node-velocity overshoot.
         stream_periodic_xz_movingwall_y_3d!(f_out, f_in, zero(FT), Uw,
                                              Nx, Ny, Nz; rho_w=one(FT))
 
-        compute_macroscopic_3d!(ρ, ux, uy, uz, f_out)
+        compute_macroscopic_forced_field_3d!(ρ, ux, uy, uz, f_out, Fx_poly, Fy_poly, Fz_poly)
 
         # --- Conformation TRT (6 components), periodic-xz + y-wall CNEBB ---
         stream_periodic_xz_wall_y_3d!(g_xx_buf, g_xx, Nx, Ny, Nz)
@@ -203,7 +213,11 @@ function run_conformation_couette_libb_3d(;
     end
     KernelAbstractions.synchronize(backend)
 
-    compute_macroscopic_3d!(ρ, ux, uy, uz, f_in)
+    compute_polymeric_force_3d!(Fx_poly, Fy_poly, Fz_poly,
+                                  tau_p_xx, tau_p_xy, tau_p_xz,
+                                  tau_p_yy, tau_p_yz, tau_p_zz;
+                                  periodic_x=true, periodic_z=true)
+    compute_macroscopic_forced_field_3d!(ρ, ux, uy, uz, f_in, Fx_poly, Fy_poly, Fz_poly)
 
     Cxx_h = Array(C_xx); Cxy_h = Array(C_xy); Cxz_h = Array(C_xz)
     Cyy_h = Array(C_yy); Cyz_h = Array(C_yz); Czz_h = Array(C_zz)

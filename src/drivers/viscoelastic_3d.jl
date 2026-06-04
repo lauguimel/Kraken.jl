@@ -2,17 +2,21 @@
 #
 # Mirrors `drivers/viscoelastic.jl::run_conformation_cylinder_libb_2d`
 # in 3D. Uses:
-#   - `fused_trt_libb_v2_step_3d!`   for the solvent flow
+#   - `compute_polymeric_force_3d!`  polymer body force F_poly = ∇·τ_p
+#   - `fused_trt_libb_v2_guo_field_step_3d!`  solvent flow + fused Guo polymer
+#                                    force (the validated 2D ∇·τ_p coupling;
+#                                    polymer momentum consumed EXACTLY ONCE at ω_s)
 #   - `apply_bc_rebuild_3d!` (BCSpec3D) for inlet/outlet
-#   - `apply_hermite_source_3d!`     to inject τ_p into f post-collision
 #   - `collide_conformation_3d!` ×6  for each conformation component
 #   - `apply_polymer_wall_bc!` dispatching to `apply_cnebb_conformation_3d!`
 #   - `update_polymer_stress_3d!`    Oldroyd-B / log-conf stress closure
 #
-# Drag: standard `compute_drag_libb_3d` post-source on f_out (same
-# rationale as 2D — Mei-with-Bouzidi double-counts τ_p when the Hermite
-# source is active; the standard MEA on post-source f captures the full
-# σ_s + τ_p).
+# Drag: standard `compute_drag_libb_3d` post-collision on f_out. With the Guo
+# ∇·τ_p coupling the polymer momentum enters as a VOLUME body force (not a
+# post-collision f modification), so the standard halfway-BB MEA on the
+# post-collision cut-link f captures the solvent traction; the polymer
+# contribution is carried by the body force. (Replaces the prior Hermite-source
+# rationale — `apply_hermite_source_3d!` is no longer in the coupling path.)
 #
 # Log-conformation 3D has low-level Ψ kernels, but this sphere driver has
 # not yet wired the log-field inlet/outlet/wall treatment. For now
@@ -80,7 +84,8 @@ function run_conformation_sphere_libb_3d(;
     D = 2 * Float64(radius)
     ν_total = ν_s + ν_p_eff
     beta    = ν_s / ν_total
-    s_plus_s = 1.0 / (3.0 * ν_s + 0.5)
+    # ω_s = 1/(3ν_s+0.5) is applied inside `fused_trt_libb_v2_guo_field_step_3d!`
+    # via trt_rates(ν_s); the polymer enters as the ∇·τ_p Guo force at that rate.
 
     # Reference velocity for Cd / Wi (matches `run_sphere_libb_3d`)
     u_ref = inlet === :parabolic   ? (4/9) * Float64(u_in) :
@@ -212,22 +217,34 @@ function run_conformation_sphere_libb_3d(;
     tau_p_yz = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
     tau_p_zz = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
 
+    # --- Polymer body force F_poly = ∇·τ_p (validated 2D Guo coupling) ---
+    # The polymer enters the momentum equation EXACTLY ONCE as a first-moment
+    # Guo body force fused into the TRT+LI-BB collision at the solvent rate ω_s
+    # (lattice viscosity = ν_s), replacing the standalone re-relaxed Hermite
+    # source. Non-periodic x (inlet/outlet) and z (walls), so the divergence
+    # stencil clamps on both. 3D port of the validated 2D cylinder coupling.
+    Fx_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fy_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fz_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+
     Fx_sum = 0.0; Fy_sum = 0.0; Fz_sum = 0.0; n_avg = 0
 
     for step in 1:max_steps
-        # --- Solvent TRT + LI-BB V2 ---
-        fused_trt_libb_v2_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
-                                     q_wall, uw_x, uw_y, uw_z,
-                                     Nx, Ny, Nz, FT(ν_s))
+        # --- Polymer body force: F_poly = ∇·τ_p (clamped x and z) ---
+        compute_polymeric_force_3d!(Fx_poly, Fy_poly, Fz_poly,
+                                      tau_p_xx, tau_p_xy, tau_p_xz,
+                                      tau_p_yy, tau_p_yz, tau_p_zz;
+                                      periodic_x=false, periodic_z=false)
+
+        # --- Solvent TRT + LI-BB V2 with fused Guo polymer force ---
+        fused_trt_libb_v2_guo_field_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                                               q_wall, uw_x, uw_y, uw_z,
+                                               Fx_poly, Fy_poly, Fz_poly,
+                                               Nx, Ny, Nz, FT(ν_s))
         # Pre-collision Zou-He rebuild at inlet/outlet
         apply_bc_rebuild_3d!(f_out, f_in, bcspec, ν_s, Nx, Ny, Nz)
 
-        # Inject Hermite polymer source (6 components of τ_p)
-        apply_hermite_source_3d!(f_out, is_solid, s_plus_s,
-                                   tau_p_xx, tau_p_xy, tau_p_xz,
-                                   tau_p_yy, tau_p_yz, tau_p_zz)
-
-        # Drag (standard halfway-BB MEA on post-source f) — note:
+        # Drag (standard halfway-BB MEA on post-collision f) — note:
         # `compute_drag_libb_3d` reads f_out only and integrates over
         # cut links via q_wall; with q_w on a symmetric sphere this gives
         # axisymmetric drag in x.

@@ -174,6 +174,89 @@ emit_code(::CollideTRTDirect_3D) = quote
     f_out[i, j, k, 18] = fp18 - a * (fp18 - feq18) - b * (fp17 - feq17)
 end
 
+"TRT collision on D3Q19 with a per-cell Guo body force field (Fx_field, Fy_field, Fz_field), written directly to f_out. 3D analogue of `CollideTRTDirectGuoField` (D2Q9): the polymer ∇·τ_p body force enters EXACTLY ONCE, fused into the collision at the solvent rate, with the standard Guo `1-s_plus/2` prefactor and NO extra denominator."
+struct CollideTRTDirectGuoField_3D <: LBMBrick end
+required_args(::CollideTRTDirectGuoField_3D) =
+    (:f_out, :s_plus, :s_minus, :Fx_field, :Fy_field, :Fz_field)
+emit_code(::CollideTRTDirectGuoField_3D) = quote
+    fx = Fx_field[i, j, k]
+    fy = Fy_field[i, j, k]
+    fz = Fz_field[i, j, k]
+    if fx != zero(T) || fy != zero(T) || fz != zero(T)
+        inv_ρ = one(T) / ρ
+        ux = (ρ * ux + fx / T(2)) * inv_ρ
+        uy = (ρ * uy + fy / T(2)) * inv_ρ
+        uz = (ρ * uz + fz / T(2)) * inv_ρ
+        usq = ux * ux + uy * uy + uz * uz
+    end
+
+    feq1  = feq_3d(Val(1),  ρ, ux, uy, uz, usq)
+    feq2  = feq_3d(Val(2),  ρ, ux, uy, uz, usq)
+    feq3  = feq_3d(Val(3),  ρ, ux, uy, uz, usq)
+    feq4  = feq_3d(Val(4),  ρ, ux, uy, uz, usq)
+    feq5  = feq_3d(Val(5),  ρ, ux, uy, uz, usq)
+    feq6  = feq_3d(Val(6),  ρ, ux, uy, uz, usq)
+    feq7  = feq_3d(Val(7),  ρ, ux, uy, uz, usq)
+    feq8  = feq_3d(Val(8),  ρ, ux, uy, uz, usq)
+    feq9  = feq_3d(Val(9),  ρ, ux, uy, uz, usq)
+    feq10 = feq_3d(Val(10), ρ, ux, uy, uz, usq)
+    feq11 = feq_3d(Val(11), ρ, ux, uy, uz, usq)
+    feq12 = feq_3d(Val(12), ρ, ux, uy, uz, usq)
+    feq13 = feq_3d(Val(13), ρ, ux, uy, uz, usq)
+    feq14 = feq_3d(Val(14), ρ, ux, uy, uz, usq)
+    feq15 = feq_3d(Val(15), ρ, ux, uy, uz, usq)
+    feq16 = feq_3d(Val(16), ρ, ux, uy, uz, usq)
+    feq17 = feq_3d(Val(17), ρ, ux, uy, uz, usq)
+    feq18 = feq_3d(Val(18), ρ, ux, uy, uz, usq)
+    feq19 = feq_3d(Val(19), ρ, ux, uy, uz, usq)
+    a = (s_plus + s_minus) * T(0.5)
+    b = (s_plus - s_minus) * T(0.5)
+    guo_pref = one(T) - s_plus / T(2)
+
+    wr = T(1.0/3.0); wa = T(1.0/18.0); we = T(1.0/36.0)
+    t3 = T(3); t9 = T(9)
+    # Guo source S_q = w_q·[3·(c_q-u)·F + 9·(c_q·u)(c_q·F)]  (D3Q19).
+    Sq1  = wr * ((-ux)*fx + (-uy)*fy + (-uz)*fz) * t3
+    Sq2  = wa * ((one(T)-ux)*fx + (-uy)*fy + (-uz)*fz) * t3 + wa * ux * fx * t9
+    Sq3  = wa * ((-one(T)-ux)*fx + (-uy)*fy + (-uz)*fz) * t3 + wa * (-ux) * (-fx) * t9
+    Sq4  = wa * ((-ux)*fx + (one(T)-uy)*fy + (-uz)*fz) * t3 + wa * uy * fy * t9
+    Sq5  = wa * ((-ux)*fx + (-one(T)-uy)*fy + (-uz)*fz) * t3 + wa * (-uy) * (-fy) * t9
+    Sq6  = wa * ((-ux)*fx + (-uy)*fy + (one(T)-uz)*fz) * t3 + wa * uz * fz * t9
+    Sq7  = wa * ((-ux)*fx + (-uy)*fy + (-one(T)-uz)*fz) * t3 + wa * (-uz) * (-fz) * t9
+    Sq8  = we * ((one(T)-ux)*fx + (one(T)-uy)*fy + (-uz)*fz) * t3 + we * (ux+uy) * (fx+fy) * t9
+    Sq9  = we * ((-one(T)-ux)*fx + (one(T)-uy)*fy + (-uz)*fz) * t3 + we * (-ux+uy) * (-fx+fy) * t9
+    Sq10 = we * ((one(T)-ux)*fx + (-one(T)-uy)*fy + (-uz)*fz) * t3 + we * (ux-uy) * (fx-fy) * t9
+    Sq11 = we * ((-one(T)-ux)*fx + (-one(T)-uy)*fy + (-uz)*fz) * t3 + we * (-ux-uy) * (-fx-fy) * t9
+    Sq12 = we * ((one(T)-ux)*fx + (-uy)*fy + (one(T)-uz)*fz) * t3 + we * (ux+uz) * (fx+fz) * t9
+    Sq13 = we * ((-one(T)-ux)*fx + (-uy)*fy + (one(T)-uz)*fz) * t3 + we * (-ux+uz) * (-fx+fz) * t9
+    Sq14 = we * ((one(T)-ux)*fx + (-uy)*fy + (-one(T)-uz)*fz) * t3 + we * (ux-uz) * (fx-fz) * t9
+    Sq15 = we * ((-one(T)-ux)*fx + (-uy)*fy + (-one(T)-uz)*fz) * t3 + we * (-ux-uz) * (-fx-fz) * t9
+    Sq16 = we * ((-ux)*fx + (one(T)-uy)*fy + (one(T)-uz)*fz) * t3 + we * (uy+uz) * (fy+fz) * t9
+    Sq17 = we * ((-ux)*fx + (-one(T)-uy)*fy + (one(T)-uz)*fz) * t3 + we * (-uy+uz) * (-fy+fz) * t9
+    Sq18 = we * ((-ux)*fx + (one(T)-uy)*fy + (-one(T)-uz)*fz) * t3 + we * (uy-uz) * (fy-fz) * t9
+    Sq19 = we * ((-ux)*fx + (-one(T)-uy)*fy + (-one(T)-uz)*fz) * t3 + we * (-uy-uz) * (-fy-fz) * t9
+
+    f_out[i, j, k, 1]  = fp1  - s_plus * (fp1 - feq1)            + guo_pref * Sq1
+    f_out[i, j, k, 2]  = fp2  - a * (fp2  - feq2)  - b * (fp3  - feq3)  + guo_pref * Sq2
+    f_out[i, j, k, 3]  = fp3  - a * (fp3  - feq3)  - b * (fp2  - feq2)  + guo_pref * Sq3
+    f_out[i, j, k, 4]  = fp4  - a * (fp4  - feq4)  - b * (fp5  - feq5)  + guo_pref * Sq4
+    f_out[i, j, k, 5]  = fp5  - a * (fp5  - feq5)  - b * (fp4  - feq4)  + guo_pref * Sq5
+    f_out[i, j, k, 6]  = fp6  - a * (fp6  - feq6)  - b * (fp7  - feq7)  + guo_pref * Sq6
+    f_out[i, j, k, 7]  = fp7  - a * (fp7  - feq7)  - b * (fp6  - feq6)  + guo_pref * Sq7
+    f_out[i, j, k, 8]  = fp8  - a * (fp8  - feq8)  - b * (fp11 - feq11) + guo_pref * Sq8
+    f_out[i, j, k, 11] = fp11 - a * (fp11 - feq11) - b * (fp8  - feq8)  + guo_pref * Sq11
+    f_out[i, j, k, 9]  = fp9  - a * (fp9  - feq9)  - b * (fp10 - feq10) + guo_pref * Sq9
+    f_out[i, j, k, 10] = fp10 - a * (fp10 - feq10) - b * (fp9  - feq9)  + guo_pref * Sq10
+    f_out[i, j, k, 12] = fp12 - a * (fp12 - feq12) - b * (fp15 - feq15) + guo_pref * Sq12
+    f_out[i, j, k, 15] = fp15 - a * (fp15 - feq15) - b * (fp12 - feq12) + guo_pref * Sq15
+    f_out[i, j, k, 13] = fp13 - a * (fp13 - feq13) - b * (fp14 - feq14) + guo_pref * Sq13
+    f_out[i, j, k, 14] = fp14 - a * (fp14 - feq14) - b * (fp13 - feq13) + guo_pref * Sq14
+    f_out[i, j, k, 16] = fp16 - a * (fp16 - feq16) - b * (fp19 - feq19) + guo_pref * Sq16
+    f_out[i, j, k, 19] = fp19 - a * (fp19 - feq19) - b * (fp16 - feq16) + guo_pref * Sq19
+    f_out[i, j, k, 17] = fp17 - a * (fp17 - feq17) - b * (fp18 - feq18) + guo_pref * Sq17
+    f_out[i, j, k, 18] = fp18 - a * (fp18 - feq18) - b * (fp17 - feq17) + guo_pref * Sq18
+end
+
 "TRT collision on D3Q19 with PER-CELL relaxation rates s_plus[i,j,k], s_minus[i,j,k]. Writes directly to f_out[i,j,k,:]. Used by SLBM 3D on stretched curvilinear meshes (compute_local_omega_3d)."
 struct CollideTRTLocalDirect_3D <: LBMBrick end
 required_args(::CollideTRTLocalDirect_3D) = (:f_out, :s_plus, :s_minus)

@@ -1,5 +1,95 @@
 using KernelAbstractions
 
+# ============================================================
+# Polymeric stress divergence → Guo body force (3D)
+# ============================================================
+#
+# 3D analogue of `compute_polymeric_force_2d!` (viscoelastic_2d.jl:16-46).
+# Builds the first-moment body force F_poly = ∇·τ_p over the 6-component
+# symmetric polymer stress (τ_xx, τ_xy, τ_xz, τ_yy, τ_yz, τ_zz):
+#
+#   Fx = ∂τ_xx/∂x + ∂τ_xy/∂y + ∂τ_xz/∂z
+#   Fy = ∂τ_xy/∂x + ∂τ_yy/∂y + ∂τ_yz/∂z
+#   Fz = ∂τ_xz/∂x + ∂τ_yz/∂y + ∂τ_zz/∂z
+#
+# Central differences. Per-axis periodicity: x and z wrap (channel /
+# duct topology) when `periodic_x` / `periodic_z` are true, else clamp;
+# y always clamps (no-slip walls). This is the VALIDATED 2D production
+# coupling (cylinder cut-link, <1% vs RheoTool) ported to 3D: the polymer
+# enters the momentum equation EXACTLY ONCE as a Guo body force at the
+# solvent rate ω_s, with NO (1±ω/2) denominator and lattice viscosity = ν_s
+# (bsd = 0). It replaces the standalone re-relaxed `apply_hermite_source_3d!`.
+
+@kernel function compute_polymeric_force_3d_kernel!(Fx_p, Fy_p, Fz_p,
+                                                      @Const(tau_xx), @Const(tau_xy),
+                                                      @Const(tau_xz), @Const(tau_yy),
+                                                      @Const(tau_yz), @Const(tau_zz),
+                                                      Nx, Ny, Nz,
+                                                      periodic_x, periodic_z)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        T = eltype(Fx_p)
+
+        # Neighbour indices: wrap on x/z when periodic, else clamp; y wall rows
+        # use a 2nd-order ONE-SIDED difference instead of a degenerate clamped
+        # central difference (the wall-aware ∂/∂y the forensic recipe requires —
+        # a raw central diff at j=1/Ny injects a spurious near-wall force that
+        # biases the constitutive self-consistency, since the bulk ∇·τ_p ≈ 0).
+        ip = i < Nx ? i + 1 : (periodic_x ? 1  : Nx)
+        im = i > 1  ? i - 1 : (periodic_x ? Nx : 1)
+        kp = k < Nz ? k + 1 : (periodic_z ? 1  : Nz)
+        km = k > 1  ? k - 1 : (periodic_z ? Nz : 1)
+
+        # ∂τ/∂y with wall-aware one-sided 2nd-order at the no-slip y-faces.
+        # interior: (τ[j+1]-τ[j-1])/2 ; j=1: (-3τ₁+4τ₂-τ₃)/2 ; j=Ny: (3τ_Ny-4τ_{Ny-1}+τ_{Ny-2})/2
+        half = T(0.5)
+        dy_xy = j == 1  ? (-T(3)*tau_xy[i,1,k] + T(4)*tau_xy[i,2,k] - tau_xy[i,3,k]) * half :
+                j == Ny ? ( T(3)*tau_xy[i,Ny,k] - T(4)*tau_xy[i,Ny-1,k] + tau_xy[i,Ny-2,k]) * half :
+                          (tau_xy[i,j+1,k] - tau_xy[i,j-1,k]) * half
+        dy_yy = j == 1  ? (-T(3)*tau_yy[i,1,k] + T(4)*tau_yy[i,2,k] - tau_yy[i,3,k]) * half :
+                j == Ny ? ( T(3)*tau_yy[i,Ny,k] - T(4)*tau_yy[i,Ny-1,k] + tau_yy[i,Ny-2,k]) * half :
+                          (tau_yy[i,j+1,k] - tau_yy[i,j-1,k]) * half
+        dy_yz = j == 1  ? (-T(3)*tau_yz[i,1,k] + T(4)*tau_yz[i,2,k] - tau_yz[i,3,k]) * half :
+                j == Ny ? ( T(3)*tau_yz[i,Ny,k] - T(4)*tau_yz[i,Ny-1,k] + tau_yz[i,Ny-2,k]) * half :
+                          (tau_yz[i,j+1,k] - tau_yz[i,j-1,k]) * half
+
+        # Fx = ∂τ_xx/∂x + ∂τ_xy/∂y + ∂τ_xz/∂z
+        Fx_p[i,j,k] = (tau_xx[ip,j,k] - tau_xx[im,j,k]) * half + dy_xy +
+                      (tau_xz[i,j,kp] - tau_xz[i,j,km]) * half
+
+        # Fy = ∂τ_xy/∂x + ∂τ_yy/∂y + ∂τ_yz/∂z
+        Fy_p[i,j,k] = (tau_xy[ip,j,k] - tau_xy[im,j,k]) * half + dy_yy +
+                      (tau_yz[i,j,kp] - tau_yz[i,j,km]) * half
+
+        # Fz = ∂τ_xz/∂x + ∂τ_yz/∂y + ∂τ_zz/∂z
+        Fz_p[i,j,k] = (tau_xz[ip,j,k] - tau_xz[im,j,k]) * half + dy_yz +
+                      (tau_zz[i,j,kp] - tau_zz[i,j,km]) * half
+    end
+end
+
+"""
+    compute_polymeric_force_3d!(Fx_p, Fy_p, Fz_p,
+                                 tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz;
+                                 periodic_x=true, periodic_z=true)
+
+Compute the 3D polymeric body force `F_poly = ∇·τ_p` (first moment) from the
+6-component symmetric polymer stress, for the Guo coupling. `periodic_x` /
+`periodic_z` wrap the x / z neighbour stencils (channel / duct); y always
+clamps (no-slip walls). 3D port of `compute_polymeric_force_2d!`.
+"""
+function compute_polymeric_force_3d!(Fx_p, Fy_p, Fz_p,
+                                      tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz;
+                                      periodic_x::Bool=true, periodic_z::Bool=true)
+    backend = KernelAbstractions.get_backend(Fx_p)
+    Nx, Ny, Nz = size(Fx_p)
+    kernel! = compute_polymeric_force_3d_kernel!(backend)
+    kernel!(Fx_p, Fy_p, Fz_p,
+            tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz,
+            Nx, Ny, Nz, periodic_x, periodic_z; ndrange=(Nx, Ny, Nz))
+    KernelAbstractions.synchronize(backend)
+end
+
 # --- 3D Hermite stress source (D3Q19) for viscoelastic post-collision ---
 #
 # 3D port of `apply_hermite_source_2d!` (Liu et al. 2025, Eq. 25 with the

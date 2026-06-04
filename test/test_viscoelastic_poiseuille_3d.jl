@@ -17,26 +17,31 @@ using KernelAbstractions
 #   γ̇(j) = |du_x/dy| linear,  C_xy(j) = λ·γ̇(j),  C_xx(j) = 1 + 2·(λγ̇(j))²
 #   C_yy = C_zz = 1,  C_xz = C_yz = 0,  N1(j) = 2·η_p·λ·γ̇(j)²,  N2 = 0.
 #
-# ── FINDING (this canary, β=0.5, peak Wi≈0.5) ─────────────────────────────
-# The 3D viscoelastic stack couples the polymer to the momentum equation via the
-# *Hermite stress source* (apply_hermite_source_3d!) with s_plus = ω_s, the SAME
-# coupling the 3D Couette and sphere drivers use. In FORCE-DRIVEN flow this
-# over-resists the momentum balance: the measured velocity is ≈ 0.42× the
-# analytical parabola at β=0.5 (effective viscosity inflated ~2.4×), worsening
-# monotonically as β decreases. The validated 2D Poiseuille canary uses a
-# DIFFERENT, stress-divergence body-force coupling (nu_lbm = nu_s + bsd·nu_p,
-# bsd=0) and reproduces the parabola to 0.07% at the same β — so this is a
-# coupling-scheme finding, not a bug in the streamer/force path (the pure-solvent
-# limit ν_p→0 of THIS driver reproduces the parabola to 0.05%, asserted below).
-# Couette masked it because its moving walls impose the velocity mechanically.
+# ── COUPLING FIX (KRK-VE-3D, validated 2D Guo ∇·τ_p ported to 3D) ──────────
+# The momentum coupling is now the VALIDATED 2D recipe: a first-moment Guo body
+# force F_poly = ∇·τ_p (compute_polymeric_force_3d!), FUSED into the collision
+# (collide_guo_field_3d!) at the SOLVENT rate ω_s (lattice viscosity = ν_s,
+# bsd = 0), consuming the polymer moment EXACTLY ONCE. It REPLACES the standalone
+# `apply_hermite_source_3d!` (a post-collision 2nd-moment source re-relaxed by
+# the next collide → the 2.4× over-resistance that gave ratio 0.494 here before).
+# The coupling itself is exact: with a PRESCRIBED analytical linear τ_p the driver
+# reproduces ν_eff = ν_total to 0.04% (subtest "(D) coupling correctness", the 3D
+# analogue of the 2D test 1c that lands 1.0002) — a hard @test below.
 #
-# Separately, the conformation TRT advection-diffusion over-diffuses C across y:
-# the centre-line C_xx settles at ≈1.015 (analytical 1.0) and the near-wall C_xy
-# under-predicts λ·γ̇_meas by ~25-40%. So the coupled C(y)/N1(y) profiles do NOT
-# match the local-γ̇ analytical profile in the interior. Per the mission
-# guardrail these mismatches are REPORTED, not masked: the profile-match
-# assertions are @test_broken (tracked, not forced green); the headline 3D
-# invariants and the pure-solvent velocity control are hard @test.
+# Residual on the LIVE-conformation canary (β=0.5, Ny=32, peak Wi≈0.5): the
+# coupling delivers whatever τ_p the conformation solver produces, and the 3D
+# conformation TRT over-diffuses / UNDER-produces τ_p (defect #2, SEPARATE from
+# the coupling). At this point τ_p,xy is delivered at only ~63-89 % of ν_p·γ̇, so
+# the flow runs ~17 % FAST (ratio 1.17, vs 0.49 with the buggy source). The
+# residual collapses with resolution / lower Wi (Ny=64 → 1.035; Ny=64,Wi=0.05 →
+# 1.020 ∈ band), confirming it is conformation accuracy, NOT a coupling-amplitude
+# bug. Per the mission guardrail the live-conformation velocity / C-profile
+# matches stay @test_broken (defect #2, tracked); the coupling correctness, the
+# pure-solvent control, and the headline 3D invariants are hard @test.
+#
+# Separately, the conformation TRT over-diffuses C across y: the centre-line C_xx
+# settles ≈1.085 (analytical 1.0) and the near-wall C_xy under-predicts λ·γ̇_meas.
+# These profile-match assertions stay @test_broken (tracked, not forced green).
 #
 # Fast: CPU Float64, 6×32×6 box, 40 000 steps (converged — identical at 80 k).
 # ==========================================================================
@@ -115,9 +120,54 @@ using KernelAbstractions
                                 res_solvent.u_analytical[2:end-1])) / u_max_an
     @test Linf_solvent < 0.01        # pure-solvent parabola ≤ 1 %
 
+    # --- (D) COUPLING CORRECTNESS (hard @test): ν_eff = ν_total ----------
+    # 3D analogue of the 2D test 1c. Drive the channel with a PRESCRIBED
+    # analytical linear τ_p,xy = A·(H/2 − (j−½)) (so ∇·τ_p = −A is a constant
+    # body force), bypassing the conformation solver, and verify the validated
+    # ∇·τ_p Guo coupling reproduces the reduced-load parabola u(Fx−A; ν_s) — i.e.
+    # the polymer body force is consumed EXACTLY ONCE (ν_eff = ν_total). This
+    # isolates the COUPLING (the thing this mission fixes) from defect #2.
+    let Nxc = 4, Nyc = 64, Nzc = 4, νsc = 0.1, Fxc = 1e-5, Ac = 5e-6
+        ω_c = 1.0 / (3.0 * νsc + 0.5); Hc = FT(Nyc)
+        is_solid_c = falses(Nxc, Nyc, Nzc)
+        f_in_c = zeros(FT, Nxc, Nyc, Nzc, 19); f_out_c = similar(f_in_c)
+        for kk in 1:Nzc, jj in 1:Nyc, ii in 1:Nxc, q in 1:19
+            f_in_c[ii, jj, kk, q] = Kraken.equilibrium(D3Q19(), one(FT),
+                                                        zero(FT), zero(FT), zero(FT), q)
+        end
+        ρc = ones(FT, Nxc, Nyc, Nzc)
+        uxc = zeros(FT, Nxc, Nyc, Nzc); uyc = similar(uxc); uzc = similar(uxc)
+        txxc = zeros(FT, Nxc, Nyc, Nzc); txyc = zeros(FT, Nxc, Nyc, Nzc)
+        txzc = zeros(FT, Nxc, Nyc, Nzc); tyyc = zeros(FT, Nxc, Nyc, Nzc)
+        tyzc = zeros(FT, Nxc, Nyc, Nzc); tzzc = zeros(FT, Nxc, Nyc, Nzc)
+        for kk in 1:Nzc, jj in 1:Nyc, ii in 1:Nxc
+            txyc[ii, jj, kk] = Ac * (Hc / 2 - (jj - 0.5))
+        end
+        Fxp = zeros(FT, Nxc, Nyc, Nzc); Fyp = similar(Fxp); Fzp = similar(Fxp)
+        Fxt = zeros(FT, Nxc, Nyc, Nzc); Fyt = similar(Fxt); Fzt = similar(Fxt)
+        for _ in 1:60_000
+            compute_polymeric_force_3d!(Fxp, Fyp, Fzp, txxc, txyc, txzc,
+                                          tyyc, tyzc, tzzc; periodic_x=true, periodic_z=true)
+            Fxt .= Fxp .+ FT(Fxc); Fyt .= Fyp; Fzt .= Fzp
+            collide_guo_field_3d!(f_in_c, is_solid_c, Fxt, Fyt, Fzt, FT(ω_c))
+            stream_periodic_xz_wall_y_3d!(f_out_c, f_in_c, Nxc, Nyc, Nzc)
+            compute_macroscopic_forced_field_3d!(ρc, uxc, uyc, uzc, f_out_c, Fxt, Fyt, Fzt)
+            f_in_c, f_out_c = f_out_c, f_in_c
+        end
+        prof_c = [sum(@view uxc[:, jj, :]) / (Nxc * Nzc) for jj in 1:Nyc]
+        u_ana_c = [(Fxc - Ac) / (2 * νsc) * (jj - 0.5) * (Nyc + 0.5 - jj) for jj in 1:Nyc]
+        ratio_c = maximum(prof_c) / maximum(u_ana_c)
+        @info "VE 3D Poiseuille — (D) COUPLING CORRECTNESS (prescribed τ_p)" ratio_c
+        @test 0.97 < ratio_c < 1.03      # ν_eff = ν_total via ∇·τ_p Guo coupling
+    end
+
     # --- (C) FINDINGS (tracked via @test_broken, NOT forced green) --------
-    # (C1) Coupled velocity parabola: the Hermite-source momentum over-coupling
-    #      gives a ~57 % velocity deficit at β=0.5 → the parabola match FAILS.
+    # (C1) LIVE-conformation coupled velocity parabola: the coupling now delivers
+    #      ν_eff = ν_total (see (D)), but the 3D conformation TRT UNDER-produces
+    #      τ_p at this Ny=32 / Wi≈0.5 point (defect #2), so the flow runs ~17 %
+    #      fast (ratio 1.17) — was 0.49 with the buggy re-relaxed Hermite source.
+    #      The parabola match stays @test_broken pending defect #2 (the residual
+    #      collapses with resolution / lower Wi; see the header).
     Linf_coupled = maximum(abs.(res.profile[2:end-1] .-
                                 res.u_analytical[2:end-1])) / res.u_max
     @test_broken Linf_coupled < 0.01

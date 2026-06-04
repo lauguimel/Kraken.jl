@@ -41,6 +41,48 @@ function fused_trt_libb_v2_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
             ndrange=(Nx, Ny, Nz))
 end
 
+# TRT + LI-BB 3D step with a per-cell Guo body-force field fused into the
+# collision (3D analogue of `_TRT_LIBB_V2_GUO_FIELD_SPEC`). Same pull /
+# solid / LI-BB pre-phase as `_TRT_LIBB_V2_SPEC_3D`; only the collision
+# brick carries the Guo force. Used by the VE sphere driver to inject the
+# polymer body force F_poly = ∇·τ_p at the solvent rate (replacing the
+# standalone re-relaxed Hermite source).
+const _TRT_LIBB_V2_GUO_FIELD_SPEC_3D = LBMSpec(
+    PullHalfwayBB_3D(), SolidInert_3D(),
+    ApplyLiBBPrePhase_3D(),
+    Moments_3D(), CollideTRTDirectGuoField_3D(),
+    WriteMoments_3D();
+    stencil = :D3Q19,
+)
+
+"""
+    fused_trt_libb_v2_guo_field_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                                          q_wall, uw_x, uw_y, uw_z,
+                                          Fx_field, Fy_field, Fz_field,
+                                          Nx, Ny, Nz, ν; Λ=3/16)
+
+D3Q19 LI-BB V2 solvent step with a per-cell Guo force field. Identical
+pull-stream / solid handling / cut-link pre-phase to
+`fused_trt_libb_v2_step_3d!`, with the collision brick replaced by the
+TRT+Guo-field brick. The force is fused into the collision and consumed
+EXACTLY ONCE (no post-collision re-relaxation). 3D analogue of the 2D
+`fused_trt_libb_v2_guo_field_step!` used by the validated VE cylinder.
+"""
+function fused_trt_libb_v2_guo_field_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
+                                                q_wall, uw_link_x, uw_link_y, uw_link_z,
+                                                Fx_field, Fy_field, Fz_field,
+                                                Nx, Ny, Nz, ν; Λ::Real=3/16)
+    backend = KernelAbstractions.get_backend(f_in)
+    ET = eltype(f_in)
+    s_plus, s_minus = trt_rates(ν; Λ=Λ)
+    kernel! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_SPEC_3D)
+    kernel!(f_out, ρ, ux, uy, uz, f_in, is_solid,
+            q_wall, uw_link_x, uw_link_y, uw_link_z,
+            Nx, Ny, Nz, ET(s_plus), ET(s_minus),
+            Fx_field, Fy_field, Fz_field;
+            ndrange=(Nx, Ny, Nz))
+end
+
 """
     precompute_q_wall_sphere_3d(Nx, Ny, Nz, cx, cy, cz, R; FT=Float64)
         -> (q_wall, is_solid)

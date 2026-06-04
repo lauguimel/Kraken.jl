@@ -212,7 +212,7 @@ export stream_axisym_inlet_2d!
 export collide_guo_2d!, collide_guo_field_2d!
 export collide_guo_3d!, collide_guo_field_3d!
 export compute_macroscopic_2d!, compute_macroscopic_3d!, compute_macroscopic_forced_2d!
-export compute_macroscopic_forced_3d!, compute_macroscopic_pressure_2d!
+export compute_macroscopic_forced_3d!, compute_macroscopic_forced_field_3d!, compute_macroscopic_pressure_2d!
 export apply_zou_he_north_2d!, apply_zou_he_south_2d!
 export apply_zou_he_west_2d!, apply_zou_he_pressure_east_2d!, apply_extrapolate_east_2d!
 export apply_zou_he_top_3d!
@@ -563,6 +563,7 @@ export run_conformation_couette_libb_3d
 export run_conformation_poiseuille_libb_3d
 export eigen_sym3x3, mat_exp_sym3x3, mat_log_spd_sym3x3
 export apply_hermite_source_3d!, update_polymer_stress_3d!
+export compute_polymeric_force_3d!, fused_trt_libb_v2_guo_field_step_3d!
 export init_conformation_field_3d!, collide_conformation_3d!
 export compute_conformation_macro_3d!, apply_cnebb_conformation_3d!
 export apply_cnebb_conformation_y_walls_3d!

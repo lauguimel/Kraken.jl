@@ -10,10 +10,11 @@
 #
 # Reuses the geometry-agnostic 3D constitutive stack and the reusable periodic-xz
 # / no-slip-y streamer introduced for the Couette canary:
-#   - `collide_guo_3d!`                    BGK solvent collision + Guo body force
-#   - `apply_hermite_source_3d!`           injects τ_p into f post-collision
+#   - `compute_polymeric_force_3d!`        polymer body force F_poly = ∇·τ_p
+#   - `collide_guo_field_3d!`              BGK solvent collision + fused Guo force
+#                                          (constant Fx + ∇·τ_p), force consumed once
 #   - `stream_periodic_xz_wall_y_3d!`      periodic-xz / no-slip y-wall streamer
-#   - `compute_macroscopic_forced_3d!`     force-corrected velocity (u = Σf·c + F/2)
+#   - `compute_macroscopic_forced_field_3d!` force-corrected velocity (u = Σf·c + F/2)
 #   - `collide_conformation_3d!` ×6        TRT conformation transport (∇u central diff)
 #   - `apply_cnebb_conformation_y_walls_3d!`  conformation wall BC (y-faces)
 #   - `update_polymer_stress_3d!`          Oldroyd-B τ_p = G·(C − I)
@@ -70,8 +71,7 @@ function run_conformation_poiseuille_libb_3d(;
 
     ν_total = Float64(ν_s) + ν_p_eff
     beta    = Float64(ν_s) / ν_total
-    ω_s     = 1.0 / (3.0 * Float64(ν_s) + 0.5)
-    s_plus_s = ω_s                       # BGK Hermite source rate
+    ω_s     = 1.0 / (3.0 * Float64(ν_s) + 0.5)  # solvent rate; polymer via ∇·τ_p Guo force
     Fx_d    = Float64(Fx)
 
     # Analytical Newtonian parabola (OB shear viscosity is constant). Half-way BB
@@ -141,17 +141,35 @@ function run_conformation_poiseuille_libb_3d(;
     tau_p_yz = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
     tau_p_zz = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
 
+    # --- Polymer body force F_poly = ∇·τ_p + the constant driving force ---
+    # VALIDATED 2D Guo coupling ported to 3D: the polymer enters the momentum
+    # equation EXACTLY ONCE as a first-moment Guo body force at the solvent rate
+    # ω_s (lattice viscosity = ν_s), NOT via a standalone re-relaxed Hermite
+    # source. Total force field = ∇·τ_p (per-cell) + Fx_d (constant in x).
+    Fx_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fy_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fz_poly = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fx_tot  = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fy_tot  = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+    Fz_tot  = KernelAbstractions.zeros(backend, FT, Nx, Ny, Nz)
+
     for step in 1:max_steps
-        # --- Solvent: BGK+Guo collide → Hermite source → no-slip y-wall stream ---
-        collide_guo_3d!(f_in, is_solid, FT(ω_s), FT(Fx_d), zero(FT), zero(FT))
-        # Inject the Hermite polymer source post-collision (pre-stream).
-        apply_hermite_source_3d!(f_in, is_solid, s_plus_s,
-                                   tau_p_xx, tau_p_xy, tau_p_xz,
-                                   tau_p_yy, tau_p_yz, tau_p_zz)
+        # --- Polymer body force: F_poly = ∇·τ_p (periodic x AND z) ---
+        compute_polymeric_force_3d!(Fx_poly, Fy_poly, Fz_poly,
+                                      tau_p_xx, tau_p_xy, tau_p_xz,
+                                      tau_p_yy, tau_p_yz, tau_p_zz;
+                                      periodic_x=true, periodic_z=true)
+        # Total Guo force = polymer divergence + constant x-driving force.
+        Fx_tot .= Fx_poly .+ FT(Fx_d)
+        Fy_tot .= Fy_poly
+        Fz_tot .= Fz_poly
+
+        # --- Solvent: BGK+Guo-field collide (force fused once) → y-wall stream ---
+        collide_guo_field_3d!(f_in, is_solid, Fx_tot, Fy_tot, Fz_tot, FT(ω_s))
         # Periodic x/z, no-slip half-way bounce-back walls on the y-faces.
         stream_periodic_xz_wall_y_3d!(f_out, f_in, Nx, Ny, Nz)
 
-        compute_macroscopic_forced_3d!(ρ, ux, uy, uz, f_out, FT(Fx_d), zero(FT), zero(FT))
+        compute_macroscopic_forced_field_3d!(ρ, ux, uy, uz, f_out, Fx_tot, Fy_tot, Fz_tot)
 
         # --- Conformation TRT (6 components), periodic-xz + y-wall CNEBB ---
         stream_periodic_xz_wall_y_3d!(g_xx_buf, g_xx, Nx, Ny, Nz)
@@ -210,7 +228,16 @@ function run_conformation_poiseuille_libb_3d(;
     end
     KernelAbstractions.synchronize(backend)
 
-    compute_macroscopic_forced_3d!(ρ, ux, uy, uz, f_in, FT(Fx_d), zero(FT), zero(FT))
+    # Final readout: recompute the total Guo force from the converged τ_p so the
+    # +F/2 velocity correction matches the last collision.
+    compute_polymeric_force_3d!(Fx_poly, Fy_poly, Fz_poly,
+                                  tau_p_xx, tau_p_xy, tau_p_xz,
+                                  tau_p_yy, tau_p_yz, tau_p_zz;
+                                  periodic_x=true, periodic_z=true)
+    Fx_tot .= Fx_poly .+ FT(Fx_d)
+    Fy_tot .= Fy_poly
+    Fz_tot .= Fz_poly
+    compute_macroscopic_forced_field_3d!(ρ, ux, uy, uz, f_in, Fx_tot, Fy_tot, Fz_tot)
 
     ux_h  = Array(ux)
     Cxx_h = Array(C_xx); Cxy_h = Array(C_xy); Cxz_h = Array(C_xz)
