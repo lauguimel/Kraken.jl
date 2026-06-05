@@ -250,7 +250,8 @@ function run_viscoelastic_fvfd_extensional_3d(;
             f_out, f_in, ρ, ux, uy, uz, is_solid,
             q_wall, uw_x, uw_y, uw_z,
             Fx_tot, Fy_tot, Fz_tot,
-            Nx, Ny, Nz, FT(ν_s),
+            Nx, Ny, Nz, FT(ν_s);
+            periodic_z=true,
         )
         apply_bc_rebuild_3d!(f_out, f_in, bcspec, FT(ν_s), Nx, Ny, Nz)
         fvfd_apply_extensional_straining_bc_3d!(

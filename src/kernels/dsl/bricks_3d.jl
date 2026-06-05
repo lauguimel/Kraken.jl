@@ -45,11 +45,29 @@ emit_code(::PullSLBM_3D) = quote
     fp19 = trilinear_f(f_in, i_dep[i,j,k,19], j_dep[i,j,k,19], k_dep[i,j,k,19], 19, Nx, Ny, Nz, periodic_ξ, periodic_η, periodic_ζ)
 end
 
-"Pull-stream D3Q19 with halfway-BB fallback at domain edges."
-struct PullHalfwayBB_3D <: LBMBrick end
+"""
+Pull-stream D3Q19 with halfway-BB fallback at domain edges.
+
+Parametrised by a compile-time `Bool` flag `PeriodicZ` selecting the z-boundary
+treatment (GPU-safe, zero-cost — the flag is a type parameter, so each variant
+compiles to a distinct branchless kernel, mirroring the M1 Val-dispatched scheme):
+
+- `PullHalfwayBB_3D()` ≡ `PullHalfwayBB_3D{false}()` (DEFAULT): no-slip
+  halfway-BB at k=1/k=Nz (and on the xz/yz edges that cross those z-faces).
+  Bit-identical to the original brick — sphere/obstacle callers are unaffected.
+- `PullHalfwayBB_3D{true}()`: PERIODIC z-wrap (km/kp addressing mirrored from
+  `stream_periodic_xz_wall_y_3d_kernel!` in stream_periodic_3d.jl). The x/y faces
+  keep the no-slip halfway-BB fallback; only the z-coupled populations
+  (fp6/fp7, fp12-15, fp16-19) wrap instead of bouncing. For the extensional
+  driver whose FVFD polymer side is already fully z-periodic.
+"""
+struct PullHalfwayBB_3D{PeriodicZ} <: LBMBrick end
+PullHalfwayBB_3D() = PullHalfwayBB_3D{false}()
 required_args(::PullHalfwayBB_3D) = (:f_in, :Nx, :Ny, :Nz)
 phase(::PullHalfwayBB_3D) = :pre_solid
-emit_code(::PullHalfwayBB_3D) = quote
+
+# DEFAULT (no-slip z): unchanged numerics — sphere/obstacle bit-identity.
+emit_code(::PullHalfwayBB_3D{false}) = quote
     # Neighbour indices are clamped (min/max) so the EAGER ifelse branch
     # (Julia `ifelse` evaluates BOTH arms) never reads out of bounds at a
     # domain edge — without the clamp, `f_in[i-1,...]` at i=1 segfaults
@@ -79,6 +97,42 @@ emit_code(::PullHalfwayBB_3D) = quote
     fp17 = ifelse(j < Ny && k > 1,    f_in[i,           min(j+1,Ny),  max(k-1,1),   17], f_in[i, j, k, 18])
     fp18 = ifelse(j > 1  && k < Nz,   f_in[i,           max(j-1,1),   min(k+1,Nz),  18], f_in[i, j, k, 17])
     fp19 = ifelse(j < Ny && k < Nz,   f_in[i,           min(j+1,Ny),  min(k+1,Nz),  19], f_in[i, j, k, 16])
+end
+
+# PERIODIC z: the z-coupled pops wrap (km/kp) instead of bouncing. x/y faces keep
+# the no-slip halfway-BB fallback identical to the {false} variant. km/kp mirror
+# `stream_periodic_xz_wall_y_3d_kernel!` (stream_periodic_3d.jl:32-33). The clamp
+# on i/j neighbours is retained for the same eager-ifelse safety reason.
+emit_code(::PullHalfwayBB_3D{true}) = quote
+    # Periodic z wrap source indices (pull from node − c_q in z).
+    kmz = ifelse(k > 1,  k - 1, Nz)   # source for +z populations (fp6, …)
+    kpz = ifelse(k < Nz, k + 1, 1)    # source for -z populations (fp7, …)
+    fp1  = f_in[i, j, k, 1]
+    # Axis-aligned x/y (no-slip halfway-BB, unchanged)
+    fp2  = ifelse(i > 1,              f_in[max(i-1,1),  j,            k,            2],  f_in[i, j, k, 3])
+    fp3  = ifelse(i < Nx,             f_in[min(i+1,Nx), j,            k,            3],  f_in[i, j, k, 2])
+    fp4  = ifelse(j > 1,              f_in[i,           max(j-1,1),   k,            4],  f_in[i, j, k, 5])
+    fp5  = ifelse(j < Ny,             f_in[i,           min(j+1,Ny),  k,            5],  f_in[i, j, k, 4])
+    # Axis z (PERIODIC wrap — no bounce)
+    fp6  = f_in[i, j, kmz, 6]
+    fp7  = f_in[i, j, kpz, 7]
+    # Edge xy: unchanged (no z component)
+    fp8  = ifelse(i > 1  && j > 1,    f_in[max(i-1,1),  max(j-1,1),   k,            8],  f_in[i, j, k, 11])
+    fp9  = ifelse(i < Nx && j > 1,    f_in[min(i+1,Nx), max(j-1,1),   k,            9],  f_in[i, j, k, 10])
+    fp10 = ifelse(i > 1  && j < Ny,   f_in[max(i-1,1),  min(j+1,Ny),  k,            10], f_in[i, j, k, 9])
+    fp11 = ifelse(i < Nx && j < Ny,   f_in[min(i+1,Nx), min(j+1,Ny),  k,            11], f_in[i, j, k, 8])
+    # Edge xz: both x and z periodic-ish — x keeps no-slip fallback, z wraps.
+    # When the x-fallback would fire (i at edge) we still bounce that link;
+    # otherwise pull from the x-neighbour at the z-wrapped plane.
+    fp12 = ifelse(i > 1,  f_in[max(i-1,1),  j, kmz, 12], f_in[i, j, k, 15])
+    fp13 = ifelse(i < Nx, f_in[min(i+1,Nx), j, kmz, 13], f_in[i, j, k, 14])
+    fp14 = ifelse(i > 1,  f_in[max(i-1,1),  j, kpz, 14], f_in[i, j, k, 13])
+    fp15 = ifelse(i < Nx, f_in[min(i+1,Nx), j, kpz, 15], f_in[i, j, k, 12])
+    # Edge yz: y keeps no-slip fallback, z wraps.
+    fp16 = ifelse(j > 1,  f_in[i, max(j-1,1),  kmz, 16], f_in[i, j, k, 19])
+    fp17 = ifelse(j < Ny, f_in[i, min(j+1,Ny), kmz, 17], f_in[i, j, k, 18])
+    fp18 = ifelse(j > 1,  f_in[i, max(j-1,1),  kpz, 18], f_in[i, j, k, 17])
+    fp19 = ifelse(j < Ny, f_in[i, min(j+1,Ny), kpz, 19], f_in[i, j, k, 16])
 end
 
 "Solid cells are INERT: rest-equilibrium populations on D3Q19."

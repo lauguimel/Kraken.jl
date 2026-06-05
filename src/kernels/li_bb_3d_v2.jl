@@ -55,6 +55,20 @@ const _TRT_LIBB_V2_GUO_FIELD_SPEC_3D = LBMSpec(
     stencil = :D3Q19,
 )
 
+# Variant of the Guo-field spec with PERIODIC z-wrap in the pull-stream brick
+# (x/y faces stay no-slip halfway-BB). Selected when the caller declares
+# periodic_z=true — e.g. the planar-extensional driver whose FVFD polymer side
+# is fully z-periodic, so the LBM solvent side must agree on z. The collision /
+# solid / cut-link bricks are identical; only PullHalfwayBB_3D's z-treatment
+# differs (distinct brick TYPE → distinct cached kernel, no runtime branch).
+const _TRT_LIBB_V2_GUO_FIELD_SPEC_Z_PERIODIC_3D = LBMSpec(
+    PullHalfwayBB_3D{true}(), SolidInert_3D(),
+    ApplyLiBBPrePhase_3D(),
+    Moments_3D(), CollideTRTDirectGuoField_3D(),
+    WriteMoments_3D();
+    stencil = :D3Q19,
+)
+
 """
     fused_trt_libb_v2_guo_field_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
                                           q_wall, uw_x, uw_y, uw_z,
@@ -71,11 +85,17 @@ EXACTLY ONCE (no post-collision re-relaxation). 3D analogue of the 2D
 function fused_trt_libb_v2_guo_field_step_3d!(f_out, f_in, ρ, ux, uy, uz, is_solid,
                                                 q_wall, uw_link_x, uw_link_y, uw_link_z,
                                                 Fx_field, Fy_field, Fz_field,
-                                                Nx, Ny, Nz, ν; Λ::Real=3/16)
+                                                Nx, Ny, Nz, ν; Λ::Real=3/16,
+                                                periodic_z::Bool=false)
     backend = KernelAbstractions.get_backend(f_in)
     ET = eltype(f_in)
     s_plus, s_minus = trt_rates(ν; Λ=Λ)
-    kernel! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_SPEC_3D)
+    # periodic_z=false (DEFAULT) keeps the bit-identical no-slip-z spec used by
+    # the VE sphere driver; =true selects the z-wrap variant for the extensional
+    # driver. Val-dispatch on a compile-time flag (M1 scheme) → no runtime branch.
+    spec = periodic_z ? _TRT_LIBB_V2_GUO_FIELD_SPEC_Z_PERIODIC_3D :
+                        _TRT_LIBB_V2_GUO_FIELD_SPEC_3D
+    kernel! = build_lbm_kernel(backend, spec)
     kernel!(f_out, ρ, ux, uy, uz, f_in, is_solid,
             q_wall, uw_link_x, uw_link_y, uw_link_z,
             Nx, Ny, Nz, ET(s_plus), ET(s_minus),

@@ -134,15 +134,14 @@ end
         @test res.velocity_mode === :coupled
         @test res.bc_config === :openxy_zh_velocity
         @test finite_state
-        # KNOWN LIMITATION (M5b): the all-face Zou-He straining BC only realizes
-        # ~85% of the target strain rate (measured grad ≈0.00427 vs ε̇=0.005, ~14.5%
-        # deficit, dominated by corner/edge reconstruction error), so C_xx/C_yy land
-        # ~7% off the target-strain analytic fixed point. The coupled run is NaN-free,
-        # Czz≈1, Cxy≈0 (asserted below); the validated <1% extensional reference is the
-        # :imposed path (E1). Certifying :coupled ≤1% needs a higher-fidelity extensional
-        # inflow/outflow BC (corner treatment) — tracked as M5b future work.
-        @test_broken m.rel_Cxx <= 0.01
-        @test_broken m.rel_Cyy <= 0.01
+        # RESOLVED: the prior ~14.5% strain deficit / ~7% C_xx-C_yy error was the
+        # z-periodicity mismatch — the LBM solvent's PullHalfwayBB_3D bounced the
+        # k=1/k=Nz z-faces as no-slip walls while the FVFD polymer side was fully
+        # z-periodic. Threading periodic_z=true into the Guo solvent step (z-wrap
+        # variant of PullHalfwayBB_3D) closes it: measured grad_x≈0.00508 (1.5% of
+        # ε̇=0.005), C_xx rel-err ≈0.06%, C_yy rel-err ≈0.22% — all ≤1%, no calibration.
+        @test m.rel_Cxx <= 0.01
+        @test m.rel_Cyy <= 0.01
         @test m.abs_Czz <= 0.01
         @test abs(m.Cxy_meas) <= 0.01
 
