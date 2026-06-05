@@ -4,6 +4,10 @@ EditURL = "06_cylinder_2d.jl"
 
 # Flow Around a Cylinder (2D) --- Re = 20
 
+```@raw html
+<DownloadMenu :files="[{label:'cylinder.krk',href:'/downloads/cylinder/cylinder.krk'},{label:'cylinder.csv',href:'/downloads/cylinder/cylinder.csv'},{label:'cylinder.py',href:'/downloads/cylinder/cylinder.py'}]" />
+```
+
 **Concepts:** [Boundary conditions](../theory/05_boundary_conditions.md) ·
 immersed solid via inline geometry predicate
 

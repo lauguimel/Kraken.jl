@@ -1,5 +1,9 @@
 # # Lid-driven cavity (2D & 3D)
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'cavity.krk',href:'/downloads/cavity/cavity.krk'},{label:'cavity.csv',href:'/downloads/cavity/cavity.csv'},{label:'cavity.py',href:'/downloads/cavity/cavity.py'}]" />
+# ```
+#
 # **Concepts:** [LBM fundamentals](../theory/01_lbm_fundamentals.md) ·
 # [BGK collision](../theory/03_bgk_collision.md) ·
 # [Boundary conditions](../theory/05_boundary_conditions.md) ·

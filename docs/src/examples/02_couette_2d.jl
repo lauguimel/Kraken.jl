@@ -1,5 +1,9 @@
 # # Couette Flow (2D)
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'couette.krk',href:'/downloads/couette/couette.krk'},{label:'couette.csv',href:'/downloads/couette/couette.csv'},{label:'couette.py',href:'/downloads/couette/couette.py'}]" />
+# ```
+#
 # **Concepts:** [LBM fundamentals](../theory/01_lbm_fundamentals.md) ·
 # [Boundary conditions](../theory/05_boundary_conditions.md)
 #

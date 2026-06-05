@@ -1,5 +1,9 @@
 # # Rayleigh--Bénard Convection (2D)
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'rayleigh_benard.krk',href:'/downloads/rayleigh_benard/rayleigh_benard.krk'},{label:'rayleigh_benard.csv',href:'/downloads/rayleigh_benard/rayleigh_benard.csv'},{label:'rayleigh_benard.py',href:'/downloads/rayleigh_benard/rayleigh_benard.py'}]" />
+# ```
+#
 # **Concepts:** [Thermal DDF](../theory/08_thermal_ddf.md) ·
 # Boussinesq coupling
 #

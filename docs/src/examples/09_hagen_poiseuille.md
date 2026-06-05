@@ -4,6 +4,10 @@ EditURL = "09_hagen_poiseuille.jl"
 
 # Hagen--Poiseuille Flow (Axisymmetric)
 
+```@raw html
+<DownloadMenu :files="[{label:'hagen_poiseuille.krk',href:'/downloads/hagen_poiseuille/hagen_poiseuille.krk'},{label:'hagen_poiseuille.csv',href:'/downloads/hagen_poiseuille/hagen_poiseuille.csv'},{label:'hagen_poiseuille.py',href:'/downloads/hagen_poiseuille/hagen_poiseuille.py'}]" />
+```
+
 **Concepts:** [Axisymmetric LBM](../theory/09_axisymmetric.md) ·
 [Body forces](../theory/07_body_forces.md)
 

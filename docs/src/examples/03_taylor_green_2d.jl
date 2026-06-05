@@ -1,5 +1,9 @@
 # # Taylor--Green Vortex (2D)
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'taylor_green.krk',href:'/downloads/taylor_green/taylor_green.krk'},{label:'taylor_green.csv',href:'/downloads/taylor_green/taylor_green.csv'},{label:'taylor_green.py',href:'/downloads/taylor_green/taylor_green.py'}]" />
+# ```
+#
 # **Concepts:** [LBM fundamentals](../theory/01_lbm_fundamentals.md) ·
 # [BGK collision](../theory/03_bgk_collision.md)
 #

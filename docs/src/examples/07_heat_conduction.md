@@ -4,6 +4,10 @@ EditURL = "07_heat_conduction.jl"
 
 # 1D Heat Conduction
 
+```@raw html
+<DownloadMenu :files="[{label:'heat_conduction.krk',href:'/downloads/heat_conduction/heat_conduction.krk'},{label:'heat_conduction.csv',href:'/downloads/heat_conduction/heat_conduction.csv'},{label:'heat_conduction.py',href:'/downloads/heat_conduction/heat_conduction.py'}]" />
+```
+
 **Concepts:** [Thermal DDF](../theory/08_thermal_ddf.md) ·
 [Boundary conditions](../theory/05_boundary_conditions.md)
 
