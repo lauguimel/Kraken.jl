@@ -11,6 +11,51 @@ function center_stagnation_mean(A)
     return sum(@view A[i1:i2, j1:j2, :]) / ((i2 - i1 + 1) * (j2 - j1 + 1) * Nz)
 end
 
+function finite_extensional_state(res)
+    return all(isfinite, res.ρ) &&
+           all(isfinite, res.ux) &&
+           all(isfinite, res.uy) &&
+           all(isfinite, res.uz) &&
+           all(isfinite, res.psi_xx) &&
+           all(isfinite, res.psi_xy) &&
+           all(isfinite, res.psi_xz) &&
+           all(isfinite, res.psi_yy) &&
+           all(isfinite, res.psi_yz) &&
+           all(isfinite, res.psi_zz) &&
+           all(isfinite, res.C_xx) &&
+           all(isfinite, res.C_yy) &&
+           all(isfinite, res.C_zz) &&
+           all(isfinite, res.tau_p_xx) &&
+           all(isfinite, res.tau_p_xy) &&
+           all(isfinite, res.tau_p_xz) &&
+           all(isfinite, res.tau_p_yy) &&
+           all(isfinite, res.tau_p_yz) &&
+           all(isfinite, res.tau_p_zz)
+end
+
+function planar_extension_metrics(res, lambda_epsilon, epsilon_dot)
+    Cxx_ref = 1 / (1 - 2 * lambda_epsilon)
+    Cyy_ref = 1 / (1 + 2 * lambda_epsilon)
+    Czz_ref = 1.0
+    Cxx_meas = center_stagnation_mean(res.C_xx)
+    Cyy_meas = center_stagnation_mean(res.C_yy)
+    Czz_meas = center_stagnation_mean(res.C_zz)
+    Cxy_meas = center_stagnation_mean(res.C_xy)
+    rel_Cxx = abs(Cxx_meas - Cxx_ref) / Cxx_ref
+    rel_Cyy = abs(Cyy_meas - Cyy_ref) / Cyy_ref
+    abs_Czz = abs(Czz_meas - Czz_ref)
+    grad_x = center_stagnation_mean(res.duxdx)
+    grad_y = center_stagnation_mean(res.duydy)
+    return (;
+        Cxx_ref, Cyy_ref, Czz_ref,
+        Cxx_meas, Cyy_meas, Czz_meas, Cxy_meas,
+        rel_Cxx, rel_Cyy, abs_Czz,
+        grad_x, grad_y,
+        rel_grad_x=abs(grad_x - epsilon_dot) / epsilon_dot,
+        rel_grad_y=abs(grad_y + epsilon_dot) / epsilon_dot,
+    )
+end
+
 @testset "FVFD 3D planar-extension Oldroyd-B canary" begin
     backend = CPU()
     FT = Float64
@@ -25,80 +70,97 @@ end
     beta = 0.5
     nu_s = beta * nu_total
     nu_p = (1 - beta) * nu_total
-    max_steps = 1_000
-
-    res = Kraken.run_viscoelastic_fvfd_extensional_3d(;
-        Nx, Ny, Nz,
-        epsilon_dot,
-        ν_s=nu_s,
-        ν_p=nu_p,
-        lambda,
-        max_steps,
-        backend,
-        FT,
-        advection_scheme=:muscl_superbee,
-        velocity_mode=:imposed,
-    )
-
-    finite_state = all(isfinite, res.ρ) &&
-                   all(isfinite, res.ux) &&
-                   all(isfinite, res.uy) &&
-                   all(isfinite, res.uz) &&
-                   all(isfinite, res.psi_xx) &&
-                   all(isfinite, res.psi_xy) &&
-                   all(isfinite, res.psi_xz) &&
-                   all(isfinite, res.psi_yy) &&
-                   all(isfinite, res.psi_yz) &&
-                   all(isfinite, res.psi_zz) &&
-                   all(isfinite, res.C_xx) &&
-                   all(isfinite, res.C_yy) &&
-                   all(isfinite, res.C_zz) &&
-                   all(isfinite, res.tau_p_xx) &&
-                   all(isfinite, res.tau_p_xy) &&
-                   all(isfinite, res.tau_p_xz) &&
-                   all(isfinite, res.tau_p_yy) &&
-                   all(isfinite, res.tau_p_yz) &&
-                   all(isfinite, res.tau_p_zz)
-
-    Cxx_ref = 1 / (1 - 2 * lambda_epsilon)
-    Cyy_ref = 1 / (1 + 2 * lambda_epsilon)
-    Czz_ref = 1.0
-    Cxx_meas = center_stagnation_mean(res.C_xx)
-    Cyy_meas = center_stagnation_mean(res.C_yy)
-    Czz_meas = center_stagnation_mean(res.C_zz)
-    Cxy_meas = center_stagnation_mean(res.C_xy)
-    rel_Cxx = abs(Cxx_meas - Cxx_ref) / Cxx_ref
-    rel_Cyy = abs(Cyy_meas - Cyy_ref) / Cyy_ref
-    abs_Czz = abs(Czz_meas - Czz_ref)
-    grad_x = center_stagnation_mean(res.duxdx)
-    grad_y = center_stagnation_mean(res.duydy)
+    max_steps_imposed = 1_000
+    max_steps_coupled = 1_500
 
     @testset "E1 NaN-free imposed-velocity run" begin
-        @test res.completed_steps == max_steps
+        res = Kraken.run_viscoelastic_fvfd_extensional_3d(;
+            Nx, Ny, Nz,
+            epsilon_dot,
+            ν_s=nu_s,
+            ν_p=nu_p,
+            lambda,
+            max_steps=max_steps_imposed,
+            backend,
+            FT,
+            advection_scheme=:muscl_superbee,
+            velocity_mode=:imposed,
+        )
+        finite_state = finite_extensional_state(res)
+
+        @test res.completed_steps == max_steps_imposed
         @test res.velocity_mode === :imposed
         @test res.open_x_gradient_supported
+        @test res.open_y_gradient_supported
         @test finite_state
+
+        m = planar_extension_metrics(res, lambda_epsilon, epsilon_dot)
+        @test m.rel_Cxx <= 0.01
+        @test m.rel_Cyy <= 0.01
+        @test m.abs_Czz <= 0.01
+        @test abs(m.Cxy_meas) <= 0.01
+        @test abs(m.grad_x - epsilon_dot) <= 1e-12
+        @test abs(m.grad_y + epsilon_dot) <= 1e-12
+
+        println("E1 NaN-free steps=$(res.completed_steps) finite=$(finite_state) mode=$(res.velocity_mode)")
+        println(
+            "E1 lambda_epsilon=$(lambda_epsilon) ",
+            "Cxx=$(m.Cxx_meas) ref=$(m.Cxx_ref) rel_err_percent=$(100 * m.rel_Cxx) ",
+            "Cyy=$(m.Cyy_meas) ref=$(m.Cyy_ref) rel_err_percent=$(100 * m.rel_Cyy)",
+        )
+        println(
+            "E1 Czz=$(m.Czz_meas) abs_err=$(m.abs_Czz) Cxy=$(m.Cxy_meas) ",
+            "grad_x=$(m.grad_x) grad_y=$(m.grad_y) max_substeps=$(res.max_substeps_observed)",
+        )
     end
 
-    @testset "E2 planar-extension fixed point" begin
-        @test rel_Cxx <= 0.01
-        @test rel_Cyy <= 0.01
-        @test abs_Czz <= 0.01
-        @test abs(Cxy_meas) <= 0.01
-        @test abs(grad_x - epsilon_dot) <= 1e-12
-        @test abs(grad_y + epsilon_dot) <= 1e-12
-    end
+    @testset "E2 coupled all-face Zou-He planar-extension fixed point" begin
+        res = Kraken.run_viscoelastic_fvfd_extensional_3d(;
+            Nx, Ny, Nz,
+            epsilon_dot,
+            ν_s=nu_s,
+            ν_p=nu_p,
+            lambda,
+            max_steps=max_steps_coupled,
+            backend,
+            FT,
+            advection_scheme=:muscl_superbee,
+            velocity_mode=:coupled,
+        )
+        finite_state = finite_extensional_state(res)
+        m = planar_extension_metrics(res, lambda_epsilon, epsilon_dot)
 
-    println("E1 NaN-free steps=$(res.completed_steps) finite=$(finite_state) mode=$(res.velocity_mode)")
-    println(
-        "E2 lambda_epsilon=$(lambda_epsilon) ",
-        "Cxx=$(Cxx_meas) ref=$(Cxx_ref) rel_err_percent=$(100 * rel_Cxx) ",
-        "Cyy=$(Cyy_meas) ref=$(Cyy_ref) rel_err_percent=$(100 * rel_Cyy)",
-    )
-    println(
-        "E2 Czz=$(Czz_meas) abs_err=$(abs_Czz) Cxy=$(Cxy_meas) ",
-        "grad_x=$(grad_x) grad_y=$(grad_y) max_substeps=$(res.max_substeps_observed)",
-    )
+        @test res.completed_steps == max_steps_coupled
+        @test res.velocity_mode === :coupled
+        @test res.bc_config === :openxy_zh_velocity
+        @test finite_state
+        # KNOWN LIMITATION (M5b): the all-face Zou-He straining BC only realizes
+        # ~85% of the target strain rate (measured grad ≈0.00427 vs ε̇=0.005, ~14.5%
+        # deficit, dominated by corner/edge reconstruction error), so C_xx/C_yy land
+        # ~7% off the target-strain analytic fixed point. The coupled run is NaN-free,
+        # Czz≈1, Cxy≈0 (asserted below); the validated <1% extensional reference is the
+        # :imposed path (E1). Certifying :coupled ≤1% needs a higher-fidelity extensional
+        # inflow/outflow BC (corner treatment) — tracked as M5b future work.
+        @test_broken m.rel_Cxx <= 0.01
+        @test_broken m.rel_Cyy <= 0.01
+        @test m.abs_Czz <= 0.01
+        @test abs(m.Cxy_meas) <= 0.01
+
+        println(
+            "E2 coupled BC=$(res.bc_config) faces=west/east/south/north ZouHeVelocity ",
+            "z=periodic epsilon_dot=$(epsilon_dot) lambda=$(lambda) Ny=$(Ny) max_steps=$(max_steps_coupled)",
+        )
+        println(
+            "E2 coupled Cxx=$(m.Cxx_meas) ref=$(m.Cxx_ref) rel_err_percent=$(100 * m.rel_Cxx) ",
+            "Cyy=$(m.Cyy_meas) ref=$(m.Cyy_ref) rel_err_percent=$(100 * m.rel_Cyy)",
+        )
+        println(
+            "E2 coupled Czz=$(m.Czz_meas) abs_err=$(m.abs_Czz) Cxy=$(m.Cxy_meas) ",
+            "grad_x=$(m.grad_x) grad_y=$(m.grad_y) ",
+            "rel_grad_x=$(m.rel_grad_x) rel_grad_y=$(m.rel_grad_y) ",
+            "max_substeps=$(res.max_substeps_observed)",
+        )
+    end
 end
 
 println("EXIT=0")

@@ -1,8 +1,8 @@
 # --- 3D FVFD log-conformation planar-extensional driver ---
 #
 # Mirrors `run_viscoelastic_fvfd_poiseuille_3d` for the ψ-space
-# log-conformation pipeline. The solvent step uses the open-x LI-BB + Zou-He
-# rebuild path, with no constant body force.
+# log-conformation pipeline. The solvent step uses lateral open-face
+# LI-BB + Zou-He rebuilds, with no constant body force.
 
 export run_viscoelastic_fvfd_extensional_3d
 
@@ -11,9 +11,10 @@ export run_viscoelastic_fvfd_extensional_3d
         ν_s, ν_p, lambda, velocity_mode=:coupled, ...)
 
 3D Oldroyd-B planar-extension FVFD canary. The polymer state is advanced as
-`ψ=log(C)` with open x, wall y, and periodic z FVFD boundary semantics.
+`ψ=log(C)` with open x/y and periodic z FVFD boundary semantics.
 
-`velocity_mode=:coupled` runs the open-x solvent step self-consistently.
+`velocity_mode=:coupled` runs the open lateral-face solvent step
+self-consistently.
 `velocity_mode=:imposed` keeps that coupled solvent/force step live, then
 overwrites `ux,uy,uz` with `u=(epsilon_dot*x,-epsilon_dot*y,0)` for the next
 FVFD ψ update. The latter is the documented YELLOW fallback for the analytical
@@ -158,12 +159,13 @@ function run_viscoelastic_fvfd_extensional_3d(;
     psi_front = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     psi_bc = (psi_west, psi_east, psi_south, psi_north, psi_back, psi_front)
 
-    fvfd_fill_planar_extensional_openx_bcs_3d!(
-        ux_west, ux_east, u_profile_west, psi_west, psi_east,
-        Nx, epsilon_dot; dx, x_center, sync=true,
+    fvfd_fill_planar_extensional_openxy_bcs_3d!(
+        ux_west, ux_east, u_profile_west,
+        uy_south, uy_north,
+        psi_west, psi_east, psi_south, psi_north,
+        Nx, Ny, epsilon_dot; dx, dy, x_center, y_center, sync=true,
     )
-    bcspec = BCSpec3D(; west=ZouHeVelocity(u_profile_west),
-                        east=ZouHePressure(FT(ρ_out)))
+    bcspec = BCSpec3D(; west=ZouHeVelocity(u_profile_west))
 
     compute_macroscopic_forced_field_3d!(ρ, ux, uy, uz, f_in, Fx_tot, Fy_tot, Fz_tot)
     if mode === :imposed
@@ -183,7 +185,7 @@ function run_viscoelastic_fvfd_extensional_3d(;
         fvfd_cell_velocity_to_faces_3d!(
             ux_face, uy_face, uz_face, ux, uy, uz, is_solid,
             ux_west, ux_east, uy_south, uy_north, uz_back, uz_front,
-            :open, :open, :wall, :wall, :periodic, :periodic;
+            :open, :open, :open, :open, :periodic, :periodic;
             sync=false,
         )
         fvfd_sym3_advect_upwind_3d!(
@@ -192,7 +194,7 @@ function run_viscoelastic_fvfd_extensional_3d(;
             psi_bc, psi_bc, psi_bc, psi_bc, psi_bc, psi_bc,
             ux_face, uy_face, uz_face, is_solid,
             dx, dy, dz,
-            :open, :open, :wall, :wall, :periodic, :periodic,
+            :open, :open, :open, :open, :periodic, :periodic,
             one(FT);
             sync=false,
             advection_scheme,
@@ -202,7 +204,7 @@ function run_viscoelastic_fvfd_extensional_3d(;
             duydx, duydy, duydz,
             duzdx, duzdy, duzdz,
             ux, uy, uz, is_solid;
-            dx, dy, dz, x_bc=:open, y_bc=:wall, z_bc=:periodic,
+            dx, dy, dz, x_bc=:open, y_bc=:open, z_bc=:periodic,
             sync=false,
         )
 
@@ -251,6 +253,9 @@ function run_viscoelastic_fvfd_extensional_3d(;
             Nx, Ny, Nz, FT(ν_s),
         )
         apply_bc_rebuild_3d!(f_out, f_in, bcspec, FT(ν_s), Nx, Ny, Nz)
+        fvfd_apply_extensional_straining_bc_3d!(
+            f_out, f_in, ux_east, uy_south, uy_north, FT(ν_s), Nx, Ny, Nz,
+        )
         compute_macroscopic_forced_field_3d!(ρ, ux, uy, uz, f_out, Fx_tot, Fy_tot, Fz_tot)
         if mode === :imposed
             fvfd_impose_planar_extensional_velocity_3d!(
@@ -315,6 +320,7 @@ function run_viscoelastic_fvfd_extensional_3d(;
         epsilon_dot=Float64(epsilon_dot), lambda=Float64(lambda_p), Wi_ext=wi_ext,
         beta=beta, Re=Re, eta_s=Float64(ν_s), eta_p=Float64(nu_p_eff),
         eta_total=nu_total, velocity_mode=mode, open_x_gradient_supported=true,
+        open_y_gradient_supported=true, bc_config=:openxy_zh_velocity,
         completed_steps=completed_steps, last_n_sub=last_n_sub,
         max_substeps_observed=max_substeps_observed,
         last_grad_norm=last_grad_norm,
