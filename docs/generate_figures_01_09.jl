@@ -56,7 +56,7 @@ println("=== 1. Poiseuille 2D ===")
 
 # --- 1a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(820, 460), backgroundcolor=BC_DARK)
+    fig = Figure(size=(610, 460), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Poiseuille 2D — geometry",
                  limits=(0, 5, 0, 4), pad=1.0)
     fluid_region!(ax, (0.0, 0.0), (5.0, 4.0); outline=false)
@@ -68,13 +68,6 @@ let
     periodic!(ax, (5.0, 0.0), (5.0, 4.0); label="periodic")
     body_force!(ax, 0.9, 2.0; dx=1.4, dy=0.0, label="Fx (body force)",
                 n=3, spread=0.8, labelside=-1, labelgap=0.3)
-    bc_legend!(fig[1, 2]; entries=[
-        (:wall,     "no-slip wall"),
-        (:periodic, "periodic"),
-        (:force,    "body force Fx"),
-        (:fluid,    "fluid region"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.26)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "poiseuille_geometry.svg"), fig)
     println("  ✓ poiseuille_geometry.svg")
 end
@@ -143,7 +136,7 @@ println("=== 2. Couette 2D ===")
 
 # --- 2a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(820, 460), backgroundcolor=BC_DARK)
+    fig = Figure(size=(600, 460), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Couette 2D — geometry",
                  limits=(0, 5, 0, 4), pad=1.0)
     fluid_region!(ax, (0.0, 0.0), (5.0, 4.0); outline=false)
@@ -153,13 +146,6 @@ let
                  label="moving wall (Zou-He)", labelgap=0.5, ulabelgap=0.55)
     periodic!(ax, (0.0, 0.0), (0.0, 4.0); label="periodic")
     periodic!(ax, (5.0, 0.0), (5.0, 4.0); label="periodic")
-    bc_legend!(fig[1, 2]; entries=[
-        (:moving,   "moving wall (u_wall)"),
-        (:wall,     "no-slip wall"),
-        (:periodic, "periodic"),
-        (:fluid,    "fluid region"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.27)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "couette_geometry.svg"), fig)
     println("  ✓ couette_geometry.svg")
 end
@@ -313,7 +299,7 @@ println("=== 4. Cavity 2D ===")
 
 # --- 4a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(720, 560), backgroundcolor=BC_DARK)
+    fig = Figure(size=(500, 560), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Lid-driven cavity — geometry",
                  limits=(0, 5, 0, 5), pad=1.2)
     fluid_region!(ax, (0.0, 0.0), (5.0, 5.0); outline=false)
@@ -322,12 +308,6 @@ let
     wall!(ax, (0.0, 0.0), (5.0, 0.0); side=-1, label="bottom wall", labelgap=0.45)
     wall!(ax, (0.0, 0.0), (0.0, 5.0); side=1,  label="left wall", labelgap=0.45)
     wall!(ax, (5.0, 0.0), (5.0, 5.0); side=-1, label="right wall", labelgap=0.45)
-    bc_legend!(fig[1, 2]; entries=[
-        (:moving, "moving lid (u_lid)"),
-        (:wall,   "no-slip wall"),
-        (:fluid,  "fluid region"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.30)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "cavity_geometry.svg"), fig)
     println("  ✓ cavity_geometry.svg")
 end
@@ -414,7 +394,7 @@ println("=== 6. Cylinder 2D ===")
 
 # --- 6a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(960, 360), backgroundcolor=BC_DARK)
+    fig = Figure(size=(730, 360), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Flow around a cylinder — geometry",
                  limits=(0, 400, 0, 100), pad=22.0)
     fluid_region!(ax, (0.0, 0.0), (400.0, 100.0); outline=false)
@@ -432,13 +412,6 @@ let
     # immersed cylinder
     obstacle!(ax, (90.0, 50.0), 12.0; label="cylinder", labelside=:below,
               labelgap=3.0)
-    bc_legend!(fig[1, 2]; entries=[
-        (:inlet,     "inlet u_in"),
-        (:outlet,    "outlet"),
-        (:free_slip, "free-slip wall"),
-        (:obstacle,  "cylinder (obstacle)"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.24)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "cylinder_geometry.svg"), fig)
     println("  ✓ cylinder_geometry.svg")
 end
@@ -495,7 +468,7 @@ println("=== 7. Heat Conduction ===")
 
 # --- 7a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(860, 440), backgroundcolor=BC_DARK)
+    fig = Figure(size=(630, 440), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Heat conduction — geometry",
                  limits=(0, 7, 0, 4), pad=1.1)
     fluid_region!(ax, (0.0, 0.0), (7.0, 4.0); outline=false)
@@ -505,13 +478,6 @@ let
                     label="T_hot (bottom)", labelgap=0.5)
     periodic!(ax, (0.0, 0.0), (0.0, 4.0); label="periodic")
     periodic!(ax, (7.0, 0.0), (7.0, 4.0); label="periodic")
-    bc_legend!(fig[1, 2]; entries=[
-        (:hot,      "no-slip wall, T_hot"),
-        (:cold,     "no-slip wall, T_cold"),
-        (:periodic, "periodic"),
-        (:fluid,    "fluid region"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.27)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "heat_geometry.svg"), fig)
     println("  ✓ heat_geometry.svg")
 end
@@ -546,7 +512,7 @@ println("=== 8. Rayleigh-Benard ===")
 
 # --- 8a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(900, 440), backgroundcolor=BC_DARK)
+    fig = Figure(size=(670, 440), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Rayleigh-Benard convection — geometry",
                  limits=(0, 9, 0, 4), pad=1.1)
     fluid_region!(ax, (0.0, 0.0), (9.0, 4.0); outline=false)
@@ -573,13 +539,6 @@ let
     end
     text!(ax, 4.5, 2.0; text="convection rolls", color=BC_TEXT, font=BC_SERIF,
           fontsize=11, align=(:center, :center))
-    bc_legend!(fig[1, 2]; entries=[
-        (:hot,      "no-slip wall, T_hot"),
-        (:cold,     "no-slip wall, T_cold"),
-        (:periodic, "periodic"),
-        (:fluid,    "fluid region"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.26)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "rayleigh_benard_geometry.svg"), fig)
     println("  ✓ rayleigh_benard_geometry.svg")
 end
@@ -617,7 +576,7 @@ println("=== 9. Hagen-Poiseuille ===")
 
 # --- 9a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(860, 430), backgroundcolor=BC_DARK)
+    fig = Figure(size=(630, 430), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Hagen-Poiseuille — pipe cross-section (z-r plane)",
                  limits=(0, 6, 0, 4), pad=1.2)
     fluid_region!(ax, (0.0, 0.0), (6.0, 4.0); outline=false)
@@ -632,13 +591,6 @@ let
           align=(:left, :center))
     text!(ax, 0.0, 4.4; text="r", color=BC_TEXT, font=BC_SERIF, fontsize=15,
           align=(:center, :bottom))
-    bc_legend!(fig[1, 2]; entries=[
-        (:wall,     "no-slip wall (r=R)"),
-        (:symmetry, "symmetry (r=0)"),
-        (:force,    "body force Fz"),
-        (:periodic, "periodic z"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.27)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "hagen_poiseuille_geometry.svg"), fig)
     println("  ✓ hagen_poiseuille_geometry.svg")
 end

@@ -23,7 +23,7 @@ end
 # 1. Lid-driven cavity — north moving lid, S/E/W no-slip
 # ===========================================================================
 let
-    fig = Figure(size=(720, 560), backgroundcolor=BC_DARK)
+    fig = Figure(size=(500, 560), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Lid-driven cavity — boundary conditions",
                  limits=(0, 5, 0, 5), pad=1.3)
     fluid_region!(ax, (0.0, 0.0), (5.0, 5.0); outline=false)
@@ -33,12 +33,6 @@ let
           labelgap=0.45)
     wall!(ax, (0.0, 0.0), (0.0, 5.0); side=1,  label="no-slip", labelgap=0.45)
     wall!(ax, (5.0, 0.0), (5.0, 5.0); side=-1, label="no-slip", labelgap=0.45)
-    bc_legend!(fig[1, 2]; entries=[
-        (:moving, "moving lid (u_lid)"),
-        (:wall,   "no-slip, bounce-back"),
-        (:fluid,  "fluid region"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.31)); colgap!(fig.layout, 14)
     _emit(fig, "cartesian-cavity-bc")
 end
 
@@ -46,7 +40,7 @@ end
 # 2. Differentially-heated cavity — west hot, east cold, N/S adiabatic, gravity
 # ===========================================================================
 let
-    fig = Figure(size=(760, 560), backgroundcolor=BC_DARK)
+    fig = Figure(size=(520, 560), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Differentially-heated cavity — boundary conditions",
                  limits=(0, 5, 0, 5), pad=1.5)
     fluid_region!(ax, (0.0, 0.0), (5.0, 5.0); outline=false)
@@ -63,14 +57,6 @@ let
           labelgap=0.45)
     # gravity cue (secondary grey), placed centre, clear of walls
     gravity!(ax, 2.5, 3.1; label="g", len=1.1)
-    bc_legend!(fig[1, 2]; entries=[
-        (:hot,     "hot wall, T=1"),
-        (:cold,    "cold wall, T=0"),
-        (:wall,    "adiabatic no-slip"),
-        (:gravity, "gravity g"),
-        (:fluid,   "fluid region"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.32)); colgap!(fig.layout, 14)
     _emit(fig, "thermal-natural-convection-bc")
 end
 
@@ -79,7 +65,7 @@ end
 #    sphere obstacle. Wide duct aspect (120×60).
 # ===========================================================================
 let
-    fig = Figure(size=(960, 380), backgroundcolor=BC_DARK)
+    fig = Figure(size=(720, 380), backgroundcolor=BC_DARK)
     # asymmetric room: a wide left margin so the long "u_in (velocity)" inlet
     # label clears the frame, and enough right margin for the outflow arrowheads.
     ax = bc_axis(fig[1, 1]; title="Sphere drag (3D) — duct mid-plane BCs")
@@ -99,13 +85,6 @@ let
     # sphere obstacle on axis
     obstacle!(ax, (38.0, 30.0), 8.0; label="sphere (STL, libb)", labelside=:below,
               labelgap=2.0)
-    bc_legend!(fig[1, 2]; entries=[
-        (:inlet,    "inlet u_in"),
-        (:outlet,   "pressure outlet"),
-        (:wall,     "no-slip wall"),
-        (:obstacle, "sphere (STL)"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.26)); colgap!(fig.layout, 14)
     _emit(fig, "sphere-drag-3d-bc")
 end
 
@@ -114,7 +93,7 @@ end
 #    cylinder obstacle on the channel axis.
 # ===========================================================================
 let
-    fig = Figure(size=(960, 380), backgroundcolor=BC_DARK)
+    fig = Figure(size=(700, 380), backgroundcolor=BC_DARK)
     ax = bc_axis(fig[1, 1]; title="Oldroyd-B flow past a confined cylinder — boundary conditions",
                  limits=(0, 120, 0, 50), pad=18.0)
     fluid_region!(ax, (0.0, 0.0), (120.0, 50.0); outline=false)
@@ -129,13 +108,6 @@ let
             depth=18.0, labelsize=12, labelgap=24.0)
     obstacle!(ax, (42.0, 25.0), 8.0; label="cylinder, R", labelside=:below,
               labelgap=2.0)
-    bc_legend!(fig[1, 2]; entries=[
-        (:inlet,    "inlet u_in"),
-        (:outlet,   "outflow"),
-        (:wall,     "no-slip (bounce-back)"),
-        (:obstacle, "cylinder, R"),
-    ])
-    colsize!(fig.layout, 2, Relative(0.27)); colgap!(fig.layout, 14)
     _emit(fig, "viscoelastic-cylinder-bc")
 end
 
