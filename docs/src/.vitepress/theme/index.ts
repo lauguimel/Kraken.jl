@@ -24,6 +24,7 @@ import {
 import VersionPicker from "@/VersionPicker.vue"
 import AuthorBadge from '@/AuthorBadge.vue'
 import Authors from '@/Authors.vue'
+import DownloadMenu from './components/DownloadMenu.vue'
 
 import { enhanceAppWithTabs } from 'vitepress-plugin-tabs/client'
 
@@ -48,6 +49,7 @@ export const Theme: ThemeConfig = {
     app.component('VersionPicker', VersionPicker);
     app.component('AuthorBadge', AuthorBadge)
     app.component('Authors', Authors)
+    app.component('DownloadMenu', DownloadMenu)
   }
 }
 export default Theme

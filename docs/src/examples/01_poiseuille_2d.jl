@@ -1,5 +1,9 @@
 # # Poiseuille Flow (2D)
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'poiseuille.krk',href:'/downloads/poiseuille/poiseuille.krk'},{label:'poiseuille.csv',href:'/downloads/poiseuille/poiseuille.csv'},{label:'poiseuille.py',href:'/downloads/poiseuille/poiseuille.py'}]" />
+# ```
+#
 # **Concepts:** [LBM fundamentals](../theory/01_lbm_fundamentals.md) ·
 # [BGK collision](../theory/03_bgk_collision.md) ·
 # [Boundary conditions](../theory/05_boundary_conditions.md) ·
