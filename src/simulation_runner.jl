@@ -403,6 +403,9 @@ end
 function _run_viscoelastic(setup::SimulationSetup;
                            backend=KernelAbstractions.CPU(), T=Float64)
     name = lowercase(setup.name)
+    if occursin("extension", name) || occursin("extensional", name)
+        return _run_viscoelastic_extensional_3d(setup; backend=backend, T=T)
+    end
     if setup.lattice === :D3Q19 || occursin("sphere", name)
         return _run_viscoelastic_sphere_3d(setup; backend=backend, T=T)
     end
@@ -503,6 +506,38 @@ function _run_viscoelastic_sphere_3d(setup::SimulationSetup;
         u_in=u_in, ν_s=nu_s, ν_p=nu_p, lambda=lambda,
         inlet=inlet, tau_plus=tau_plus,
         max_steps=setup.max_steps, avg_window=avg_window,
+        backend=backend, FT=T,
+    )
+    return merge(result, (setup=setup,))
+end
+
+"""Dispatch a 3D viscoelastic Oldroyd-B planar-extension `.krk` canary to the
+`run_viscoelastic_fvfd_extensional_3d` driver in `velocity_mode=:imposed`. The
+driver imposes `u = (epsilon_dot*x, -epsilon_dot*y, 0)` analytically (no
+obstacle/inflow geometry); the `.krk` Domain supplies `Nx/Ny/Nz`, the Rheology
+block the solvent/polymer viscosities and relaxation time, and `epsilon_dot`
+comes from a `Define`/`Physics` entry. At the fixed point
+`C_xx = 1/(1 - 2λε̇)`, `C_yy = 1/(1 + 2λε̇)`."""
+function _run_viscoelastic_extensional_3d(setup::SimulationSetup;
+                                          backend=KernelAbstractions.CPU(), T=Float64)
+    rs = _ve_oldroydb_rheology(setup)
+    nu_s   = _ve_rheology_param(rs, :nu_s)
+    nu_p   = _ve_rheology_param(rs, :nu_p)
+    lambda = _ve_rheology_param(rs, :lambda)
+
+    epsilon_dot = _ve_numeric_param(setup, :epsilon_dot)
+
+    dom = setup.domain
+    advection_scheme = _ve_symbol_param(setup, :advection_scheme, :muscl_superbee)
+    velocity_mode = _ve_symbol_param(setup, :velocity_mode, :imposed)
+
+    result = run_viscoelastic_fvfd_extensional_3d(;
+        Nx=dom.Nx, Ny=dom.Ny, Nz=dom.Nz,
+        epsilon_dot=epsilon_dot,
+        ν_s=nu_s, ν_p=nu_p, lambda=lambda,
+        advection_scheme=advection_scheme,
+        velocity_mode=velocity_mode,
+        max_steps=setup.max_steps,
         backend=backend, FT=T,
     )
     return merge(result, (setup=setup,))
