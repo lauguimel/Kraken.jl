@@ -788,3 +788,71 @@ function logfv_constitutive_step_log_3d!(
         sync,
     )
 end
+
+# ---------------------------------------------------------------------
+# Shared constitutive-step dispatch (DRY): pick the per-model RK2 step
+# from the polymer `model`, forwarding the same ψ_out/ψ_in/∇u arg list to
+# every variant. This is the single point both FVFD drivers (Poiseuille +
+# extensional) call, so adding a constitutive model means a new branch
+# HERE only — the drivers never duplicate the if/elseif.
+#
+# Bit-identity guarantees:
+#   * LogConfOldroydB         → the dedicated OB kernel (untouched).
+#   * LogConfFENEP            → the FENE-P kernel with L²=polymer_max_extensibility
+#                               (identical to the prior `isfinite(L2)` branch).
+#   * LogConfGiesekus(α=0)    → its kernel reproduces the OB trajectory.
+#   * LogConfPTT(ε=0)         → its kernel reproduces the OB trajectory.
+# ---------------------------------------------------------------------
+function logfv_constitutive_step_dispatch_3d!(
+    model::AbstractPolymerModel,
+    psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+    psixx, psixy, psixz, psiyy, psiyz, psizz,
+    duxdx, duxdy, duxdz,
+    duydx, duydy, duydz,
+    duzdx, duzdy, duzdz,
+    lambda, dt, n_sub;
+    sync::Bool=true,
+)
+    if model isa LogConfFENEP
+        logfv_constitutive_step_log_fenep_3d!(
+            psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+            psixx, psixy, psixz, psiyy, psiyz, psizz,
+            duxdx, duxdy, duxdz,
+            duydx, duydy, duydz,
+            duzdx, duzdy, duzdz,
+            lambda, dt, oftype(lambda, polymer_max_extensibility(model)), n_sub;
+            sync,
+        )
+    elseif model isa LogConfGiesekus
+        logfv_constitutive_step_log_giesekus_3d!(
+            psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+            psixx, psixy, psixz, psiyy, psiyz, psizz,
+            duxdx, duxdy, duxdz,
+            duydx, duydy, duydz,
+            duzdx, duzdy, duzdz,
+            lambda, dt, oftype(lambda, polymer_mobility(model)), n_sub;
+            sync,
+        )
+    elseif model isa LogConfPTT
+        logfv_constitutive_step_log_ptt_3d!(
+            psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+            psixx, psixy, psixz, psiyy, psiyz, psizz,
+            duxdx, duxdy, duxdz,
+            duydx, duydy, duydz,
+            duzdx, duzdy, duzdz,
+            lambda, dt, oftype(lambda, polymer_ptt_epsilon(model)), n_sub;
+            variant=polymer_ptt_variant(model), sync,
+        )
+    else
+        logfv_constitutive_step_log_3d!(
+            psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+            psixx, psixy, psixz, psiyy, psiyz, psizz,
+            duxdx, duxdy, duxdz,
+            duydx, duydy, duydz,
+            duzdx, duzdy, duzdz,
+            lambda, dt, n_sub;
+            sync,
+        )
+    end
+    return nothing
+end

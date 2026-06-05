@@ -220,29 +220,21 @@ function run_viscoelastic_fvfd_extensional_3d(;
             last_grad_norm, Float64(lambda_p), 1.0; max_substeps=max_polymer_substeps,
         )
         max_substeps_observed = max(max_substeps_observed, last_n_sub)
-        if isfinite(L2_fene)
-            # FENE-P (Peterlin): finite extensibility caps trC < L². As
-            # L²→∞ this reduces to the Oldroyd-B step bit-for-bit.
-            logfv_constitutive_step_log_fenep_3d!(
-                psixx_next, psixy_next, psixz_next, psiyy_next, psiyz_next, psizz_next,
-                psixx_adv, psixy_adv, psixz_adv, psiyy_adv, psiyz_adv, psizz_adv,
-                duxdx, duxdy, duxdz,
-                duydx, duydy, duydz,
-                duzdx, duzdy, duzdz,
-                FT(lambda_p), one(FT), FT(L2_fene), last_n_sub;
-                sync=true,
-            )
-        else
-            logfv_constitutive_step_log_3d!(
-                psixx_next, psixy_next, psixz_next, psiyy_next, psiyz_next, psizz_next,
-                psixx_adv, psixy_adv, psixz_adv, psiyy_adv, psiyz_adv, psizz_adv,
-                duxdx, duxdy, duxdz,
-                duydx, duydy, duydz,
-                duzdx, duzdy, duzdz,
-                FT(lambda_p), one(FT), last_n_sub;
-                sync=true,
-            )
-        end
+        # Shared per-model constitutive-step dispatch (DRY): OB / FENE-P /
+        # Giesekus / PTT all route through one helper. OB → dedicated OB
+        # kernel; FENE-P → FENE-P kernel with L²=polymer_max_extensibility
+        # (bit-identical to the prior isfinite(L2) branch); Giesekus(α=0) /
+        # PTT(ε=0) reproduce the OB trajectory bit-for-bit.
+        logfv_constitutive_step_dispatch_3d!(
+            polymer_model,
+            psixx_next, psixy_next, psixz_next, psiyy_next, psiyz_next, psizz_next,
+            psixx_adv, psixy_adv, psixz_adv, psiyy_adv, psiyz_adv, psizz_adv,
+            duxdx, duxdy, duxdz,
+            duydx, duydy, duydz,
+            duzdx, duzdy, duzdz,
+            FT(lambda_p), one(FT), last_n_sub;
+            sync=true,
+        )
 
         psi_to_C_3d!(
             C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,

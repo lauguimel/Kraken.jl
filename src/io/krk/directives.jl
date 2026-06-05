@@ -519,7 +519,8 @@ function _parse_rheology(line::String, user_vars::Dict{Symbol,Any}=Dict{Symbol,A
 
     known_phases = (:liquid, :gas, :default)
     known_models = (:newtonian, :power_law, :carreau, :cross, :bingham,
-                    :herschel_bulkley, :oldroyd_b, :fene_p, :saramito)
+                    :herschel_bulkley, :oldroyd_b, :fene_p, :saramito,
+                    :giesekus, :ptt)
 
     if length(tokens) >= 3
         phase = Symbol(tokens[2])

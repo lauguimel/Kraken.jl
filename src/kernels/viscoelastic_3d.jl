@@ -296,3 +296,35 @@ function update_polymer_stress_3d!(tau_xx, tau_xy, tau_xz,
             FT(polymer_max_extensibility(model)); ndrange=(Nx, Ny, Nz))
     KernelAbstractions.synchronize(backend)
 end
+
+# Giesekus and PTT both reconstruct stress as τ_p = G·(C − I), identical to
+# Oldroyd-B — the model nonlinearity lives entirely in the constitutive
+# evolution (mobility α / trace multiplier Y(trC)), not in the stress
+# closure. Reuse the OB kernel (L2_fene = 0 ⇒ Peterlin factor = 1).
+function update_polymer_stress_3d!(tau_xx, tau_xy, tau_xz,
+                                     tau_yy, tau_yz, tau_zz,
+                                     C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
+                                     model::LogConfGiesekus)
+    backend = KernelAbstractions.get_backend(tau_xx)
+    Nx, Ny, Nz = size(tau_xx)
+    FT = eltype(tau_xx)
+    kernel! = _update_polymer_stress_3d_oldroyd_kernel!(backend)
+    kernel!(tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz,
+            C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
+            FT(polymer_modulus(model)), FT(0.0); ndrange=(Nx, Ny, Nz))
+    KernelAbstractions.synchronize(backend)
+end
+
+function update_polymer_stress_3d!(tau_xx, tau_xy, tau_xz,
+                                     tau_yy, tau_yz, tau_zz,
+                                     C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
+                                     model::LogConfPTT)
+    backend = KernelAbstractions.get_backend(tau_xx)
+    Nx, Ny, Nz = size(tau_xx)
+    FT = eltype(tau_xx)
+    kernel! = _update_polymer_stress_3d_oldroyd_kernel!(backend)
+    kernel!(tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz,
+            C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
+            FT(polymer_modulus(model)), FT(0.0); ndrange=(Nx, Ny, Nz))
+    KernelAbstractions.synchronize(backend)
+end

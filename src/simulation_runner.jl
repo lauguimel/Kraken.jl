@@ -372,19 +372,26 @@ function _ve_rheology_param(rs::RheologySetup, key::Symbol)
         "viscoelastic dispatch: Rheology $(rs.model) is missing `$key`."))
 end
 
-"""Locate a viscoelastic Rheology block — either `oldroyd_b` or `fene_p`."""
+"""Locate a viscoelastic Rheology block — `oldroyd_b`, `fene_p`,
+`giesekus`, or `ptt`."""
 function _ve_polymer_rheology(setup::SimulationSetup)
-    idx = findfirst(rs -> rs.model === :oldroyd_b || rs.model === :fene_p,
+    idx = findfirst(rs -> rs.model === :oldroyd_b || rs.model === :fene_p ||
+                          rs.model === :giesekus  || rs.model === :ptt,
                     setup.rheology)
     idx !== nothing && return setup.rheology[idx]
     throw(ArgumentError(
-        "viscoelastic dispatch: requires `Rheology oldroyd_b { ... }` or " *
-        "`Rheology fene_p { ... Lmax2 = ... }`."))
+        "viscoelastic dispatch: requires `Rheology oldroyd_b { ... }`, " *
+        "`Rheology fene_p { ... Lmax2 = ... }`, " *
+        "`Rheology giesekus { ... alpha = ... }`, or " *
+        "`Rheology ptt { ... epsilon = ... }`."))
 end
 
 """Build a log-conformation polymer model from a VE Rheology block.
-`oldroyd_b` → `LogConfOldroydB`; `fene_p` → `LogConfFENEP` (needs `Lmax2`/`L2`).
-G = nu_p / lambda in both cases."""
+`oldroyd_b` → `LogConfOldroydB`; `fene_p` → `LogConfFENEP` (needs `Lmax2`/`L2`);
+`giesekus` → `LogConfGiesekus` (needs `alpha`/`α`); `ptt` → `LogConfPTT`
+(needs `epsilon`/`eps`/`ε`, optional `variant` = 0 linear (default) / 1
+exponential, since `.krk` Rheology params are numeric-only). G = nu_p / lambda
+in every case."""
 function _ve_build_polymer_model(rs::RheologySetup; FT=Float64)
     nu_p   = _ve_rheology_param(rs, :nu_p)
     lambda = _ve_rheology_param(rs, :lambda)
@@ -395,6 +402,23 @@ function _ve_build_polymer_model(rs::RheologySetup; FT=Float64)
              throw(ArgumentError(
                  "viscoelastic dispatch: Rheology fene_p needs `Lmax2` (alias `L2`)."))
         return LogConfFENEP(G=G, λ=FT(lambda), Lmax2=FT(L2))
+    elseif rs.model === :giesekus
+        α = haskey(rs.params, :alpha) ? Float64(rs.params[:alpha]) :
+            haskey(rs.params, :α)     ? Float64(rs.params[:α])     :
+            throw(ArgumentError(
+                "viscoelastic dispatch: Rheology giesekus needs `alpha` (alias `α`)."))
+        return LogConfGiesekus(G=G, λ=FT(lambda), α=FT(α))
+    elseif rs.model === :ptt
+        ε = haskey(rs.params, :epsilon) ? Float64(rs.params[:epsilon]) :
+            haskey(rs.params, :eps)     ? Float64(rs.params[:eps])     :
+            haskey(rs.params, :ε)       ? Float64(rs.params[:ε])       :
+            throw(ArgumentError(
+                "viscoelastic dispatch: Rheology ptt needs `epsilon` (alias `eps`/`ε`)."))
+        # `.krk` Rheology params are numeric-only, so the variant is encoded
+        # as 0 = :linear (default) / 1 = :exponential.
+        variant_code = haskey(rs.params, :variant) ? Float64(rs.params[:variant]) : 0.0
+        variant = variant_code == 1.0 ? :exponential : :linear
+        return LogConfPTT(G=G, λ=FT(lambda), ε=FT(ε), variant=variant)
     end
     return LogConfOldroydB(G=G, λ=FT(lambda))
 end
