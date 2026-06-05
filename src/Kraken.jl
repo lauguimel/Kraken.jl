@@ -104,6 +104,7 @@ include("drivers/viscoelastic_3d.jl")
 include("drivers/viscoelastic_couette_3d.jl")
 include("drivers/viscoelastic_poiseuille_3d.jl")
 include("drivers/viscoelastic_fvfd_3d.jl")
+include("drivers/viscoelastic_fvfd_extensional_3d.jl")
 include("drivers/step_geometry_2d.jl")
 include("drivers/viscoelastic_logfv_2d.jl")
 
