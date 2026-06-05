@@ -242,18 +242,9 @@ function _fvfd_advection_scheme_val_3d(advection_scheme::Symbol)
     return Val(scheme)
 end
 
-@inline function _fvfd_superbee_limiter_3d(r)
-    one_r = one(r)
-    two_r = one_r + one_r
-    return max(zero(r), max(min(two_r * r, one_r), min(r, two_r)))
-end
-
-@inline function _fvfd_muscl_superbee_face_value_3d(far_upwind, upwind, downwind)
-    d_up = upwind - far_upwind
-    d_down = downwind - upwind
-    r = ifelse(d_down == zero(d_down), zero(d_down), d_up / d_down)
-    return upwind + (one(r) / (one(r) + one(r))) * _fvfd_superbee_limiter_3d(r) * d_down
-end
+@inline _fvfd_superbee_limiter_3d(r) = _fvfd_superbee_limiter_2d(r)
+@inline _fvfd_muscl_superbee_face_value_3d(far_upwind, upwind, downwind) =
+    _fvfd_muscl_superbee_face_value_2d(far_upwind, upwind, downwind)
 
 @inline function _fvfd_upwind_scalar_advective_rhs_3d(
     phi, west_phi, east_phi, south_phi, north_phi, back_phi, front_phi,
