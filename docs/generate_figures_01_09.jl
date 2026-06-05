@@ -8,6 +8,42 @@ using CairoMakie
 const KA = Kraken.KernelAbstractions
 const OUTDIR = joinpath(@__DIR__, "src", "examples")
 
+# --- Dark docs theme (#1b1b1f Vitepress page bg, light text/ticks/spines/grid) ---
+# Every Figure()/Axis()/Colorbar()/Legend() below inherits this so the exported
+# SVGs sit seamlessly on the dark Vitepress page. Mirrors the explicit dark block
+# that already produces cylinder_umag.png. Blocks that pass their own
+# backgroundcolor (e.g. cylinder_umag) still win locally.
+const KRAKEN_DARK = "#1b1b1f"
+set_theme!(Theme(
+    backgroundcolor = KRAKEN_DARK,
+    textcolor = "gray92",
+    Axis = (
+        backgroundcolor = KRAKEN_DARK,
+        titlecolor = "gray92",
+        xlabelcolor = "gray92", ylabelcolor = "gray92",
+        xticklabelcolor = "gray85", yticklabelcolor = "gray85",
+        xtickcolor = "gray70", ytickcolor = "gray70",
+        xgridcolor = ("gray60", 0.18), ygridcolor = ("gray60", 0.18),
+        leftspinecolor = "gray55", rightspinecolor = "gray55",
+        topspinecolor = "gray55", bottomspinecolor = "gray55",
+    ),
+    Axis3 = (
+        backgroundcolor = KRAKEN_DARK,
+        titlecolor = "gray92",
+        xlabelcolor = "gray92", ylabelcolor = "gray92", zlabelcolor = "gray92",
+        xticklabelcolor = "gray85", yticklabelcolor = "gray85", zticklabelcolor = "gray85",
+    ),
+    Colorbar = (
+        labelcolor = "gray92", ticklabelcolor = "gray85", tickcolor = "gray70",
+        leftspinecolor = "gray55", rightspinecolor = "gray55",
+        topspinecolor = "gray55", bottomspinecolor = "gray55",
+    ),
+    Legend = (
+        backgroundcolor = KRAKEN_DARK, labelcolor = "gray92",
+        titlecolor = "gray92", framecolor = "gray45",
+    ),
+))
+
 # ============================================================================
 # === 1. Poiseuille 2D ======================================================
 # ============================================================================
@@ -45,9 +81,14 @@ let
     Ny = 32; ν = 0.1; Fx = 1e-5
     ρ, ux, uy, config = run_poiseuille_2d(; Nx=4, Ny=Ny, ν=ν, Fx=Fx, max_steps=20000)
 
-    H = Ny - 1
-    j_fluid = 2:Ny-1
-    y_phys = [j - 1.5 for j in j_fluid]
+    # Full-way bounce-back (stream_periodic_x_wall_y_2d!) places the no-slip wall
+    # HALFWAY between the last fluid node and the ghost layer: at y = 0.5 (below
+    # j=1) and y = Ny + 0.5 (above j=Ny). The effective channel height is H = Ny,
+    # the physical coordinate of fluid node j is y = j - 0.5, and ALL nodes j=1..Ny
+    # are fluid. With these wall-aware coordinates the D2Q9 parabola is exact.
+    H = Ny
+    j_fluid = 1:Ny
+    y_phys = [j - 0.5 for j in j_fluid]
     u_ana  = [Fx / (2ν) * y * (H - y) for y in y_phys]
     u_num  = [ux[2, j] for j in j_fluid]
 
@@ -55,7 +96,7 @@ let
     ax = Axis(fig[1, 1]; xlabel="u_x (lattice units)", ylabel="y (lattice units)",
               title="Poiseuille flow — Ny = $Ny")
     lines!(ax, u_ana, y_phys; label="Analytical", linewidth=2)
-    scatter!(ax, u_num, y_phys; label="LBM", markersize=8)
+    scatter!(ax, u_num, y_phys; label="Kraken", markersize=8)
     axislegend(ax; position=:rb)
     save(joinpath(OUTDIR, "poiseuille_profile.svg"), fig)
     println("  ✓ poiseuille_profile.svg")
@@ -68,10 +109,14 @@ let
     errors = Float64[]
 
     for Ny_i in Ny_list
-        ρ_i, ux_i, _, _ = run_poiseuille_2d(; Nx=4, Ny=Ny_i, ν=ν, Fx=Fx, max_steps=30000)
-        H_i = Ny_i - 1
-        jf  = 2:Ny_i-1
-        u_a = [Fx / (2ν) * (j - 1.5) * (H_i - (j - 1.5)) for j in jf]
+        H_i = Ny_i                       # halfway-wall channel height (see 1b)
+        # Diffusive time to steady state scales as H²/ν, so the step budget MUST
+        # grow with resolution — a fixed budget leaves the fine grids transient
+        # and corrupts the slope (spurious error blow-up at Ny≥64).
+        nsteps = max(30_000, ceil(Int, 8 * H_i^2 / ν))
+        ρ_i, ux_i, _, _ = run_poiseuille_2d(; Nx=4, Ny=Ny_i, ν=ν, Fx=Fx, max_steps=nsteps)
+        jf  = 1:Ny_i                     # all nodes are fluid
+        u_a = [Fx / (2ν) * (j - 0.5) * (H_i - (j - 0.5)) for j in jf]
         u_n = [ux_i[2, j] for j in jf]
         L2  = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
         push!(errors, L2)
@@ -80,7 +125,7 @@ let
     fig = Figure(size=(500, 400))
     ax = Axis(fig[1, 1]; xlabel="Ny", ylabel="Relative L2 error",
               title="Convergence — Poiseuille flow", xscale=log10, yscale=log10)
-    scatterlines!(ax, Float64.(Ny_list), errors; linewidth=2, markersize=10, label="LBM")
+    scatterlines!(ax, Float64.(Ny_list), errors; linewidth=2, markersize=10, label="Kraken")
     ref = errors[1] .* (Ny_list[1] ./ Ny_list).^2
     lines!(ax, Float64.(Ny_list), ref; linestyle=:dash, color=:gray, label="slope 2")
     axislegend(ax; position=:lb)
@@ -134,7 +179,7 @@ let
     ax = Axis(fig[1, 1]; xlabel="u_x (lattice units)", ylabel="y (lattice units)",
               title="Couette flow — Ny = $Ny")
     lines!(ax, u_ana, y_phys; label="Analytical", linewidth=2)
-    scatter!(ax, u_num, y_phys; label="LBM", markersize=8)
+    scatter!(ax, u_num, y_phys; label="Kraken", markersize=8)
     axislegend(ax; position=:rt)
     save(joinpath(OUTDIR, "couette_profile.svg"), fig)
     println("  ✓ couette_profile.svg")
@@ -150,20 +195,26 @@ let
         H_i = Ny_i - 1
         nsteps = max(10_000, ceil(Int, 3 * H_i^2 / ν))
         ρ_i, ux_i, _, _ = run_couette_2d(; Nx=4, Ny=Ny_i, ν=ν, u_wall=u_wall, max_steps=nsteps)
-        jf  = 2:Ny_i-1
+        # Zou-He pins the wall velocity exactly ON nodes j=1 and j=Ny, so the
+        # linear profile is reproduced over EVERY node. Measure over all of them.
+        jf  = 1:Ny_i
         u_a = [u_wall * (1 - (j - 1) / H_i) for j in jf]
         u_n = [ux_i[2, j] for j in jf]
         L2  = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
         push!(errors, L2)
     end
 
+    # Couette is EXACT for D2Q9 (linear profile is a 2nd-order-exact lattice
+    # solution): the error is pure floating-point roundoff (~1e-14…1e-12) and has
+    # NO convergence trend. Plotting a "slope 2" reference here would be a lie, so
+    # we show the machine-precision floor honestly with a flat reference band.
     fig = Figure(size=(500, 400))
     ax = Axis(fig[1, 1]; xlabel="Ny", ylabel="Relative L2 error",
-              title="Convergence — Couette flow", xscale=log10, yscale=log10)
-    scatterlines!(ax, Float64.(Ny_list), errors; linewidth=2, markersize=10, label="LBM")
-    ref = errors[1] .* (Ny_list[1] ./ Ny_list).^2
-    lines!(ax, Float64.(Ny_list), ref; linestyle=:dash, color=:gray, label="slope 2")
-    axislegend(ax; position=:lb)
+              title="Couette — exact to machine precision", xscale=log10, yscale=log10)
+    scatterlines!(ax, Float64.(Ny_list), errors; linewidth=2, markersize=10, label="Kraken")
+    hlines!(ax, [eps(Float64)]; linestyle=:dash, color=:gray, label="machine ε (Float64)")
+    ylims!(ax, 1e-16, 1e-9)
+    axislegend(ax; position=:lt)
     save(joinpath(OUTDIR, "couette_convergence.svg"), fig)
     println("  ✓ couette_convergence.svg")
 end
@@ -198,7 +249,12 @@ end
 let
     N = 64; u0 = 0.04; ν = 0.01
     k = 2pi / N
-    E0 = 0.5 * u0^2
+    # The velocity field u = u0·(−cos kx sin ky, sin kx cos ky) decays as
+    # exp(−2νk²t), so the kinetic energy ∝ u² decays as exp(−4νk²t). The MEAN
+    # kinetic-energy density of that field is E0 = ⟨½(ux²+uy²)⟩ = u0²/4 (the cos²/sin²
+    # spatial averages each give ¼), NOT the peak ½u0². Using ½u0² over-predicts the
+    # baseline by 2× and exp(−2νk²t) halves the slope — both were wrong before.
+    E0 = u0^2 / 4
 
     steps_list = 0:500:5000
     E_num = Float64[]
@@ -216,14 +272,14 @@ let
             end
             push!(E_num, KE / (N * N))
         end
-        push!(E_ana, E0 * exp(-2ν * k^2 * s))
+        push!(E_ana, E0 * exp(-4ν * k^2 * s))
     end
 
     fig = Figure(size=(600, 420))
     ax = Axis(fig[1, 1]; xlabel="Time step", ylabel="Mean kinetic energy",
               title="Taylor-Green vortex decay — N = $N")
     lines!(ax, collect(steps_list), E_ana; label="Analytical", linewidth=2)
-    scatter!(ax, collect(steps_list), E_num; label="LBM", markersize=10)
+    scatter!(ax, collect(steps_list), E_num; label="Kraken", markersize=10)
     axislegend(ax; position=:rt)
     save(joinpath(OUTDIR, "taylor_green_decay.svg"), fig)
     println("  ✓ taylor_green_decay.svg")
@@ -307,13 +363,13 @@ let
     fig = Figure(size=(900, 420))
     ax1 = Axis(fig[1, 1]; xlabel="u_x / u_lid", ylabel="y / N",
                title="Vertical centreline")
-    lines!(ax1, ux_profile, y_norm; label="LBM (N=$N)", linewidth=2)
+    lines!(ax1, ux_profile, y_norm; label="Kraken (N=$N)", linewidth=2)
     scatter!(ax1, ux_ghia, y_ghia; label="Ghia et al.", color=:red, markersize=8)
     axislegend(ax1; position=:lb)
 
     ax2 = Axis(fig[1, 2]; xlabel="x / N", ylabel="u_y / u_lid",
                title="Horizontal centreline")
-    lines!(ax2, x_norm, uy_profile; label="LBM (N=$N)", linewidth=2)
+    lines!(ax2, x_norm, uy_profile; label="Kraken (N=$N)", linewidth=2)
     axislegend(ax2; position=:rt)
     save(joinpath(OUTDIR, "cavity_centerlines.svg"), fig)
     println("  ✓ cavity_centerlines.svg")
@@ -369,7 +425,7 @@ let
               aspect=DataAspect(), limits=(-20, 420, -15, 115))
 
     # Domain boundary
-    lines!(ax, [0, 400, 400, 0, 0], [0, 0, 100, 100, 0]; color=:black, linewidth=1.5)
+    lines!(ax, [0, 400, 400, 0, 0], [0, 0, 100, 100, 0]; color="gray80", linewidth=1.5)
 
     # Cylinder
     θ = range(0, 2pi, length=60)
@@ -407,10 +463,10 @@ let
     Nx, Ny = size(ux)
     umag = @. sqrt(ux^2 + uy^2)
 
-    # Dark Documenter-theme styling (#1f2424 bg, magma sequential field, light
-    # text) to match the dark vitrine. Saved as PNG — the per-cell heatmap
+    # Dark docs styling (#1b1b1f Vitepress page bg, magma sequential field, light
+    # text) to match the dark page. Saved as PNG — the per-cell heatmap
     # exports to a multi-MB SVG, so raster it directly.
-    DARK = "#1f2424"
+    DARK = "#1b1b1f"
     fig = Figure(size=(800, 350), backgroundcolor=DARK)
     ax = Axis(fig[1, 1]; backgroundcolor=DARK,
               title="Velocity magnitude — Re=$Re", titlecolor="gray92",
@@ -432,7 +488,8 @@ let
     fig2 = Figure(size=(400, 300))
     ax2 = Axis(fig2[1, 1]; title="Drag comparison at Re = $Re")
     barplot!(ax2, [1, 2], [Cd, Cd_ref]; color=[:steelblue, :tomato],
-             bar_labels=[string(round(Cd; digits=3)), string(Cd_ref)])
+             bar_labels=[string(round(Cd; digits=3)), string(Cd_ref)],
+             label_color="gray92")
     ax2.xticks = ([1, 2], ["Kraken", "Schafer-Turek"])
     ax2.ylabel = "Cd"
     save(joinpath(OUTDIR, "cylinder_drag.svg"), fig2)
@@ -491,7 +548,7 @@ let
     ax = Axis(fig[1, 1]; xlabel="Temperature", ylabel="y / H",
               title="Heat conduction — Ra = $Ra (sub-critical)")
     lines!(ax, T_ana, y_phys; label="Analytical (linear)", linewidth=2)
-    scatter!(ax, T_num, y_phys; label="LBM", markersize=8)
+    scatter!(ax, T_num, y_phys; label="Kraken", markersize=8)
     axislegend(ax; position=:rt)
     save(joinpath(OUTDIR, "heat_profile.svg"), fig)
     println("  ✓ heat_profile.svg")
@@ -620,7 +677,7 @@ let
     ax = Axis(fig[1, 1]; xlabel="u_z (lattice units)", ylabel="r (lattice units)",
               title="Hagen-Poiseuille flow — Nr = $Nr")
     lines!(ax, u_ana, r_phys; label="Analytical", linewidth=2)
-    scatter!(ax, u_num, r_phys; label="LBM (axisymmetric)", markersize=8)
+    scatter!(ax, u_num, r_phys; label="Kraken (axisymmetric)", markersize=8)
     axislegend(ax; position=:rt)
     save(joinpath(OUTDIR, "hagen_poiseuille_profile.svg"), fig)
     println("  ✓ hagen_poiseuille_profile.svg")

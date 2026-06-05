@@ -3,8 +3,9 @@
 # **Concepts:** [LBM fundamentals](../theory/01_lbm_fundamentals.md) ·
 # [BGK collision](../theory/03_bgk_collision.md)
 #
-# **Validates against:** analytical exponential decay
-# ``u(t) = u_0\,\exp(-2\nu k^2 t)``
+# **Validates against:** analytical exponential decay of the velocity amplitude
+# ``u(t) = u_0\,\exp(-2\nu k^2 t)`` (hence the kinetic energy ``\propto u^2``
+# decays as ``E(t) = E_0\,\exp(-4\nu k^2 t)``)
 #
 # **Download:** [`taylor_green.krk`](../assets/krk/taylor_green.krk)
 #
@@ -187,7 +188,10 @@ u0 = 0.01
 steps_list = 0:200:2000
 E_num = Float64[]
 E_ana = Float64[]
-E0    = 0.5 * u0^2
+## MEAN kinetic-energy density of u = u0·(−cos kx sin ky, sin kx cos ky):
+## ⟨½(ux²+uy²)⟩ = u0²/4 (the cos²/sin² spatial averages each give ¼).
+## NOT the peak ½u0², which would sit 2× above the measured energy.
+E0    = u0^2 / 4
 
 for s in steps_list
     if s == 0
@@ -203,7 +207,7 @@ for s in steps_list
     push!(E_ana, E0 * exp(-4ν * k^2 * s))
 end
 
-# ![Taylor-Green vortex energy decay at N = 64.  Blue line: analytical exponential decay E(t) = E0 exp(-4 nu k^2 t).  Orange dots: LBM simulation measured at intervals of 200 time steps.  The numerical energy follows the analytical curve precisely, confirming that the BGK collision operator produces the correct effective viscosity nu = 0.01.  After 2000 steps, the energy has decayed to approximately 46 percent of its initial value.](taylor_green_decay.svg)
+# ![Taylor-Green vortex energy decay at N = 64.  Blue line: analytical exponential decay E(t) = E0 exp(-4 nu k^2 t) with E0 = u0^2/4 (mean kinetic-energy density).  Orange dots: Kraken simulation measured at intervals of 200 time steps.  The numerical energy follows the analytical curve to within 0.3 percent, confirming that the BGK collision operator produces the correct effective viscosity nu = 0.01.  After 2000 steps, the energy has decayed to approximately 46 percent of its initial value.](taylor_green_decay.svg)
 #
 # The numerical energy decay follows the analytical exponential with
 # excellent agreement.  This confirms that the effective viscosity of the

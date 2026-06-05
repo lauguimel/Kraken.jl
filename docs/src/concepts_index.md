@@ -129,7 +129,7 @@ bookkeeping grow quickly. This page explains what changes and what
 does not.
 
 - Theory: [From 2D to 3D](theory/06_from_2d_to_3d.md)
-- Examples: [Lid-driven cavity 3D](examples/05_cavity_3d.md)
+- Examples: [Lid-driven cavity (2D & 3D)](examples/04_cavity_2d.md)
 
 ## Limitations
 

@@ -29,7 +29,7 @@ from matplotlib.colors import LinearSegmentedColormap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
-DARK = "#1f2424"  # Documenter dark theme background
+DARK = "#1b1b1f"  # Vitepress dark page background
 # Diverging cmap centred on the theme bg: near-zero blends into the page,
 # only strong +/- values pop. Avoids the white block of light-centred RdBu.
 DIVR = LinearSegmentedColormap.from_list("dark_div", ["#4ea1d3", DARK, "#ff6b6b"])

@@ -19,7 +19,7 @@ Legend: ✓ = works and tested · ~ = implemented, partial validation ·
 
 | Capability | 2D | 3D | GPU | .krk | Theory | Example | API |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| D2Q9 / D3Q19 lattice | ✓ | ✓ | ✓ | ✓ | [01](theory/01_lbm_fundamentals.md), [02](theory/02_d2q9_lattice.md), [06](theory/06_from_2d_to_3d.md) | [Poiseuille 2D](examples/01_poiseuille_2d.md), [Cavity 3D](examples/05_cavity_3d.md) | [lattice](api/lattice.md) |
+| D2Q9 / D3Q19 lattice | ✓ | ✓ | ✓ | ✓ | [01](theory/01_lbm_fundamentals.md), [02](theory/02_d2q9_lattice.md), [06](theory/06_from_2d_to_3d.md) | [Poiseuille 2D](examples/01_poiseuille_2d.md), [Cavity (2D & 3D)](examples/04_cavity_2d.md) | [lattice](api/lattice.md) |
 | BGK collision | ✓ | ✓ | ✓ | ✓ | [03](theory/03_bgk_collision.md) | [Cavity 2D](examples/04_cavity_2d.md) | [collision](api/collision.md) |
 | MRT collision | ✓ | ✗ | ✓ | ✓ | [12](theory/12_mrt.md) | — | [collision](api/collision.md) |
 | Streaming (periodic/wall) | ✓ | ✓ | ✓ | ✓ | [04](theory/04_streaming.md) | [Couette](examples/02_couette_2d.md) | [streaming](api/streaming.md) |

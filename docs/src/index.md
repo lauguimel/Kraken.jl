@@ -1,48 +1,50 @@
-# Kraken.jl
+```@raw html
+---
+layout: home
+
+hero:
+  name: "Kraken.jl"
+  text: "GPU-native multiphysics LBM in Julia"
+  tagline: "Write a reproducible .krk case or a direct Julia driver, then run it on CUDA, Metal, or CPU backends."
+  image:
+    src: /logo.png
+    alt: Kraken
+  actions:
+    - theme: brand
+      text: Get started
+      link: /getting_started
+    - theme: alt
+      text: KRK reference
+      link: /users/krk-reference
+    - theme: alt
+      text: Validation matrix
+      link: /users/benchmarks/validation-matrix
+    - theme: alt
+      text: Cite
+      link: /#citing-kraken
+
+features:
+  - title: Reproducible cases
+    details: Canonical flows can be launched from declarative .krk files or direct Julia drivers.
+    link: /examples/04_cavity_2d
+  - title: Validated multiphysics
+    details: Cavity, thermal, sphere-drag, viscoelastic, and refinement checks are tracked in the v0.2 validation matrix.
+    link: /users/benchmarks/validation-matrix
+  - title: GPU certification
+    details: Backend checks document CPU, CUDA-class, and Apple Silicon execution paths.
+    link: /users/benchmarks/gpu-certification
+  - title: Grid refinement
+    details: Nested patches and route-native validation are documented for v0.2 refinement workflows.
+    link: /examples/20_grid_refinement_cavity
+---
+```
 
 ```@raw html
 <div align="center">
-  <img src="assets/logo.png" alt="Kraken.jl logo" width="320"/>
+  <img src="./assets/showcases/vonkarman_re200.gif" alt="Von Kármán vortex street past a cylinder, simulated with Kraken.jl" width="100%"/>
+  <br/><em>Von Kármán vortex street (Re = 200) — D2Q9 LBM on GPU.</em>
 </div>
 ```
-
-**A GPU-native Lattice Boltzmann framework in Julia — write your solver once, run it on NVIDIA, Apple Silicon, AMD, or CPU.**
-
-Kraken.jl is a composable, high-performance Lattice Boltzmann (LBM) solver for
-incompressible and thermal flows. Kernels are written once against
-[KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) and
-dispatched automatically to whatever hardware you have — no vendor-specific code
-in the physics layer.
-
-```@raw html
-<div align="center">
-  <img src="assets/showcases/vonkarman_re200.gif" alt="Von Kármán vortex street at Re = 200" width="48%"/>
-  <img src="assets/showcases/taylor_green_decay.gif" alt="Taylor–Green vortex decay" width="48%"/>
-  <br/>
-  <em>Left: von Kármán vortex street past a cylinder (Re = 200). Right: Taylor–Green vortex decay.</em>
-</div>
-```
-
-## Why Kraken
-
-- **One solver, every backend.** The same kernel runs on CUDA, Metal (Apple
-  Silicon), AMD ROCm, and multi-threaded CPU — selected at runtime, with no
-  vendor-specific code in the physics layer.
-- **Fast where it counts.** A single H100 sustains **7675 MLUPS** for D2Q9 BGK,
-  and up to **24 000 MLUPS** with the fused Float32 kernels — see the
-  [performance benchmarks](benchmarks/performance.md).
-- **Composable physics.** BGK and MRT collision, Guo body forcing, thermal
-  double-distribution coupling, and axisymmetric flows share one kinetic core.
-- **Validated against the literature.** Lid-driven cavity (Ghia et al. 1982),
-  natural convection (de Vahl Davis 1983), and 3D sphere drag (Clift et al.
-  1978) are cross-checked in the [benchmarks](benchmarks/accuracy.md), several
-  against an independent OpenFOAM run — the cavity centreline matches Ghia to
-  **better than 0.5 %** at Re = 100 and 400.
-- **Configuration without code.** Describe a full run in a single declarative
-  [`.krk` file](krk/overview.md) and launch it from the command line — no Julia
-  required to drive a simulation.
-- **Built for inspection.** Fields stream to VTK (`.vti` / `.pvd`) for ParaView,
-  and stay in memory for direct postprocessing.
 
 ## Quick start
 
@@ -77,39 +79,71 @@ krk cavity.krk
 
 ## Where to go next
 
-- **[Installation](@ref)** — set up Kraken.jl and its GPU backends.
+- **[Installation](installation.md)** — set up Kraken.jl and its GPU backends.
 - **[Getting started](getting_started.md)** — from zero to a running simulation.
 - **[Concepts](concepts_index.md)** — the ideas behind the solver.
-- **Theory** — ten progressive chapters, from kinetic theory to lattice Boltzmann.
-- **Tutorials & examples** — validated runs with plots and convergence studies.
-- **[Benchmarks](benchmarks/accuracy.md)** — accuracy and performance measurements.
-- **[`.krk` DSL reference](krk/overview.md)** — the declarative configuration language.
+- **[Capabilities](capabilities.md)** — what the v0.2 release ships.
+- **[Theory](theory/01_lbm_fundamentals.md)** — progressive chapters, from kinetic theory to lattice Boltzmann.
+- **[Examples](examples/04_cavity_2d.md)** — validated runs with plots and convergence studies.
+- **[Validation matrix](users/benchmarks/validation-matrix.md)** — every benchmark and its reference.
+- **[Performance benchmarks](benchmarks/performance.md)** — MLUPS across CPU and GPU backends.
+- **[`.krk` reference](users/krk-reference.md)** — the declarative configuration language.
 - **[API reference](api/config.md)** — every public function, documented.
 
 ## Physics capabilities
 
-| Capability | Lattice | Driver |
-|:-----------|:--------|:-------|
-| Lid-driven cavity | D2Q9, D3Q19 | `run_cavity_2d`, `run_cavity_3d` |
-| Channel flow (Poiseuille) | D2Q9 | `run_poiseuille_2d` |
-| Couette flow | D2Q9 | `run_couette_2d` |
-| Taylor–Green vortex | D2Q9 | `run_taylor_green_2d` |
-| Cylinder drag | D2Q9 | `run_cylinder_2d` |
-| Thermal convection | D2Q9 | `run_rayleigh_benard_2d` |
-| Axisymmetric pipe flow | D2Q9 | `run_hagen_poiseuille_2d` |
+Kraken is organised as a set of physics modules that share one kinetic core,
+so the same BGK/MRT solver, body forcing, and boundary machinery extend across
+every regime.
+
+| Module | What it enables | Representative drivers |
+|:-------|:----------------|:-----------------------|
+| **Newtonian** | Incompressible flow in 2D, 3D, and axisymmetric geometries (BGK & MRT collision, Guo forcing) | `run_cavity_2d`, `run_cavity_3d`, `run_poiseuille_2d`, `run_cylinder_2d`, `run_hagen_poiseuille_2d` |
+| **Thermal** | Boussinesq natural convection via a coupled double-distribution temperature field | `run_rayleigh_benard_2d` |
+| **Viscoelastic** | Oldroyd-B polymer stress coupled to the flow ([validated vs RheoTool](users/benchmarks/viscoelastic-cylinder.md)) | `run_viscoelastic_logfv_channel_2d`, `run_viscoelastic_cylinder_2d` |
+| **Grid refinement** | Nested patch refinement with Filippova–Hänel rescaling and route-native validation | `run_cavity_2d` with `Refine { … }` patches |
+| **Geometry / immersed boundaries** | STL-driven masks, voxelisation, and linearly-interpolated bounce-back for curved walls | `run_sphere_libb_3d`, STL loader + cut-link drag |
+| **GPU backends** | One physics layer, multiple runtimes selected at launch — CUDA, Apple Silicon (Metal), and multi-threaded CPU | every driver, via the backend argument |
+
+See the [capabilities page](capabilities.md) for the full module breakdown and
+the [validation matrix](users/benchmarks/validation-matrix.md) for the
+literature references each module is checked against.
 
 ## Showcase gallery
 
 ```@raw html
 <div align="center">
-  <img src="assets/showcases/cavity_re1000.gif" alt="Lid-driven cavity at Re = 1000" width="48%"/>
-  <img src="assets/showcases/rayleigh_benard_ra1e5.gif" alt="Rayleigh–Bénard convection at Ra = 1e5" width="48%"/>
+  <img src="./assets/showcases/cavity_re1000.gif" alt="Lid-driven cavity at Re = 1000" width="32%"/>
+  <img src="./assets/showcases/rayleigh_benard_ra1e5.gif" alt="Rayleigh–Bénard convection at Ra = 1e5" width="32%"/>
+  <img src="./assets/showcases/taylor_green_decay.gif" alt="Taylor–Green vortex decay" width="32%"/>
   <br/>
   <em>Left: lid-driven cavity at Re = 1000 (primary vortex + corner eddies).
-  Right: Rayleigh–Bénard convection cells at Ra = 1e5.</em>
+  Centre: Rayleigh–Bénard convection cells at Ra = 1e5.
+  Right: Taylor–Green vortex decay.</em>
 </div>
 ```
 
-All four animations on this page are produced by the validated drivers shown in
-the table above; reproduce them from the [examples](examples/04_cavity_2d.md)
-and [benchmarks](benchmarks/accuracy.md).
+Every animation on this page is produced by the validated drivers in the table
+above; reproduce them from the [examples](examples/04_cavity_2d.md) and the
+[validation matrix](users/benchmarks/validation-matrix.md).
+
+## Citing Kraken
+
+If you use Kraken.jl in your research, please cite it. The repository ships a
+[`CITATION.cff`](https://github.com/lauguimel/Kraken.jl/blob/main/CITATION.cff),
+so GitHub's **"Cite this repository"** button (top-right of the
+[repository](https://github.com/lauguimel/Kraken.jl)) gives a ready-made entry.
+
+```bibtex
+@software{kraken_jl,
+  author  = {Maitrejean, Guillaume and Sauret, Emilie},
+  title   = {{Kraken.jl}},
+  year    = {2026},
+  version = {0.2.0},
+  url     = {https://github.com/lauguimel/Kraken.jl}
+}
+```
+
+A citable **DOI** (Zenodo) will be added with the archived `v0.2.0` release —
+update the `doi` field in `CITATION.cff` and the `doi = {...}` line above once it
+is minted.

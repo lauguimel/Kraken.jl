@@ -170,17 +170,18 @@ u_wall = 0.05
 # no ``x``-dependence, the profile is identical at every ``x`` location.
 
 H = Ny - 1
-j_fluid = 2:Ny-1
+j_fluid = 1:Ny                                  # Zou-He pins the wall ON nodes
 y_phys  = [j - 1 for j in j_fluid]              # on-node (Zou-He)
 u_ana   = [u_wall * (1 - y / H) for y in y_phys]
 u_num   = [ux[2, j] for j in j_fluid]
 
-# ![Couette flow velocity profile at Ny = 32.  Blue line: analytical linear profile ux(y) = u_wall (1 - y/H).  Orange dots: LBM simulation.  The numerical solution is indistinguishable from the analytical line because the D2Q9 equilibrium exactly reproduces linear velocity profiles.  The velocity equals u_wall = 0.05 at the bottom and zero at the top.](couette_profile.svg)
+# ![Couette flow velocity profile at Ny = 32.  Blue line: analytical linear profile ux(y) = u_wall (1 - y/H).  Orange dots: Kraken simulation.  The numerical solution is indistinguishable from the analytical line because the D2Q9 equilibrium exactly reproduces linear velocity profiles.  The velocity equals u_wall = 0.05 at the bottom and zero at the top.](couette_profile.svg)
 #
 # The numerical solution is **indistinguishable** from the analytical profile.
 # This is not just "good agreement" --- it is exact agreement to machine
-# precision.  The relative ``L_2`` error is typically of order ``10^{-14}`` to
-# ``10^{-15}``, limited only by floating-point arithmetic.
+# precision.  The relative ``L_2`` error is of order ``10^{-14}`` to
+# ``10^{-12}`` (rising slightly with ``N_y`` as more nodes accumulate roundoff),
+# limited only by floating-point arithmetic.
 #
 # This exactness is a unique property of the LBM for linear velocity profiles.
 # Any deviation from this behaviour would immediately indicate a bug in the
@@ -206,19 +207,19 @@ for Ny_i in Ny_list
     H_i  = Ny_i - 1
     nsteps = max(10_000, ceil(Int, 3 * H_i^2 / ν))
     ρ_i, ux_i, _, _ = run_couette_2d(; Nx=4, Ny=Ny_i, ν=ν, u_wall=u_wall, max_steps=nsteps)
-    jf   = 2:Ny_i-1
+    jf   = 1:Ny_i
     u_a  = [u_wall * (1 - (j - 1) / H_i) for j in jf]
     u_n  = [ux_i[2, j] for j in jf]
     L2   = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
     push!(errors, L2)
 end
 
-# ![Convergence of the Couette flow simulation.  Log-log plot of relative L2 error vs grid resolution Ny.  Blue dots: LBM results hovering near 1e-14 to 1e-15 at all resolutions.  Grey dashed line: reference slope of 2 for comparison.  Unlike Poiseuille flow, there is no convergence trend because the error is already at machine precision at all resolutions.](couette_convergence.svg)
+# ![Convergence of the Couette flow simulation.  Log-log plot of relative L2 error vs grid resolution Ny.  Blue dots: Kraken results hovering between 1e-14 and 1e-12 at all resolutions.  Grey dashed line: Float64 machine epsilon for reference.  Unlike Poiseuille flow, there is no convergence trend because the error is pure floating-point roundoff, not truncation error.](couette_convergence.svg)
 #
-# The "convergence" plot confirms that the error is at machine precision
-# (``\sim 10^{-14}``--``10^{-15}``) for all resolutions.  The grey reference
-# slope is shown for visual comparison but is meaningless here: there is no
-# truncation error to converge away.
+# The "convergence" plot confirms that the error is at the floating-point floor
+# (``\sim 10^{-14}``--``10^{-12}``) for all resolutions.  A flat machine-epsilon
+# reference is drawn instead of a slope line: there is no truncation error to
+# converge away, so any power-law slope would be meaningless here.
 #
 # This result is significant because it demonstrates that:
 #

@@ -31,7 +31,7 @@ import seaborn as sns
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
-DARK = "#1f2424"  # Documenter dark theme background
+DARK = "#1b1b1f"  # Vitepress dark page background
 
 # Published / derived reference ceilings (see README + the docs page).
 # A100-40GB peak HBM 1.555 TB/s, 304 bytes/update F64 D2Q9 -> 5115 MLUPS.

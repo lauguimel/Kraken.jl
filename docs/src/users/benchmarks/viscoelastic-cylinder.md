@@ -1,133 +1,85 @@
 # Viscoelastic cylinder (Oldroyd-B)
 
-Viscoelastic flow past a confined cylinder, validated against **RheoTool**
-(rheoFoam, OpenFOAM-9, log-conformation) on the canonical confined-cylinder
-problem — the standard High-Weissenberg-Number-Problem (HWNP) testbed of Alves,
-Oliveira & Pinho (2001). At the production resolution `R = 50`, Kraken's v0.3
-cut-link drag matches RheoTool to **better than 1 %** on the integrated drag
-coefficient `Cd` across the validated range `Wi ≤ 1`.
+Viscoelastic flow past a confined cylinder — the standard High-Weissenberg-Number-Problem
+(HWNP) testbed of **Alves, Oliveira & Pinho (2001)**. At the production resolution
+`R = 50`, Kraken's TRT-LBM cut-link drag matches **RheoTool** (rheoFoam, OpenFOAM-9,
+log-conformation) to **better than 1 %** on the integrated drag coefficient `Cd` across
+the validated range `Wi ≤ 1` — `−0.96 %` at the most elastic point `Wi = 1`.
 
-## Methodology
-
-**Kraken (TRT-LBM + log-conformation finite-volume polymer transport).** The flow
-field uses a D2Q9 TRT collision; a separate finite-volume solver advects the
-matrix-logarithm of the polymer conformation tensor (Fattal–Kupferman 2004) with
-MUSCL–superbee advection, and couples the polymer extra-stress
-`τ_p = (ν_p/λ)(C − I)` back into the flow as a body force. The cylinder sits on
-the channel centreline with a **half-way bounce-back** wall; the v0.3 cut-link
-momentum-exchange integrator measures the drag. The driver is
-`run_viscoelastic_logfv_cylinder_coupled_2d`.
-
-- **Geometry**: cylinder of radius `R` on the channel centreline, blockage
-  ratio `D/H = 0.5` (half-height `2R`), upstream/downstream length `15R`.
-- **Fluid**: Oldroyd-B, `Re = 1`, solvent fraction `β = η_s/η₀ = 0.59`
-  (the Boger-fluid value used throughout the cylinder literature).
-- **Scaling**: diffusive (fixed lattice viscosity `ν_total = 0.15`, `τ = 0.95`);
-  `u_mean = ν_total·Re/R`, `λ = Wi·R/u_mean`.
-
-| Quantity        | Value                              |
-|-----------------|------------------------------------|
-| Resolution      | `R = 50` (diameter 100 LU)         |
-| Channel         | `±15R` up/downstream, `D/H = 0.5`  |
-| β               | 0.59                               |
-| ν_total / τ     | 0.15 / 0.95 (diffusive scaling)    |
-| Wall BC         | half-way bounce-back               |
-| Steps           | 300 000                            |
-| Backend         | CUDA Float64 (Aqua A100, job 22199679) |
-
-**RheoTool `rheoFoam` (FVM, log-conformation, reference cross-check).** The
-viscoelastic reference solver: OpenFOAM-9 base, `Cylinder/Oldroyd-BLog` tutorial
-mesh, 2-core MPI, run to steady state at `t = 20`, matched `β = 0.59`, `Re = 1`,
-`D/H = 0.5`. Two independent methods (LBM + log-FV vs FV + log-conformation)
-bracket the same benchmark.
-
-**Reference.** M. A. Alves, P. J. Oliveira, F. T. Pinho (2001), *The flow of
-viscoelastic fluids past a cylinder: finite-volume high-resolution methods*,
-J. Non-Newtonian Fluid Mech. **97**, 207–232 — the canonical confined-cylinder
-HWNP benchmark family (cross-checked against Hulsen et al. 2005 and Claus &
-Phillips 2013).
-
-## Error norms
-
-The acceptance gate is **< 1 % on the integrated drag coefficient `Cd`**. At the
-production resolution `R = 50`, Kraken matches RheoTool to better than 1 % across
-the validated range `Wi ≤ 1`:
-
-| Wi  | Kraken Cd | Kraken Cd_p | RheoTool Cd | rel. error |
-|-----|-----------|-------------|-------------|------------|
-| 0.1 | 129.9155  | 16.097      | 130.43      | **−0.40 %** |
-| 0.5 | 118.6770  | 14.837      | 119.71      | **−0.86 %** |
-| 1.0 | 119.2410  | 14.155      | 120.40      | **−0.96 %** |
-
-All three clear the strict **< 1 %** gate, and reproduce the prior dev-viscoelastic
-"M8" study to 4–5 significant figures. The drag follows the **characteristic
-elastic signature** reported across the cylinder literature (Alves–Oliveira–Pinho
-2001; Hulsen et al. 2005; Claus & Phillips 2013): a shallow **minimum near
-`Wi ≈ 0.5`** followed by an **elastic upturn** — Kraken reproduces this shape
-(`Cd` drops 129.9 → 118.7 to the minimum, then rises again past `Wi ≈ 1`), not
-just a single matched value. Full machine-readable data:
-`benchmarks/results/rheotool_compare/viscoelastic/error_norms.csv`.
-
-**Mesh convergence.** The agreement improves monotonically as the cylinder is
-resolved, confirming the residual gap is discretisation (not a modelling error):
-
-| Wi = 1.0 | R = 10 | R = 30 | R = 50 | RheoTool |
-|----------|--------|--------|--------|----------|
-| Cd       | 112.93 | 118.10 | 119.24 | 120.40   |
-| rel. err | −6.2 % | −1.9 % | −0.96 % | —        |
-
-## Plots
-
-Kraken (filled markers + line), RheoTool (dashed line + open squares); the
-per-point relative error annotated. The elastic minimum near `Wi ≈ 0.5` and the
-upturn toward `Wi = 1` are visible in both codes.
+Kraken (filled markers + line), RheoTool (dashed + open squares); the elastic minimum
+near `Wi ≈ 0.5` and the upturn toward `Wi = 1` are visible in both codes.
 
 ![Viscoelastic cylinder Cd vs Wi](viscoelastic-cylinder.png)
 
-## Acceptance
+## Result
 
-**Verdict: viscoelastic cylinder PASS at the strict < 1 % integrated-Cd gate.**
+The strict **< 1 % on `Cd`** gate is met across `Wi ≤ 1` (R = 50, β = 0.59, Re = 1):
 
-- **Kraken** lands at **−0.40 % / −0.86 % / −0.96 %** drag error at
-  `Wi = 0.1 / 0.5 / 1.0` (R = 50, β = 0.59) — all three under 1 %.
-- **RheoTool** independently provides the viscoelastic reference; the two
-  independent methods (LBM + log-FV vs FV + log-conformation) agree on both the
-  absolute drag and its elastic shape.
+| Wi  | Kraken Cd | RheoTool Cd | rel. error  |
+|-----|-----------|-------------|-------------|
+| 0.1 | 129.92    | 130.43      | **−0.40 %** |
+| 0.5 | 118.68    | 119.71      | **−0.86 %** |
+| 1.0 | 119.24    | 120.40      | **−0.96 %** |
+
+Kraken reproduces the **characteristic elastic signature** reported across the cylinder
+literature (Alves–Oliveira–Pinho 2001; Hulsen et al. 2005; Claus & Phillips 2013): a
+shallow minimum near `Wi ≈ 0.5` followed by an elastic upturn — not just a single
+matched value. The agreement improves monotonically as the cylinder is resolved
+(`Wi = 1`: −6.2 % / −1.9 % / −0.96 % at R = 10 / 30 / 50), confirming the residual gap
+is discretisation, not modelling. Two independent methods (LBM + log-FV vs FV +
+log-conformation) bracket the same benchmark, and the result reproduces the earlier
+M8 validation study to 4–5 significant figures. Full data:
+`benchmarks/results/rheotool_compare/viscoelastic/error_norms.csv`.
+
+## Methodology
+
+**Kraken (TRT-LBM + log-conformation finite-volume polymer transport).** A D2Q9 TRT
+collision for the flow; a separate finite-volume solver advects the matrix-logarithm of
+the polymer conformation tensor (Fattal–Kupferman 2004) with MUSCL–superbee advection
+and couples the extra-stress `τ_p = (ν_p/λ)(C − I)` back as a body force. Cylinder on
+the channel centreline with a halfway bounce-back wall; the cut-link momentum-exchange
+integrator measures the drag. Driver `run_viscoelastic_logfv_cylinder_coupled_2d`.
+
+- **Geometry**: blockage `D/H = 0.5` (half-height `2R`), up/downstream length `15R`.
+- **Fluid**: Oldroyd-B, `Re = 1`, solvent fraction `β = η_s/η₀ = 0.59` (the Boger value
+  used throughout the cylinder literature).
+- **Scaling**: diffusive (fixed `ν_total = 0.15`, `τ = 0.95`); `u_mean = ν_total·Re/R`,
+  `λ = Wi·R/u_mean`.
+- **Production run**: `R = 50` (diameter 100 LU), 300 000 steps, CUDA Float64
+  (Aqua A100, job 22199679).
+
+**RheoTool `rheoFoam` (FVM reference).** OpenFOAM-9 base, `Cylinder/Oldroyd-BLog`
+tutorial mesh, 2-core MPI to steady state at `t = 20`, matched `β = 0.59`, `Re = 1`,
+`D/H = 0.5`.
+
+**Reference.** M. A. Alves, P. J. Oliveira, F. T. Pinho (2001), *The flow of
+viscoelastic fluids past a cylinder: finite-volume high-resolution methods*,
+J. Non-Newtonian Fluid Mech. **97**, 207–232 — the canonical confined-cylinder HWNP
+benchmark (cross-checked against Hulsen et al. 2005 and Claus & Phillips 2013).
 
 ## Caveats
 
-- **N1 is a documented open difference, not a pass.** The wake first
-  normal-stress difference `N1 = τ_xx − τ_yy` is **qualitatively** concordant
-  (N1 rises with `Wi`, and rises as `β` decreases), but the **absolute** wake-N1
-  maxima differ by up to ~30–44 % and the discrepancy **changes sign** with the
-  parameters (Kraken/RheoTool ratio 0.77 / 0.70 at β = 0.59 Wi = 0.5 / 1.0;
-  0.89 / 1.44 at β = 0.30). An independent two-method derivation confirmed this is
-  **not** a unit-conversion or stress-convention artifact — every candidate
-  reference stress (`η₀U/R`, `ρU²`, `η_pU/R`, `G = η_p/λ`) cancels identically in
-  the ratio. The residual is a genuine difference in the resolved wake-stress
-  field. The integrated **drag** (the mandate's primary gate) matches to < 1 %;
-  N1 is reported here as an open difference, not a passing ≤ 5 % comparison.
-  See `m8_refs/N1_comparison.csv` in the bundle.
-- **β ≤ 0.1 — both codes diverge.** Sweeping the solvent fraction (R = 50),
-  drag decreases as the polymer fraction grows (β = 0.59 → 0.30) and **both
-  solvers diverge for β ≤ 0.1**: Kraken returns NaN, RheoTool's PETSc solver
-  aborts with a floating-point exception at `t ≈ 5`. The strongly-polymeric
-  corner is a genuine physical/numerical boundary reproduced identically by two
-  independent methods — not a solver-specific weakness.
-- **High-Wi stability ≠ accuracy.** Kraken's half-way bounce-back cylinder
-  remains **NaN-free up to `Wi = 10`** at both R = 30 and R = 50 — at or beyond
-  the state of the art for LBM-based viscoelastic solvers (which typically report
-  ceilings near `Wi ≈ 1`). But these high-`Wi` drag values are **stable, not
-  converged**: the two resolutions diverge increasingly with `Wi` (141.8 vs 116.3
-  at Wi = 3) because `λ = Wi·R/u_mean` grows very large (≈ 1.7×10⁵ LU at Wi = 10,
-  R = 50) and 300 000 steps no longer reach steady state. Only `Wi ≤ 1` is
-  quantitatively validated; the `Wi ≤ 10` figures demonstrate robustness, not
-  benchmark-grade drag.
+- **N1 is a documented open difference, not a pass.** The wake first normal-stress
+  difference `N1 = τ_xx − τ_yy` is qualitatively concordant (rises with `Wi`, rises as
+  `β` decreases), but absolute wake-N1 maxima differ by up to ~30–44 % and the sign of
+  the discrepancy changes with the parameters. An independent two-method derivation
+  confirmed this is a genuine difference in the resolved wake-stress field, not a
+  unit/convention artifact (every candidate reference stress cancels in the ratio). The
+  integrated **drag** — the primary gate — matches to < 1 %. See `m8_refs/N1_comparison.csv`.
+- **β ≤ 0.1 — both codes diverge.** Drag decreases as the polymer fraction grows
+  (β = 0.59 → 0.30), and for β ≤ 0.1 Kraken returns NaN while RheoTool's PETSc solver
+  aborts at `t ≈ 5`. This strongly-polymeric corner is a genuine physical/numerical
+  boundary reproduced by both methods, not a solver-specific weakness.
+- **High-Wi stability ≠ accuracy.** Kraken's halfway bounce-back cylinder is NaN-free up
+  to `Wi = 10` (R = 30 and R = 50) — at or beyond the state of the art for LBM-based
+  viscoelastic solvers (which typically ceiling near `Wi ≈ 1`). But these values are
+  stable, not converged: the two resolutions diverge with `Wi` (141.8 vs 116.3 at
+  Wi = 3) because `λ` grows very large and 300 000 steps no longer reach steady state.
+  Only `Wi ≤ 1` is quantitatively validated.
 - **Bouzidi-FL wall rejected.** A sub-cell linear-interpolation wall
-  (Bouzidi–Filippova–Hänel, `wall = bouzidi_fl`) was evaluated as an alternative
-  to half-way bounce-back. It **diverges (NaN) at the production resolution** for
-  `Wi ≥ 0.5` (R ≥ 50) and over-predicts drag where it survives on coarse grids, so
-  half-way bounce-back is the validated default for this benchmark.
+  (Bouzidi–Filippova–Hänel, `wall = bouzidi_fl`) diverges (NaN) at the production
+  resolution for `Wi ≥ 0.5` (R ≥ 50) and over-predicts drag where it survives on coarse
+  grids, so halfway bounce-back is the validated default here.
 
 ## Reproduce
 
@@ -137,17 +89,11 @@ result = run_simulation("benchmarks/results/rheotool_compare/viscoelastic/cylind
 @show result.Cd   # coarse smoke (240×32, 20 steps) — NOT the R=50 table value
 ```
 
-The shipped `.krk` is a **quick smoke** that confirms the viscoelastic solver
-dispatches and runs — it declares the channel, the cylinder obstacle, the
-Oldroyd-B rheology (`Rheology oldroyd_b { nu_s, nu_p, lambda }`) and `Re`/`Wi`, and
-the runner dispatches to the coupled log-FV cylinder driver, returning a
-**non-converged** `Cd`. The **production tables above** (`R = 50`, 300 000 steps,
-CUDA Float64) were produced on **Aqua (A100)** via the harness
-`bench/viscoelastic_logfv/run_ve_revalidate_r50_halfwaybb.pbs` (which sweeps
-`Wi = 0.1/0.5/1.0` at `R = 50` through `run_cyl_bigsweep_v2_2d.jl`) — they are
-**not** CI-reproducible and require an A100-class run (job 22199679). The
-comparison figure is
-regenerated from the shipped CSVs with:
+The shipped `.krk` is a quick smoke confirming the solver dispatches (returns a
+non-converged `Cd`). The production tables (`R = 50`, 300 000 steps, CUDA Float64) were
+produced on **Aqua (A100)** via `bench/viscoelastic_logfv/run_ve_revalidate_r50_halfwaybb.pbs`
+(sweeping `Wi = 0.1/0.5/1.0` through `run_cyl_bigsweep_v2_2d.jl`) — they are **not**
+CI-reproducible and require an A100-class run (job 22199679). Regenerate the figure with:
 
 ```bash
 conda run -n kraken-v0-3-figures python \

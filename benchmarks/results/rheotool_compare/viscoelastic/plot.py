@@ -5,7 +5,7 @@ Self-contained: reads ``kraken_cd_vs_wi.csv`` and ``rheotool_cd_vs_wi.csv`` next
 this script and regenerates ``comparison.png`` (Cd vs Weissenberg number): Kraken as
 filled markers, RheoTool (rheoFoam) as a dashed reference line through its three points.
 
-Dark Documenter theme (``DARK = #1f2424``), matching the other rheotool_compare
+Dark Documenter theme (``DARK = #1b1b1f``), matching the other rheotool_compare
 figures. LaTeX is used for all text when a system ``latex`` is available, otherwise the
 matplotlib mathtext engine with the Computer-Modern font set. Dependencies: csv +
 matplotlib + seaborn.
@@ -28,7 +28,7 @@ from matplotlib.lines import Line2D
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _USETEX = shutil.which("latex") is not None
-DARK = "#1f2424"  # Documenter dark theme background
+DARK = "#1b1b1f"  # Vitepress dark page background
 
 
 def load(name, *cols):

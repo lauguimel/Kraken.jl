@@ -1,0 +1,61 @@
+/* ==========================================================================
+   Kraken.jl — custom home page styling (loaded after DocumenterVitepress
+   defaults via theme/index.ts). Selectors verified against the built markup in
+   docs/build/1/index.html: `.VPHome`, `.VPHero.VPHomeHero`, `.name.clip`,
+   `.VPFeatures.VPHomeFeatures`, feature cards `<h2 class="title">`.
+   Canonical page background = #1b1b1f.
+   ========================================================================== */
+
+/* --- Kraken brand gradient (teal/green -> violet), reused for titles ------- */
+:root {
+  /* Mirror the dark hero-name gradient palette so feature titles match the
+     "Kraken.jl" wordmark. Kept as a non-prefixed gradient for background-clip. */
+  --kraken-title-gradient: linear-gradient(
+    120deg,
+    var(--julia-purple, #9558B2) 15%,
+    var(--vp-dark-green-light, #42d392),
+    var(--vp-dark-green, #155f3e)
+  );
+}
+
+/* ==========================================================================
+   1. Hero logo — clean, no animated backdrop (the von Kármán animation lives
+   in the page body, just below the hero, not behind the title)
+   ========================================================================== */
+
+/* The logo occupies the native hero image slot. Drop the default blurred
+   gradient backplate so the logo reads cleanly on the dark page. */
+.VPHome .VPHero.VPHomeHero .image-bg {
+  display: none;
+}
+.VPHome .VPHero.VPHomeHero .VPImage.logo {
+  filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.45));
+}
+
+/* ==========================================================================
+   2. Gradient titles
+   ========================================================================== */
+
+/* Hero wordmark "Kraken.jl" — DocumenterVitepress already gradients .name via
+   --vp-home-hero-name-* vars; re-assert here so it stays gradiented regardless
+   of override order, and add a faint shadow for contrast over the animation. */
+.VPHome .VPHero .name.clip {
+  background: var(--vp-home-hero-name-background, var(--kraken-title-gradient));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Feature-card titles — gradient with the Kraken brand palette. The built
+   markup renders each card title as <h2 class="title"> inside
+   .VPFeatures.VPHomeFeatures; the scoped .VPFeature class is also targeted for
+   robustness. */
+.VPFeatures.VPHomeFeatures .VPFeature .title,
+.VPFeatures.VPHomeFeatures .title {
+  background: var(--kraken-title-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}

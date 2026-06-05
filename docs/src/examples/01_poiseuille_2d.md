@@ -86,11 +86,13 @@ an error that decreases as ``\mathcal{O}(\Delta x^2)``
 
 ### Boundary conditions: half-way bounce-back
 
-In the half-way bounce-back scheme, the physical wall is located **halfway**
-between the first/last fluid node and the boundary node.  This means the
-effective channel height is ``H = N_y - 1``, and the physical coordinate of
-fluid node ``j`` is ``y = j - 1.5``.  Fluid nodes occupy indices
-``j = 2, \ldots, N_y - 1``.
+In the half-way bounce-back scheme, the physical no-slip wall is located
+**halfway** between the last fluid node and the ghost layer — i.e. at
+``y = 0.5`` (below ``j = 1``) and ``y = N_y + 0.5`` (above ``j = N_y``).
+Every node ``j = 1, \ldots, N_y`` is therefore a fluid node, the effective
+channel height is ``H = N_y``, and the physical coordinate of fluid node
+``j`` is ``y = j - 0.5``.  With these wall-aware coordinates the D2Q9 lattice
+reproduces the parabola to second order (no half-cell offset in the formula).
 
 ### Forcing scheme: Guo's method
 
@@ -173,18 +175,18 @@ in ``x`` and fully developed, the profile is the same at every ``x``
 location.
 
 ```julia
-H = Ny - 1                                  # effective channel height
-j_fluid = 2:Ny-1                             # fluid node indices
-y_phys  = [j - 1.5 for j in j_fluid]        # physical y coordinate
+H = Ny                                       # halfway-wall channel height
+j_fluid = 1:Ny                               # all nodes are fluid
+y_phys  = [j - 0.5 for j in j_fluid]         # physical y coordinate (wall at 0.5)
 u_ana   = [Fx / (2ν) * y * (H - y) for y in y_phys]
 u_num   = [ux[2, j] for j in j_fluid]       # numerical profile at x=2
 ```
 
-![Poiseuille flow velocity profile at Ny = 32.  Blue line: analytical parabola ux(y) = Fx/(2 nu) y (H - y).  Orange dots: LBM simulation.  The agreement is excellent, with the numerical solution overlapping the analytical curve at every fluid node.  The profile is zero at both walls and reaches its maximum at the channel centreline y = H/2 = 15.5.](poiseuille_profile.svg)
+![Poiseuille flow velocity profile at Ny = 32.  Blue line: analytical parabola ux(y) = Fx/(2 nu) y (H - y) with H = Ny = 32.  Orange dots: Kraken simulation.  The numerical solution overlaps the analytical curve at every fluid node.  The profile extrapolates to zero at the half-cell walls (y = 0.5 and y = 32.5) and reaches its maximum at the channel centreline y = H/2 = 16.](poiseuille_profile.svg)
 
 The LBM solution matches the analytical parabola to high accuracy.  At this
-resolution (``N_y = 32``), the relative ``L_2`` error is typically of order
-``10^{-4}`` to ``10^{-3}``.  The residual error comes from the finite
+resolution (``N_y = 32``), the relative ``L_2`` error is of order
+``4 \times 10^{-4}``.  The residual error comes from the finite
 lattice spacing: the BGK collision operator approximates the viscous stress
 tensor via a second-order Taylor expansion, which introduces an
 ``\mathcal{O}(\Delta x^2)`` truncation error.
@@ -211,17 +213,20 @@ Ny_list = [16, 32, 64, 128]
 errors  = Float64[]
 
 for Ny_i in Ny_list
-    ρ_i, ux_i, _, _ = run_poiseuille_2d(; Nx=4, Ny=Ny_i, ν=ν, Fx=Fx, max_steps=30000)
-    H_i    = Ny_i - 1
-    jf     = 2:Ny_i-1
-    u_a    = [Fx / (2ν) * (j - 1.5) * (H_i - (j - 1.5)) for j in jf]
+    H_i    = Ny_i                            # halfway-wall channel height
+    # diffusive time to steady state ∝ H²/ν, so scale the step budget with it,
+    # otherwise the fine grids stay transient and the slope is corrupted
+    nsteps = max(30_000, ceil(Int, 8 * H_i^2 / ν))
+    ρ_i, ux_i, _, _ = run_poiseuille_2d(; Nx=4, Ny=Ny_i, ν=ν, Fx=Fx, max_steps=nsteps)
+    jf     = 1:Ny_i
+    u_a    = [Fx / (2ν) * (j - 0.5) * (H_i - (j - 0.5)) for j in jf]
     u_n    = [ux_i[2, j] for j in jf]
     L2     = sqrt(sum((u_n .- u_a).^2) / sum(u_a.^2))
     push!(errors, L2)
 end
 ```
 
-![Convergence of the Poiseuille flow simulation.  Log-log plot of relative L2 error vs grid resolution Ny.  Blue dots with solid line: LBM results.  Grey dashed line: reference slope of 2.  The LBM errors follow the slope-2 line closely, confirming second-order spatial convergence as predicted by the Chapman-Enskog analysis.](poiseuille_convergence.svg)
+![Convergence of the Poiseuille flow simulation.  Log-log plot of relative L2 error vs grid resolution Ny.  Blue dots with solid line: Kraken results.  Grey dashed line: reference slope of 2.  The Kraken errors follow the slope-2 line closely (observed order 1.9999 across all refinements once each grid is run to steady state), confirming second-order spatial convergence as predicted by the Chapman-Enskog analysis.](poiseuille_convergence.svg)
 
 The convergence plot confirms clean second-order behaviour: each doubling of
 ``N_y`` reduces the error by approximately a factor of 4.  This is a direct
