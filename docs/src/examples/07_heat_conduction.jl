@@ -14,7 +14,7 @@
 #
 # **Hardware:** Apple M3 Max, ~15s wall-clock at 128×32
 #
-# ![Heat conduction profile](../assets/figures/heat_profile.png)
+# ![Steady-state temperature field for 1D heat conduction.  The temperature varies linearly from the hot bottom wall to the cold top wall as smooth horizontal bands, uniform along the periodic horizontal direction.](heat_temperature.svg)
 #
 # ---
 #

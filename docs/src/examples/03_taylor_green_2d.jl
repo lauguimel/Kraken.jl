@@ -15,7 +15,7 @@
 #
 # **Hardware:** Apple M3 Max, ~5s wall-clock at N = 64×64
 #
-# ![Taylor-Green vorticity](../assets/figures/taylor_green_vorticity.png)
+# ![Velocity magnitude field of the Taylor-Green vortex.  The four counter-rotating vortices appear as a regular array of fast-flowing rings separated by quiet stagnation points, the sinusoidal pattern preserved as the field decays in place.](taylor_green_umag.svg)
 #
 # ---
 #
@@ -137,7 +137,7 @@
 #
 # Download: [`taylor_green.krk`](../assets/krk/taylor_green.krk)
 #
-# ```
+# ```krk
 # # Taylor-Green vortex decay in a fully periodic domain
 # # Validation: exponential decay rate exp(-2*nu*k^2*t)
 #

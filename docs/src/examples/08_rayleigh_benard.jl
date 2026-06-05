@@ -14,7 +14,7 @@
 #
 # **Hardware:** Apple M3 Max, ~90s wall-clock at 128×64 (Ra = 10⁵)
 #
-# ![Rayleigh-Benard temperature field](../assets/figures/rayleigh_benard_temperature.png)
+# ![Velocity magnitude field for Rayleigh-Benard convection at steady state.  The convection rolls carry fast fluid up the hot plumes and down the cold ones, with quiet cores between the rolls.](rayleigh_benard_velocity.svg)
 #
 # ---
 #

@@ -20,7 +20,7 @@ EditURL = "04_cavity_2d.jl"
 
 **Hardware:** Apple M3 Max, ~30s wall-clock at N = 128×128
 
-![Cavity centerline profiles](../assets/figures/cavity_centerlines.png)
+![Velocity magnitude field for the 2D lid-driven cavity at Re = 100.  The primary recirculation vortex is visible, with the highest velocities near the lid and a quiet core in the centre.](cavity_umag.svg)
 
 ---
 

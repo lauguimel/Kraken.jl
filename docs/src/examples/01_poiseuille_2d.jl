@@ -16,7 +16,7 @@
 #
 # **Hardware:** Apple M3 Max, ~10s wall-clock at N = 4×32
 #
-# ![Poiseuille velocity profile](../assets/figures/poiseuille_profile.png)
+# ![Velocity magnitude field for the converged Poiseuille flow.  The parabolic profile is visible as horizontal bands: zero at the walls (top and bottom) and maximum along the channel centreline, uniform along the periodic streamwise direction.](poiseuille_umag.svg)
 #
 # ---
 #
@@ -125,7 +125,7 @@
 #
 # Download: [`poiseuille.krk`](../assets/krk/poiseuille.krk)
 #
-# ```
+# ```krk
 # # Poiseuille flow driven by body force
 # # Validation: parabolic profile ux(y) = Fx/(2*nu) * y * (Ly - y)
 #

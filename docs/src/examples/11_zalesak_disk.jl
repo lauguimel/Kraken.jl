@@ -72,7 +72,7 @@
 #
 # Download: [`zalesak.krk`](../assets/krk/zalesak.krk)
 #
-# ```
+# ```krk
 # Simulation zalesak D2Q9
 # Define N = 100
 # Define R = 15

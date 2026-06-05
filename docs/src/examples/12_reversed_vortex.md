@@ -78,7 +78,7 @@ field (a single vortex centred in the domain).
 
 Download: [`reversed_vortex.krk`](../assets/krk/reversed_vortex.krk)
 
-```
+```krk
 Simulation reversed_vortex D2Q9
 Define N = 128
 Domain L = N x N  N = N x N

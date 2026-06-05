@@ -129,6 +129,20 @@ let
     println("  ✓ poiseuille_convergence.svg")
 end
 
+# --- 1d. Velocity magnitude field (lead illustration) ---
+let
+    Ny = 32; Nx = 96; ν = 0.1; Fx = 1e-5
+    ρ, ux, uy, _ = run_poiseuille_2d(; Nx=Nx, Ny=Ny, ν=ν, Fx=Fx, max_steps=20000)
+    umag = @. sqrt(ux^2 + uy^2)
+    fig = Figure(size=(760, 320))
+    ax = Axis(fig[1, 1]; title="Velocity magnitude — converged Poiseuille flow",
+              xlabel="x", ylabel="y", aspect=DataAspect())
+    hm = heatmap!(ax, 1:Nx, 1:Ny, umag; colormap=:viridis)
+    Colorbar(fig[1, 2], hm; label="|u|")
+    save(joinpath(OUTDIR, "poiseuille_umag.svg"), fig)
+    println("  ✓ poiseuille_umag.svg")
+end
+
 # ============================================================================
 # === 2. Couette 2D =========================================================
 # ============================================================================
@@ -203,6 +217,20 @@ let
     axislegend(ax; position=:lt)
     save(joinpath(OUTDIR, "couette_convergence.svg"), fig)
     println("  ✓ couette_convergence.svg")
+end
+
+# --- 2d. Velocity magnitude field (lead illustration) ---
+let
+    Ny = 32; Nx = 96; ν = 0.1; u_wall = 0.05
+    ρ, ux, uy, _ = run_couette_2d(; Nx=Nx, Ny=Ny, ν=ν, u_wall=u_wall, max_steps=20000)
+    umag = @. sqrt(ux^2 + uy^2)
+    fig = Figure(size=(760, 320))
+    ax = Axis(fig[1, 1]; title="Velocity magnitude — converged Couette flow",
+              xlabel="x", ylabel="y", aspect=DataAspect())
+    hm = heatmap!(ax, 1:Nx, 1:Ny, umag; colormap=:viridis)
+    Colorbar(fig[1, 2], hm; label="|u|")
+    save(joinpath(OUTDIR, "couette_umag.svg"), fig)
+    println("  ✓ couette_umag.svg")
 end
 
 # ============================================================================
@@ -290,6 +318,21 @@ let
     Colorbar(fig[1, 2], hm; label="omega_z")
     save(joinpath(OUTDIR, "taylor_green_vorticity.svg"), fig)
     println("  ✓ taylor_green_vorticity.svg")
+end
+
+# --- 3d. Velocity magnitude field (lead illustration) ---
+let
+    N = 64; u0 = 0.04; ν = 0.01
+    res = run_taylor_green_2d(; N=N, ν=ν, u0=u0, max_steps=2000)
+    ux = res.ux; uy = res.uy
+    umag = @. sqrt(ux^2 + uy^2)
+    fig = Figure(size=(520, 470))
+    ax = Axis(fig[1, 1]; title="Velocity magnitude — Taylor-Green vortex",
+              xlabel="x", ylabel="y", aspect=DataAspect())
+    hm = heatmap!(ax, 1:N, 1:N, umag; colormap=:viridis)
+    Colorbar(fig[1, 2], hm; label="|u|")
+    save(joinpath(OUTDIR, "taylor_green_umag.svg"), fig)
+    println("  ✓ taylor_green_umag.svg")
 end
 
 # ============================================================================
@@ -505,6 +548,21 @@ let
     println("  ✓ heat_profile.svg")
 end
 
+# --- 7c. Temperature field (lead illustration; no flow → use the thermal field) ---
+let
+    Ra = 100.0; Pr = 1.0; T_hot = 1.0; T_cold = 0.0
+    ρ, ux, uy, Temp, _ = run_rayleigh_benard_2d(;
+        Nx=128, Ny=32, Ra=Ra, Pr=Pr, T_hot=T_hot, T_cold=T_cold, max_steps=20000)
+    Nx, Ny = size(Temp)
+    fig = Figure(size=(800, 320))
+    ax = Axis(fig[1, 1]; title="Steady-state temperature — 1D heat conduction",
+              xlabel="x", ylabel="y", aspect=DataAspect())
+    hm = heatmap!(ax, 1:Nx, 1:Ny, Temp; colormap=:thermal, colorrange=(T_cold, T_hot))
+    Colorbar(fig[1, 2], hm; label="T")
+    save(joinpath(OUTDIR, "heat_temperature.svg"), fig)
+    println("  ✓ heat_temperature.svg")
+end
+
 # ============================================================================
 # === 8. Rayleigh-Benard =====================================================
 # ============================================================================
@@ -600,7 +658,7 @@ let
     Nr = 32; ν = 0.1; Fz = 1e-5
     ρ, uz, ur, config = run_hagen_poiseuille_2d(; Nz=4, Nr=Nr, ν=ν, Fz=Fz, max_steps=20000)
 
-    R_eff  = Nr - 0.5
+    R_eff  = Nr  # halfway BB wall at j=Nr → physical radius R = Nr (not Nr-0.5)
     j_fluid = 1:Nr
     r_phys = [j - 0.5 for j in j_fluid]
     u_ana  = [Fz / (4ν) * (R_eff^2 - r^2) for r in r_phys]

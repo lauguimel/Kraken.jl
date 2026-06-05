@@ -18,7 +18,7 @@ EditURL = "02_couette_2d.jl"
 
 **Hardware:** Apple M3 Max, ~10s wall-clock at N = 4×32
 
-![Couette velocity profile](../assets/figures/couette_profile.png)
+![Velocity magnitude field for the converged Couette flow.  The linear profile appears as smooth horizontal bands: maximum at the moving bottom wall and decreasing to zero at the stationary top wall, uniform along the periodic streamwise direction.](couette_umag.svg)
 
 ---
 
@@ -130,7 +130,7 @@ where the wall sits between nodes and the effective height is also
 
 Download: [`couette.krk`](../assets/krk/couette.krk)
 
-```
+```krk
 # Couette flow: linear velocity profile
 # Validation: ux(y) = u_wall * y / Ly
 
