@@ -25,6 +25,8 @@ the lattice, with an **interpolated bounce-back** (`wall=libb`) wall treatment s
 the curved surface and the cut-link momentum exchange (which gives the drag) are
 resolved sub-cell.
 
+![Sphere-drag boundary conditions, shown on the 3D duct mid-plane.  The west boundary is a uniform velocity inlet (cool arrows in) and the east boundary a constant-pressure outlet (ρ = 1, cool arrows out); the north and south duct walls are no-slip (hatched); the sphere is an immersed STL obstacle with interpolated bounce-back (libb).](sphere-drag-3d-bc.svg)
+
 ## The `.krk` file
 
 The 3D STL drag case (`examples/geometry_stl/sphere_stl_3d_drag.krk`) is:

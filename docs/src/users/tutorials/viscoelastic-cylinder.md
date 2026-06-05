@@ -39,6 +39,8 @@ The dimensionless drivers are:
 The reported quantity is the **drag coefficient** `C_d` on the cylinder, compared to
 fine-mesh **rheoTool** (OpenFOAM-based, Oldroyd-B log-conformation) reference runs.
 
+![Confined-cylinder boundary conditions.  The west boundary is a parabolic channel-flow inlet (cool arrows in) and the east boundary an outflow (cool arrows out); the top and bottom channel walls are no-slip half-way bounce-back (hatched); the cylinder of radius R sits on the channel axis as an immersed obstacle.](viscoelastic-cylinder-bc.svg)
+
 ## Validated results
 
 ### Drag at `Re = 1`, the production resolution `R = 50`

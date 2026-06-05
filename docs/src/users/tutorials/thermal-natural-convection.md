@@ -27,6 +27,8 @@ buoyancy is fed back into the flow through a Boussinesq body force
 `F = ρ β g (T − T₀)`. The driver is `run_natural_convection_2d`, selected
 automatically when the `thermal` module is active.
 
+![Differentially-heated cavity boundary conditions.  The west wall is a hot Dirichlet wall (T = 1, red hatched no-slip) and the east wall a cold Dirichlet wall (T = 0, blue hatched no-slip); the north and south walls are adiabatic no-slip walls (∂ₙT = 0, grey hatched).  Gravity acts downward (grey arrow).](thermal-natural-convection-bc.svg)
+
 ## The `.krk` file
 
 The thermal module is activated with `Module thermal`; the hot/cold walls are

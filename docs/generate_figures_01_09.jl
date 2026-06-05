@@ -5,6 +5,11 @@
 using Kraken
 using CairoMakie
 
+# BC / geometry schematic primitives (pure CairoMakie, no Kraken dependency).
+# The 7 *_geometry.svg blocks below are assembled exclusively from these so every
+# schematic shares one visual identity. See docs/bc_schematic.jl for the contract.
+include(joinpath(@__DIR__, "bc_schematic.jl"))
+
 const KA = Kraken.KernelAbstractions
 const OUTDIR = joinpath(@__DIR__, "src", "examples")
 
@@ -49,29 +54,27 @@ set_theme!(Theme(
 # ============================================================================
 println("=== 1. Poiseuille 2D ===")
 
-# --- 1a. Geometry schematic ---
+# --- 1a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(600, 300))
-    ax = Axis(fig[1, 1]; title="Poiseuille 2D — geometry",
-              xlabel="x", ylabel="y", aspect=DataAspect(),
-              limits=(-1, 6, -1, 5))
-
-    # Walls
-    poly!(ax, Point2f[(0, 0), (5, 0), (5, -0.3), (0, -0.3)]; color=:gray70, strokewidth=1)
-    poly!(ax, Point2f[(0, 4), (5, 4), (5, 4.3), (0, 4.3)]; color=:gray70, strokewidth=1)
-    text!(ax, 2.5, -0.7; text="Bottom wall (bounce-back)", align=(:center, :top), fontsize=11)
-    text!(ax, 2.5, 4.7; text="Top wall (bounce-back)", align=(:center, :bottom), fontsize=11)
-
-    # Body force arrow
-    arrows!(ax, [0.5], [2.0], [1.5], [0.0]; color=:red, linewidth=3, arrowsize=15)
-    text!(ax, 1.2, 2.4; text="Fx (body force)", color=:red, fontsize=12)
-
-    # Periodic labels
-    text!(ax, -0.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:blue)
-    text!(ax, 5.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:blue)
-
-    hidespines!(ax)
-    hidedecorations!(ax)
+    fig = Figure(size=(820, 460), backgroundcolor=BC_DARK)
+    ax = bc_axis(fig[1, 1]; title="Poiseuille 2D — geometry",
+                 limits=(0, 5, 0, 4), pad=1.0)
+    fluid_region!(ax, (0.0, 0.0), (5.0, 4.0); outline=false)
+    wall!(ax, (0.0, 4.0), (5.0, 4.0); side=1,  label="top wall (bounce-back)",
+          labelgap=0.4)
+    wall!(ax, (0.0, 0.0), (5.0, 0.0); side=-1, label="bottom wall (bounce-back)",
+          labelgap=0.4)
+    periodic!(ax, (0.0, 0.0), (0.0, 4.0); label="periodic")
+    periodic!(ax, (5.0, 0.0), (5.0, 4.0); label="periodic")
+    body_force!(ax, 0.9, 2.0; dx=1.4, dy=0.0, label="Fx (body force)",
+                n=3, spread=0.8, labelside=-1, labelgap=0.3)
+    bc_legend!(fig[1, 2]; entries=[
+        (:wall,     "no-slip wall"),
+        (:periodic, "periodic"),
+        (:force,    "body force Fx"),
+        (:fluid,    "fluid region"),
+    ])
+    colsize!(fig.layout, 2, Relative(0.26)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "poiseuille_geometry.svg"), fig)
     println("  ✓ poiseuille_geometry.svg")
 end
@@ -138,28 +141,25 @@ end
 # ============================================================================
 println("=== 2. Couette 2D ===")
 
-# --- 2a. Geometry schematic ---
+# --- 2a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(600, 300))
-    ax = Axis(fig[1, 1]; title="Couette 2D — geometry",
-              xlabel="x", ylabel="y", aspect=DataAspect(),
-              limits=(-1, 6, -1, 5))
-
-    # Bottom wall (moving)
-    poly!(ax, Point2f[(0, 0), (5, 0), (5, -0.3), (0, -0.3)]; color=:tomato, strokewidth=1)
-    arrows!(ax, [0.3], [-0.15], [1.5], [0.0]; color=:red, linewidth=3, arrowsize=15)
-    text!(ax, 2.5, -0.7; text="Moving wall (u_wall, Zou-He)", align=(:center, :top), fontsize=11)
-
-    # Top wall (stationary)
-    poly!(ax, Point2f[(0, 4), (5, 4), (5, 4.3), (0, 4.3)]; color=:gray70, strokewidth=1)
-    text!(ax, 2.5, 4.7; text="Stationary wall (Zou-He)", align=(:center, :bottom), fontsize=11)
-
-    # Periodic labels
-    text!(ax, -0.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:blue)
-    text!(ax, 5.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:blue)
-
-    hidespines!(ax)
-    hidedecorations!(ax)
+    fig = Figure(size=(820, 460), backgroundcolor=BC_DARK)
+    ax = bc_axis(fig[1, 1]; title="Couette 2D — geometry",
+                 limits=(0, 5, 0, 4), pad=1.0)
+    fluid_region!(ax, (0.0, 0.0), (5.0, 4.0); outline=false)
+    wall!(ax, (0.0, 4.0), (5.0, 4.0); side=1, label="top wall (Zou-He)",
+          labelgap=0.4)
+    moving_wall!(ax, (0.0, 0.0), (5.0, 0.0); side=-1, u_label="u_wall",
+                 label="moving wall (Zou-He)", labelgap=0.5, ulabelgap=0.55)
+    periodic!(ax, (0.0, 0.0), (0.0, 4.0); label="periodic")
+    periodic!(ax, (5.0, 0.0), (5.0, 4.0); label="periodic")
+    bc_legend!(fig[1, 2]; entries=[
+        (:moving,   "moving wall (u_wall)"),
+        (:wall,     "no-slip wall"),
+        (:periodic, "periodic"),
+        (:fluid,    "fluid region"),
+    ])
+    colsize!(fig.layout, 2, Relative(0.27)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "couette_geometry.svg"), fig)
     println("  ✓ couette_geometry.svg")
 end
@@ -311,29 +311,23 @@ end
 # ============================================================================
 println("=== 4. Cavity 2D ===")
 
-# --- 4a. Geometry schematic ---
+# --- 4a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(500, 500))
-    ax = Axis(fig[1, 1]; title="Lid-driven cavity — geometry",
-              aspect=DataAspect(), limits=(-1, 6, -1, 6))
-
-    # Walls
-    poly!(ax, Point2f[(0, 0), (5, 0), (5, -0.3), (0, -0.3)]; color=:gray70, strokewidth=1)
-    poly!(ax, Point2f[(0, 0), (-0.3, 0), (-0.3, 5), (0, 5)]; color=:gray70, strokewidth=1)
-    poly!(ax, Point2f[(5, 0), (5.3, 0), (5.3, 5), (5, 5)]; color=:gray70, strokewidth=1)
-
-    # Lid (top)
-    poly!(ax, Point2f[(0, 5), (5, 5), (5, 5.3), (0, 5.3)]; color=:tomato, strokewidth=1)
-    arrows!(ax, [0.5], [5.15], [2.0], [0.0]; color=:red, linewidth=3, arrowsize=15)
-    text!(ax, 2.5, 5.7; text="u_lid", align=(:center, :bottom), fontsize=13, color=:red)
-
-    # Wall labels
-    text!(ax, 2.5, -0.7; text="bottom wall", align=(:center, :top), fontsize=11)
-    text!(ax, -0.7, 2.5; text="left wall", rotation=pi/2, align=(:center, :center), fontsize=11)
-    text!(ax, 5.7, 2.5; text="right wall", rotation=-pi/2, align=(:center, :center), fontsize=11)
-
-    hidespines!(ax)
-    hidedecorations!(ax)
+    fig = Figure(size=(720, 560), backgroundcolor=BC_DARK)
+    ax = bc_axis(fig[1, 1]; title="Lid-driven cavity — geometry",
+                 limits=(0, 5, 0, 5), pad=1.2)
+    fluid_region!(ax, (0.0, 0.0), (5.0, 5.0); outline=false)
+    moving_wall!(ax, (0.0, 5.0), (5.0, 5.0); side=1, u_label="u_lid",
+                 label="moving lid (Zou-He)", labelgap=0.5, ulabelgap=0.55)
+    wall!(ax, (0.0, 0.0), (5.0, 0.0); side=-1, label="bottom wall", labelgap=0.45)
+    wall!(ax, (0.0, 0.0), (0.0, 5.0); side=1,  label="left wall", labelgap=0.45)
+    wall!(ax, (5.0, 0.0), (5.0, 5.0); side=-1, label="right wall", labelgap=0.45)
+    bc_legend!(fig[1, 2]; entries=[
+        (:moving, "moving lid (u_lid)"),
+        (:wall,   "no-slip wall"),
+        (:fluid,  "fluid region"),
+    ])
+    colsize!(fig.layout, 2, Relative(0.30)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "cavity_geometry.svg"), fig)
     println("  ✓ cavity_geometry.svg")
 end
@@ -418,35 +412,33 @@ end
 # ============================================================================
 println("=== 6. Cylinder 2D ===")
 
-# --- 6a. Geometry schematic ---
+# --- 6a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(800, 300))
-    ax = Axis(fig[1, 1]; title="Flow around a cylinder — geometry",
-              aspect=DataAspect(), limits=(-20, 420, -15, 115))
-
-    # Domain boundary
-    lines!(ax, [0, 400, 400, 0, 0], [0, 0, 100, 100, 0]; color="gray80", linewidth=1.5)
-
-    # Cylinder
-    θ = range(0, 2pi, length=60)
-    cx, cy, R = 80.0, 50.0, 10.0
-    poly!(ax, [Point2f(cx + R * cos(t), cy + R * sin(t)) for t in θ]; color=:gray50, strokewidth=2)
-
-    # Inlet arrows
-    for yy in 20:20:80
-        arrows!(ax, [-15.0], [Float64(yy)], [12.0], [0.0]; color=:blue, linewidth=2, arrowsize=10)
-    end
-    text!(ax, -15, 95; text="inlet\nu_in", fontsize=11, color=:blue)
-
-    # Outlet label
-    text!(ax, 410, 50; text="outlet", fontsize=11, align=(:left, :center))
-
-    # Top/bottom labels
-    text!(ax, 200, -8; text="wall (free-slip)", align=(:center, :top), fontsize=11)
-    text!(ax, 200, 108; text="wall (free-slip)", align=(:center, :bottom), fontsize=11)
-
-    hidespines!(ax)
-    hidedecorations!(ax)
+    fig = Figure(size=(960, 360), backgroundcolor=BC_DARK)
+    ax = bc_axis(fig[1, 1]; title="Flow around a cylinder — geometry",
+                 limits=(0, 400, 0, 100), pad=22.0)
+    fluid_region!(ax, (0.0, 0.0), (400.0, 100.0); outline=false)
+    # top & bottom free-slip (plain grey line, NO hatch)
+    free_slip!(ax, (0.0, 100.0), (400.0, 100.0); label="free-slip", labelside=-1,
+               labelgap=11.0)
+    free_slip!(ax, (0.0, 0.0), (400.0, 0.0); label="free-slip", labelside=1,
+               labelgap=11.0)
+    # uniform inlet on the left edge, arrows pointing INTO the domain (+x)
+    inlet!(ax, (0.0, 8.0), (0.0, 92.0); profile=:uniform, label="u_in",
+           depth=34.0, n=5, side=1, labelsize=12, labelgap=14.0)
+    # outlet on the right edge, arrows leaving the domain (+x)
+    outlet!(ax, (400.0, 8.0), (400.0, 92.0); label="outflow", side=-1, n=4,
+            depth=30.0, labelsize=12, labelgap=42.0)
+    # immersed cylinder
+    obstacle!(ax, (90.0, 50.0), 12.0; label="cylinder", labelside=:below,
+              labelgap=3.0)
+    bc_legend!(fig[1, 2]; entries=[
+        (:inlet,     "inlet u_in"),
+        (:outlet,    "outlet"),
+        (:free_slip, "free-slip wall"),
+        (:obstacle,  "cylinder (obstacle)"),
+    ])
+    colsize!(fig.layout, 2, Relative(0.24)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "cylinder_geometry.svg"), fig)
     println("  ✓ cylinder_geometry.svg")
 end
@@ -501,32 +493,25 @@ end
 # ============================================================================
 println("=== 7. Heat Conduction ===")
 
-# --- 7a. Geometry schematic ---
+# --- 7a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(600, 300))
-    ax = Axis(fig[1, 1]; title="Heat conduction — geometry",
-              aspect=DataAspect(), limits=(-1, 8, -1, 5))
-
-    # Hot bottom wall
-    poly!(ax, Point2f[(0, 0), (7, 0), (7, -0.3), (0, -0.3)]; color=:red, strokewidth=1)
-    text!(ax, 3.5, -0.7; text="T_hot (bottom wall)", align=(:center, :top), fontsize=12, color=:red)
-
-    # Cold top wall
-    poly!(ax, Point2f[(0, 4), (7, 4), (7, 4.3), (0, 4.3)]; color=:blue, strokewidth=1)
-    text!(ax, 3.5, 4.7; text="T_cold (top wall)", align=(:center, :bottom), fontsize=12, color=:blue)
-
-    # Periodic labels
-    text!(ax, -0.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:gray50)
-    text!(ax, 7.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:gray50)
-
-    # Temperature gradient arrows (downward = cold, upward direction)
-    for xx in 1.0:1.5:6.0
-        arrows!(ax, [xx], [3.2], [0.0], [-1.5]; color=:orange, linewidth=1.5, arrowsize=10)
-    end
-    text!(ax, 4.5, 2.0; text="heat flux", fontsize=11, color=:orange)
-
-    hidespines!(ax)
-    hidedecorations!(ax)
+    fig = Figure(size=(860, 440), backgroundcolor=BC_DARK)
+    ax = bc_axis(fig[1, 1]; title="Heat conduction — geometry",
+                 limits=(0, 7, 0, 4), pad=1.1)
+    fluid_region!(ax, (0.0, 0.0), (7.0, 4.0); outline=false)
+    dirichlet_wall!(ax, (0.0, 4.0), (7.0, 4.0); kind=:cold, side=1,
+                    label="T_cold (top)", labelgap=0.5)
+    dirichlet_wall!(ax, (0.0, 0.0), (7.0, 0.0); kind=:hot, side=-1,
+                    label="T_hot (bottom)", labelgap=0.5)
+    periodic!(ax, (0.0, 0.0), (0.0, 4.0); label="periodic")
+    periodic!(ax, (7.0, 0.0), (7.0, 4.0); label="periodic")
+    bc_legend!(fig[1, 2]; entries=[
+        (:hot,      "no-slip wall, T_hot"),
+        (:cold,     "no-slip wall, T_cold"),
+        (:periodic, "periodic"),
+        (:fluid,    "fluid region"),
+    ])
+    colsize!(fig.layout, 2, Relative(0.27)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "heat_geometry.svg"), fig)
     println("  ✓ heat_geometry.svg")
 end
@@ -559,41 +544,42 @@ end
 # ============================================================================
 println("=== 8. Rayleigh-Benard ===")
 
-# --- 8a. Geometry schematic ---
+# --- 8a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(700, 350))
-    ax = Axis(fig[1, 1]; title="Rayleigh-Benard convection — geometry",
-              aspect=DataAspect(), limits=(-1, 10, -1, 5))
-
-    # Hot bottom
-    poly!(ax, Point2f[(0, 0), (9, 0), (9, -0.3), (0, -0.3)]; color=:red, strokewidth=1)
-    text!(ax, 4.5, -0.7; text="T_hot (bottom)", align=(:center, :top), fontsize=12, color=:red)
-
-    # Cold top
-    poly!(ax, Point2f[(0, 4), (9, 4), (9, 4.3), (0, 4.3)]; color=:blue, strokewidth=1)
-    text!(ax, 4.5, 4.7; text="T_cold (top)", align=(:center, :bottom), fontsize=12, color=:blue)
-
-    # Convection roll arrows (two counter-rotating cells)
-    # Left roll (clockwise)
-    arrows!(ax, [1.5], [1.0], [0.0], [2.0]; color=:orange, linewidth=2, arrowsize=12)
-    arrows!(ax, [1.5], [3.0], [1.5], [0.0]; color=:orange, linewidth=2, arrowsize=12)
-    arrows!(ax, [3.0], [3.0], [0.0], [-2.0]; color=:orange, linewidth=2, arrowsize=12)
-    arrows!(ax, [3.0], [1.0], [-1.5], [0.0]; color=:orange, linewidth=2, arrowsize=12)
-
-    # Right roll (counter-clockwise)
-    arrows!(ax, [6.0], [1.0], [0.0], [2.0]; color=:purple, linewidth=2, arrowsize=12)
-    arrows!(ax, [6.0], [3.0], [1.5], [0.0]; color=:purple, linewidth=2, arrowsize=12)
-    arrows!(ax, [7.5], [3.0], [0.0], [-2.0]; color=:purple, linewidth=2, arrowsize=12)
-    arrows!(ax, [7.5], [1.0], [-1.5], [0.0]; color=:purple, linewidth=2, arrowsize=12)
-
-    text!(ax, 2.25, 2.0; text="convection\nrolls", align=(:center, :center), fontsize=11, color=:orange)
-
-    # Periodic
-    text!(ax, -0.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:gray50)
-    text!(ax, 9.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:gray50)
-
-    hidespines!(ax)
-    hidedecorations!(ax)
+    fig = Figure(size=(900, 440), backgroundcolor=BC_DARK)
+    ax = bc_axis(fig[1, 1]; title="Rayleigh-Benard convection — geometry",
+                 limits=(0, 9, 0, 4), pad=1.1)
+    fluid_region!(ax, (0.0, 0.0), (9.0, 4.0); outline=false)
+    dirichlet_wall!(ax, (0.0, 4.0), (9.0, 4.0); kind=:cold, side=1,
+                    label="T_cold (top)", labelgap=0.5)
+    dirichlet_wall!(ax, (0.0, 0.0), (9.0, 0.0); kind=:hot, side=-1,
+                    label="T_hot (bottom)", labelgap=0.5)
+    periodic!(ax, (0.0, 0.0), (0.0, 4.0); label="periodic")
+    periodic!(ax, (9.0, 0.0), (9.0, 4.0); label="periodic")
+    # light convection-roll cue in a NEUTRAL secondary grey (accent/cool reserved)
+    for (xc, sgn) in ((2.5, 1.0), (6.5, -1.0))
+        θ = range(0, 2π; length=64)
+        rx, ry = 1.05, 1.25
+        cx, cy = xc, 2.0
+        lines!(ax, [cx + rx * cos(t) for t in θ], [cy + ry * sin(t) for t in θ];
+               color=("gray70", 0.55), linewidth=1.3)
+        ang = sgn > 0 ? π/2 : -π/2
+        hx, hy = cx + rx * cos(ang), cy + ry * sin(ang)
+        tx = -rx * sin(ang) * sgn
+        ty =  ry * cos(ang) * sgn
+        tn = sqrt(tx^2 + ty^2)
+        arrows2d!(ax, [hx], [hy], [tx / tn * 0.6], [ty / tn * 0.6];
+                  color=("gray70", 0.7), shaftwidth=1.4, tipwidth=7, tiplength=7)
+    end
+    text!(ax, 4.5, 2.0; text="convection rolls", color=BC_TEXT, font=BC_SERIF,
+          fontsize=11, align=(:center, :center))
+    bc_legend!(fig[1, 2]; entries=[
+        (:hot,      "no-slip wall, T_hot"),
+        (:cold,     "no-slip wall, T_cold"),
+        (:periodic, "periodic"),
+        (:fluid,    "fluid region"),
+    ])
+    colsize!(fig.layout, 2, Relative(0.26)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "rayleigh_benard_geometry.svg"), fig)
     println("  ✓ rayleigh_benard_geometry.svg")
 end
@@ -629,35 +615,30 @@ end
 # ============================================================================
 println("=== 9. Hagen-Poiseuille ===")
 
-# --- 9a. Geometry schematic ---
+# --- 9a. Geometry schematic (bc_schematic.jl primitives) ---
 let
-    fig = Figure(size=(600, 450))
-    ax = Axis(fig[1, 1]; title="Hagen-Poiseuille — pipe cross-section (z-r plane)",
-              aspect=DataAspect(), limits=(-1, 7, -2, 5))
-
-    # Pipe walls
-    poly!(ax, Point2f[(0, 4), (6, 4), (6, 4.3), (0, 4.3)]; color=:gray70, strokewidth=1)
-    poly!(ax, Point2f[(0, 0), (6, 0), (6, -0.3), (0, -0.3)]; color=:gray70, strokewidth=1)
-    text!(ax, 3.0, 4.7; text="wall (bounce-back, r = R)", align=(:center, :bottom), fontsize=11)
-    text!(ax, 3.0, -0.7; text="axis of symmetry (r = 0)", align=(:center, :top), fontsize=11, color=:blue)
-
-    # Dashed symmetry line
-    lines!(ax, [0, 6], [0, 0]; color=:blue, linestyle=:dash, linewidth=1.5)
-
-    # Body force arrow
-    arrows!(ax, [0.5], [2.0], [2.0], [0.0]; color=:red, linewidth=3, arrowsize=15)
-    text!(ax, 1.5, 2.5; text="Fz (body force)", color=:red, fontsize=12)
-
-    # Axis labels
-    text!(ax, 6.5, 0.0; text="z", fontsize=14, align=(:left, :center))
-    text!(ax, 0.0, 4.8; text="r", fontsize=14, align=(:center, :bottom))
-
-    # Periodic arrows
-    text!(ax, -0.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:gray50)
-    text!(ax, 6.5, 2.0; text="periodic", rotation=pi/2, align=(:center, :center), fontsize=11, color=:gray50)
-
-    hidespines!(ax)
-    hidedecorations!(ax)
+    fig = Figure(size=(860, 430), backgroundcolor=BC_DARK)
+    ax = bc_axis(fig[1, 1]; title="Hagen-Poiseuille — pipe cross-section (z-r plane)",
+                 limits=(0, 6, 0, 4), pad=1.2)
+    fluid_region!(ax, (0.0, 0.0), (6.0, 4.0); outline=false)
+    wall!(ax, (0.0, 4.0), (6.0, 4.0); side=1, label="wall r=R", labelgap=0.45)
+    symmetry!(ax, (0.0, 0.0), (6.0, 0.0); label="symmetry r=0")
+    periodic!(ax, (0.0, 0.0), (0.0, 4.0); label="periodic z")
+    periodic!(ax, (6.0, 0.0), (6.0, 4.0); label="periodic z")
+    body_force!(ax, 1.0, 2.0; dx=1.5, dy=0.0, label="Fz (body force)",
+                n=3, spread=0.85, labelside=1, labelgap=0.35)
+    # axis labels: z horizontal, r vertical
+    text!(ax, 6.3, 0.0; text="z", color=BC_TEXT, font=BC_SERIF, fontsize=15,
+          align=(:left, :center))
+    text!(ax, 0.0, 4.4; text="r", color=BC_TEXT, font=BC_SERIF, fontsize=15,
+          align=(:center, :bottom))
+    bc_legend!(fig[1, 2]; entries=[
+        (:wall,     "no-slip wall (r=R)"),
+        (:symmetry, "symmetry (r=0)"),
+        (:force,    "body force Fz"),
+        (:periodic, "periodic z"),
+    ])
+    colsize!(fig.layout, 2, Relative(0.27)); colgap!(fig.layout, 14)
     save(joinpath(OUTDIR, "hagen_poiseuille_geometry.svg"), fig)
     println("  ✓ hagen_poiseuille_geometry.svg")
 end
