@@ -383,6 +383,183 @@ function logfv_constitutive_step_log_fenep_3d!(
     )
 end
 
+# ---------------------------------------------------------------------
+# Giesekus variant of the unsplit RK2 constitutive step.
+#
+# Structurally identical to `logfv_constitutive_step_log_fenep_3d_kernel!`,
+# but integrates `logconf_source_with_divergence_giesekus_3d` (mobility
+# scalar `alpha` in place of the Peterlin `L2_fene`). With `alpha == 0`
+# the Giesekus quadratic factor is exactly 1, so this kernel reproduces
+# the Oldroyd-B trajectory bit-for-bit; the dedicated OB kernel above is
+# left untouched so the OB path never changes.
+# ---------------------------------------------------------------------
+@kernel function logfv_constitutive_step_log_giesekus_3d_kernel!(
+    psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+    @Const(psixx), @Const(psixy), @Const(psixz),
+    @Const(psiyy), @Const(psiyz), @Const(psizz),
+    @Const(duxdx), @Const(duxdy), @Const(duxdz),
+    @Const(duydx), @Const(duydy), @Const(duydz),
+    @Const(duzdx), @Const(duzdy), @Const(duzdz),
+    lambda, dt, alpha, n_sub, Nx, Ny, Nz,
+)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny && k <= Nz
+            T = eltype(psixx_out)
+            pxx = psixx[i, j, k]
+            pxy = psixy[i, j, k]
+            pxz = psixz[i, j, k]
+            pyy = psiyy[i, j, k]
+            pyz = psiyz[i, j, k]
+            pzz = psizz[i, j, k]
+            l11 = duxdx[i, j, k]
+            l12 = duxdy[i, j, k]
+            l13 = duxdz[i, j, k]
+            l21 = duydx[i, j, k]
+            l22 = duydy[i, j, k]
+            l23 = duydz[i, j, k]
+            l31 = duzdx[i, j, k]
+            l32 = duzdy[i, j, k]
+            l33 = duzdz[i, j, k]
+            h = T(dt) / T(n_sub)
+            half_h = T(0.5) * h
+            lambda_t = T(lambda)
+            alpha_t = T(alpha)
+            divu_transport = zero(T)
+
+            for _ in 1:n_sub
+                k1xx = logconf_source_with_divergence_giesekus_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 1,
+                )
+                k1xy = logconf_source_with_divergence_giesekus_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 2,
+                )
+                k1xz = logconf_source_with_divergence_giesekus_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 3,
+                )
+                k1yy = logconf_source_with_divergence_giesekus_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 4,
+                )
+                k1yz = logconf_source_with_divergence_giesekus_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 5,
+                )
+                k1zz = logconf_source_with_divergence_giesekus_3d(
+                    pxx, pxy, pxz, pyy, pyz, pzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 6,
+                )
+
+                qxx = pxx + h * k1xx
+                qxy = pxy + h * k1xy
+                qxz = pxz + h * k1xz
+                qyy = pyy + h * k1yy
+                qyz = pyz + h * k1yz
+                qzz = pzz + h * k1zz
+
+                k2xx = logconf_source_with_divergence_giesekus_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 1,
+                )
+                k2xy = logconf_source_with_divergence_giesekus_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 2,
+                )
+                k2xz = logconf_source_with_divergence_giesekus_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 3,
+                )
+                k2yy = logconf_source_with_divergence_giesekus_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 4,
+                )
+                k2yz = logconf_source_with_divergence_giesekus_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 5,
+                )
+                k2zz = logconf_source_with_divergence_giesekus_3d(
+                    qxx, qxy, qxz, qyy, qyz, qzz,
+                    l11, l12, l13, l21, l22, l23, l31, l32, l33,
+                    divu_transport, lambda_t, alpha_t, 6,
+                )
+
+                pxx += half_h * (k1xx + k2xx)
+                pxy += half_h * (k1xy + k2xy)
+                pxz += half_h * (k1xz + k2xz)
+                pyy += half_h * (k1yy + k2yy)
+                pyz += half_h * (k1yz + k2yz)
+                pzz += half_h * (k1zz + k2zz)
+            end
+
+            psixx_out[i, j, k] = pxx
+            psixy_out[i, j, k] = pxy
+            psixz_out[i, j, k] = pxz
+            psiyy_out[i, j, k] = pyy
+            psiyz_out[i, j, k] = pyz
+            psizz_out[i, j, k] = pzz
+        end
+    end
+end
+
+function logfv_constitutive_step_log_giesekus_3d!(
+    psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+    psixx, psixy, psixz, psiyy, psiyz, psizz,
+    duxdx, duxdy, duxdz,
+    duydx, duydy, duydz,
+    duzdx, duzdy, duzdz,
+    lambda, dt, alpha, n_sub;
+    sync::Bool=true,
+)
+    n_sub >= 1 || throw(ArgumentError("n_sub must be >= 1"))
+    backend = KernelAbstractions.get_backend(psixx_out)
+    Nx, Ny, Nz = size(psixx_out)
+    kernel! = logfv_constitutive_step_log_giesekus_3d_kernel!(backend)
+    kernel!(
+        psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
+        psixx, psixy, psixz, psiyy, psiyz, psizz,
+        duxdx, duxdy, duxdz,
+        duydx, duydy, duydz,
+        duzdx, duzdy, duzdz,
+        lambda, dt, alpha, Int(n_sub), Nx, Ny, Nz;
+        ndrange=(Nx, Ny, Nz),
+    )
+    sync && KernelAbstractions.synchronize(backend)
+    return nothing
+end
+
+function logfv_constitutive_step_log_giesekus_3d!(
+    psixx, psixy, psixz, psiyy, psiyz, psizz,
+    duxdx, duxdy, duxdz,
+    duydx, duydy, duydz,
+    duzdx, duzdy, duzdz,
+    lambda, dt, alpha, n_sub;
+    sync::Bool=true,
+)
+    return logfv_constitutive_step_log_giesekus_3d!(
+        psixx, psixy, psixz, psiyy, psiyz, psizz,
+        psixx, psixy, psixz, psiyy, psiyz, psizz,
+        duxdx, duxdy, duxdz,
+        duydx, duydy, duydz,
+        duzdx, duzdy, duzdz,
+        lambda, dt, alpha, n_sub;
+        sync,
+    )
+end
+
 function logfv_constitutive_step_log_3d!(
     psixx_out, psixy_out, psixz_out, psiyy_out, psiyz_out, psizz_out,
     psixx, psixy, psixz, psiyy, psiyz, psizz,

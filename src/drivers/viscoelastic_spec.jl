@@ -94,6 +94,47 @@ polymer_modulus(m::LogConfFENEP) = m.G
 polymer_relaxation_time(m::LogConfFENEP) = m.λ
 
 """
+    LogConfGiesekus(; G, λ, α)
+
+Giesekus model evolved in the log-conformation variable Ψ = log(C)
+(Fattal & Kupferman 2004). Identical log-conf machinery to
+`LogConfOldroydB`, but the upper-convected relaxation gains an
+anisotropic (quadratic) mobility term controlled by `α ∈ [0, 0.5]`:
+
+    dC/dt = ∇uᵀ·C + C·∇u − (1/λ)[ (C − I) + α·(C − I)² ].
+
+In the eigenframe of C (eigenvalues c_i) the relaxation is diagonal,
+with per-eigenvalue restoring term
+
+    (c_i − 1) + α·(c_i − 1)² = (c_i − 1)·(1 + α·(c_i − 1)),
+
+so the mobility quadratically enhances relaxation of stretched modes
+(`c_i > 1`), producing shear-thinning and a bounded steady response. At
+`α = 0` the term collapses to `(c_i − 1)`, recovering Oldroyd-B exactly
+(bit-identically).
+
+- `G`: polymer shear modulus (G = ν_p / λ)
+- `λ`: polymer relaxation time
+- `α`: mobility / anisotropy parameter, `0 ≤ α ≤ 0.5`.
+
+Stress reconstruction (same as Oldroyd-B): τ_p = G · (C − I).
+"""
+struct LogConfGiesekus{T<:AbstractFloat} <: AbstractPolymerModel
+    G::T
+    λ::T
+    α::T
+end
+function LogConfGiesekus(; G, λ, α)
+    αf = float(α)
+    (αf >= 0 && αf <= 0.5) ||
+        throw(ArgumentError("LogConfGiesekus requires 0 ≤ α ≤ 0.5"))
+    return LogConfGiesekus(promote(float(G), float(λ), αf)...)
+end
+
+polymer_modulus(m::LogConfGiesekus) = m.G
+polymer_relaxation_time(m::LogConfGiesekus) = m.λ
+
+"""
     polymer_max_extensibility(model) -> L²
 
 Maximum extensibility `L²` (`Lmax²`) for finitely-extensible models.
@@ -104,6 +145,16 @@ polymer_max_extensibility(::AbstractPolymerModel) = Inf
 polymer_max_extensibility(m::LogConfFENEP) = m.L²
 
 """
+    polymer_mobility(model) -> α
+
+Giesekus mobility / anisotropy parameter `α`. Returns `0` for models
+without a quadratic mobility term (Oldroyd-B, FENE-P), so callers can
+branch on `iszero(...)` to recover the Oldroyd-B path bit-identically.
+"""
+polymer_mobility(::AbstractPolymerModel) = 0.0
+polymer_mobility(m::LogConfGiesekus) = m.α
+
+"""
     uses_log_conformation(model) -> Bool
 
 Dispatch hook: `true` if the driver must evolve Ψ = log(C) instead of
@@ -112,6 +163,7 @@ C, and reconstruct C via `psi_to_C_2d!` before computing τ_p.
 uses_log_conformation(::AbstractPolymerModel) = false
 uses_log_conformation(::LogConfOldroydB) = true
 uses_log_conformation(::LogConfFENEP) = true
+uses_log_conformation(::LogConfGiesekus) = true
 
 """
     update_polymer_stress!(τ_p_xx, τ_p_xy, τ_p_yy, C_xx, C_xy, C_yy, model)
@@ -140,6 +192,25 @@ end
 function update_polymer_stress!(τ_p_xx, τ_p_xy, τ_p_yy,
                                   C_xx, C_xy, C_yy,
                                   m::LogConfOldroydB)
+    G = eltype(τ_p_xx)(m.G)
+    if iszero(G)
+        fill!(τ_p_xx, zero(eltype(τ_p_xx)))
+        fill!(τ_p_xy, zero(eltype(τ_p_xy)))
+        fill!(τ_p_yy, zero(eltype(τ_p_yy)))
+        return nothing
+    end
+    @. τ_p_xx = G * (C_xx - 1)
+    @. τ_p_xy = G * C_xy
+    @. τ_p_yy = G * (C_yy - 1)
+    return nothing
+end
+
+# Giesekus uses the same linear stress reconstruction τ_p = G·(C − I) as
+# Oldroyd-B; the quadratic mobility lives only in the conformation
+# evolution, not in the stress closure.
+function update_polymer_stress!(τ_p_xx, τ_p_xy, τ_p_yy,
+                                  C_xx, C_xy, C_yy,
+                                  m::LogConfGiesekus)
     G = eltype(τ_p_xx)(m.G)
     if iszero(G)
         fill!(τ_p_xx, zero(eltype(τ_p_xx)))

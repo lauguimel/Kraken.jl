@@ -233,6 +233,103 @@ end
     end
 end
 
+# ---------------------------------------------------------------------
+# Giesekus log-conformation source.
+#
+# Identical eigenframe machinery to `logconf_source_with_divergence_3d`,
+# but the upper-convected relaxation gains the Giesekus anisotropic
+# (quadratic) mobility term. The Giesekus conformation relaxation is
+#
+#     −(1/λ)[ (C − I) + α·(C − I)² ],
+#
+# which in the diagonal eigenframe is, per eigenvalue c_i,
+#
+#     (c_i − 1)·(1 + α·(c_i − 1)).
+#
+# Mapped to the log variable (chain rule dΨ_i/dt = (1/c_i)·dc_i/dt) the
+# eigenframe diagonal restoring term becomes
+#
+#     −(1 − 1/c_i)·(1 + α·(c_i − 1))·inv_λ
+#
+# instead of the Oldroyd-B −(1 − 1/c_i)·inv_λ. At α = 0 the factor
+# (1 + α(c_i−1)) is exactly 1, so the expression collapses to the OB
+# diagonal term BIT-IDENTICALLY and the Oldroyd-B source is recovered.
+# The off-diagonal eigenframe couplings (`s12p, s13p, s23p`) are the
+# deformation/advection contribution and are unchanged: the Giesekus
+# mobility only rescales the diagonal restoring term.
+# ---------------------------------------------------------------------
+@inline function logconf_source_with_divergence_giesekus_3d(
+    ψxx::T, ψxy::T, ψxz::T, ψyy::T, ψyz::T, ψzz::T,
+    duxdx::T, duxdy::T, duxdz::T,
+    duydx::T, duydy::T, duydz::T,
+    duzdx::T, duzdy::T, duzdz::T,
+    advective_divu::T, λ::T, α::T, component::Int,
+) where {T<:AbstractFloat}
+    ψ1, ψ2, ψ3,
+    v11, v21, v31,
+    v12, v22, v32,
+    v13, v23, v33 = eigen_sym3x3(ψxx, ψxy, ψxz, ψyy, ψyz, ψzz)
+
+    c1 = exp(ψ1)
+    c2 = exp(ψ2)
+    c3 = exp(ψ3)
+    inv_λ = inv(λ)
+
+    l11, l12, l13,
+    l21, l22, l23,
+    l31, l32, l33 = _project_grad_sym3(
+        duxdx, duxdy, duxdz,
+        duydx, duydy, duydz,
+        duzdx, duzdy, duzdz,
+        v11, v21, v31, v12, v22, v32, v13, v23, v33,
+    )
+
+    # Giesekus quadratic mobility factor per eigenvalue. At α=0 this is
+    # exactly 1 → the OB diagonal term −(1 − 1/c_i)·inv_λ is recovered
+    # bit-identically.
+    g1 = one(T) + α * (c1 - one(T))
+    g2 = one(T) + α * (c2 - one(T))
+    g3 = one(T) + α * (c3 - one(T))
+
+    s11p = T(2) * l11 - (one(T) - inv(c1)) * g1 * inv_λ
+    s22p = T(2) * l22 - (one(T) - inv(c2)) * g2 * inv_λ
+    s33p = T(2) * l33 - (one(T) - inv(c3)) * g3 * inv_λ
+    s12p = _logconf_loewner_exp_inv(ψ1, ψ2, c1, c2) * (l12 * c2 + c1 * l21)
+    s13p = _logconf_loewner_exp_inv(ψ1, ψ3, c1, c3) * (l13 * c3 + c1 * l31)
+    s23p = _logconf_loewner_exp_inv(ψ2, ψ3, c2, c3) * (l23 * c3 + c2 * l32)
+
+    sxx, sxy, sxz, syy, syz, szz = _sym3_from_eigenvalues(
+        s11p, s22p, s33p,
+        v11, v21, v31, v12, v22, v32, v13, v23, v33,
+    )
+    sxx += T(2) * (s12p * v11 * v12 + s13p * v11 * v13 + s23p * v12 * v13)
+    sxy += s12p * (v11 * v22 + v21 * v12) +
+           s13p * (v11 * v23 + v21 * v13) +
+           s23p * (v12 * v23 + v22 * v13)
+    sxz += s12p * (v11 * v32 + v31 * v12) +
+           s13p * (v11 * v33 + v31 * v13) +
+           s23p * (v12 * v33 + v32 * v13)
+    syy += T(2) * (s12p * v21 * v22 + s13p * v21 * v23 + s23p * v22 * v23)
+    syz += s12p * (v21 * v32 + v31 * v22) +
+           s13p * (v21 * v33 + v31 * v23) +
+           s23p * (v22 * v33 + v32 * v23)
+    szz += T(2) * (s12p * v31 * v32 + s13p * v31 * v33 + s23p * v32 * v33)
+
+    if component == 1
+        return sxx + ψxx * advective_divu
+    elseif component == 2
+        return sxy + ψxy * advective_divu
+    elseif component == 3
+        return sxz + ψxz * advective_divu
+    elseif component == 4
+        return syy + ψyy * advective_divu
+    elseif component == 5
+        return syz + ψyz * advective_divu
+    else
+        return szz + ψzz * advective_divu
+    end
+end
+
 @kernel function collide_logconf_3d_kernel!(
     g, @Const(Ψ_field),
     @Const(ux), @Const(uy), @Const(uz),

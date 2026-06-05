@@ -67,6 +67,7 @@ using Kraken
     include("test_fvfd_operators_3d.jl")
     include("test_fvfd_logconf_3d.jl")
     include("test_fvfd_fenep_3d.jl")
+    include("test_fvfd_giesekus_3d.jl")
     include("test_fvfd_velocity_gradient_3d.jl")
     include("test_viscoelastic_fvfd_poiseuille_3d.jl")
     include("test_fvfd_fenep_coupled_3d.jl")
