@@ -541,19 +541,20 @@ function _run_viscoelastic_sphere_3d(setup::SimulationSetup;
     return merge(result, (setup=setup,))
 end
 
-"""Dispatch a 3D viscoelastic Oldroyd-B planar-extension `.krk` canary to the
-`run_viscoelastic_fvfd_extensional_3d` driver in `velocity_mode=:imposed`. The
+"""Dispatch a 3D viscoelastic planar-extension `.krk` canary to the
+`run_viscoelastic_fvfd_extensional_3d` driver in `velocity_mode=:imposed`. Accepts
+both `Rheology oldroyd_b { nu_s nu_p lambda }` (Oldroyd-B) and
+`Rheology fene_p { nu_s nu_p lambda Lmax2 }` (FENE-P, finite extensibility). The
 driver imposes `u = (epsilon_dot*x, -epsilon_dot*y, 0)` analytically (no
 obstacle/inflow geometry); the `.krk` Domain supplies `Nx/Ny/Nz`, the Rheology
 block the solvent/polymer viscosities and relaxation time, and `epsilon_dot`
-comes from a `Define`/`Physics` entry. At the fixed point
-`C_xx = 1/(1 - 2λε̇)`, `C_yy = 1/(1 + 2λε̇)`."""
+comes from a `Define`/`Physics` entry. At the Oldroyd-B fixed point
+`C_xx = 1/(1 - 2λε̇)`, `C_yy = 1/(1 + 2λε̇)`; FENE-P caps trC below `L²`."""
 function _run_viscoelastic_extensional_3d(setup::SimulationSetup;
                                           backend=KernelAbstractions.CPU(), T=Float64)
-    rs = _ve_oldroydb_rheology(setup)
-    nu_s   = _ve_rheology_param(rs, :nu_s)
-    nu_p   = _ve_rheology_param(rs, :nu_p)
-    lambda = _ve_rheology_param(rs, :lambda)
+    rs = _ve_polymer_rheology(setup)
+    nu_s = _ve_rheology_param(rs, :nu_s)
+    polymer_model = _ve_build_polymer_model(rs; FT=T)
 
     epsilon_dot = _ve_numeric_param(setup, :epsilon_dot)
 
@@ -564,7 +565,8 @@ function _run_viscoelastic_extensional_3d(setup::SimulationSetup;
     result = run_viscoelastic_fvfd_extensional_3d(;
         Nx=dom.Nx, Ny=dom.Ny, Nz=dom.Nz,
         epsilon_dot=epsilon_dot,
-        ν_s=nu_s, ν_p=nu_p, lambda=lambda,
+        ν_s=nu_s, ν_p=nothing, lambda=polymer_relaxation_time(polymer_model),
+        polymer_model=polymer_model,
         advection_scheme=advection_scheme,
         velocity_mode=velocity_mode,
         max_steps=setup.max_steps,

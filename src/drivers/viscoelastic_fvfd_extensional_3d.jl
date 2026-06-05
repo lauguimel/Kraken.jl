@@ -44,6 +44,8 @@ function run_viscoelastic_fvfd_extensional_3d(;
     end
     lambda_p = polymer_relaxation_time(polymer_model)
     nu_p_eff = polymer_modulus(polymer_model) * lambda_p
+    # Finite for LogConfFENEP (= L²), Inf for Oldroyd-B → OB constitutive path.
+    L2_fene = polymer_max_extensibility(polymer_model)
     wi_ext = Float64(lambda_p) * Float64(epsilon_dot)
     2 * wi_ext < 1 ||
         throw(ArgumentError("planar-extension fixed point requires 2*lambda*epsilon_dot < 1"))
@@ -218,15 +220,29 @@ function run_viscoelastic_fvfd_extensional_3d(;
             last_grad_norm, Float64(lambda_p), 1.0; max_substeps=max_polymer_substeps,
         )
         max_substeps_observed = max(max_substeps_observed, last_n_sub)
-        logfv_constitutive_step_log_3d!(
-            psixx_next, psixy_next, psixz_next, psiyy_next, psiyz_next, psizz_next,
-            psixx_adv, psixy_adv, psixz_adv, psiyy_adv, psiyz_adv, psizz_adv,
-            duxdx, duxdy, duxdz,
-            duydx, duydy, duydz,
-            duzdx, duzdy, duzdz,
-            FT(lambda_p), one(FT), last_n_sub;
-            sync=true,
-        )
+        if isfinite(L2_fene)
+            # FENE-P (Peterlin): finite extensibility caps trC < L². As
+            # L²→∞ this reduces to the Oldroyd-B step bit-for-bit.
+            logfv_constitutive_step_log_fenep_3d!(
+                psixx_next, psixy_next, psixz_next, psiyy_next, psiyz_next, psizz_next,
+                psixx_adv, psixy_adv, psixz_adv, psiyy_adv, psiyz_adv, psizz_adv,
+                duxdx, duxdy, duxdz,
+                duydx, duydy, duydz,
+                duzdx, duzdy, duzdz,
+                FT(lambda_p), one(FT), FT(L2_fene), last_n_sub;
+                sync=true,
+            )
+        else
+            logfv_constitutive_step_log_3d!(
+                psixx_next, psixy_next, psixz_next, psiyy_next, psiyz_next, psizz_next,
+                psixx_adv, psixy_adv, psixz_adv, psiyy_adv, psiyz_adv, psizz_adv,
+                duxdx, duxdy, duxdz,
+                duydx, duydy, duydz,
+                duzdx, duzdy, duzdz,
+                FT(lambda_p), one(FT), last_n_sub;
+                sync=true,
+            )
+        end
 
         psi_to_C_3d!(
             C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
@@ -320,7 +336,8 @@ function run_viscoelastic_fvfd_extensional_3d(;
         center_duxdx=center_mean(duxdx_h), center_duydy=center_mean(duydy_h),
         epsilon_dot=Float64(epsilon_dot), lambda=Float64(lambda_p), Wi_ext=wi_ext,
         beta=beta, Re=Re, eta_s=Float64(ν_s), eta_p=Float64(nu_p_eff),
-        eta_total=nu_total, velocity_mode=mode, open_x_gradient_supported=true,
+        eta_total=nu_total, L2_fene=L2_fene,
+        velocity_mode=mode, open_x_gradient_supported=true,
         open_y_gradient_supported=true, bc_config=:openxy_zh_velocity,
         completed_steps=completed_steps, last_n_sub=last_n_sub,
         max_substeps_observed=max_substeps_observed,
