@@ -4,6 +4,10 @@ EditURL = "20_grid_refinement_cavity.jl"
 
 # Grid Refinement --- Lid-Driven Cavity
 
+```@raw html
+<DownloadMenu :files="[{label:'grid_refinement_cavity.krk',href:'/downloads/grid_refinement_cavity/grid_refinement_cavity.krk'},{label:'grid_refinement_cavity.csv',href:'/downloads/grid_refinement_cavity/grid_refinement_cavity.csv'},{label:'grid_refinement_cavity.py',href:'/downloads/grid_refinement_cavity/grid_refinement_cavity.py'}]" />
+```
+
 **Concepts:** [Grid refinement (Filippova-Hänel)](../theory/18_grid_refinement.md) ·
 [Lid-driven cavity (base case)](04_cavity_2d.md)
 

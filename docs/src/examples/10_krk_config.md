@@ -4,6 +4,10 @@ EditURL = "10_krk_config.jl"
 
 # Configuration Files (`.krk`)
 
+```@raw html
+<DownloadMenu :files="[{label:'cavity.krk',href:'/downloads/krk_config/cavity.krk'},{label:'poiseuille.krk',href:'/downloads/krk_config/poiseuille.krk'},{label:'cylinder.krk',href:'/downloads/krk_config/cylinder.krk'},{label:'couette.krk',href:'/downloads/krk_config/couette.krk'}]" />
+```
+
 **Concepts:** [Spatial boundary conditions](../theory/19_spatial_bcs.md) ·
 `.krk` DSL parser, presets, helpers
 

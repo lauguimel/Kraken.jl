@@ -1,5 +1,8 @@
 # # Reversed Vortex --- Time-Dependent Advection
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'reversed_vortex.csv',href:'/downloads/reversed_vortex/reversed_vortex.csv'},{label:'reversed_vortex.py',href:'/downloads/reversed_vortex/reversed_vortex.py'}]" />
+# ```
 #
 # ## Problem Statement
 #

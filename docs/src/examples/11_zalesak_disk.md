@@ -4,6 +4,9 @@ EditURL = "11_zalesak_disk.jl"
 
 # Zalesak Disk --- VOF Advection Test
 
+```@raw html
+<DownloadMenu :files="[{label:'zalesak.csv',href:'/downloads/zalesak/zalesak.csv'},{label:'zalesak.py',href:'/downloads/zalesak/zalesak.py'}]" />
+```
 
 ## Problem Statement
 
