@@ -102,13 +102,14 @@ The shipped Oldroyd-B `.krk` presets (sphere, extensional, cylinder) live in
 `benchmarks/krk/viscoelastic/`.
 
 The GPU mesh-converged table above (`N_y = 32/64/128`, CUDA Float64) was produced on
-**Aqua (H100)** by `bench/scratch/ve_3d_poiseuille_sweep/sweep_run.jl` (env
-`KRAKEN_VE3D_BACKEND=cuda`) — it is **not** CI-reproducible and requires a GPU run. Data:
-`bench/scratch/ve3d_poiseuille_sweep.csv`. Regenerate the figure with:
+**Aqua (H100)** with `KRAKEN_VE3D_BACKEND=cuda` — it is **not** CI-reproducible and
+requires a GPU run. The data and the figure generator are tracked under
+`benchmarks/results/repro/ve3d/` (data: `ve3d_poiseuille_sweep.csv`). Regenerate the
+figure with:
 
 ```bash
 conda run -n kraken-v0-3-figures python \
-  bench/scratch/plot_ve3d_poiseuille_sweep.py
+  benchmarks/results/repro/ve3d/plot_ve3d_poiseuille_sweep.py
 ```
 
 ## References
