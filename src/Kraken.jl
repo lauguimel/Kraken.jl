@@ -610,8 +610,8 @@ export contraction_step_geometry_2d, backward_facing_step_geometry_2d,
        square_obstacle_channel_geometry_2d
 export transfer_step_geometry_2d, parabolic_face_profile_2d
 export oldroydb_inlet_conformation_profile_2d, default_step_bcspec_2d
-export AbstractPolymerModel, LogConfOldroydB, update_polymer_stress!
-export uses_log_conformation
+export AbstractPolymerModel, LogConfOldroydB, LogConfFENEP, update_polymer_stress!
+export uses_log_conformation, polymer_max_extensibility
 export AbstractPolymerWallBC, CNEBB, CNEBBQAware, CNEBBField,
        CNEBBFieldEquilibrium,
        CNEBBEqGradient, CNEBBCutLinkEqGradient, YLW_A, YLW_B, YLWBalanceOnly,

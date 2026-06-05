@@ -57,6 +57,53 @@ polymer_modulus(m::LogConfOldroydB) = m.G
 polymer_relaxation_time(m::LogConfOldroydB) = m.λ
 
 """
+    LogConfFENEP(; G, λ, L²)
+    LogConfFENEP(; G, λ, Lmax2)
+
+FENE-P (finitely-extensible nonlinear elastic, Peterlin closure) evolved
+in the log-conformation variable Ψ = log(C). Identical log-conf machinery
+to `LogConfOldroydB` (Fattal & Kupferman 2004) but the upper-convected
+relaxation is multiplied by the Peterlin factor
+
+    f = (L² − 3) / (L² − tr C),
+
+so that `dC/dt = ∇uᵀ·C + C·∇u − (1/λ)(f·C − I)`. The factor caps the
+trace below `L²` (finite extensibility) and reduces the shear/extensional
+response relative to Oldroyd-B. At equilibrium (C=I, tr C=3) → f=1, and as
+`L² → ∞` → f→1, so FENE-P reduces to Oldroyd-B exactly.
+
+- `G`:  polymer shear modulus (G = ν_p / λ)
+- `λ`:  polymer relaxation time
+- `L²`: maximum extensibility (`Lmax²`), must satisfy `L² > 3`.
+
+Stress reconstruction (Peterlin-consistent): τ_p = G · (f·C − I).
+"""
+struct LogConfFENEP{T<:AbstractFloat} <: AbstractPolymerModel
+    G::T
+    λ::T
+    L²::T
+end
+function LogConfFENEP(; G, λ, L²=nothing, Lmax2=nothing)
+    L2 = L² === nothing ? Lmax2 : L²
+    L2 === nothing && throw(ArgumentError("LogConfFENEP requires L² (alias Lmax2)"))
+    float(L2) > 3 || throw(ArgumentError("LogConfFENEP requires L² > 3"))
+    return LogConfFENEP(promote(float(G), float(λ), float(L2))...)
+end
+
+polymer_modulus(m::LogConfFENEP) = m.G
+polymer_relaxation_time(m::LogConfFENEP) = m.λ
+
+"""
+    polymer_max_extensibility(model) -> L²
+
+Maximum extensibility `L²` (`Lmax²`) for finitely-extensible models.
+Returns `Inf` for unbounded models (Oldroyd-B), so callers can branch on
+`isfinite(...)` to recover the OB path.
+"""
+polymer_max_extensibility(::AbstractPolymerModel) = Inf
+polymer_max_extensibility(m::LogConfFENEP) = m.L²
+
+"""
     uses_log_conformation(model) -> Bool
 
 Dispatch hook: `true` if the driver must evolve Ψ = log(C) instead of
@@ -64,6 +111,7 @@ C, and reconstruct C via `psi_to_C_2d!` before computing τ_p.
 """
 uses_log_conformation(::AbstractPolymerModel) = false
 uses_log_conformation(::LogConfOldroydB) = true
+uses_log_conformation(::LogConfFENEP) = true
 
 """
     update_polymer_stress!(τ_p_xx, τ_p_xy, τ_p_yy, C_xx, C_xy, C_yy, model)
