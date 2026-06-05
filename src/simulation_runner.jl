@@ -372,6 +372,33 @@ function _ve_rheology_param(rs::RheologySetup, key::Symbol)
         "viscoelastic dispatch: Rheology $(rs.model) is missing `$key`."))
 end
 
+"""Locate a viscoelastic Rheology block — either `oldroyd_b` or `fene_p`."""
+function _ve_polymer_rheology(setup::SimulationSetup)
+    idx = findfirst(rs -> rs.model === :oldroyd_b || rs.model === :fene_p,
+                    setup.rheology)
+    idx !== nothing && return setup.rheology[idx]
+    throw(ArgumentError(
+        "viscoelastic dispatch: requires `Rheology oldroyd_b { ... }` or " *
+        "`Rheology fene_p { ... Lmax2 = ... }`."))
+end
+
+"""Build a log-conformation polymer model from a VE Rheology block.
+`oldroyd_b` → `LogConfOldroydB`; `fene_p` → `LogConfFENEP` (needs `Lmax2`/`L2`).
+G = nu_p / lambda in both cases."""
+function _ve_build_polymer_model(rs::RheologySetup; FT=Float64)
+    nu_p   = _ve_rheology_param(rs, :nu_p)
+    lambda = _ve_rheology_param(rs, :lambda)
+    G = FT(nu_p / lambda)
+    if rs.model === :fene_p
+        L2 = haskey(rs.params, :Lmax2) ? Float64(rs.params[:Lmax2]) :
+             haskey(rs.params, :L2)    ? Float64(rs.params[:L2])    :
+             throw(ArgumentError(
+                 "viscoelastic dispatch: Rheology fene_p needs `Lmax2` (alias `L2`)."))
+        return LogConfFENEP(G=G, λ=FT(lambda), Lmax2=FT(L2))
+    end
+    return LogConfOldroydB(G=G, λ=FT(lambda))
+end
+
 function _ve_cylinder_obstacle_radius(setup::SimulationSetup)
     for region in setup.regions
         region_name = lowercase(region.name)
@@ -403,6 +430,9 @@ end
 function _run_viscoelastic(setup::SimulationSetup;
                            backend=KernelAbstractions.CPU(), T=Float64)
     name = lowercase(setup.name)
+    if occursin("poiseuille", name) || occursin("channel", name)
+        return _run_viscoelastic_fvfd_poiseuille_3d(setup; backend=backend, T=T)
+    end
     if occursin("extension", name) || occursin("extensional", name)
         return _run_viscoelastic_extensional_3d(setup; backend=backend, T=T)
     end
@@ -537,6 +567,33 @@ function _run_viscoelastic_extensional_3d(setup::SimulationSetup;
         ν_s=nu_s, ν_p=nu_p, lambda=lambda,
         advection_scheme=advection_scheme,
         velocity_mode=velocity_mode,
+        max_steps=setup.max_steps,
+        backend=backend, FT=T,
+    )
+    return merge(result, (setup=setup,))
+end
+
+"""Dispatch a 3D viscoelastic planar-Poiseuille `.krk` case to the FVFD
+log-conformation driver `run_viscoelastic_fvfd_poiseuille_3d`. Accepts both
+`Rheology oldroyd_b { nu_s nu_p lambda }` (Oldroyd-B) and
+`Rheology fene_p { nu_s nu_p lambda Lmax2 }` (FENE-P, finite extensibility).
+The Domain supplies `Nx/Ny/Nz`; the constant body force `Fx` comes from a
+`Define`/`Physics` entry (default 1e-5)."""
+function _run_viscoelastic_fvfd_poiseuille_3d(setup::SimulationSetup;
+                                              backend=KernelAbstractions.CPU(), T=Float64)
+    rs = _ve_polymer_rheology(setup)
+    nu_s = _ve_rheology_param(rs, :nu_s)
+    polymer_model = _ve_build_polymer_model(rs; FT=T)
+
+    dom = setup.domain
+    Fx = _ve_numeric_param(setup, :Fx, 1e-5)
+    advection_scheme = _ve_symbol_param(setup, :advection_scheme, :muscl_superbee)
+
+    result = run_viscoelastic_fvfd_poiseuille_3d(;
+        Nx=dom.Nx, Ny=dom.Ny, Nz=dom.Nz,
+        Fx=Fx, ν_s=nu_s, ν_p=nothing, lambda=polymer_relaxation_time(polymer_model),
+        polymer_model=polymer_model,
+        advection_scheme=advection_scheme,
         max_steps=setup.max_steps,
         backend=backend, FT=T,
     )

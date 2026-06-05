@@ -249,3 +249,50 @@ function update_polymer_stress_3d!(tau_xx, tau_xy, tau_xz,
             FT(polymer_modulus(model)), FT(0.0); ndrange=(Nx, Ny, Nz))
     KernelAbstractions.synchronize(backend)
 end
+
+# ============================================================
+# FENE-P (Peterlin) polymeric stress  τ_p = G·(f·C − I)
+# ============================================================
+#
+# Peterlin factor f = (L²−3)/(L²−trC), the SAME factor used by the FENE-P
+# constitutive source `logconf_source_with_divergence_fenep_3d` so that the
+# stress and the relaxation closure are consistent. As L²→∞, f→1 and this
+# recovers the Oldroyd-B stress τ_p = G·(C−I). A small floor on (L²−trC)
+# keeps the factor finite at the finite-extensibility limit (trC→L²).
+@kernel function _update_polymer_stress_3d_fenep_kernel!(tau_xx, tau_xy, tau_xz,
+                                                            tau_yy, tau_yz, tau_zz,
+                                                            @Const(C_xx), @Const(C_xy),
+                                                            @Const(C_xz), @Const(C_yy),
+                                                            @Const(C_yz), @Const(C_zz),
+                                                            G, L2_fene)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(tau_xx)
+        cxx = C_xx[i,j,k]; cyy = C_yy[i,j,k]; czz = C_zz[i,j,k]
+        cxy = C_xy[i,j,k]; cxz = C_xz[i,j,k]; cyz = C_yz[i,j,k]
+        trC = cxx + cyy + czz
+        # Identical f to logconf_source_with_divergence_fenep_3d.
+        fene = (L2_fene - T(3)) / max(L2_fene - trC, T(1e-6) * L2_fene)
+        tau_xx[i,j,k] = G * (fene * cxx - one(T))
+        tau_yy[i,j,k] = G * (fene * cyy - one(T))
+        tau_zz[i,j,k] = G * (fene * czz - one(T))
+        tau_xy[i,j,k] = G * fene * cxy
+        tau_xz[i,j,k] = G * fene * cxz
+        tau_yz[i,j,k] = G * fene * cyz
+    end
+end
+
+function update_polymer_stress_3d!(tau_xx, tau_xy, tau_xz,
+                                     tau_yy, tau_yz, tau_zz,
+                                     C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
+                                     model::LogConfFENEP)
+    backend = KernelAbstractions.get_backend(tau_xx)
+    Nx, Ny, Nz = size(tau_xx)
+    FT = eltype(tau_xx)
+    kernel! = _update_polymer_stress_3d_fenep_kernel!(backend)
+    kernel!(tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz,
+            C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
+            FT(polymer_modulus(model)),
+            FT(polymer_max_extensibility(model)); ndrange=(Nx, Ny, Nz))
+    KernelAbstractions.synchronize(backend)
+end
