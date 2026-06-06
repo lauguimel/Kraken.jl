@@ -51,6 +51,35 @@ files above.
   `docs/src/users/benchmarks/ve-constitutive-models.png`.
   Run `conda run -n kraken-v0-3-figures python plot.py`.
 
+## In-flow (coupled Poiseuille) — sibling pair
+
+Where the single-cell scripts above impose the velocity gradient, this pair
+solves the **coupled** problem: the FVFD Poiseuille driver
+`run_viscoelastic_fvfd_poiseuille_3d` runs the D3Q19 solvent and the
+log-conformation polymer two-way coupled (`F_poly = ∇·τ_p`), so the flow sets
+its own shear rate `γ̇(y)`. Same channel and operating point as the
+constitutive-coupling canaries `test/test_fvfd_{fenep,giesekus,ptt}_coupled_3d.jl`
+(periodic `x`/`z`, half-way bounce-back `y` walls, `β = ν_s/ν_total = 0.5`,
+`λ` set so `Wi_wall ≈ 1`). Only the `polymer_model` spec changes between runs.
+
+| Channel | `Nx×Ny×Nz` | `β` | `Wi_wall` | `Fx` | steps |
+|---------|-----------|-----|-----------|------|-------|
+| planar Poiseuille | `6×32×6` | 0.5 | ≈ 1 | `1.5e-5` | 10 000 |
+
+- `make_poiseuille_csv.jl` — runs the 4 coupled drivers and writes the
+  wall-normal `y`-profiles to `ve_poiseuille_profiles.csv`
+  (`model, j, u, gamma, Cxx, Cyy, Czz, Cxy, trC, N1`). Run (from repo root):
+  `julia --project=. benchmarks/results/repro/ve-constitutive-models/make_poiseuille_csv.jl`.
+  CPU Float64, ~1–2 min; CI-reproducible (no GPU).
+- `plot_poiseuille.py` — dark two-panel figure: `tr C(y)` (wall→centre) and the
+  coupled `u(y)`. Writes the docs page PNG
+  `docs/src/users/benchmarks/ve-constitutive-models-poiseuille.png`.
+  Run `conda run -n kraken-v0-3-figures python plot_poiseuille.py`.
+
+Near-wall stretch ranking (`tr C` at the wall plane, `Wi_wall ≈ 1`):
+Oldroyd-B `5.00` > FENE-P `4.74` > PTT `4.44` > Giesekus `4.27`; all relax to
+`tr C ≈ 3` at the low-shear core.
+
 ## Reference
 
 R. Fattal, R. Kupferman (2004), *Constitutive laws for the matrix-logarithm of

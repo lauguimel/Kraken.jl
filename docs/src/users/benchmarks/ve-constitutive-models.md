@@ -83,6 +83,56 @@ plateaus higher because `L² = 50` permits more stretch than the `α = 0.2` /
 `ε = 0.25` nonlinearities. This is *exactly* the qualitative behaviour a
 viscoelastic solver must reproduce to be useful beyond the linear regime.
 
+## In a channel flow (Poiseuille)
+
+The analytical comparison above imposes the velocity gradient. The real test is
+**coupled**: drive each model through the same planar-Poiseuille channel with
+the full FVFD solver — D3Q19 solvent at `ν_s` plus the log-conformation polymer
+transport, two-way coupled through the Guo body force `F_poly = ∇·τ_p` — and
+let the flow set its own shear rate `γ̇(y)`. Only the constitutive
+`polymer_model` spec changes between runs, so the wall-normal profiles differ
+*only* by the closure.
+
+The channel matches the constitutive-coupling canaries
+(`test/test_fvfd_{fenep,giesekus,ptt}_coupled_3d.jl`): periodic `x`/`z`,
+half-way bounce-back no-slip `y` walls, a constant streamwise body force `Fx`,
+solvent/polymer split `β = ν_s/ν_total = 0.5`, and `λ` set so the wall
+Weissenberg number `Wi_wall = λγ̇_wall ≈ 1`. In Poiseuille the shear rate is
+**zero at the centre and peaks at the walls**, so the near-wall band is the
+high-`Wi` region where the closures separate, while the low-shear core relaxes
+to the equilibrium `tr C = 3` for every model.
+
+![Viscoelastic constitutive models — coupled Poiseuille trace(C)](ve-constitutive-models-poiseuille.png)
+
+Left: the polymer stretch `tr C = C_xx + C_yy + C_zz` across the channel
+half-width (wall → centre). All four collapse onto `tr C = 3` at the low-shear
+core, then **fan out in the near-wall high-shear band** — exactly the
+differentiation the homogeneous figure predicts, now emerging from the flow
+itself. Right: the coupled velocity profile `u(y)`; the shear-thinning closures
+carry less near-wall polymer stress, so the solvent shear moves a little faster
+and their profiles are slightly fuller.
+
+### Key numbers (coupled, `Wi_wall ≈ 1`, `β = 0.5`, `Ny = 32`)
+
+Ranked by near-wall stretch (`tr C` at the wall plane `j = 1`, the highest-shear
+row), the models order exactly as the constitutive nonlinearity predicts:
+
+| Model | `tr C` (wall) | `tr C` (centre) | peak `u` |
+|-------|--------------:|----------------:|---------:|
+| **Oldroyd-B** | **5.00** (unbounded stretch) | 3.002 | 0.01916 |
+| **FENE-P** (`L²=50`) | **4.74** | 3.002 | 0.01936 |
+| **PTT** (`ε=0.25`) | **4.44** | 3.002 | 0.02093 |
+| **Giesekus** (`α=0.2`) | **4.27** | 3.001 | 0.02124 |
+
+Oldroyd-B sits highest because nothing caps its stretch; FENE-P / PTT / Giesekus
+each thin the near-wall conformation, in that order, and the same ordering holds
+all the way through the high-shear band (e.g. at `j = 4`: `4.30 / 4.16 / 4.02 /
+3.89`). The velocity peak ranks inversely — Giesekus and PTT, which shed the most
+near-wall polymer stress, flow fastest. All four runs are NaN-free and reach a
+steady, symmetric profile in `10 000` steps. This is the same near-wall
+separation the analytical figure predicts, now produced by a fully coupled
+solver — the practical signature a viscoelastic code must show in a real flow.
+
 ## Validation status
 
 Each constitutive closure is validated independently before it appears here:
@@ -136,6 +186,21 @@ conda run -n kraken-v0-3-figures python \
   benchmarks/results/repro/ve-constitutive-models/plot.py
 ```
 
+The **coupled Poiseuille** comparison is a sibling pair in the same bundle. It
+drives the real FVFD Poiseuille solver for each model and writes the
+wall-normal profiles (CPU Float64, `Ny = 32`, ~1–2 min, CI-reproducible — no
+GPU):
+
+```bash
+# from the repo root — runs the 4 coupled drivers, writes the profile CSV
+julia --project=. \
+  benchmarks/results/repro/ve-constitutive-models/make_poiseuille_csv.jl
+
+# then the dark figure (env kraken-v0-3-figures)
+conda run -n kraken-v0-3-figures python \
+  benchmarks/results/repro/ve-constitutive-models/plot_poiseuille.py
+```
+
 The shipped viscoelastic `.krk` presets (sphere, extensional, cylinder) live in
 `benchmarks/krk/viscoelastic/`.
 
@@ -154,7 +219,9 @@ The shipped viscoelastic `.krk` presets (sphere, extensional, cylinder) live in
   85–104 — the RheoTool reference.
 
 ::: tip Coming next
-This page covers the *constitutive* response in homogeneous flows. Follow-up
-sections will add the **in-flow** trace `tr C` along a Poiseuille / extensional
-channel and a **cross-slot** stagnation-point comparison of the four models.
+This page now covers both the *constitutive* response in homogeneous flows and
+the **in-flow** trace `tr C` across a coupled Poiseuille channel. A follow-up
+section will add a **cross-slot** stagnation-point comparison of the four
+models, where the strong extensional kinematics push the bounded closures far
+harder than channel shear does.
 :::
