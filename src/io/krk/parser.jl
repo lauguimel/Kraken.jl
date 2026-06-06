@@ -200,15 +200,16 @@ struct SimulationSetup
     units::Union{UnitsSetup, Nothing}              # Parse-time physical-units descriptor. Runner ignores it; fields above are already raw LU.
     collision::Symbol                              # Generic 2D collision selector; default preserves the historical BGK path.
     wall_bc::Symbol                                # Generic 2D wall selector; default preserves historical halfway bounce-back.
+    sensitivity::Union{Nothing,NamedTuple}         # Optional AD request parsed from `Sensitivity { qoi = ..., wrt = ... }`.
 
     function SimulationSetup(name, lattice, domain, physics, user_vars, regions,
                              boundaries, initial, modules, max_steps, outputs,
                              diagnostics, refinements, velocity_field, rheology,
-                             mesh, units, collision, wall_bc)
+                             mesh, units, collision, wall_bc, sensitivity=nothing)
         return new(name, lattice, domain, physics, Dict{Symbol, Any}(user_vars),
                    regions, boundaries, initial, modules, max_steps, outputs,
                    diagnostics, refinements, velocity_field, rheology, mesh,
-                   units, Symbol(collision), Symbol(wall_bc))
+                   units, Symbol(collision), Symbol(wall_bc), sensitivity)
     end
 end
 
@@ -471,6 +472,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
     diagnostics = nothing
     refinements = RefineSetup[]
     rheology_setups = RheologySetup[]
+    sensitivity = nothing
     setup_helpers = Dict{Symbol, Float64}()  # reynolds, rayleigh, prandtl, L_ref, U_ref
 
     for line in lines
@@ -512,11 +514,15 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
             push!(rheology_setups, _parse_rheology(line, user_vars))
         elseif keyword == "Setup"
             merge!(setup_helpers, _parse_setup(line, user_vars))
+        elseif keyword == "Sensitivity"
+            sensitivity === nothing ||
+                throw(ArgumentError("Only one Sensitivity { ... } block is allowed"))
+            sensitivity = _parse_sensitivity(line)
         else
             known = ("Simulation", "Domain", "Physics", "Define", "Obstacle",
                      "Fluid", "Boundary", "Refine", "Initial", "Velocity",
                      "Module", "Run", "Output", "Diagnostics", "Rheology",
-                     "Setup", "Units", "Preset", "Sweep")
+                     "Setup", "Units", "Preset", "Sweep", "Sensitivity")
             suggestion = _suggest_name(keyword, known)
             msg = "Unknown keyword '$keyword' in .krk file"
             if suggestion !== nothing
@@ -584,7 +590,7 @@ function _parse_kraken_internal_single(lines::Vector{String}; kwargs...)
                             regions, boundaries, initial, modules,
                             max_steps, outputs, diagnostics, refinements,
                             velocity_field, rheology_setups, nothing, units_setup,
-                            collision, wall_bc)
+                            collision, wall_bc, sensitivity)
 
     # --- Validate face names against lattice dimensionality ---
     _validate_faces_vs_lattice(setup)

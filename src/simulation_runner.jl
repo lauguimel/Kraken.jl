@@ -10,25 +10,28 @@ Keyword arguments override `Define` defaults for parametric studies.
 Pass `max_steps` to override the `Run N steps` directive (useful for tests).
 
 Returns a NamedTuple with final fields on CPU: `(ρ, ux, uy, setup)`.
+If the setup contains `Sensitivity { ... }`, returns the
+`steady_shape_sensitivity` API result instead.
 
 ## Dispatch rules
 The runner selects a backend driver based on `setup.modules`, `setup.lattice`,
 `setup.refinements`, and the `setup.name` (case name):
 
-1. `:advection_only in modules`  → pure VOF advection (no LBM solve)
-2. `:twophase_vof   in modules`  → two-phase LBM with surface tension
-3. `:axisymmetric   in modules`  → `run_hagen_poiseuille_2d` if the case
+1. `setup.sensitivity !== nothing` → steady AD shape sensitivity
+2. `:advection_only in modules`  → pure VOF advection (no LBM solve)
+3. `:twophase_vof   in modules`  → two-phase LBM with surface tension
+4. `:axisymmetric   in modules`  → `run_hagen_poiseuille_2d` if the case
    name contains `hagen_poiseuille`, otherwise an informative error
-4. `!isempty(setup.refinements)` → refined-grid drivers. Only refined
+5. `!isempty(setup.refinements)` → refined-grid drivers. Only refined
    natural convection is currently supported via the .krk runner;
    other refined cases raise an informative error (run them via the
    Julia API — see `create_refined_domain` / `create_thermal_patch_arrays`).
-5. `:thermal in modules`         → `run_rayleigh_benard_2d`,
+6. `:thermal in modules`         → `run_rayleigh_benard_2d`,
    `run_natural_convection_2d`, or a thermal-conduction fallback
    depending on the case name
-6. `setup.lattice === :D3Q19`    → `run_cavity_3d` if the case name
+7. `setup.lattice === :D3Q19`    → `run_cavity_3d` if the case name
    contains `cavity_3d`, otherwise an informative error
-7. Default (`:D2Q9`, no modules) → generic single-phase LBM loop
+8. Default (`:D2Q9`, no modules) → generic single-phase LBM loop
    (existing behavior, compatible with all cavity/Poiseuille/Couette/
    Taylor-Green/cylinder examples).
 
@@ -66,7 +69,7 @@ function _override_max_steps(setup::SimulationSetup, new_max::Int)
         setup.modules, new_max,
         setup.outputs, setup.diagnostics, setup.refinements,
         setup.velocity_field, setup.rheology, setup.mesh, setup.units,
-        setup.collision, setup.wall_bc)
+        setup.collision, setup.wall_bc, setup.sensitivity)
 end
 
 _krk_selector_symbol(sym::Symbol) = Symbol(lowercase(String(sym)))
@@ -108,7 +111,8 @@ function _setup_with_global_stl_libb(setup::SimulationSetup)
                            setup.initial, setup.modules, setup.max_steps,
                            setup.outputs, setup.diagnostics, setup.refinements,
                            setup.velocity_field, setup.rheology, setup.mesh,
-                           setup.units, setup.collision, :libb)
+                           setup.units, setup.collision, :libb,
+                           setup.sensitivity)
 end
 
 function _ensure_generic_trt_supported!(setup::SimulationSetup, has_body_force::Bool,
@@ -144,7 +148,11 @@ function run_simulation(setup::SimulationSetup;
     sanity_check(setup)
 
     # --- Dispatch to specialized runners based on modules ---
-    if setup.mesh !== nothing
+    if setup.sensitivity !== nothing
+        T === Float64 || throw(ArgumentError(
+            ".krk Sensitivity dispatch supports T=Float64 only."))
+        return run_krk_sensitivity(setup)
+    elseif setup.mesh !== nothing
         if :slbm_drag in setup.modules
             return _run_gmsh_slbm_drag(setup; backend=backend, T=T,
                                        callback=callback,

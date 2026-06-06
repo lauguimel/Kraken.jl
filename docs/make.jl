@@ -169,6 +169,8 @@ makedocs(;
                 "Thermal natural convection" => "users/benchmarks/thermal-natural-convection.md",
                 "Sphere drag 3D" => "users/benchmarks/sphere-drag-3d.md",
                 "Viscoelastic cylinder (Oldroyd-B)" => "users/benchmarks/viscoelastic-cylinder.md",
+                "Steady shape sensitivity (AD)" => "users/benchmarks/ad-shape-sensitivity.md",
+                "Steady shape sensitivity — viscoelastic (AD)" => "users/benchmarks/ad-shape-sensitivity-viscoelastic.md",
                 "GPU certification" => "users/benchmarks/gpu-certification.md",
             ],
         ],
