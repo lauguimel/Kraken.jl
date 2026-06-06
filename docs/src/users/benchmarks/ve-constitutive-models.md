@@ -201,6 +201,22 @@ conda run -n kraken-v0-3-figures python \
   benchmarks/results/repro/ve-constitutive-models/plot_poiseuille.py
 ```
 
+The **cross-slot strand** comparison is a third pair in the same bundle. It
+drives the real FVFD planar-extension solver
+(`run_viscoelastic_fvfd_extensional_3d`, `velocity_mode=:imposed`) for each
+model and writes the `z`-mid `tr C(x, y)` field (CPU Float64, `Nx = Ny = 32`,
+`λε̇ = 0.35`, ~a few minutes, CI-reproducible — no GPU):
+
+```bash
+# from the repo root — runs the 4 imposed-stagnation drivers, writes the field CSV
+julia --project=. \
+  benchmarks/results/repro/ve-constitutive-models/make_crossslot_csv.jl
+
+# then the dark figure (env kraken-v0-3-figures)
+conda run -n kraken-v0-3-figures python \
+  benchmarks/results/repro/ve-constitutive-models/plot_crossslot.py
+```
+
 The shipped viscoelastic `.krk` presets (sphere, extensional, cylinder) live in
 `benchmarks/krk/viscoelastic/`.
 
@@ -218,10 +234,66 @@ The shipped viscoelastic `.krk` presets (sphere, extensional, cylinder) live in
   solver for viscoelastic fluid flows*, J. Non-Newtonian Fluid Mech. **239**,
   85–104 — the RheoTool reference.
 
-::: tip Coming next
-This page now covers both the *constitutive* response in homogeneous flows and
-the **in-flow** trace `tr C` across a coupled Poiseuille channel. A follow-up
-section will add a **cross-slot** stagnation-point comparison of the four
-models, where the strong extensional kinematics push the bounded closures far
-harder than channel shear does.
-:::
+## Planar stagnation-point flow (cross-slot strand)
+
+The Poiseuille channel above separates the closures through wall **shear**. The
+complementary — and for polymer solutions far more demanding — test is strong
+**extension**. The cleanest extensional flow is the **planar stagnation point**:
+the kinematic core of a cross-slot device, where two opposed inlets feed two
+opposed outlets and the streamlines cross at a central stagnation point. We
+idealise that core directly with the imposed straining field
+
+```
+u = (ε̇·x,  −ε̇·y,  0)
+```
+
+— **outflow along ±x**, **inflow along ±y**, with a stagnation point at the
+centre. A fluid element entering along the inflow (`y`) axis decelerates toward
+the centre, then accelerates out along the outflow (`x`) axis: it spends a long
+residence time in the extensional region, so the conformation tensor `C` builds
+a high-stretch **strand** along the outflow axis while relaxing back toward
+equilibrium `tr C = 3` along the inflow axis. This is the lattice-scale origin
+of the cross-slot's iconic central **birefringent strand**. Crucially, it is
+driven by conformation **advection** (the `∇uᵀ·C + C·∇u` transport): even though
+the imposed strain rate is spatially *uniform*, the resulting `tr C` field is
+strongly **non-uniform** — exactly the strand. (A literal four-arm cross-slot
+geometry, with the stagnation point produced by the flow rather than imposed, is
+a natural future extension; here we isolate its essential kinematics.)
+
+We drive the same straining field through all four closures with the real FVFD
+log-conformation pipeline (`run_viscoelastic_fvfd_extensional_3d`,
+`velocity_mode=:imposed`: the conformation is advected + relaxed by the actual
+solver while the velocity is held at the analytical stagnation field). The
+operating point is matched to the validated extensional canary — a small strain
+rate `ε̇` in lattice units (so the coupled D3Q19 solvent step stays stable) with
+a large `λ` giving an extension number `λε̇ = 0.35`, a strong Oldroyd-B stretch
+safely below the coil-stretch pole `λε̇ = 0.5`.
+
+![Viscoelastic constitutive models — cross-slot strand trace(C)](ve-constitutive-models-crossslot.png)
+
+Top: the `tr C(x, y)` field in the `z`-mid plane for the four models on a shared
+colour scale. Each shows the bright **strand along the outflow (`x`) axis**
+through the stagnation point, fading to `tr C = 3` along the inflow (`y`) axis —
+the signature stagnation-point anisotropy. Bottom: `tr C` along the outflow axis,
+which cleanly ranks the four closures by strand intensity.
+
+### Key numbers (`λε̇ = 0.35`, `β = 0.5`, `Nx = Ny = 32`)
+
+Ranked by strand intensity (peak `tr C` on the outflow axis), the models order
+exactly as the constitutive nonlinearity predicts:
+
+| Model | strand peak `tr C` | inflow `tr C` (`r = 8`) | outflow/inflow anisotropy |
+|-------|-------------------:|------------------------:|--------------------------:|
+| **Oldroyd-B** | **4.71** (unbounded stretch) | 3.63 | **1.30×** |
+| **FENE-P** (`L²=50`) | **4.45** | 3.60 | 1.23× |
+| **PTT** (`ε=0.25`) | **3.94** | 3.56 | 1.11× |
+| **Giesekus** (`α=0.2`) | **3.83** | 3.49 | 1.10× |
+
+Oldroyd-B builds the most intense strand because nothing caps its extensional
+stretch; FENE-P sits below it (the `L² = 50` extensibility limit), and the two
+trace-based closures shed the most — Giesekus and PTT cap extension hardest, so
+their strands are the weakest. This is the **same ordering** as the homogeneous
+extension figure (`C_xx` plateaus) and the coupled Poiseuille near-wall stretch,
+now produced by a stagnation-point flow with a spatially varying field — the
+practical signature a viscoelastic solver must reproduce to predict cross-slot
+behaviour. All four runs are NaN-free and reach a steady strand.

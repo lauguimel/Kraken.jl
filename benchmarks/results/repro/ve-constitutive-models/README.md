@@ -80,6 +80,43 @@ Near-wall stretch ranking (`tr C` at the wall plane, `Wi_wall ≈ 1`):
 Oldroyd-B `5.00` > FENE-P `4.74` > PTT `4.44` > Giesekus `4.27`; all relax to
 `tr C ≈ 3` at the low-shear core.
 
+## Cross-slot strand (planar stagnation point) — third pair
+
+The cross-slot's central birefringent **strand** is a planar stagnation-point
+flow effect. With the imposed straining field `u = (ε̇·x, −ε̇·y, 0)` — outflow
+along `±x`, inflow along `±y`, stagnation point at the centre — conformation
+**advection** builds a high-stretch strand along the outflow axis while the
+inflow axis relaxes toward `tr C = 3`, even though the imposed strain rate is
+spatially uniform. This pair drives the real FVFD planar-extension solver
+`run_viscoelastic_fvfd_extensional_3d` (`velocity_mode=:imposed`: the
+conformation is advected + relaxed by the actual solver while the velocity is
+held at the analytical stagnation field) for each model and writes the `z`-mid
+`tr C(x, y)` field. Operating point matched to the validated extensional canary:
+small `ε̇` in lattice units (so the coupled D3Q19 solvent step stays stable) with
+a large `λ` giving `λε̇ = 0.35` — a strong Oldroyd-B stretch below the
+coil-stretch pole `λε̇ = 0.5`.
+
+| Field | `Nx×Ny×Nz` | `β` | `λε̇` | `ε̇` | `λ` | steps |
+|-------|-----------|-----|-------|------|-----|-------|
+| imposed planar stagnation | `32×32×4` | 0.5 | 0.35 | `0.005` | 70 | 1500 |
+
+- `make_crossslot_csv.jl` — runs the 4 imposed-stagnation drivers and writes the
+  `z`-mid `tr C(x, y)` field to `ve_crossslot_fields.csv`
+  (`model, i, j, x, y, trC`; `x, y` are LU offsets from the stagnation point).
+  Run (from repo root):
+  `julia --project=. benchmarks/results/repro/ve-constitutive-models/make_crossslot_csv.jl`.
+  CPU Float64, no GPU; CI-reproducible (~a few minutes).
+- `plot_crossslot.py` — dark figure: a 2×2 grid of `tr C(x, y)` for the four
+  models on a shared colour scale + a strand profile along the outflow axis.
+  Writes the docs page PNG
+  `docs/src/users/benchmarks/ve-constitutive-models-crossslot.png`.
+  Run `conda run -n kraken-v0-3-figures python plot_crossslot.py`.
+
+Strand-intensity ranking (peak `tr C` on the outflow axis, `λε̇ = 0.35`):
+Oldroyd-B `4.71` > FENE-P `4.45` > PTT `3.94` > Giesekus `3.83`; outflow/inflow
+anisotropy `1.30× / 1.23× / 1.11× / 1.10×`. Same ordering as the homogeneous
+extension `C_xx` plateaus and the coupled Poiseuille near-wall stretch.
+
 ## Reference
 
 R. Fattal, R. Kupferman (2004), *Constitutive laws for the matrix-logarithm of
