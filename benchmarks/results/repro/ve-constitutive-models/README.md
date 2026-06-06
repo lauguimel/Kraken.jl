@@ -1,0 +1,58 @@
+# Reproducibility bundle — viscoelastic constitutive models
+
+Self-contained bundle for the **constitutive-models** page
+(`docs/src/users/benchmarks/ve-constitutive-models.md`). Drives each of
+Kraken's four 3D log-conformation constitutive models single-cell through two
+homogeneous flows with the **real** Kraken constitutive solver (no hardcoded
+model formulas) and renders the two-panel comparison figure in the locked dark
+docs style (`krakendark`, `#1b1b1f`, LaTeX-if-available).
+
+## Case
+
+A single conformation cell `(1,1,1)` driven by an imposed, spatially-uniform
+velocity gradient, integrated to its constitutive fixed point — the same
+single-cell pattern as the constitutive canaries
+`test/test_fvfd_{logconf,fenep,giesekus,ptt}_3d.jl`. Each step calls the actual
+3D log-conformation kernel
+(`logfv_constitutive_step_log_{,_fenep,_giesekus,_ptt}_3d!`) the coupled drivers
+use; `C = exp(Ψ)` is reconstructed via `mat_exp_sym3x3`. With `G = 1`, `λ = 1`
+the control parameters are read directly: `Wi = λγ̇` (shear) and `λε̇`
+(extension).
+
+| Flow | Imposed `gradU` | Control | Reported |
+|------|-----------------|---------|----------|
+| **Steady simple shear** | `γ̇·(e_x⊗e_y)` | `Wi = λγ̇ ∈ [0, 10]` | `N1 = G(C_xx−C_yy)`, `η_p,app = G·C_xy/γ̇`, `tr C` |
+| **Steady planar extension** | `ε̇·diag(1,−1,0)` | `λε̇ ∈ [0, 0.49]` | `C_xx`, `tr C` |
+
+The four models at representative non-Newtonian parameters:
+
+| Series | Model | Parameter | Signature |
+|--------|-------|-----------|-----------|
+| `oldroydb` | `LogConfOldroydB` | — | constant viscosity; `N1 = 2 Wi²`; extension pole at `λε̇=0.5` (`C_xx=1/(1−2λε̇)`). |
+| `fenep` | `LogConfFENEP` | `L²=50` | finite extensibility (`tr C < L²`); shear-thinning. |
+| `giesekus` | `LogConfGiesekus` | `α=0.2` | quadratic mobility; shear-thinning; bounded extension. |
+| `ptt` | `LogConfPTT` (linear) | `ε=0.25` | trace multiplier `Y=1+ε(tr C−3)`; shear-thinning; bounded extension. |
+
+Each model is independently validated against its closed-form steady simple
+shear (Giesekus/PTT residual ≤ 1e-6, FENE-P/OB-limit ≤ 1e-3) and the Oldroyd-B
+limit (`α,ε→0` or `L²→∞`) is recovered **bit-identically** — see the canary
+files above.
+
+## Files
+
+- `make_csv.jl` — drives all four models through both flows with the real
+  Kraken solver and writes `ve_constitutive_models.csv`. Run (from repo root):
+  `julia --project=. benchmarks/results/repro/ve-constitutive-models/make_csv.jl`.
+  CPU Float64, ~1 min; CI-reproducible (no GPU).
+- `ve_constitutive_models.csv` — the sweep:
+  `flow, model, control, Cxx, Cxy, Cyy, Czz, trC, N1, eta_p, steps`.
+- `plot.py` — self-contained figure reproducer (csv + matplotlib +
+  `krakendark`). Reads the CSV next to it and writes the docs page PNG
+  `docs/src/users/benchmarks/ve-constitutive-models.png`.
+  Run `conda run -n kraken-v0-3-figures python plot.py`.
+
+## Reference
+
+R. Fattal, R. Kupferman (2004), *Constitutive laws for the matrix-logarithm of
+the conformation tensor*, J. Non-Newtonian Fluid Mech. **123**, 281–285 — the
+log-conformation representation shared by all four models.

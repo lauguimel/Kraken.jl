@@ -186,6 +186,7 @@ makedocs(;
             "Thermal natural convection" => "users/benchmarks/thermal-natural-convection.md",
             "Sphere drag 3D" => "users/benchmarks/sphere-drag-3d.md",
             "Viscoelastic cylinder (Oldroyd-B)" => "users/benchmarks/viscoelastic-cylinder.md",
+            "Viscoelastic constitutive models" => "users/benchmarks/ve-constitutive-models.md",
             "Viscoelastic Poiseuille (FVFD 3D)" => "users/benchmarks/ve3d-poiseuille-convergence.md",
             "GPU certification" => "users/benchmarks/gpu-certification.md",
             "Performance" => "benchmarks/performance.md",
