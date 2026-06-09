@@ -12,6 +12,12 @@ module Kraken
 const _png_saver = Ref{Any}(nothing)
 const _gif_saver = Ref{Any}(nothing)
 
+# --- Platform contract (method-agnostic; Phase 0 — types only) ---
+include("platform/contract.jl")
+export AbstractProblem, AbstractMethod, AbstractSolution, AbstractObservable, AbstractClosure
+export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure
+export capabilities
+
 # --- Lattice definitions ---
 include("lattice/lattice.jl")
 include("lattice/d2q9.jl")
