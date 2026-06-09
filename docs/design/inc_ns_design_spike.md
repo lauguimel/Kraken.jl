@@ -14,6 +14,26 @@ Hard constraints from the platform: GPU-native, `KernelAbstractions`-portable
 fractional faces**, reuse the existing FVFD advective operators, and stay
 **adjoint-friendly** (later `SteadyAdjoint` capability).
 
+## Scope refinement (user direction, 2026-06-10)
+
+Target: **incompressible laminar** flow, Newtonian first (no turbulence model). Two
+extensions beyond issue #7's original "steady-only, transient stays LBM's job":
+
+- **Steady AND unsteady.** One shared incompressible core (the operators + the
+  pressure-Poisson service) driven by either a **steady driver (SIMPLE)** or an
+  **unsteady driver (projection / fractional-step / PISO, implicit-in-diffusion)**.
+  Both reuse the same Poisson service and operators; only the outer loop differs.
+- **Branchable to viscoelastic.** The momentum stress term is a **pluggable
+  constitutive closure** (`AbstractClosure`): Newtonian (`μ∇²u`, ≡ `∇·(2μD)` at
+  `∇·u=0`) now; viscoelastic later via the **existing FVFD log-conformation
+  operators + `∇·τ`** — no separate solver. Unifies steady/unsteady × Newtonian/VE
+  in one FVFD discretization (same BCs, cut-cell geometry, constitutive modules as
+  the current VE work).
+
+Reinforcement: the pressure-Poisson matrix is **geometry-only ⇒ constant across
+time steps** ⇒ cuDSS *factorize-once* amortizes over an entire transient run —
+strengthening Decision 2 (assembled-sparse) for unsteady, not just steady.
+
 ## Framing decision — adopt a general performant linear-solve foundation
 
 We deliberately build #8 on a **general assembled-sparse linear solver** from the
@@ -62,6 +82,12 @@ sparse-direct fits **steady** so well.
 infrastructure (assemble the larger system, hand to the solver) → cheap to reach
 once #8's foundation is general. PTC kept as a robustness fallback for stalled
 high-Re cases (same Poisson kernel).
+
+**Unsteady driver (per Scope refinement):** the transient regime uses a
+**projection / fractional-step (or PISO)** time-integration — implicit in
+diffusion, with one pressure-Poisson solve per step — over the **same** operators
++ Poisson service. SIMPLE is the steady driver; both sit on the shared core, with
+the viscous/stress term supplied by the branchable constitutive closure.
 
 ## Decision 2 — linear-solve path (#8): **assembled-sparse, cuDSS + CHOLMOD via LinearSolve.jl**
 
