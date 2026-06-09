@@ -59,3 +59,78 @@
   -webkit-text-fill-color: transparent;
   color: transparent;
 }
+
+/* ==========================================================================
+   3. Capability grid — "What Kraken can do" showcase on the home page.
+   Rendered from a ```@raw html``` block in index.md as <div class="kraken-caps">
+   wrapping eight <a class="kraken-cap"> cards (inline Lucide SVG icons).
+   Built to match the native Vitepress feature cards: same theme vars
+   (--vp-c-bg-soft / --vp-c-divider / --vp-c-brand-1) and the same
+   --kraken-title-gradient on titles. Reads cleanly on the #1b1b1f page.
+   ========================================================================== */
+
+.kraken-caps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.kraken-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.25rem;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  text-decoration: none;
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.kraken-cap:hover {
+  transform: translateY(-2px);
+  border-color: var(--vp-c-brand-1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* Cards are <a> inside the markdown body, so Vitepress's content-link rule
+   (.vp-doc a) underlines them. Override with a higher-specificity selector so
+   the whole card stays underline-free, idle and on hover. */
+.vp-doc a.kraken-cap,
+.vp-doc a.kraken-cap:hover {
+  text-decoration: none;
+}
+
+/* Icon takes the brand teal so it pops on the dark page; shifts to the
+   resolved brand colour on hover for a subtle accent change. */
+.kraken-cap-icon svg {
+  width: 28px;
+  height: 28px;
+  stroke: var(--vp-dark-green-light, #42d392);
+  stroke-width: 2;
+  fill: none;
+}
+
+.kraken-cap:hover .kraken-cap-icon svg {
+  stroke: var(--vp-c-brand-1);
+}
+
+/* Title reuses the hero/feature-card gradient so the wordmark identity carries
+   through to the capability grid. */
+.kraken-cap-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  background: var(--kraken-title-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.kraken-cap-sub {
+  color: var(--vp-c-text-2);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}

@@ -77,37 +77,54 @@ Run        30000 steps
 krk cavity.krk
 ```
 
-## Where to go next
+## What Kraken can do
 
-- **[Installation](installation.md)** — set up Kraken.jl and its GPU backends.
-- **[Getting started](getting_started.md)** — from zero to a running simulation.
-- **[Concepts](concepts_index.md)** — the ideas behind the solver.
-- **[Capabilities](capabilities.md)** — what the v0.2 release ships.
-- **[Theory](theory/01_lbm_fundamentals.md)** — progressive chapters, from kinetic theory to lattice Boltzmann.
-- **[Examples](examples/04_cavity_2d.md)** — validated runs with plots and convergence studies.
-- **[Validation matrix](users/benchmarks/validation-matrix.md)** — every benchmark and its reference.
-- **[Performance benchmarks](benchmarks/performance.md)** — MLUPS across CPU and GPU backends.
-- **[`.krk` reference](users/krk-reference.md)** — the declarative configuration language.
-- **[API reference](api/config.md)** — every public function, documented.
+```@raw html
+<div class="kraken-caps">
+  <a class="kraken-cap" href="/examples/04_cavity_2d">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.8 19.6A2 2 0 1 0 14 16H2"/><path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/><path d="M9.8 4.4A2 2 0 1 1 11 8H2"/></svg></span>
+    <span class="kraken-cap-title">Newtonian flow</span>
+    <span class="kraken-cap-sub">Incompressible 2D · 3D · axisymmetric — BGK &amp; MRT</span>
+  </a>
+  <a class="kraken-cap" href="/examples/08_rayleigh_benard">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg></span>
+    <span class="kraken-cap-title">Thermal convection</span>
+    <span class="kraken-cap-sub">Boussinesq natural convection, coupled DDF</span>
+  </a>
+  <a class="kraken-cap" href="/users/benchmarks/viscoelastic-cylinder">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12q2.5 2 5 0t5 0 5 0 5 0"/><path d="M2 19q2.5 2 5 0t5 0 5 0 5 0"/><path d="M2 5q2.5 2 5 0t5 0 5 0 5 0"/></svg></span>
+    <span class="kraken-cap-title">Viscoelastic</span>
+    <span class="kraken-cap-sub">Oldroyd-B polymer stress, validated vs RheoTool</span>
+  </a>
+  <a class="kraken-cap" href="/examples/20_grid_refinement_cavity">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"/><path d="M3 12h18"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg></span>
+    <span class="kraken-cap-title">Grid refinement</span>
+    <span class="kraken-cap-sub">Nested patches, Filippova–Hänel rescaling</span>
+  </a>
+  <a class="kraken-cap" href="/capabilities#5-geometry-and-obstacles">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span>
+    <span class="kraken-cap-title">Complex geometry</span>
+    <span class="kraken-cap-sub">STL import, voxelisation, interpolated bounce-back</span>
+  </a>
+  <a class="kraken-cap" href="/users/benchmarks/gpu-certification">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg></span>
+    <span class="kraken-cap-title">GPU-native</span>
+    <span class="kraken-cap-sub">One kernel layer — CUDA · Apple Metal · CPU</span>
+  </a>
+  <a class="kraken-cap" href="/users/krk-reference">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/></svg></span>
+    <span class="kraken-cap-title">.krk language</span>
+    <span class="kraken-cap-sub">Declarative cases, no Julia required</span>
+  </a>
+  <a class="kraken-cap" href="/users/benchmarks/validation-matrix">
+    <span class="kraken-cap-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></svg></span>
+    <span class="kraken-cap-title">Validated</span>
+    <span class="kraken-cap-sub">Every benchmark tracked against a literature reference</span>
+  </a>
+</div>
+```
 
-## Physics capabilities
-
-Kraken is organised as a set of physics modules that share one kinetic core,
-so the same BGK/MRT solver, body forcing, and boundary machinery extend across
-every regime.
-
-| Module | What it enables | Representative drivers |
-|:-------|:----------------|:-----------------------|
-| **Newtonian** | Incompressible flow in 2D, 3D, and axisymmetric geometries (BGK & MRT collision, Guo forcing) | `run_cavity_2d`, `run_cavity_3d`, `run_poiseuille_2d`, `run_cylinder_2d`, `run_hagen_poiseuille_2d` |
-| **Thermal** | Boussinesq natural convection via a coupled double-distribution temperature field | `run_rayleigh_benard_2d` |
-| **Viscoelastic** | Oldroyd-B polymer stress coupled to the flow ([validated vs RheoTool](users/benchmarks/viscoelastic-cylinder.md)) | `run_viscoelastic_logfv_channel_2d`, `run_viscoelastic_cylinder_2d` |
-| **Grid refinement** | Nested patch refinement with Filippova–Hänel rescaling and route-native validation | `run_cavity_2d` with `Refine { … }` patches |
-| **Geometry / immersed boundaries** | STL-driven masks, voxelisation, and linearly-interpolated bounce-back for curved walls | `run_sphere_libb_3d`, STL loader + cut-link drag |
-| **GPU backends** | One physics layer, multiple runtimes selected at launch — CUDA, Apple Silicon (Metal), and multi-threaded CPU | every driver, via the backend argument |
-
-See the [capabilities page](capabilities.md) for the full module breakdown and
-the [validation matrix](users/benchmarks/validation-matrix.md) for the
-literature references each module is checked against.
+See the [full capabilities matrix](capabilities.md) for the complete module breakdown, and the [validation matrix](users/benchmarks/validation-matrix.md) for every literature reference.
 
 ## Showcase gallery
 
