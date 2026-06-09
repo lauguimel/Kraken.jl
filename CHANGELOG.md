@@ -3,6 +3,16 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## v0.2.1
+
+Documentation patch — no functional or source changes.
+
+- Landing page: reworked navigation and the "What Kraken can do" capability grid.
+- Examples: per-example `.krk` download dropdowns; boundary-condition schematics
+  redrawn with a shared toolkit.
+- DocumenterVitepress theme polish (custom CSS); `.krk` syntax highlighting;
+  velocity-field lead plots; axisymmetric reference; theory-page cleanups.
+
 ## v0.2.0
 
 Multiphysics release.
