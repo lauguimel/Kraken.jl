@@ -12,11 +12,17 @@ module Kraken
 const _png_saver = Ref{Any}(nothing)
 const _gif_saver = Ref{Any}(nothing)
 
-# --- Platform contract (method-agnostic; Phase 0 — types only) ---
+# --- Platform contract (method-agnostic) ---
+# Phase 0: types + capabilities. Phase 0b: LBMSolution + solve + sample (thin,
+# behaviour-preserving wrappers around run_simulation; function bodies resolve
+# run_simulation lazily at call time, so include order before the runner is fine).
 include("platform/contract.jl")
+include("platform/solution.jl")   # LBM, LBMSolution, solve
+include("platform/sample.jl")     # sample
 export AbstractProblem, AbstractMethod, AbstractSolution, AbstractObservable, AbstractClosure
 export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure
 export capabilities
+export LBM, LBMSolution, solve, sample
 
 # --- Lattice definitions ---
 include("lattice/lattice.jl")

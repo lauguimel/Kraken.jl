@@ -7,6 +7,7 @@ if get(ENV, "KRAKEN_AD_ONLY", "false") == "true"
 end
 
 @testset "Kraken.jl LBM" begin
+    include("platform/contract_parity_test.jl")
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
     include("test_poiseuille_3d.jl")
