@@ -19,10 +19,12 @@ const _gif_saver = Ref{Any}(nothing)
 include("platform/contract.jl")
 include("platform/solution.jl")   # LBM, LBMSolution, solve
 include("platform/sample.jl")     # sample
+include("platform/observe.jl")    # observe, predict, Prediction, observables
 export AbstractProblem, AbstractMethod, AbstractSolution, AbstractObservable, AbstractClosure
 export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure
 export capabilities
 export LBM, LBMSolution, solve, sample
+export observe, predict, Prediction, FieldProbe, LineProfile, FieldReduction
 
 # --- Lattice definitions ---
 include("lattice/lattice.jl")

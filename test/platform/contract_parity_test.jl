@@ -40,3 +40,30 @@ struct _DummyMethod <: Kraken.AbstractMethod end
         @test sample(sol, :uy, (2, 2)) == ref.uy[2, 2]
     end
 end
+
+@testset "platform observables (Phase 1)" begin
+    krk = """
+        Simulation parity D2Q9
+        Domain L = 0.25 x 1.0  N = 8 x 16
+        Physics nu = 0.1  Fx = 1e-5
+        Boundary x periodic
+        Boundary south wall
+        Boundary north wall
+        Run 200 steps
+    """
+    sol = solve(parse_kraken(krk), LBM())
+    ref = sol.result
+
+    # observe goes through sample only — values match the raw field.
+    @test observe(sol, FieldProbe(:ux, (2, 2))).value == ref.ux[2, 2]
+    @test observe(sol, LineProfile(:uy, [(2, j) for j in 1:4])).value == [ref.uy[2, j] for j in 1:4]
+    @test observe(sol, FieldReduction(:ρ, sum)).value == sum(ref.ρ)
+
+    pred = observe(sol, FieldProbe(:ux, (2, 2)))
+    @test pred isa Prediction
+    @test pred.observable isa FieldProbe
+
+    # predict = solve + observe (LBM is deterministic → identical to observing a fresh solve).
+    pr = predict(parse_kraken(krk), LBM(), FieldReduction(:ρ, sum))
+    @test pr.value == observe(solve(parse_kraken(krk), LBM()), FieldReduction(:ρ, sum)).value
+end
