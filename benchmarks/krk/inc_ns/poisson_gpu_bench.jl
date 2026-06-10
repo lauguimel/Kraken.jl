@@ -27,6 +27,24 @@ const _SRC = joinpath(@__DIR__, "..", "..", "..", "src", "solve")
 include(joinpath(_SRC, "linear_solve.jl"))
 include(joinpath(_SRC, "poisson_embedded.jl"))
 
+# Conditionally load CUDA/CUDSS at TOP LEVEL. This MUST be done in top-level
+# statements separate from where the bindings are first used: referencing `CUDA`
+# in the same world age as its `using` raises `UndefVarError: CUDA ... binding
+# too new`. On a CPU-only box the `using` throws and the GPU half stays disabled.
+const _CUDA_LOADED = try
+    @eval using CUDA
+    @eval using CUDA.CUSPARSE
+    @eval using CUDSS
+    true
+catch err
+    @info "GPU half disabled: CUDA/CUDSS not loadable" error = err
+    false
+end
+
+# Separate top-level statement → world age has advanced past the `using` above,
+# so `CUDA` now resolves. Short-circuits (never touches `CUDA`) when not loaded.
+const _GPU_OK = _CUDA_LOADED && CUDA.functional()
+
 const BENCH_NS = (128, 256, 512, 1024)
 
 # Manufactured Dirichlet problem on the unit square with an embedded tilted wall,
@@ -82,18 +100,8 @@ end
 # ----- GPU half: activates only under a functional CUDA + CUDSS -------------
 # Returns `nothing` if CUDA/CUDSS are unavailable (CPU-only run).
 function try_run_gpu(cpu_results)
-    have_cuda = false
-    try
-        @eval using CUDA
-        @eval using CUDA.CUSPARSE
-        @eval using CUDSS
-        have_cuda = CUDA.functional()
-    catch err
-        @info "GPU half skipped: CUDA/CUDSS not available" error = err
-        return nothing
-    end
-    if !have_cuda
-        @info "GPU half skipped: CUDA.functional() == false (no device)"
+    if !_GPU_OK
+        @info "GPU half skipped: CUDA/CUDSS unavailable or no functional device"
         return nothing
     end
 
