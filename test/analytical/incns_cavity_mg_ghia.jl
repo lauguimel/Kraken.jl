@@ -100,19 +100,24 @@ end
         @test c.res.u[64, end] > 0.5
     end
 
-    @testset "Re=1000 (256²) <= 10% local" begin
-        c = incns_cavity_mg_case(; N=256, Re=1000.0,
-                                 ghia_u=GHIA_MG_RE1000_U, ghia_v=GHIA_MG_RE1000_V,
-                                 relax=(u=0.5, p=0.2), tol=1e-6, vel_tol=1e-6,
-                                 maxiter=40000)
-        INCNS_CAVITY_MG_RESULTS[:re1000] = c
-        @test c.res.converged
-        rh = c.res.residual_history
-        @test rh[end] / rh[1] < 1e-4
-        @test c.max_err_u <= 0.10
-        @test c.max_err_v <= 0.10
-        @test c.res.checkerboard < 0.5
-        # Re=1000 primary vortex: stronger return flow than Re=100.
-        @test minimum(c.res.u) < -0.3
+    # The Re=1000 256² case is a LONG CPU run (tens of thousands of SIMPLE
+    # iterations); set INCNS_MG_GHIA_SKIP_RE1000=1 to skip it for quick local
+    # Re=100 validation. Default (no env) runs everything — CI gate unchanged.
+    if !(get(ENV, "INCNS_MG_GHIA_SKIP_RE1000", "") in ("1", "true", "TRUE"))
+        @testset "Re=1000 (256²) <= 10% local" begin
+            c = incns_cavity_mg_case(; N=256, Re=1000.0,
+                                     ghia_u=GHIA_MG_RE1000_U, ghia_v=GHIA_MG_RE1000_V,
+                                     relax=(u=0.5, p=0.2), tol=1e-6, vel_tol=1e-6,
+                                     maxiter=40000)
+            INCNS_CAVITY_MG_RESULTS[:re1000] = c
+            @test c.res.converged
+            rh = c.res.residual_history
+            @test rh[end] / rh[1] < 1e-4
+            @test c.max_err_u <= 0.10
+            @test c.max_err_v <= 0.10
+            @test c.res.checkerboard < 0.5
+            # Re=1000 primary vortex: stronger return flow than Re=100.
+            @test minimum(c.res.u) < -0.3
+        end
     end
 end

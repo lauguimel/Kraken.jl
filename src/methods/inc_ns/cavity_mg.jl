@@ -19,6 +19,35 @@
 # So a CUDA run is `backend_ka = CUDABackend()`, `atype = CuArray{Float64}` with
 # NO other change. We validate on the CPU backend here (no GPU locally).
 #
+# LATENCY/ORCHESTRATION DESIGN (GPU)
+# ----------------------------------
+# The end-to-end GPU solve is LATENCY-bound, not FLOP-bound: tens of thousands
+# of SIMPLE outer iterations, each made of many small kernels. Three measures
+# keep the GPU fed:
+#
+#   1. The per-iteration physics is FUSED into four large kernels (gradient +
+#      Rhie-Chow; convection + momentum RHS (+L² scaling); face divergence +
+#      pressure RHS; all velocity/pressure corrections). Fusion only joins ops
+#      whose per-cell results depend on data that is already globally consistent
+#      — no fusion across a needed global barrier. Recomputing a neighbour's
+#      compact pressure gradient inline (same FP ops, bit-identical) replaces a
+#      stored-array dependency, so gradient+Rhie-Chow need no barrier between
+#      them.
+#   2. NO per-launch host synchronize: KA CPU kernels are synchronous and CUDA
+#      launches are stream-ordered, so host syncs only happen where a host
+#      scalar is read. Outer convergence norms are computed every `norm_stride`
+#      iterations only (they only gate the STOP decision; the iterates are
+#      unchanged — the solver merely stops up to norm_stride-1 iterations
+#      later, i.e. slightly MORE converged).
+#   3. `mg_cycles > 0` runs every inner MG solve (momentum + pressure) with a
+#      FIXED number of V-cycles and ZERO residual checks / zero-mean
+#      projections — no inner reductions or syncs at all, and a STATIC kernel
+#      launch sequence (CUDA-graph-capturable later). `mg_cycles = 0` keeps
+#      the legacy tolerance-driven inner solves.
+#
+# With `mg_cycles > 0` and off-stride iterations, one SIMPLE outer iteration
+# performs ZERO host<->device synchronizations.
+#
 # MOMENTUM OPERATOR (Laplace vs Helmholtz)
 # ----------------------------------------
 # The momentum predictor is solved by MG, which inverts `(-∇² + σ)` (the optional
@@ -48,6 +77,7 @@
 #
 # Public entry point:
 #   solve_incns_cavity_mg(; nx, ny, U_lid, Re, relax, tol, maxiter,
+#                         norm_stride=25, mg_cycles=3,
 #                         backend_ka=CPU(), atype=Array{Float64}, ...)
 #     -> NamedTuple(u, v, p, residual_history, iters, converged, ...)
 #
@@ -66,29 +96,39 @@ end
 # Field layout u[i,j], i in 1:N (x), j in 1:N (y). North = j=N (lid), south = j=1,
 # west = i=1, east = i=N. Faces: uf[i,j] = east face of (i,j) (i in 1:N-1 active),
 # vf[i,j] = north face of (i,j) (j in 1:N-1 active); wall faces carry 0.
+#
+# The per-iteration physics is fused into FOUR kernels (see header). The compact
+# cell-centred pressure gradient (homogeneous Neumann at the walls, consistent
+# with the all-Neumann pressure Laplacian) is an @inline helper recomputed where
+# needed — same FP expressions as a stored-gradient pass, so values (and the
+# converged answer) are bit-identical to the unfused version.
 # ---------------------------------------------------------------------------
 
-# Compact cell-centred pressure gradient (gx=+dp/dx, gy=+dp/dy) with homogeneous
-# Neumann at the walls (zero normal pressure gradient), consistent with the
-# all-Neumann pressure Laplacian. Backend-generic @kernel.
-@kernel function cav_compact_gradient_kernel!(gx, gy, @Const(p), invdx, invdy, N)
-    i, j = @index(Global, NTuple)
+@inline function _cav_gradx(p, i, j, invdx, N)
     @inbounds begin
-        if i <= N && j <= N
-            pe = (i < N) ? (p[i, j] + p[i + 1, j]) * eltype(p)(0.5) : p[i, j]
-            pw = (i > 1) ? (p[i - 1, j] + p[i, j]) * eltype(p)(0.5) : p[i, j]
-            gx[i, j] = (pe - pw) * invdx
-            pn = (j < N) ? (p[i, j] + p[i, j + 1]) * eltype(p)(0.5) : p[i, j]
-            ps = (j > 1) ? (p[i, j - 1] + p[i, j]) * eltype(p)(0.5) : p[i, j]
-            gy[i, j] = (pn - ps) * invdy
-        end
+        T = eltype(p)
+        pe = (i < N) ? (p[i, j] + p[i + 1, j]) * T(0.5) : p[i, j]
+        pw = (i > 1) ? (p[i - 1, j] + p[i, j]) * T(0.5) : p[i, j]
+        return (pe - pw) * invdx
     end
 end
 
-# Rhie-Chow face velocities. uf east faces (i<N), vf north faces (j<N). Wall
-# faces set to 0 (no-slip; lid face vf at north is 0 since v_lid=0).
-@kernel function cav_rhie_chow_kernel!(
-    uf, vf, @Const(u), @Const(v), @Const(p), @Const(gpx), @Const(gpy),
+@inline function _cav_grady(p, i, j, invdy, N)
+    @inbounds begin
+        T = eltype(p)
+        pn = (j < N) ? (p[i, j] + p[i, j + 1]) * T(0.5) : p[i, j]
+        ps = (j > 1) ? (p[i, j - 1] + p[i, j]) * T(0.5) : p[i, j]
+        return (pn - ps) * invdy
+    end
+end
+
+# FUSED kernel 1: cell-centred pressure gradient (gx=+dp/dx, gy=+dp/dy) AND
+# Rhie-Chow face velocities. uf east faces (i<N), vf north faces (j<N); wall
+# faces 0 (no-slip; lid face vf at north is 0 since v_lid=0). The neighbour's
+# cell gradient is recomputed inline from p (bit-identical to a stored pass),
+# which removes the global barrier a stored-gradient dependency would need.
+@kernel function cav_grad_rhie_chow_kernel!(
+    gx, gy, uf, vf, @Const(u), @Const(v), @Const(p),
     @Const(d_u), @Const(d_v), invdx, invdy, N,
 )
     i, j = @index(Global, NTuple)
@@ -96,12 +136,16 @@ end
         if i <= N && j <= N
             T = eltype(uf)
             half = T(0.5)
+            gxc = _cav_gradx(p, i, j, invdx, N)
+            gyc = _cav_grady(p, i, j, invdy, N)
+            gx[i, j] = gxc
+            gy[i, j] = gyc
             # east face of (i,j)
             if i < N
                 ubar = half * (u[i, j] + u[i + 1, j])
                 dbar = half * (d_u[i, j] + d_u[i + 1, j])
                 gp_face = (p[i + 1, j] - p[i, j]) * invdx
-                gp_cell = half * (gpx[i, j] + gpx[i + 1, j])
+                gp_cell = half * (gxc + _cav_gradx(p, i + 1, j, invdx, N))
                 uf[i, j] = ubar - dbar * (gp_face - gp_cell)
             else
                 uf[i, j] = zero(T)
@@ -111,7 +155,7 @@ end
                 vbar = half * (v[i, j] + v[i, j + 1])
                 dbar = half * (d_v[i, j] + d_v[i, j + 1])
                 gp_face = (p[i, j + 1] - p[i, j]) * invdy
-                gp_cell = half * (gpy[i, j] + gpy[i, j + 1])
+                gp_cell = half * (gyc + _cav_grady(p, i, j + 1, invdy, N))
                 vf[i, j] = vbar - dbar * (gp_face - gp_cell)
             else
                 vf[i, j] = zero(T)
@@ -120,18 +164,36 @@ end
     end
 end
 
-# Deferred-correction convection: conv = +div(u_face * phi) for phi = u and v,
-# first-order upwind on the Rhie-Chow face fluxes. Wall fluxes vanish (no-slip);
-# the lid carries U_lid for the advected u value at the north wall but vf=0 there
-# so it does not contribute a flux — matching cavity.jl exactly.
-@kernel function cav_convection_kernel!(
-    conv_u, conv_v, @Const(u), @Const(v), @Const(uf), @Const(vf),
-    invdx, invdy, U_lid, N,
+# FUSED kernel 2: deferred-correction convection (conv = +div(u_face * phi),
+# first-order upwind on the Rhie-Chow face fluxes; wall fluxes vanish, the lid
+# carries U_lid for the advected u value at the north wall but vf=0 there so it
+# contributes no flux — matching cavity.jl exactly) AND the momentum RHS for the
+# MG solve of (-∇² + σ) phi* = rhs, PRE-SCALED by L² (the unit-square MG
+# rescaling; see the solver body).
+#
+# The PHYSICAL viscous momentum equation is  μ(-∇²)φ + conv = -∂p/∂x  with
+# Dirichlet walls. Dividing by ν=μ (ρ=1) gives the MG-form operator (-∇²)φ, so
+# the convective and pressure-gradient terms divide by ν. The Dirichlet wall
+# SOURCE pairs with the MG operator's own boundary diagonal (already the post-÷ν
+# viscous coefficient) and is therefore NOT divided by ν.
+#
+# WALL TREATMENT (verified against the assembled +2/h² operator).
+# On a cell-centred grid the wall sits at the FACE (half a cell from the centre),
+# so the Dirichlet ghost is u_g = 2 u_w - u_c. The resulting OPERATOR is bit-for-
+# bit identical to the MG ghost-0 Dirichlet operator: BOTH have boundary diagonal
+# (4 + n_wall)/h². The "+1/h² vs +2/h²" distinction lives in the SOURCE only, not
+# the stencil. Only the moving lid (north, u-momentum) carries a source,
+# +2 U_lid/h². The σ φ_old pseudo-transient term cancels at the fixed point
+# (φ=φ_old), so the converged answer is σ-independent. `phi_old` is the current
+# (pre-predictor) velocity, passed as u, v.
+@kernel function cav_conv_mom_rhs_kernel!(
+    rhs_u, rhs_v, @Const(u), @Const(v), @Const(uf), @Const(vf),
+    @Const(gpx), @Const(gpy), invdx, invdy, invnu, sigma, invh2, U_lid, L2, N,
 )
     i, j = @index(Global, NTuple)
     @inbounds begin
         if i <= N && j <= N
-            T = eltype(conv_u)
+            T = eltype(rhs_u)
             Fe = (i < N) ? uf[i, j] : zero(T)
             Fw = (i > 1) ? uf[i - 1, j] : zero(T)
             Fn = (j < N) ? vf[i, j] : zero(T)
@@ -147,14 +209,30 @@ end
             vN = (j < N) ? (Fn >= 0 ? v[i, j] : v[i, j + 1]) : zero(T)
             vS = (j > 1) ? (Fs >= 0 ? v[i, j - 1] : v[i, j]) : zero(T)
 
-            conv_u[i, j] = (Fe * uE - Fw * uW) * invdx + (Fn * uN - Fs * uS) * invdy
-            conv_v[i, j] = (Fe * vE - Fw * vW) * invdx + (Fn * vN - Fs * vS) * invdy
+            conv_u = (Fe * uE - Fw * uW) * invdx + (Fn * uN - Fs * uS) * invdy
+            conv_v = (Fe * vE - Fw * vW) * invdx + (Fn * vN - Fs * vS) * invdy
+
+            # Lid source on the north row for the u-component only: +2 U_lid/h²
+            # (the half-spacing ghost 2 u_w - u_c). All other walls homogeneous.
+            src_u = zero(T)
+            if j == N
+                src_u += T(2) * T(U_lid) * invh2
+            end
+            src_v = zero(T)
+            rhs_u[i, j] = ((-conv_u - gpx[i, j]) * invnu + src_u + sigma * u[i, j]) * L2
+            rhs_v[i, j] = ((-conv_v - gpy[i, j]) * invnu + src_v + sigma * v[i, j]) * L2
         end
     end
 end
 
-# Face divergence of the Rhie-Chow field (cell-centred). Wall faces are 0.
-@kernel function cav_face_divergence_kernel!(divu, @Const(uf), @Const(vf), invdx, invdy, N)
+# FUSED kernel 3: face divergence of the Rhie-Chow field (cell-centred; wall
+# faces are 0) AND the scaled pressure-correction RHS rhs_p = div(u*) · L²/dval
+# (MG solves the PLAIN unit-square Neumann Laplacian; the SIMPLE d-coefficient
+# and domain scaling are folded into the RHS). `divu` is kept unscaled for the
+# outer continuity-residual norm.
+@kernel function cav_div_prhs_kernel!(
+    divu, rhs_p, @Const(uf), @Const(vf), invdx, invdy, pscale, N,
+)
     i, j = @index(Global, NTuple)
     @inbounds begin
         if i <= N && j <= N
@@ -163,16 +241,24 @@ end
             uw = (i > 1) ? uf[i - 1, j] : zero(T)
             vn = (j < N) ? vf[i, j] : zero(T)
             vs = (j > 1) ? vf[i, j - 1] : zero(T)
-            divu[i, j] = (ue - uw) * invdx + (vn - vs) * invdy
+            d = (ue - uw) * invdx + (vn - vs) * invdy
+            divu[i, j] = d
+            rhs_p[i, j] = d * pscale
         end
     end
 end
 
-# Correct FACE velocities from the pressure-correction `pcorr` (exact projection).
-# The MG pressure operator solves (-∇²)pcorr = div(u*)/dscalar, so adding
-# d^f * grad_face(pcorr) annihilates the face divergence in one shot.
-@kernel function cav_correct_faces_kernel!(
-    uf, vf, @Const(pcorr), @Const(d_u), @Const(d_v), invdx, invdy, N,
+# FUSED kernel 4: ALL post-pressure-solve corrections in one pass —
+#   * FACE velocities += d^f · grad_face(pcorr)  (exact projection: the MG
+#     pressure operator solves (-∇²)pcorr = div(u*)/dscalar, so this annihilates
+#     the face divergence in one shot),
+#   * CELL velocities += d · grad_cell(pcorr)  (compact gradient inline),
+#   * under-relaxed pressure update p -= αp · pcorr.
+# Every output at (i,j) depends only on the (already globally consistent) pcorr
+# stencil at (i,j), so no barrier is needed between the fused pieces.
+@kernel function cav_apply_corrections_kernel!(
+    uf, vf, u, v, p, @Const(pcorr), @Const(d_u), @Const(d_v),
+    invdx, invdy, alpha_p, N,
 )
     i, j = @index(Global, NTuple)
     @inbounds begin
@@ -187,68 +273,8 @@ end
                 dbar = half * (d_v[i, j] + d_v[i, j + 1])
                 vf[i, j] += dbar * (pcorr[i, j + 1] - pcorr[i, j]) * invdy
             end
-        end
-    end
-end
-
-# Build the momentum RHS for the MG solve of (-∇² + σ) phi* = rhs.
-#
-# The PHYSICAL viscous momentum equation is  μ(-∇²)φ + conv = -∂p/∂x  with
-# Dirichlet walls. Dividing by ν=μ (ρ=1) gives the MG-form operator (-∇²)φ, so
-# the convective and pressure-gradient terms divide by ν. The Dirichlet wall
-# SOURCE pairs with the MG operator's own boundary diagonal (already the post-÷ν
-# viscous coefficient) and is therefore NOT divided by ν.
-#
-# WALL TREATMENT (verified against the assembled +2/h² operator).
-# On a cell-centred grid the wall sits at the FACE (half a cell from the centre),
-# so the Dirichlet ghost is u_g = 2 u_w - u_c. The resulting OPERATOR is bit-for-
-# bit identical to the MG ghost-0 Dirichlet operator: BOTH have boundary diagonal
-# (4 + n_wall)/h². The "+1/h² vs +2/h²" distinction lives in the SOURCE only, not
-# the stencil. A non-homogeneous wall value u_w therefore needs source +2 u_w/h²
-# at the boundary row; homogeneous walls (u_w=0) need NO source. Only the moving
-# lid (north, u-momentum) carries a source, +2 U_lid/h². (Verified empirically:
-# the ghost-0 assembled operator == cavity.jl's +2/h² assembled operator,
-# bit-identical, so NO diagonal/deferred correction is needed.)
-#
-# An optional pseudo-transient shift σ (operator + σ φ_old on the RHS) provides
-# diagonal dominance/stability for the deferred-correction advection; it cancels
-# at the fixed point (φ=φ_old), so the converged answer is σ-independent.
-#   rhs = ( -conv - gp )/ν + src_lid + σ φ_old
-@kernel function cav_momentum_rhs_kernel!(
-    rhs, @Const(conv), @Const(gp), @Const(phi_old), invnu, sigma,
-    invh2, wall_lid, U_lid, N,
-)
-    i, j = @index(Global, NTuple)
-    @inbounds begin
-        if i <= N && j <= N
-            T = eltype(rhs)
-            src = zero(T)
-            # Lid source on the north row for the u-component only (wall_lid=1):
-            # +2 U_lid/h² (the half-spacing ghost 2 u_w - u_c). All other walls
-            # are homogeneous and need no source.
-            if wall_lid == 1 && j == N
-                src += T(2) * T(U_lid) * invh2
-            end
-            rhs[i, j] = (-conv[i, j] - gp[i, j]) * invnu + src + sigma * phi_old[i, j]
-        end
-    end
-end
-
-# Cell-velocity correction: phi += d * grad(pcorr)_component.
-@kernel function cav_cell_correct_kernel!(phi, @Const(d), @Const(gcorr), N)
-    i, j = @index(Global, NTuple)
-    @inbounds begin
-        if i <= N && j <= N
-            phi[i, j] += d[i, j] * gcorr[i, j]
-        end
-    end
-end
-
-# Under-relaxed pressure update: p -= alpha_p * pcorr.
-@kernel function cav_pressure_update_kernel!(p, @Const(pcorr), alpha_p, N)
-    i, j = @index(Global, NTuple)
-    @inbounds begin
-        if i <= N && j <= N
+            u[i, j] += d_u[i, j] * _cav_gradx(pcorr, i, j, invdx, N)
+            v[i, j] += d_v[i, j] * _cav_grady(pcorr, i, j, invdy, N)
             p[i, j] -= alpha_p * pcorr[i, j]
         end
     end
@@ -267,7 +293,8 @@ end
     end
 end
 
-# Subtract a scalar (gauge / zero-mean) from a field, elementwise.
+# Subtract a HOST scalar (gauge / zero-mean) from a field, elementwise. Legacy
+# (tolerance-driven) gauge path: the mean is reduced to the host first.
 @kernel function cav_shift_kernel!(a, s, N)
     i, j = @index(Global, NTuple)
     @inbounds begin
@@ -277,10 +304,17 @@ end
     end
 end
 
-# ---------------------------------------------------------------------------
-# Host-side launch helpers (sync after each launch; backend-generic).
-# ---------------------------------------------------------------------------
-_cav_sync(kab) = KernelAbstractions.synchronize(kab)
+# Subtract a DEVICE-resident mean: mbuf is a 1x1 device array holding sum(a)
+# (filled by `sum!`, which stays on-device), invNN = 1/(N*N). No host transfer,
+# so the zero-mean gauge costs NO host sync in the fixed-cycles fast path.
+@kernel function cav_shift_mean_kernel!(a, @Const(mbuf), invNN, N)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= N && j <= N
+            a[i, j] -= mbuf[1, 1] * invNN
+        end
+    end
+end
 
 # Checkerboard metric (high-frequency pressure energy / variance). Uses a kernel
 # to form the 5-point high-pass and the squared deviation, then device reductions.
@@ -302,12 +336,34 @@ _cav_sync(kab) = KernelAbstractions.synchronize(kab)
     end
 end
 
+# Per-cell SIMPLE response coefficient d = αu / a_p, with the boundary-aware
+# relaxed diagonal a_p = ν·(4 + n_wall)/h² / αu (n_wall = number of Dirichlet wall
+# faces the cell touches). So d = αu² h² / (ν (4 + n_wall)). Using the per-cell
+# (not uniform) diagonal — matching cavity.jl — keeps the Rhie-Chow correction
+# from over-shooting at boundary/corner cells (which otherwise spikes v in the
+# corners and weakens the interior centreline). `dnum = αu² h² / ν`.
+@kernel function cav_fill_d_kernel!(d, dnum, N)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= N && j <= N
+            nwall = 0
+            if i == 1; nwall += 1; end
+            if i == N; nwall += 1; end
+            if j == 1; nwall += 1; end
+            if j == N; nwall += 1; end
+            d[i, j] = eltype(d)(dnum) / (4 + nwall)
+        end
+    end
+end
+
 """
     solve_incns_cavity_mg(; nx=128, ny=128, U_lid=1.0, Re=100.0,
                           relax=(u=0.7, p=0.3), tol=1e-7, vel_tol=1e-6,
                           maxiter=8000, L=1.0, backend_ka=CPU(),
                           atype=Array{Float64}, mg_tol=1e-3, mg_maxcycles=20,
-                          mom_mg_tol=1e-3, mom_mg_maxcycles=20, verbose=false)
+                          mom_mg_tol=1e-3, mom_mg_maxcycles=20,
+                          norm_stride=25, mg_cycles=3, mom_mg_cycles=1,
+                          verbose=false)
 
 Backend-parametric steady SIMPLE incompressible solver for the 2D lid-driven
 cavity on `[0,L]^2` (square grid, `nx == ny`). Top wall moves at `u=U_lid, v=0`;
@@ -320,6 +376,28 @@ value folded into the RHS (ghost-0 convention); the pressure solve is all-Neuman
 (`bc=:neumann`, σ=0). Every field is allocated via `atype` and every elementwise
 op is a KA `@kernel` launched on `backend_ka`, so passing `backend_ka=CUDABackend()`
 and `atype=CuArray{Float64}` runs the identical source on the GPU.
+
+Latency/orchestration keywords (see file header):
+  `norm_stride`  compute the outer convergence norms (continuity residual +
+                 velocity settle) only every `norm_stride` iterations (plus
+                 iteration 1 and `maxiter`). The norms only gate the STOP
+                 decision, so the iterates are unchanged; the solver stops at
+                 the first CHECKED iteration satisfying the criterion, i.e. up
+                 to `norm_stride-1` iterations later (slightly more converged)
+                 than `norm_stride=1`. `residual_history` holds one entry per
+                 CHECK. Default 25. `norm_stride=1` = check every iteration.
+  `mg_cycles`    when > 0, run every inner MG solve with a FIXED number of
+                 V-cycles and no residual checks / zero-mean projections (zero
+                 inner host syncs; static launch sequence): the PRESSURE solve
+                 runs `mg_cycles` V-cycles (default 3 — matches the legacy
+                 1e-3 inner tolerance from a zero start) and each MOMENTUM
+                 solve runs `mom_mg_cycles` V-cycles (default 1 — the warm-
+                 started, strongly σ-dominant momentum solve needs ~1 cycle at
+                 the legacy tolerance). `mg_tol`, `mg_maxcycles`, `mom_mg_tol`,
+                 `mom_mg_maxcycles` are then ignored. `mg_cycles=0` = legacy
+                 tolerance-driven inner solves (validated against Ghia Re=100).
+  `mom_mg_cycles` fixed V-cycles per momentum solve when `mg_cycles > 0`
+                 (ignored when `mg_cycles=0`). Default 1.
 
 Returns a NamedTuple with `u, v, p` (nx x ny host `Array`s for convenience),
 `residual_history`, `iters`, `converged`, grid metrics, and `checkerboard`.
@@ -334,6 +412,9 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
                                atype::Type{<:AbstractArray}=Array{Float64},
                                mg_tol::Real=1e-3, mg_maxcycles::Integer=20,
                                mom_mg_tol::Real=1e-3, mom_mg_maxcycles::Integer=20,
+                               norm_stride::Integer=25,
+                               mg_cycles::Integer=3,
+                               mom_mg_cycles::Integer=1,
                                verbose::Bool=false)
     nx == ny || throw(ArgumentError("cavity_mg requires a square grid (nx == ny)"))
     N = Int(nx)
@@ -345,6 +426,11 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
     invdx = 1.0 / dx; invdy = 1.0 / dy
     invh2 = 1.0 / (h * h)
     kab = backend_ka
+    stride = max(Int(norm_stride), 1)
+    nfixed = max(Int(mg_cycles), 0)                       # pressure fixed cycles
+    use_fixed = nfixed > 0
+    nfixed_mom = use_fixed ? max(Int(mom_mg_cycles), 1) : 0  # momentum fixed cycles
+    maxit = Int(maxiter)
 
     # ----- SIMPLE response coefficient d = αu / a_p (relaxed) -----
     # Momentum under-relaxation is folded into the operator DIAGONAL via the
@@ -372,24 +458,36 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
     # momentum solve converge in very few V-cycles.
     sigma_mom = (1.0 / αu - 1.0) * 4.0 * invh2
 
+    # MG solves on the unit square (spacing 1/N). The physical operator uses
+    # spacing h=L/N; on a square domain L scales (-∇²) by 1/L², so we pass the
+    # RHS scaled by L² (and σ by L²). With L=1 these are identities.
+    L2 = L * L
+    prhs_scale = L2 / dval
+    invNN = 1.0 / (N * N)
+
     # ----- backend fields (all via atype) -----
     mk() = (a = atype(undef, N, N); fill!(a, 0.0); a)
     u = mk(); v = mk(); p = mk()
     u_old = mk(); v_old = mk()
     gpx = mk(); gpy = mk()
     uf = mk(); vf = mk()
-    conv_u = mk(); conv_v = mk()
     divstar = mk(); pcorr = mk()
-    rhs_u = mk(); rhs_v = mk()
+    rhs_u = mk(); rhs_v = mk(); rhs_p = mk()
     d_u = mk(); d_v = mk()
     delta = mk()
     osc = mk(); dev2 = mk()
+    gbuf = atype(undef, 1, 1); fill!(gbuf, 0.0)   # device-resident gauge mean
     # per-cell d = αu² h² / (ν (4 + n_wall)); dnum = αu² h² / ν = dval * 4
     # (dval = αu²/(ν·4/h²) is the interior value).
     dnum = αu * αu / (nu * invh2)
     cav_fill_d_kernel!(kab)(d_u, dnum, N; ndrange=(N, N))
     cav_fill_d_kernel!(kab)(d_v, dnum, N; ndrange=(N, N))
-    _cav_sync(kab)
+
+    # ONE multigrid hierarchy shared by all three inner solves (momentum u,
+    # momentum v, pressure): every level array is fully (re)initialized per
+    # solve, so reuse is value-identical and removes 3 full level-stack
+    # allocations per outer iteration.
+    mg_hier = build_mg_hierarchy(N, atype)
 
     xcenters = [(i - 0.5) * dx for i in 1:N]
     ycenters = [(j - 0.5) * dy for j in 1:N]
@@ -398,168 +496,130 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
     converged = false
     iters = 0
     vel_change = Inf
+    res = Inf
     ref_flux = U_lid
+    ncyc_mom_total = 0
+    ncyc_p_total = 0
 
-    for it in 1:Int(maxiter)
+    for it in 1:maxit
         iters = it
+        # Convergence norms only every `stride` iterations (+ first and last):
+        # they gate the STOP decision only, so skipping them does not change the
+        # iterates. With stride=1 this is the legacy every-iteration behavior.
+        do_check = (it == 1) || (it % stride == 0) || (it == maxit)
 
-        # 1. cell pressure gradient (for momentum source + Rhie-Chow cell term)
-        cav_compact_gradient_kernel!(kab)(gpx, gpy, p, invdx, invdy, N; ndrange=(N, N))
-        _cav_sync(kab)
+        # 1+2. fused: cell pressure gradient + Rhie-Chow face velocities
+        cav_grad_rhie_chow_kernel!(kab)(gpx, gpy, uf, vf, u, v, p, d_u, d_v,
+                                        invdx, invdy, N; ndrange=(N, N))
 
-        # 2. Rhie-Chow face velocities from current u,v,p
-        cav_rhie_chow_kernel!(kab)(uf, vf, u, v, p, gpx, gpy, d_u, d_v,
-                                   invdx, invdy, N; ndrange=(N, N))
-        _cav_sync(kab)
+        # 3+4. fused: deferred-correction convection + momentum RHS (×L²).
+        #      phi_old (the σ pseudo-transient term) is the CURRENT u,v — they
+        #      are not modified until the predictor copy below. u carries the
+        #      lid source on north; v has homogeneous walls.
+        cav_conv_mom_rhs_kernel!(kab)(rhs_u, rhs_v, u, v, uf, vf, gpx, gpy,
+                                      invdx, invdy, 1.0 / nu, sigma_mom, invh2,
+                                      U_lid, L2, N; ndrange=(N, N))
 
-        # 3. deferred-correction convection on the current field
-        cav_convection_kernel!(kab)(conv_u, conv_v, u, v, uf, vf,
-                                    invdx, invdy, U_lid, N; ndrange=(N, N))
-        _cav_sync(kab)
-
-        # snapshot old velocity for the settle metric and the σ*phi_old term
-        copyto!(u_old, u); copyto!(v_old, v)
-
-        # 4. momentum predictor: pure-viscous MG solve, then EXPLICIT under-relax.
-        #    Lid + wall-at-face Dirichlet folded into the RHS (deferred). u carries
-        #    the lid source on north (wall_lid=1); v has homogeneous walls (=0).
-        cav_momentum_rhs_kernel!(kab)(rhs_u, conv_u, gpx, u_old, 1.0 / nu, sigma_mom,
-                                      invh2, 1, U_lid, N; ndrange=(N, N))
-        _cav_sync(kab)
-        cav_momentum_rhs_kernel!(kab)(rhs_v, conv_v, gpy, v_old, 1.0 / nu, sigma_mom,
-                                      invh2, 0, U_lid, N; ndrange=(N, N))
-        _cav_sync(kab)
-
-        # MG solves on the unit square (spacing 1/N). The physical operator uses
-        # spacing h=L/N; on a square domain L scales (-∇²) by 1/L², so we pass the
-        # RHS scaled by L² (and σ by L²). With L=1 these are identities. We warm-
-        # start from the current velocity to cut V-cycles in the SIMPLE loop.
-        L2 = L * L
-        upred, _, _ = solve_poisson_mg(_scaled_rhs(rhs_u, L2, atype, kab, N), N;
-                                       bc=:dirichlet, backend_ka=kab, atype=atype,
-                                       tol=mom_mg_tol, maxcycles=Int(mom_mg_maxcycles),
-                                       sigma=sigma_mom * L2, u0=u)
-        vpred, _, _ = solve_poisson_mg(_scaled_rhs(rhs_v, L2, atype, kab, N), N;
-                                       bc=:dirichlet, backend_ka=kab, atype=atype,
-                                       tol=mom_mg_tol, maxcycles=Int(mom_mg_maxcycles),
-                                       sigma=sigma_mom * L2, u0=v)
-        # The σ-shifted predictor IS the under-relaxed velocity (relaxation is in
-        # the operator/RHS, not applied again here): copy it straight in.
-        copyto!(u, upred); copyto!(v, vpred)
-        _cav_sync(kab)
-
-        # settle metric (device reduction; no scalar host indexing)
-        cav_delta_kernel!(kab)(delta, u, u_old, v, v_old, N; ndrange=(N, N))
-        _cav_sync(kab)
-        umax_prev = max(_field_absmax(u_old), _field_absmax(v_old), U_lid * eps())
-        vel_change = _field_absmax(delta) / umax_prev
-
-        # 5. Rhie-Chow faces from the predictor (continuity RHS)
-        cav_compact_gradient_kernel!(kab)(gpx, gpy, p, invdx, invdy, N; ndrange=(N, N))
-        _cav_sync(kab)
-        cav_rhie_chow_kernel!(kab)(uf, vf, u, v, p, gpx, gpy, d_u, d_v,
-                                   invdx, invdy, N; ndrange=(N, N))
-        _cav_sync(kab)
-
-        # 6. continuity residual = div(u*_face)
-        cav_face_divergence_kernel!(kab)(divstar, uf, vf, invdx, invdy, N; ndrange=(N, N))
-        _cav_sync(kab)
-        res = sqrt(sum(abs2, divstar) / (N * N)) * dx / max(ref_flux, eps())
-        push!(residual_history, res)
-
-        if verbose && (it <= 5 || it % 100 == 0)
-            @info "cavity_mg SIMPLE" it res vel_change
-        end
-        # Convergence: continuity residual below `tol` AND the velocity field
-        # essentially steady (settle below `vel_tol`). The velocity-settle gate is
-        # looser because explicit momentum under-relaxation settles more slowly
-        # than the continuity residual drops; the physical solution is converged
-        # once continuity is satisfied and the field stops moving at `vel_tol`.
-        if res < tol && vel_change < vel_tol
-            converged = true
-            break
+        # snapshot old velocity for the settle metric (only when checked;
+        # device-to-device copy, stream-ordered, no host sync)
+        if do_check
+            copyto!(u_old, u); copyto!(v_old, v)
         end
 
-        # 7. pressure-correction Poisson: dscalar*(-∇²) pcorr = div(u*).
-        #    MG solves the PLAIN Neumann (-∇²) on the unit square: pass the RHS
-        #    scaled so that (-∇²_unit) pcorr = div(u*) * L² / dval. Then pcorr is
-        #    MINUS the physical pressure correction (sign matched to the projection).
-        rhs_p = _scaled_rhs(divstar, L2 / dval, atype, kab, N)
-        pc, _, _ = solve_poisson_mg(rhs_p, N; bc=:neumann, backend_ka=kab, atype=atype,
-                                    tol=mg_tol, maxcycles=Int(mg_maxcycles), sigma=0.0)
+        # momentum predictor: Helmholtz MG solves, warm-started from the current
+        # velocity. The σ-shifted predictor IS the under-relaxed velocity
+        # (relaxation lives in the operator/RHS): copy it straight in.
+        upred, ncu, _ = solve_poisson_mg(rhs_u, N;
+                                         bc=:dirichlet, backend_ka=kab, atype=atype,
+                                         tol=mom_mg_tol, maxcycles=Int(mom_mg_maxcycles),
+                                         sigma=sigma_mom * L2, u0=u,
+                                         fixed_cycles=nfixed_mom, hier=mg_hier)
+        copyto!(u, upred)
+        vpred, ncv, _ = solve_poisson_mg(rhs_v, N;
+                                         bc=:dirichlet, backend_ka=kab, atype=atype,
+                                         tol=mom_mg_tol, maxcycles=Int(mom_mg_maxcycles),
+                                         sigma=sigma_mom * L2, u0=v,
+                                         fixed_cycles=nfixed_mom, hier=mg_hier)
+        copyto!(v, vpred)
+        ncyc_mom_total += ncu + ncv
+
+        # settle metric (device reductions; host scalar reads = the only syncs)
+        if do_check
+            cav_delta_kernel!(kab)(delta, u, u_old, v, v_old, N; ndrange=(N, N))
+            umax_prev = max(_field_absmax(u_old), _field_absmax(v_old), U_lid * eps())
+            vel_change = _field_absmax(delta) / umax_prev
+        end
+
+        # 5. Rhie-Chow faces from the predictor (continuity RHS). p is unchanged
+        #    since step 1, so the fused gradient recompute writes the same gpx,gpy.
+        cav_grad_rhie_chow_kernel!(kab)(gpx, gpy, uf, vf, u, v, p, d_u, d_v,
+                                        invdx, invdy, N; ndrange=(N, N))
+
+        # 6. fused: continuity residual divstar = div(u*_face) AND the scaled
+        #    pressure RHS rhs_p = div(u*) · L²/dval.
+        cav_div_prhs_kernel!(kab)(divstar, rhs_p, uf, vf, invdx, invdy,
+                                  prhs_scale, N; ndrange=(N, N))
+
+        if do_check
+            res = sqrt(sum(abs2, divstar) / (N * N)) * dx / max(ref_flux, eps())
+            push!(residual_history, res)
+            if verbose && (it <= 5 || it % 100 == 0)
+                @info "cavity_mg SIMPLE" it res vel_change
+            end
+            # Convergence: continuity residual below `tol` AND the velocity field
+            # essentially steady (settle below `vel_tol`). The velocity-settle
+            # gate is looser because explicit momentum under-relaxation settles
+            # more slowly than the continuity residual drops.
+            if res < tol && vel_change < vel_tol
+                converged = true
+                break
+            end
+        end
+
+        # 7. pressure-correction Poisson: dscalar*(-∇²) pcorr = div(u*). MG solves
+        #    the PLAIN Neumann (-∇²) on the unit square with the pre-scaled RHS;
+        #    pcorr is MINUS the physical pressure correction (sign matched to the
+        #    projection).
+        pc, ncp, _ = solve_poisson_mg(rhs_p, N;
+                                      bc=:neumann, backend_ka=kab, atype=atype,
+                                      tol=mg_tol, maxcycles=Int(mg_maxcycles),
+                                      sigma=0.0, fixed_cycles=nfixed, hier=mg_hier)
         copyto!(pcorr, pc)
-        # Neumann gauge: zero-mean.
-        m = sum(pcorr) / (N * N)
-        cav_shift_kernel!(kab)(pcorr, m, N; ndrange=(N, N))
-        _cav_sync(kab)
+        ncyc_p_total += ncp
+        # Neumann gauge: zero-mean. Fixed-cycles path keeps the mean ON DEVICE
+        # (sum! into a 1x1 buffer + shift kernel — no host transfer); the legacy
+        # path reduces to a host scalar exactly as before.
+        if use_fixed
+            sum!(gbuf, pcorr)
+            cav_shift_mean_kernel!(kab)(pcorr, gbuf, invNN, N; ndrange=(N, N))
+        else
+            m = sum(pcorr) / (N * N)
+            cav_shift_kernel!(kab)(pcorr, m, N; ndrange=(N, N))
+        end
 
-        # 8. correct FACE velocities directly (exact projection)
-        cav_correct_faces_kernel!(kab)(uf, vf, pcorr, d_u, d_v, invdx, invdy, N; ndrange=(N, N))
-        _cav_sync(kab)
-
-        # 9. correct CELL velocities with the pressure-correction cell gradient
-        cav_compact_gradient_kernel!(kab)(gpx, gpy, pcorr, invdx, invdy, N; ndrange=(N, N))
-        _cav_sync(kab)
-        cav_cell_correct_kernel!(kab)(u, d_u, gpx, N; ndrange=(N, N))
-        cav_cell_correct_kernel!(kab)(v, d_v, gpy, N; ndrange=(N, N))
-        _cav_sync(kab)
-
-        # 10. under-relaxed pressure update
-        cav_pressure_update_kernel!(kab)(p, pcorr, αp, N; ndrange=(N, N))
-        _cav_sync(kab)
+        # 8+9+10. fused: correct FACE velocities (exact projection), correct CELL
+        #         velocities with the compact pcorr gradient, under-relaxed
+        #         pressure update.
+        cav_apply_corrections_kernel!(kab)(uf, vf, u, v, p, pcorr, d_u, d_v,
+                                           invdx, invdy, αp, N; ndrange=(N, N))
     end
+
+    # One final device barrier before host post-processing.
+    KernelAbstractions.synchronize(kab)
 
     # checkerboard metric via device reductions
     pbar = sum(p) / (N * N)
     cav_checker_kernel!(kab)(osc, dev2, p, pbar, N; ndrange=(N, N))
-    _cav_sync(kab)
     checkerboard = sqrt(sum(osc) / max(sum(dev2), eps()))
 
     # Return host copies for convenience (interpolation/plotting on the host).
     return (; u=Array(u), v=Array(v), p=Array(p),
             residual_history, iters, converged, vel_change,
             dx, dy, xcenters, ycenters, nx=N, ny=N, U_lid, Re, mu=nu, L,
-            checkerboard, sigma_mom)
+            checkerboard, sigma_mom,
+            norm_stride=stride, mg_cycles=nfixed, mom_mg_cycles=nfixed_mom,
+            mg_cycles_mom_total=ncyc_mom_total, mg_cycles_p_total=ncyc_p_total)
 end
 
 # Device reduction for the max abs value (no host scalar indexing of device arrays).
 _field_absmax(a) = maximum(abs, a)
-
-# Return a NEW scaled RHS array (device) = src .* s. solve_poisson_mg copies the
-# RHS into its hierarchy, so a fresh scaled array per call is fine and keeps every
-# op on the backend (broadcast dispatches to the device).
-function _scaled_rhs(src, s::Real, atype, kab, N)
-    out = atype(undef, N, N)
-    cav_scale_kernel!(kab)(out, src, eltype(out)(s), N; ndrange=(N, N))
-    _cav_sync(kab)
-    return out
-end
-
-@kernel function cav_scale_kernel!(out, @Const(src), s, N)
-    i, j = @index(Global, NTuple)
-    @inbounds begin
-        if i <= N && j <= N
-            out[i, j] = src[i, j] * s
-        end
-    end
-end
-
-# Per-cell SIMPLE response coefficient d = αu / a_p, with the boundary-aware
-# relaxed diagonal a_p = ν·(4 + n_wall)/h² / αu (n_wall = number of Dirichlet wall
-# faces the cell touches). So d = αu² h² / (ν (4 + n_wall)). Using the per-cell
-# (not uniform) diagonal — matching cavity.jl — keeps the Rhie-Chow correction
-# from over-shooting at boundary/corner cells (which otherwise spikes v in the
-# corners and weakens the interior centreline). `dnum = αu² h² / ν`.
-@kernel function cav_fill_d_kernel!(d, dnum, N)
-    i, j = @index(Global, NTuple)
-    @inbounds begin
-        if i <= N && j <= N
-            nwall = 0
-            if i == 1; nwall += 1; end
-            if i == N; nwall += 1; end
-            if j == 1; nwall += 1; end
-            if j == N; nwall += 1; end
-            d[i, j] = eltype(d)(dnum) / (4 + nwall)
-        end
-    end
-end

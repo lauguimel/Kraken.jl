@@ -339,20 +339,26 @@ end
 end
 
 # =============================================================================
-# Host-side launch helpers (sync after each kernel; backend-generic)
+# Host-side launch helpers (backend-generic).
+#
+# NO per-launch `synchronize`: KA CPU kernels execute synchronously (the call
+# returns only after completion; `synchronize(::CPU)` is a no-op), and on CUDA
+# all launches go to the task-local stream IN ORDER, so device-side data
+# dependencies between consecutive kernels need no host sync. Host syncs happen
+# implicitly only where a host scalar is read (reductions: `norm`, `sum`).
+# Removing them eliminates the per-launch host<->device round trip that
+# dominated the latency-bound SIMPLE cavity solve.
 # =============================================================================
 
 function _mg_apply!(Lu, u, invh2, sigma, bc, Nx, Ny, kab)
     mg_laplacian_apply_kernel!(kab)(Lu, u, invh2, sigma, bc[1], bc[2], bc[3], bc[4],
                                     Nx, Ny; ndrange = (Nx, Ny))
-    KernelAbstractions.synchronize(kab)
     return Lu
 end
 
 function _mg_residual!(r, u, f, invh2, sigma, bc, Nx, Ny, kab)
     mg_residual_kernel!(kab)(r, u, f, invh2, sigma, bc[1], bc[2], bc[3], bc[4],
                              Nx, Ny; ndrange = (Nx, Ny))
-    KernelAbstractions.synchronize(kab)
     return r
 end
 
@@ -361,10 +367,8 @@ function _mg_smooth!(u, f, h2, sigma, nsweeps, bc, Nx, Ny, kab, smoother, scratc
         for _ in 1:nsweeps
             mg_rbgs_kernel!(kab)(u, f, h2, 0, sigma, bc[1], bc[2], bc[3], bc[4],
                                  Nx, Ny; ndrange = (Nx, Ny))
-            KernelAbstractions.synchronize(kab)
             mg_rbgs_kernel!(kab)(u, f, h2, 1, sigma, bc[1], bc[2], bc[3], bc[4],
                                  Nx, Ny; ndrange = (Nx, Ny))
-            KernelAbstractions.synchronize(kab)
         end
     else # :jacobi (weighted, ω=2/3), needs a scratch buffer (ping-pong)
         omega = eltype(u)(2 // 3)
@@ -372,8 +376,7 @@ function _mg_smooth!(u, f, h2, sigma, nsweeps, bc, Nx, Ny, kab, smoother, scratc
             mg_jacobi_kernel!(kab)(scratch, u, f, h2, omega, sigma,
                                    bc[1], bc[2], bc[3], bc[4],
                                    Nx, Ny; ndrange = (Nx, Ny))
-            KernelAbstractions.synchronize(kab)
-            copyto!(u, scratch)
+            copyto!(u, scratch)   # device-to-device, stream-ordered
         end
     end
     return u
@@ -381,19 +384,16 @@ end
 
 function _mg_zero!(a, Nx, Ny, kab)
     mg_zero_kernel!(kab)(a, Nx, Ny; ndrange = (Nx, Ny))
-    KernelAbstractions.synchronize(kab)
     return a
 end
 
 function _mg_restrict!(rc, rf, Nxc, Nyc, kab)
     mg_restrict_kernel!(kab)(rc, rf, Nxc, Nyc; ndrange = (Nxc, Nyc))
-    KernelAbstractions.synchronize(kab)
     return rc
 end
 
 function _mg_prolong_add!(uf, ec, Nxf, Nyf, Nxc, Nyc, kab)
     mg_prolong_add_kernel!(kab)(uf, ec, Nxf, Nyf, Nxc, Nyc; ndrange = (Nxf, Nyf))
-    KernelAbstractions.synchronize(kab)
     return uf
 end
 
@@ -509,9 +509,8 @@ end
 # library call; here we use the generic `sum`, which dispatches to the device
 # implementation for CUDA arrays (no scalar host indexing).
 function _project_zero_mean!(a, Nx, Ny, kab, scratch)
-    m = sum(a) / (Nx * Ny)
+    m = sum(a) / (Nx * Ny)   # device reduction; the host read is the only sync
     mg_shift_kernel!(kab)(a, m, Nx, Ny; ndrange = (Nx, Ny))
-    KernelAbstractions.synchronize(kab)
     return a
 end
 
@@ -567,9 +566,25 @@ Keywords
               mean (the shift removes the constant nullspace).
   `u0`        optional `N x N` initial guess (warm start); default zero start.
               Lets a SIMPLE loop reuse the previous solution to cut V-cycles.
+  `fixed_cycles`  when > 0, run EXACTLY this many V-cycles with NO residual-norm
+              computation at all (no `fnorm`, no per-cycle relative residual):
+              zero host reductions/syncs and a STATIC kernel-launch sequence
+              (CUDA-graph-capturable later). `tol`/`maxcycles` are ignored.
+              For `:neumann` the RHS is assumed discretely zero-mean (true for
+              a conservative face divergence) and the per-level zero-mean
+              projections are SKIPPED: the V-cycle commutes with constant
+              shifts, so the result only differs by an additive constant,
+              which the caller must gauge away. Default 0 = tolerance-driven
+              behavior (unchanged).
+  `hier`      optional pre-built `MGHierarchy` (from `build_mg_hierarchy(N,
+              atype)`) to reuse across repeated solves of the same size —
+              avoids re-allocating the full level stack per call (a per-
+              iteration allocation in SIMPLE loops). All level arrays are
+              fully (re)initialized here, so reuse is value-identical.
 
 Returns the solution `u` (N x N device array), the number of V-cycles performed,
-and the relative-residual history (one entry per cycle, on the host).
+and the relative-residual history (one entry per cycle, on the host; EMPTY when
+`fixed_cycles > 0`).
 """
 function solve_poisson_mg(f, N::Integer;
                           bc::Symbol = :dirichlet,
@@ -585,10 +600,13 @@ function solve_poisson_mg(f, N::Integer;
                           min_size::Integer = 4,
                           sigma::Real = 0.0,
                           u0 = nothing,
+                          fixed_cycles::Integer = 0,
+                          hier::Union{Nothing, MGHierarchy} = nothing,
                           verbose::Bool = false)
     N = Int(N)
     kab = backend_ka
     sig = Float64(sigma)
+    nfixed = Int(fixed_cycles)
 
     bctag = bc === :dirichlet ? MG_BC_DIRICHLET :
             bc === :neumann   ? MG_BC_NEUMANN   :
@@ -596,7 +614,11 @@ function solve_poisson_mg(f, N::Integer;
     bcs = (bctag, bctag, bctag, bctag)  # (west, east, south, north)
     neumann_pin = bc === :neumann
 
-    hier = build_mg_hierarchy(N, atype; min_size = min_size)
+    if hier === nothing
+        hier = build_mg_hierarchy(N, atype; min_size = min_size)
+    else
+        hier.sizes[1] == N || throw(ArgumentError("reused hierarchy is sized $(hier.sizes[1]), need $N"))
+    end
 
     # Fill the finest RHS at cell centres. Sampling a Function is a host loop into
     # a host staging array, then copied to the device array (no device scalar
@@ -619,8 +641,12 @@ function solve_poisson_mg(f, N::Integer;
     # (zero mean). Project it. A Helmholtz shift (sig>0) makes the operator
     # non-singular, so zero-mean handling is only applied for the pure-Neumann,
     # sig=0 case (neumann_pin is only set for :neumann bc, which the cavity uses
-    # with sig=0 for the pressure solve).
-    do_project = neumann_pin && sig == 0.0
+    # with sig=0 for the pressure solve). In fixed-cycles mode the projection
+    # is SKIPPED entirely (it is a host-sync reduction at every level of every
+    # cycle): the V-cycle commutes with constant shifts and the caller's RHS is
+    # discretely zero-mean, so the answer differs by a constant only (gauged by
+    # the caller).
+    do_project = neumann_pin && sig == 0.0 && nfixed == 0
     if do_project
         _project_zero_mean!(hier.f[1], N, N, kab, hier.scratch[1])
     end
@@ -634,6 +660,17 @@ function solve_poisson_mg(f, N::Integer;
         copyto!(hier.u[1], u0)
     end
 
+    # ---- fixed-cycle mode: static launch sequence, ZERO host syncs ----------
+    if nfixed > 0
+        for _ in 1:nfixed
+            vcycle!(hier, 1, bcs, kab; nu1 = Int(nu1), nu2 = Int(nu2),
+                    ncoarse = Int(ncoarse), smoother = smoother,
+                    neumann_pin = false, sigma = sig)
+        end
+        return hier.u[1], nfixed, Float64[]
+    end
+
+    # ---- tolerance-driven mode (legacy, unchanged) --------------------------
     fnorm = norm(hier.f[1])
     fnorm == 0 && (fnorm = 1.0)
 
