@@ -1,0 +1,71 @@
+#!/bin/bash -l
+#PBS -N poisson_mg_gpu_bench
+#PBS -l select=1:ncpus=4:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -V
+
+# --- Matrix-free multigrid Poisson benchmark: MG (GPU vs CPU) vs cuDSS ---
+# Manufactured Dirichlet Poisson (u = sin(pi x) sin(pi y)) at N=128..4096 (16M
+# DOF). Solves with the matrix-free geometric multigrid V-cycle on CPU and GPU
+# (KernelAbstractions, same source) and cuDSS sparse-direct for comparison.
+# Reports MG-CPU/MG-GPU ms, speed-up, cuDSS solve ms, V-cycles, cells/s, parity.
+#
+# KEY METRIC: GPU utilization. cuDSS averaged only ~9% on the pressure-Poisson
+# solve. The hypothesis is that matrix-free MG SATURATES the A100. We sample
+# nvidia-smi every second during the Julia run and report the mean utilization;
+# compare it against cuDSS's ~9%.
+
+WORKDIR=$HOME/kraken_poisson_gpu_bench
+cd $WORKDIR
+
+echo "========================================"
+echo "Job: $PBS_JOBID"
+echo "Node: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "Start: $(date)"
+echo "========================================"
+
+export PATH=$HOME/.juliaup/bin:$PATH
+export JULIA_CUDA_USE_COMPAT=false
+
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+
+julia --project=. -e 'using Pkg; Pkg.instantiate(); using CUDA; CUDA.versioninfo()' 2>&1
+
+# --- Start GPU utilization sampler (1 Hz) in the background -------------------
+GPU_UTIL_LOG=$WORKDIR/gpu_util_mg.log
+echo "Sampling GPU utilization to $GPU_UTIL_LOG (1 Hz) during the bench..."
+nvidia-smi --query-gpu=utilization.gpu,utilization.memory --format=csv -l 1 \
+    > "$GPU_UTIL_LOG" 2>&1 &
+SMI_PID=$!
+
+echo "=== Poisson MG GPU bench (MG GPU/CPU vs cuDSS) ==="
+julia --project=. benchmarks/krk/inc_ns/poisson_mg_gpu_bench.jl 2>&1
+EXIT_CODE=$?
+
+# --- Stop the sampler --------------------------------------------------------
+kill $SMI_PID 2>/dev/null
+wait $SMI_PID 2>/dev/null
+
+# --- Summarise the captured GPU utilization ----------------------------------
+# CSV columns: "utilization.gpu [%], utilization.memory [%]"; values like "37 %".
+echo "========================================"
+echo "GPU utilization summary (from $GPU_UTIL_LOG):"
+if [ -s "$GPU_UTIL_LOG" ]; then
+    # Mean of the GPU-util column (field 1), skipping the header row. Compares
+    # directly against cuDSS's ~9% to test the saturation hypothesis.
+    awk -F',' 'NR>1 {gsub(/[ %]/,"",$1); s+=$1; n++}
+               END {if (n>0) printf "  mean GPU util = %.1f%%  over %d samples\n", s/n, n;
+                    else print "  (no samples captured)"}' "$GPU_UTIL_LOG"
+    awk -F',' 'NR>1 {gsub(/[ %]/,"",$1); if($1>mx)mx=$1}
+               END {printf "  peak GPU util = %d%%\n", mx}' "$GPU_UTIL_LOG"
+    echo "  --- last 5 samples ---"
+    tail -n 5 "$GPU_UTIL_LOG"
+else
+    echo "  (gpu_util_mg.log empty or missing)"
+fi
+echo "========================================"
+echo "End: $(date)  exit=$EXIT_CODE"
+echo "========================================"
+exit $EXIT_CODE
