@@ -90,7 +90,7 @@ end
 # =============================================================================
 
 @kernel function mg_laplacian_apply_kernel!(
-    Lu, @Const(u), invh2, west_bc, east_bc, south_bc, north_bc, Nx, Ny,
+    Lu, @Const(u), invh2, sigma, west_bc, east_bc, south_bc, north_bc, Nx, Ny,
 )
     i, j = @index(Global, NTuple)
     @inbounds begin
@@ -135,13 +135,14 @@ end
                 acc -= uc
             end
 
-            Lu[i, j] = acc * invh2
+            # Helmholtz shift: (σI - ∇²)u. σ=0 recovers the plain Poisson operator.
+            Lu[i, j] = acc * invh2 + sigma * uc
         end
     end
 end
 
 @kernel function mg_residual_kernel!(
-    r, @Const(u), @Const(f), invh2, west_bc, east_bc, south_bc, north_bc, Nx, Ny,
+    r, @Const(u), @Const(f), invh2, sigma, west_bc, east_bc, south_bc, north_bc, Nx, Ny,
 )
     i, j = @index(Global, NTuple)
     @inbounds begin
@@ -179,7 +180,7 @@ end
                 acc -= uc
             end
 
-            r[i, j] = f[i, j] - acc * invh2
+            r[i, j] = f[i, j] - (acc * invh2 + sigma * uc)
         end
     end
 end
@@ -227,14 +228,15 @@ end
 # u_new = u + ω D⁻¹ (f - L u). With L = (diag*I - offdiag)/h², D = diag/h², so
 #   u_new = (1-ω) u + ω (h² f + Σ_nb u_nb) / diag.
 @kernel function mg_jacobi_kernel!(
-    unew, @Const(u), @Const(f), h2, omega,
+    unew, @Const(u), @Const(f), h2, omega, sigma,
     west_bc, east_bc, south_bc, north_bc, Nx, Ny,
 )
     i, j = @index(Global, NTuple)
     @inbounds begin
         if i <= Nx && j <= Ny
             T = eltype(unew)
-            d = T(_mg_diag_count(i, j, Nx, Ny, west_bc, east_bc, south_bc, north_bc))
+            # Helmholtz diagonal: (diag_count + σ h²) since D = diag_count/h² + σ.
+            d = T(_mg_diag_count(i, j, Nx, Ny, west_bc, east_bc, south_bc, north_bc)) + sigma * h2
             s = _mg_offdiag_sum(u, i, j, Nx, Ny)
             gs = (h2 * f[i, j] + s) / d
             unew[i, j] = (one(T) - omega) * u[i, j] + omega * gs
@@ -247,14 +249,14 @@ end
 # neighbour values (neighbours are all the other colour, so this is a true GS
 # sweep and fully data-parallel within a colour).
 @kernel function mg_rbgs_kernel!(
-    u, @Const(f), h2, colour,
+    u, @Const(f), h2, colour, sigma,
     west_bc, east_bc, south_bc, north_bc, Nx, Ny,
 )
     i, j = @index(Global, NTuple)
     @inbounds begin
         if i <= Nx && j <= Ny && ((i + j) % 2 == colour)
             T = eltype(u)
-            d = T(_mg_diag_count(i, j, Nx, Ny, west_bc, east_bc, south_bc, north_bc))
+            d = T(_mg_diag_count(i, j, Nx, Ny, west_bc, east_bc, south_bc, north_bc)) + sigma * h2
             s = _mg_offdiag_sum(u, i, j, Nx, Ny)
             u[i, j] = (h2 * f[i, j] + s) / d
         end
@@ -340,34 +342,34 @@ end
 # Host-side launch helpers (sync after each kernel; backend-generic)
 # =============================================================================
 
-function _mg_apply!(Lu, u, invh2, bc, Nx, Ny, kab)
-    mg_laplacian_apply_kernel!(kab)(Lu, u, invh2, bc[1], bc[2], bc[3], bc[4],
+function _mg_apply!(Lu, u, invh2, sigma, bc, Nx, Ny, kab)
+    mg_laplacian_apply_kernel!(kab)(Lu, u, invh2, sigma, bc[1], bc[2], bc[3], bc[4],
                                     Nx, Ny; ndrange = (Nx, Ny))
     KernelAbstractions.synchronize(kab)
     return Lu
 end
 
-function _mg_residual!(r, u, f, invh2, bc, Nx, Ny, kab)
-    mg_residual_kernel!(kab)(r, u, f, invh2, bc[1], bc[2], bc[3], bc[4],
+function _mg_residual!(r, u, f, invh2, sigma, bc, Nx, Ny, kab)
+    mg_residual_kernel!(kab)(r, u, f, invh2, sigma, bc[1], bc[2], bc[3], bc[4],
                              Nx, Ny; ndrange = (Nx, Ny))
     KernelAbstractions.synchronize(kab)
     return r
 end
 
-function _mg_smooth!(u, f, h2, nsweeps, bc, Nx, Ny, kab, smoother, scratch)
+function _mg_smooth!(u, f, h2, sigma, nsweeps, bc, Nx, Ny, kab, smoother, scratch)
     if smoother === :rbgs
         for _ in 1:nsweeps
-            mg_rbgs_kernel!(kab)(u, f, h2, 0, bc[1], bc[2], bc[3], bc[4],
+            mg_rbgs_kernel!(kab)(u, f, h2, 0, sigma, bc[1], bc[2], bc[3], bc[4],
                                  Nx, Ny; ndrange = (Nx, Ny))
             KernelAbstractions.synchronize(kab)
-            mg_rbgs_kernel!(kab)(u, f, h2, 1, bc[1], bc[2], bc[3], bc[4],
+            mg_rbgs_kernel!(kab)(u, f, h2, 1, sigma, bc[1], bc[2], bc[3], bc[4],
                                  Nx, Ny; ndrange = (Nx, Ny))
             KernelAbstractions.synchronize(kab)
         end
     else # :jacobi (weighted, ω=2/3), needs a scratch buffer (ping-pong)
         omega = eltype(u)(2 // 3)
         for _ in 1:nsweeps
-            mg_jacobi_kernel!(kab)(scratch, u, f, h2, omega,
+            mg_jacobi_kernel!(kab)(scratch, u, f, h2, omega, sigma,
                                    bc[1], bc[2], bc[3], bc[4],
                                    Nx, Ny; ndrange = (Nx, Ny))
             KernelAbstractions.synchronize(kab)
@@ -459,7 +461,7 @@ solution are projected to zero mean to stay in the range of the operator.
 """
 function vcycle!(hier::MGHierarchy, level::Int, bc, kab;
                  nu1::Int, nu2::Int, ncoarse::Int, smoother::Symbol,
-                 neumann_pin::Bool)
+                 neumann_pin::Bool, sigma::Float64 = 0.0)
     N = hier.sizes[level]
     h2 = hier.h[level]^2
     invh2 = 1.0 / h2
@@ -469,16 +471,16 @@ function vcycle!(hier::MGHierarchy, level::Int, bc, kab;
 
     if level == length(hier.sizes)
         # Coarsest grid: smooth heavily (effective direct solve on a tiny grid).
-        _mg_smooth!(u, f, h2, ncoarse, bc, N, N, kab, smoother, hier.scratch[level])
+        _mg_smooth!(u, f, h2, sigma, ncoarse, bc, N, N, kab, smoother, hier.scratch[level])
         neumann_pin && _project_zero_mean!(u, N, N, kab, hier.scratch[level])
         return nothing
     end
 
     # Pre-smooth.
-    _mg_smooth!(u, f, h2, nu1, bc, N, N, kab, smoother, hier.scratch[level])
+    _mg_smooth!(u, f, h2, sigma, nu1, bc, N, N, kab, smoother, hier.scratch[level])
 
     # Residual r = f - L u.
-    _mg_residual!(r, u, f, invh2, bc, N, N, kab)
+    _mg_residual!(r, u, f, invh2, sigma, bc, N, N, kab)
 
     # Restrict residual to coarse RHS.
     Nc = hier.sizes[level + 1]
@@ -490,13 +492,13 @@ function vcycle!(hier::MGHierarchy, level::Int, bc, kab;
     _mg_zero!(hier.u[level + 1], Nc, Nc, kab)
 
     vcycle!(hier, level + 1, bc, kab; nu1 = nu1, nu2 = nu2, ncoarse = ncoarse,
-            smoother = smoother, neumann_pin = neumann_pin)
+            smoother = smoother, neumann_pin = neumann_pin, sigma = sigma)
 
     # Prolong coarse correction and add to fine solution.
     _mg_prolong_add!(u, hier.u[level + 1], N, N, Nc, Nc, kab)
 
     # Post-smooth.
-    _mg_smooth!(u, f, h2, nu2, bc, N, N, kab, smoother, hier.scratch[level])
+    _mg_smooth!(u, f, h2, sigma, nu2, bc, N, N, kab, smoother, hier.scratch[level])
 
     neumann_pin && _project_zero_mean!(u, N, N, kab, hier.scratch[level])
     return nothing
@@ -515,10 +517,10 @@ end
 
 # Relative residual norm (L2, scaled by h to be a grid-function norm). Uses the
 # device-side residual kernel + a reduction; no host scalar indexing.
-function _mg_relresid(hier::MGHierarchy, bc, kab; fnorm)
+function _mg_relresid(hier::MGHierarchy, bc, kab; fnorm, sigma::Float64 = 0.0)
     N = hier.sizes[1]
     invh2 = 1.0 / hier.h[1]^2
-    _mg_residual!(hier.r[1], hier.u[1], hier.f[1], invh2, bc, N, N, kab)
+    _mg_residual!(hier.r[1], hier.u[1], hier.f[1], invh2, sigma, bc, N, N, kab)
     rn = norm(hier.r[1])
     return rn / fnorm, rn
 end
@@ -556,6 +558,15 @@ Keywords
   `nu1,nu2`   pre/post smoothing sweeps.
   `ncoarse`   coarsest-grid smoothing sweeps.
   `smoother`  `:rbgs` (default, red-black Gauss-Seidel) or `:jacobi` (weighted).
+  `sigma`     Helmholtz shift: solves `(σI - ∇²)u = f` on the unit square
+              (σ has units 1/length² in unit-square coordinates). Default 0
+              recovers the plain Poisson operator. A positive σ makes the
+              operator non-singular and strongly diagonally dominant — used by
+              the cavity momentum solve (under-relaxed/pseudo-transient
+              predictor). With σ>0 the Neumann case is NOT projected to zero
+              mean (the shift removes the constant nullspace).
+  `u0`        optional `N x N` initial guess (warm start); default zero start.
+              Lets a SIMPLE loop reuse the previous solution to cut V-cycles.
 
 Returns the solution `u` (N x N device array), the number of V-cycles performed,
 and the relative-residual history (one entry per cycle, on the host).
@@ -572,9 +583,12 @@ function solve_poisson_mg(f, N::Integer;
                           ncoarse::Integer = 50,
                           smoother::Symbol = :rbgs,
                           min_size::Integer = 4,
+                          sigma::Real = 0.0,
+                          u0 = nothing,
                           verbose::Bool = false)
     N = Int(N)
     kab = backend_ka
+    sig = Float64(sigma)
 
     bctag = bc === :dirichlet ? MG_BC_DIRICHLET :
             bc === :neumann   ? MG_BC_NEUMANN   :
@@ -602,18 +616,29 @@ function solve_poisson_mg(f, N::Integer;
     end
 
     # For the singular Neumann problem the RHS must be in the range of L
-    # (zero mean). Project it.
-    if neumann_pin
+    # (zero mean). Project it. A Helmholtz shift (sig>0) makes the operator
+    # non-singular, so zero-mean handling is only applied for the pure-Neumann,
+    # sig=0 case (neumann_pin is only set for :neumann bc, which the cavity uses
+    # with sig=0 for the pressure solve).
+    do_project = neumann_pin && sig == 0.0
+    if do_project
         _project_zero_mean!(hier.f[1], N, N, kab, hier.scratch[1])
     end
 
-    _mg_zero!(hier.u[1], N, N, kab)
+    # Initial guess: zero, or a caller-supplied warm start (e.g. the previous
+    # outer-iteration solution, which cuts V-cycles markedly in SIMPLE loops).
+    if u0 === nothing
+        _mg_zero!(hier.u[1], N, N, kab)
+    else
+        size(u0) == (N, N) || throw(ArgumentError("u0 must be N x N"))
+        copyto!(hier.u[1], u0)
+    end
 
     fnorm = norm(hier.f[1])
     fnorm == 0 && (fnorm = 1.0)
 
     resid_history = Float64[]
-    relres, _ = _mg_relresid(hier, bcs, kab; fnorm = fnorm)
+    relres, _ = _mg_relresid(hier, bcs, kab; fnorm = fnorm, sigma = sig)
     push!(resid_history, relres)
     verbose && @info "MG start" N relres
 
@@ -621,9 +646,9 @@ function solve_poisson_mg(f, N::Integer;
     for cyc in 1:Int(maxcycles)
         vcycle!(hier, 1, bcs, kab; nu1 = Int(nu1), nu2 = Int(nu2),
                 ncoarse = Int(ncoarse), smoother = smoother,
-                neumann_pin = neumann_pin)
+                neumann_pin = do_project, sigma = sig)
         ncycles += 1
-        relres, _ = _mg_relresid(hier, bcs, kab; fnorm = fnorm)
+        relres, _ = _mg_relresid(hier, bcs, kab; fnorm = fnorm, sigma = sig)
         push!(resid_history, relres)
         verbose && @info "MG cycle" cyc relres
         relres <= tol && break
@@ -715,7 +740,8 @@ function solve_poisson_mgcg(f, N::Integer;
         copyto!(hier.f[1], rin)
         _mg_zero!(hier.u[1], N, N, kab)
         vcycle!(hier, 1, bcs, kab; nu1 = Int(nu1), nu2 = Int(nu2),
-                ncoarse = Int(ncoarse), smoother = smoother, neumann_pin = false)
+                ncoarse = Int(ncoarse), smoother = smoother, neumann_pin = false,
+                sigma = 0.0)
         copyto!(zout, hier.u[1])
     end
 
@@ -728,7 +754,7 @@ function solve_poisson_mgcg(f, N::Integer;
 
     niters = 0
     for it in 1:Int(maxiters)
-        _mg_apply!(Ap, p, invh2, bcs, N, N, kab)
+        _mg_apply!(Ap, p, invh2, 0.0, bcs, N, N, kab)
         pAp = _mg_dot(p, Ap)
         alpha = rz / pAp
         mg_axpy_kernel!(kab)(x, alpha, p, N, N; ndrange = (N, N))
