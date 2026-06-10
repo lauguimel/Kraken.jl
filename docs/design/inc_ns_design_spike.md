@@ -115,6 +115,29 @@ Why this over a hand-rolled matrix-free multigrid (the earlier draft):
 - steady ⇒ factorize-once amortization makes sparse-direct ideal;
 - less bespoke numerics to build, debug, and keep competitive vs NVIDIA libs.
 
+## Decision 2 — RECONSIDERED for GPU performance (user, 2026-06-10)
+
+Evidence from the Aqua A100 bench (`benchmarks/results/poisson_gpu_aqua_a100.md`):
+cuDSS gave ~30× solve vs CPU but the job averaged only **~9% GPU utilization** —
+modest next to LBM's ~1000× CPU→GPU. Root cause: sparse-direct factorization
+(elimination tree) and triangular solves are **sequentially dependent** → poor
+GPU occupancy. LBM is embarrassingly-parallel local stencils → saturates the GPU.
+
+**Revised priority:** the primary Poisson path for GPU performance and 3D
+scalability is **matrix-free geometric multigrid / MG-preconditioned CG**
+(Jacobi/Chebyshev smoothers + restriction/prolongation = KA stencils, like LBM):
+O(N) and GPU-saturating, vs cuDSS O(N^1.5)-2D / O(N²)-3D and GPU-starved. This
+**promotes the matrix-free MG that the first spike demoted to a fallback** — the
+"performant deps" framing under-weighted GPU occupancy. cuDSS stays as a robust
+2D correctness baseline + steady factorize-once option (and a parity reference).
+
+**Honest cap:** the pressure-Poisson is elliptic (global coupling — information
+crosses the whole domain each solve), fundamentally less GPU-trivial than LBM's
+local explicit updates. Matrix-free MG ≫ cuDSS on GPU but will not reach LBM's
+1000×. The FVFD steady solver's real win over LBM is **iteration count**
+(~1e3 vs ~1e6–1e7 to reach steady), not per-solve GPU throughput — that is why
+elliptic is the right tool for the steady regime regardless of kernel speed.
+
 ## Adjoint forward-compatibility (corrected)
 
 The adjoint of a linear solve `A x = b` is the **transpose solve**
