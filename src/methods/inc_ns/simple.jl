@@ -27,6 +27,10 @@ end
 if !isdefined(@__MODULE__, :pin_reference_dof)
     include(_INCNS_SIMPLE_POISSON_PATH)
 end
+# Factorize-once seam (poisson.jl includes it, but guard for standalone use).
+if !isdefined(@__MODULE__, :lin_factorize)
+    include(joinpath(@__DIR__, "..", "..", "solve", "linear_solve.jl"))
+end
 
 # ---------------------------------------------------------------------------
 # Sparse Laplacian assembly on a rectangular cell-centred grid.
@@ -112,34 +116,20 @@ function _incns_assemble_neg_laplacian(nx::Integer, ny::Integer, dx::Real, dy::R
     return sparse(I, J, V, n, n)
 end
 
-# Factorise a SPD sparse operator once (CHOLMOD), with optional reference-dof
-# pinning for the singular (all-Neumann/periodic) pressure operator.
-struct _IncnsLinearOp
-    factor
-    pin_k0::Int       # 0 if not pinned
-end
-
+# Factorise a SPD sparse operator ONCE (CHOLMOD), with optional reference-dof
+# pinning for the singular (all-Neumann/periodic) pressure operator. Thin
+# wrappers over the shared factorize-once seam (linear_solve.jl) so the repeated
+# per-outer-iteration solves reuse a single cached factorization; cuDSS drops in
+# on GPU by swapping the backend tag. Returns a LinearSolveCache.
 function _incns_factorise(A::SparseMatrixCSC{Float64,Int}; pin_k0::Integer=0)
-    if pin_k0 > 0
-        # Build a pinned operator: replace row/col k0 by identity. Reuse the
-        # poisson.jl pin convention via a zero RHS (we only need the matrix
-        # here; RHS pinning is applied per-solve).
-        Apin, _ = pin_reference_dof(A, zeros(Float64, size(A, 1)), pin_k0, 0.0)
-        return _IncnsLinearOp(cholesky(Symmetric(Apin); check=true), Int(pin_k0))
-    else
-        return _IncnsLinearOp(cholesky(Symmetric(A); check=true), 0)
-    end
+    return lin_factorize(A; backend=CPUBackendTag(), spd=true, pin_k0=Int(pin_k0))
 end
 
-# Solve op * x = b (b given as a length-n vector). For the pinned operator the
-# RHS is adjusted to enforce x[k0] = 0 (consistent with the pinned matrix).
-function _incns_solve!(op::_IncnsLinearOp, A::SparseMatrixCSC{Float64,Int}, b::Vector{Float64})
-    if op.pin_k0 > 0
-        _, bpin = pin_reference_dof(A, b, op.pin_k0, 0.0)
-        return op.factor \ bpin
-    else
-        return op.factor \ b
-    end
+# Solve A * x = b reusing the cached factorization. The pinned-operator RHS
+# adjustment is handled inside lin_solve! from the cache (the `A` argument is
+# kept for call-site compatibility but is no longer needed).
+function _incns_solve!(cache::LinearSolveCache, ::SparseMatrixCSC{Float64,Int}, b::Vector{Float64})
+    return lin_solve!(cache, b)
 end
 
 # ---------------------------------------------------------------------------

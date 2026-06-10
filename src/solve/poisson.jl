@@ -179,8 +179,12 @@ function solve_poisson(A::SparseMatrixCSC{Float64, Int}, b::AbstractVector{<:Rea
     size(A, 1) == N * N || throw(ArgumentError("A size must match N^2"))
     length(b) == N * N || throw(ArgumentError("b length must match N^2"))
 
-    factor = cholesky(Symmetric(A); check=true)
-    u = factor \ Float64.(b)
+    # Route through the factorize-once seam (CPU CHOLMOD by default). For this
+    # single-RHS entry point the cache is built then immediately consumed, so the
+    # result is bit-identical to the previous `cholesky(Symmetric(A)) \ b`; the
+    # win is realised by callers that reuse the cache across many RHS.
+    cache = lin_factorize(A; backend = CPUBackendTag(), spd = true)
+    u = lin_solve!(cache, Float64.(b))
     return reshape(Vector{Float64}(u), N, N)
 end
 
@@ -216,4 +220,11 @@ function l2_error(u::AbstractMatrix{<:Real}, u_exact::Function, N::Integer)
         err2 += diff * diff
     end
     return sqrt(h * h * err2)
+end
+
+# Pull in the factorize-once linear-solve seam LAST: linear_solve.jl needs
+# `pin_reference_dof` (defined above) to be in scope when it loads, so it must be
+# included after this point. Guarded against re-inclusion.
+if !isdefined(@__MODULE__, :lin_factorize)
+    include(joinpath(@__DIR__, "linear_solve.jl"))
 end

@@ -29,6 +29,10 @@ using SparseArrays
 if !isdefined(@__MODULE__, :pin_reference_dof)
     include(joinpath(@__DIR__, "..", "..", "solve", "poisson.jl"))
 end
+# Factorize-once seam (poisson.jl includes it, but guard for standalone use).
+if !isdefined(@__MODULE__, :lin_factorize)
+    include(joinpath(@__DIR__, "..", "..", "solve", "linear_solve.jl"))
+end
 
 # ---------------------------------------------------------------------------
 # SPD (-Laplacian) assembly for a cell-centred grid with per-wall Dirichlet /
@@ -114,27 +118,17 @@ function _cavity_dirichlet_rhs!(src, nx, ny, dx, dy;
 end
 
 # CHOLMOD factor wrapper with optional reference-dof pinning (singular pressure).
-struct _CavityLinearOp
-    factor
-    pin_k0::Int
-end
-
+# Thin wrappers over the shared factorize-once seam (linear_solve.jl): the
+# constant viscous momentum operator and the constant pressure Laplacian are each
+# factorized ONCE and reused across all ~3000 outer iterations. cuDSS drops in on
+# GPU by swapping the backend tag. Returns a LinearSolveCache.
 function _cavity_factorise(A::SparseMatrixCSC{Float64,Int}; pin_k0::Integer=0)
-    if pin_k0 > 0
-        Apin, _ = pin_reference_dof(A, zeros(Float64, size(A, 1)), pin_k0, 0.0)
-        return _CavityLinearOp(cholesky(Symmetric(Apin); check=true), Int(pin_k0))
-    else
-        return _CavityLinearOp(cholesky(Symmetric(A); check=true), 0)
-    end
+    return lin_factorize(A; backend=CPUBackendTag(), spd=true, pin_k0=Int(pin_k0))
 end
 
-function _cavity_solve!(op::_CavityLinearOp, A::SparseMatrixCSC{Float64,Int}, b::Vector{Float64})
-    if op.pin_k0 > 0
-        _, bpin = pin_reference_dof(A, b, op.pin_k0, 0.0)
-        return op.factor \ bpin
-    else
-        return op.factor \ b
-    end
+# Solve A * x = b reusing the cached factorization (pinning handled in the cache).
+function _cavity_solve!(cache::LinearSolveCache, ::SparseMatrixCSC{Float64,Int}, b::Vector{Float64})
+    return lin_solve!(cache, b)
 end
 
 # ---------------------------------------------------------------------------
