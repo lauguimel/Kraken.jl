@@ -316,6 +316,42 @@ end
     end
 end
 
+# STATIC two-stage gauge reduction (opt-in via `static_gauge=true`): column sums
+# into a 1xN buffer, then a single-work-item final sum into the 1x1 gauge buffer.
+# Functionally equivalent to `sum!(gbuf, a)` (last-ulp summation-order
+# differences only) but ALLOCATION-FREE and a fixed two-launch sequence — the
+# library `sum!` may allocate a temporary partial-reduction buffer on GPU, which
+# CUDA stream capture rejects ("graph capture does not support asynchronous
+# memory operations"). Required by the CUDA-graph executor; default OFF keeps
+# the bit-identical `sum!` path.
+@kernel function cav_colsum_kernel!(csum, @Const(a), N)
+    j = @index(Global, Linear)
+    @inbounds begin
+        if j <= N
+            T = eltype(csum)
+            s = zero(T)
+            for i in 1:N
+                s += a[i, j]
+            end
+            csum[1, j] = s
+        end
+    end
+end
+
+@kernel function cav_gauge_finalize_kernel!(gbuf, @Const(csum), N)
+    k = @index(Global, Linear)
+    @inbounds begin
+        if k == 1
+            T = eltype(gbuf)
+            s = zero(T)
+            for j in 1:N
+                s += csum[1, j]
+            end
+            gbuf[1, 1] = s
+        end
+    end
+end
+
 # Checkerboard metric (high-frequency pressure energy / variance). Uses a kernel
 # to form the 5-point high-pass and the squared deviation, then device reductions.
 @kernel function cav_checker_kernel!(osc, dev2, @Const(p), pbar, N)
@@ -354,6 +390,127 @@ end
             d[i, j] = eltype(d)(dnum) / (4 + nwall)
         end
     end
+end
+
+# =============================================================================
+# Per-iteration phase functions (function barrier / injectable executor seam).
+#
+# The SIMPLE outer iteration is split into four phases over a shared state
+# NamedTuple `S` (all device buffers + host scalars, built ONCE in the solver —
+# every buffer is allocation-stable across iterations):
+#
+#   phase 1  fused grad+Rhie-Chow  +  fused convection+momentum-RHS
+#   phase 2  momentum predictor MG solves (u, v) + predictor copy
+#   phase 3  fused grad+Rhie-Chow (predictor)  +  fused divergence+pressure-RHS
+#   phase 4  pressure-correction MG solve + zero-mean gauge + fused corrections
+#
+# An OFF-STRIDE iteration is exactly phase1;2;3;4 — with `mg_cycles>0` this is a
+# STATIC kernel-launch sequence with zero host syncs and zero device
+# allocations (with `static_gauge=true`; the default `sum!` gauge may allocate
+# a GPU reduction temporary), i.e. CUDA-graph-capturable as a single unit:
+# `_cavity_mg_offstride_step!`. An ON-STRIDE (checked) iteration runs the same
+# phases with the norm computations and the convergence break interleaved
+# between them (in the solver loop), exactly as before this refactor — the
+# launch/FP sequence is unchanged, so results are bit-identical.
+#
+# The solver accepts an injectable `offstride_executor(S)` replacing
+# `_cavity_mg_offstride_step!` for off-stride iterations only; the CUDA-graph
+# wrapper (cavity_mg_cuda.jl, loaded only in GPU jobs) captures the step once
+# and replays the instantiated graph. This file stays CUDA-free.
+#
+# Host-side bookkeeping note: `S.counters` ([momentum cycles; pressure cycles])
+# is incremented by HOST code inside phases 2/4. A replayed CUDA graph re-runs
+# only the recorded DEVICE work, so captured iterations do not increment the
+# counters (fixed-cycles mode is required there, where the per-iteration counts
+# are constant anyway).
+# =============================================================================
+
+function _cav_phase1!(S)
+    cav_grad_rhie_chow_kernel!(S.kab)(S.gpx, S.gpy, S.uf, S.vf, S.u, S.v, S.p,
+                                      S.d_u, S.d_v, S.invdx, S.invdy, S.N;
+                                      ndrange=(S.N, S.N))
+    cav_conv_mom_rhs_kernel!(S.kab)(S.rhs_u, S.rhs_v, S.u, S.v, S.uf, S.vf,
+                                    S.gpx, S.gpy, S.invdx, S.invdy, S.invnu,
+                                    S.sigma_mom, S.invh2, S.U_lid, S.L2, S.N;
+                                    ndrange=(S.N, S.N))
+    return nothing
+end
+
+function _cav_phase2!(S)
+    upred, ncu, _ = solve_poisson_mg(S.rhs_u, S.N;
+                                     bc=:dirichlet, backend_ka=S.kab, atype=S.atype,
+                                     tol=S.mom_mg_tol, maxcycles=S.mom_mg_maxcycles,
+                                     sigma=S.sigma_mom_mg, u0=S.u,
+                                     fixed_cycles=S.nfixed_mom, hier=S.mg_hier,
+                                     mixed_precision=S.mom_mg_mixed_precision,
+                                     hier_f32=S.mg_hier_f32)
+    copyto!(S.u, upred)
+    vpred, ncv, _ = solve_poisson_mg(S.rhs_v, S.N;
+                                     bc=:dirichlet, backend_ka=S.kab, atype=S.atype,
+                                     tol=S.mom_mg_tol, maxcycles=S.mom_mg_maxcycles,
+                                     sigma=S.sigma_mom_mg, u0=S.v,
+                                     fixed_cycles=S.nfixed_mom, hier=S.mg_hier,
+                                     mixed_precision=S.mom_mg_mixed_precision,
+                                     hier_f32=S.mg_hier_f32)
+    copyto!(S.v, vpred)
+    S.counters[1] += ncu + ncv
+    return nothing
+end
+
+function _cav_phase3!(S)
+    cav_grad_rhie_chow_kernel!(S.kab)(S.gpx, S.gpy, S.uf, S.vf, S.u, S.v, S.p,
+                                      S.d_u, S.d_v, S.invdx, S.invdy, S.N;
+                                      ndrange=(S.N, S.N))
+    cav_div_prhs_kernel!(S.kab)(S.divstar, S.rhs_p, S.uf, S.vf, S.invdx, S.invdy,
+                                S.prhs_scale, S.N; ndrange=(S.N, S.N))
+    return nothing
+end
+
+function _cav_phase4!(S)
+    pc, ncp, _ = solve_poisson_mg(S.rhs_p, S.N;
+                                  bc=:neumann, backend_ka=S.kab, atype=S.atype,
+                                  tol=S.mg_tol, maxcycles=S.mg_maxcycles,
+                                  sigma=0.0, fixed_cycles=S.nfixed, hier=S.mg_hier,
+                                  mixed_precision=S.mg_mixed_precision,
+                                  hier_f32=S.mg_hier_f32)
+    copyto!(S.pcorr, pc)
+    S.counters[2] += ncp
+    # Neumann gauge: zero-mean. Fixed-cycles path keeps the mean ON DEVICE; the
+    # legacy path reduces to a host scalar exactly as before. `static_gauge`
+    # swaps the library `sum!` for the fixed two-kernel reduction (allocation-
+    # free, capture-safe; last-ulp summation-order difference only).
+    if S.use_fixed
+        if S.static_gauge
+            cav_colsum_kernel!(S.kab)(S.csum, S.pcorr, S.N; ndrange=(S.N,))
+            cav_gauge_finalize_kernel!(S.kab)(S.gbuf, S.csum, S.N; ndrange=(1,))
+        else
+            sum!(S.gbuf, S.pcorr)
+        end
+        cav_shift_mean_kernel!(S.kab)(S.pcorr, S.gbuf, S.invNN, S.N; ndrange=(S.N, S.N))
+    else
+        m = sum(S.pcorr) / (S.N * S.N)
+        cav_shift_kernel!(S.kab)(S.pcorr, m, S.N; ndrange=(S.N, S.N))
+    end
+    cav_apply_corrections_kernel!(S.kab)(S.uf, S.vf, S.u, S.v, S.p, S.pcorr,
+                                         S.d_u, S.d_v, S.invdx, S.invdy,
+                                         S.alpha_p, S.N; ndrange=(S.N, S.N))
+    return nothing
+end
+
+"""
+    _cavity_mg_offstride_step!(S)
+
+One full OFF-STRIDE SIMPLE outer iteration (no norms, no host syncs): phases
+1-4 back-to-back. With `mg_cycles>0` (+ `static_gauge=true` for the gauge
+reduction) this is a static, allocation-free device launch sequence — the unit
+the CUDA-graph executor captures and replays.
+"""
+function _cavity_mg_offstride_step!(S)
+    _cav_phase1!(S)
+    _cav_phase2!(S)
+    _cav_phase3!(S)
+    _cav_phase4!(S)
+    return nothing
 end
 
 """
@@ -399,6 +556,25 @@ Latency/orchestration keywords (see file header):
   `mom_mg_cycles` fixed V-cycles per momentum solve when `mg_cycles > 0`
                  (ignored when `mg_cycles=0`). Default 1.
 
+GPU-efficiency opt-ins (ALL default OFF — defaults are bit-identical to the
+previous revision):
+  `mg_mixed_precision`     run the inner PRESSURE MG solves in mixed precision
+                 (F64 defect correction wrapping F32 V-cycles; see
+                 `solve_poisson_mg`'s `mixed_precision`). The outer SIMPLE
+                 iterate stays Float64.
+  `mom_mg_mixed_precision` same for the MOMENTUM MG solves. Exposed separately
+                 from the pressure flag because the two operators differ
+                 (σ-shifted Dirichlet vs singular Neumann) and may tolerate
+                 F32 differently.
+  `static_gauge` replace the library `sum!` in the fixed-cycles zero-mean gauge
+                 with a fixed two-kernel reduction (allocation-free, static
+                 launch count — required for CUDA-graph capture; last-ulp
+                 summation-order difference only). Ignored when `mg_cycles=0`.
+  `offstride_executor` injectable `f(S)` executing one full off-stride outer
+                 iteration (default `_cavity_mg_offstride_step!`). Seam for the
+                 CUDA-graph wrapper in cavity_mg_cuda.jl; on-stride (checked)
+                 iterations always run the regular uncaptured path.
+
 Returns a NamedTuple with `u, v, p` (nx x ny host `Array`s for convenience),
 `residual_history`, `iters`, `converged`, grid metrics, and `checkerboard`.
 """
@@ -415,6 +591,10 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
                                norm_stride::Integer=25,
                                mg_cycles::Integer=3,
                                mom_mg_cycles::Integer=1,
+                               mg_mixed_precision::Bool=false,
+                               mom_mg_mixed_precision::Bool=false,
+                               static_gauge::Bool=false,
+                               offstride_executor=nothing,
                                verbose::Bool=false)
     nx == ny || throw(ArgumentError("cavity_mg requires a square grid (nx == ny)"))
     N = Int(nx)
@@ -488,6 +668,32 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
     # solve, so reuse is value-identical and removes 3 full level-stack
     # allocations per outer iteration.
     mg_hier = build_mg_hierarchy(N, atype)
+    # Shared Float32 hierarchy for the mixed-precision inner solves (only
+    # allocated when an MP flag is on; fully reinitialized per solve like
+    # mg_hier, so sharing it across the three solves is value-identical).
+    mg_hier_f32 = (mg_mixed_precision || mom_mg_mixed_precision) ?
+        build_mg_hierarchy(N, _mg_eltype_variant(atype, Float32)) : nothing
+    # 1xN column-sum buffer for the static gauge reduction.
+    csum = atype(undef, 1, N); fill!(csum, 0.0)
+    # Inner-cycle counters [momentum; pressure], host-side (see phase functions).
+    counters = zeros(Int, 2)
+
+    # Shared per-iteration state for the phase functions / injectable executor.
+    # EVERY device buffer the iteration touches lives here and in mg_hier(.f32);
+    # nothing below reallocates them, so the off-stride step is allocation-
+    # stable across iterations (CUDA-graph requirement).
+    S = (; kab, N, atype,
+         u, v, p, gpx, gpy, uf, vf, divstar, pcorr, rhs_u, rhs_v, rhs_p,
+         d_u, d_v, gbuf, csum,
+         invdx, invdy, invnu=1.0 / nu, sigma_mom, sigma_mom_mg=sigma_mom * L2,
+         invh2, U_lid, L2, prhs_scale, invNN, alpha_p=αp,
+         mg_tol, mg_maxcycles=Int(mg_maxcycles),
+         mom_mg_tol, mom_mg_maxcycles=Int(mom_mg_maxcycles),
+         nfixed, nfixed_mom, use_fixed, static_gauge,
+         mg_mixed_precision, mom_mg_mixed_precision,
+         mg_hier, mg_hier_f32, counters)
+    offexec = offstride_executor === nothing ? _cavity_mg_offstride_step! :
+              offstride_executor
 
     xcenters = [(i - 0.5) * dx for i in 1:N]
     ycenters = [(j - 0.5) * dy for j in 1:N]
@@ -498,8 +704,6 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
     vel_change = Inf
     res = Inf
     ref_flux = U_lid
-    ncyc_mom_total = 0
-    ncyc_p_total = 0
 
     for it in 1:maxit
         iters = it
@@ -508,100 +712,55 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
         # iterates. With stride=1 this is the legacy every-iteration behavior.
         do_check = (it == 1) || (it % stride == 0) || (it == maxit)
 
-        # 1+2. fused: cell pressure gradient + Rhie-Chow face velocities
-        cav_grad_rhie_chow_kernel!(kab)(gpx, gpy, uf, vf, u, v, p, d_u, d_v,
-                                        invdx, invdy, N; ndrange=(N, N))
-
-        # 3+4. fused: deferred-correction convection + momentum RHS (×L²).
-        #      phi_old (the σ pseudo-transient term) is the CURRENT u,v — they
-        #      are not modified until the predictor copy below. u carries the
-        #      lid source on north; v has homogeneous walls.
-        cav_conv_mom_rhs_kernel!(kab)(rhs_u, rhs_v, u, v, uf, vf, gpx, gpy,
-                                      invdx, invdy, 1.0 / nu, sigma_mom, invh2,
-                                      U_lid, L2, N; ndrange=(N, N))
-
-        # snapshot old velocity for the settle metric (only when checked;
-        # device-to-device copy, stream-ordered, no host sync)
-        if do_check
-            copyto!(u_old, u); copyto!(v_old, v)
+        if !do_check
+            # OFF-STRIDE iteration: one static device launch sequence (no norms,
+            # no host syncs), via the injectable executor (CUDA-graph seam).
+            offexec(S)
+            continue
         end
+
+        # ON-STRIDE (checked) iteration: the SAME phase sequence with the norm
+        # computations and the convergence break interleaved, exactly as before.
+
+        # 1+2. fused: cell pressure gradient + Rhie-Chow face velocities,
+        #      then deferred-correction convection + momentum RHS (×L²).
+        _cav_phase1!(S)
+
+        # snapshot old velocity for the settle metric (device-to-device copy,
+        # stream-ordered, no host sync)
+        copyto!(u_old, u); copyto!(v_old, v)
 
         # momentum predictor: Helmholtz MG solves, warm-started from the current
         # velocity. The σ-shifted predictor IS the under-relaxed velocity
-        # (relaxation lives in the operator/RHS): copy it straight in.
-        upred, ncu, _ = solve_poisson_mg(rhs_u, N;
-                                         bc=:dirichlet, backend_ka=kab, atype=atype,
-                                         tol=mom_mg_tol, maxcycles=Int(mom_mg_maxcycles),
-                                         sigma=sigma_mom * L2, u0=u,
-                                         fixed_cycles=nfixed_mom, hier=mg_hier)
-        copyto!(u, upred)
-        vpred, ncv, _ = solve_poisson_mg(rhs_v, N;
-                                         bc=:dirichlet, backend_ka=kab, atype=atype,
-                                         tol=mom_mg_tol, maxcycles=Int(mom_mg_maxcycles),
-                                         sigma=sigma_mom * L2, u0=v,
-                                         fixed_cycles=nfixed_mom, hier=mg_hier)
-        copyto!(v, vpred)
-        ncyc_mom_total += ncu + ncv
+        # (relaxation lives in the operator/RHS): copied straight in.
+        _cav_phase2!(S)
 
         # settle metric (device reductions; host scalar reads = the only syncs)
-        if do_check
-            cav_delta_kernel!(kab)(delta, u, u_old, v, v_old, N; ndrange=(N, N))
-            umax_prev = max(_field_absmax(u_old), _field_absmax(v_old), U_lid * eps())
-            vel_change = _field_absmax(delta) / umax_prev
+        cav_delta_kernel!(kab)(delta, u, u_old, v, v_old, N; ndrange=(N, N))
+        umax_prev = max(_field_absmax(u_old), _field_absmax(v_old), U_lid * eps())
+        vel_change = _field_absmax(delta) / umax_prev
+
+        # 5+6. Rhie-Chow faces from the predictor + continuity residual
+        #      divstar = div(u*_face) AND the scaled pressure RHS.
+        _cav_phase3!(S)
+
+        res = sqrt(sum(abs2, divstar) / (N * N)) * dx / max(ref_flux, eps())
+        push!(residual_history, res)
+        if verbose && (it <= 5 || it % 100 == 0)
+            @info "cavity_mg SIMPLE" it res vel_change
+        end
+        # Convergence: continuity residual below `tol` AND the velocity field
+        # essentially steady (settle below `vel_tol`). The velocity-settle
+        # gate is looser because explicit momentum under-relaxation settles
+        # more slowly than the continuity residual drops.
+        if res < tol && vel_change < vel_tol
+            converged = true
+            break
         end
 
-        # 5. Rhie-Chow faces from the predictor (continuity RHS). p is unchanged
-        #    since step 1, so the fused gradient recompute writes the same gpx,gpy.
-        cav_grad_rhie_chow_kernel!(kab)(gpx, gpy, uf, vf, u, v, p, d_u, d_v,
-                                        invdx, invdy, N; ndrange=(N, N))
-
-        # 6. fused: continuity residual divstar = div(u*_face) AND the scaled
-        #    pressure RHS rhs_p = div(u*) · L²/dval.
-        cav_div_prhs_kernel!(kab)(divstar, rhs_p, uf, vf, invdx, invdy,
-                                  prhs_scale, N; ndrange=(N, N))
-
-        if do_check
-            res = sqrt(sum(abs2, divstar) / (N * N)) * dx / max(ref_flux, eps())
-            push!(residual_history, res)
-            if verbose && (it <= 5 || it % 100 == 0)
-                @info "cavity_mg SIMPLE" it res vel_change
-            end
-            # Convergence: continuity residual below `tol` AND the velocity field
-            # essentially steady (settle below `vel_tol`). The velocity-settle
-            # gate is looser because explicit momentum under-relaxation settles
-            # more slowly than the continuity residual drops.
-            if res < tol && vel_change < vel_tol
-                converged = true
-                break
-            end
-        end
-
-        # 7. pressure-correction Poisson: dscalar*(-∇²) pcorr = div(u*). MG solves
-        #    the PLAIN Neumann (-∇²) on the unit square with the pre-scaled RHS;
-        #    pcorr is MINUS the physical pressure correction (sign matched to the
-        #    projection).
-        pc, ncp, _ = solve_poisson_mg(rhs_p, N;
-                                      bc=:neumann, backend_ka=kab, atype=atype,
-                                      tol=mg_tol, maxcycles=Int(mg_maxcycles),
-                                      sigma=0.0, fixed_cycles=nfixed, hier=mg_hier)
-        copyto!(pcorr, pc)
-        ncyc_p_total += ncp
-        # Neumann gauge: zero-mean. Fixed-cycles path keeps the mean ON DEVICE
-        # (sum! into a 1x1 buffer + shift kernel — no host transfer); the legacy
-        # path reduces to a host scalar exactly as before.
-        if use_fixed
-            sum!(gbuf, pcorr)
-            cav_shift_mean_kernel!(kab)(pcorr, gbuf, invNN, N; ndrange=(N, N))
-        else
-            m = sum(pcorr) / (N * N)
-            cav_shift_kernel!(kab)(pcorr, m, N; ndrange=(N, N))
-        end
-
-        # 8+9+10. fused: correct FACE velocities (exact projection), correct CELL
-        #         velocities with the compact pcorr gradient, under-relaxed
-        #         pressure update.
-        cav_apply_corrections_kernel!(kab)(uf, vf, u, v, p, pcorr, d_u, d_v,
-                                           invdx, invdy, αp, N; ndrange=(N, N))
+        # 7-10. pressure-correction Poisson + zero-mean gauge + fused
+        #       face/cell-velocity corrections and pressure update.
+        _cav_phase4!(S)
     end
 
     # One final device barrier before host post-processing.
@@ -618,7 +777,8 @@ function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
             dx, dy, xcenters, ycenters, nx=N, ny=N, U_lid, Re, mu=nu, L,
             checkerboard, sigma_mom,
             norm_stride=stride, mg_cycles=nfixed, mom_mg_cycles=nfixed_mom,
-            mg_cycles_mom_total=ncyc_mom_total, mg_cycles_p_total=ncyc_p_total)
+            mg_mixed_precision, mom_mg_mixed_precision, static_gauge,
+            mg_cycles_mom_total=counters[1], mg_cycles_p_total=counters[2])
 end
 
 # Device reduction for the max abs value (no host scalar indexing of device arrays).

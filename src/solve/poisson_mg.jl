@@ -325,6 +325,28 @@ end
     end
 end
 
+# Mixed-precision transfer kernels: elementwise eltype conversion (F64 residual
+# -> F32 RHS) and converted-add (F32 correction -> F64 solution). Backend-generic
+# (no copyto! between mismatched eltypes, which is not guaranteed on every
+# device array type) and allocation-free, so they are CUDA-graph-capturable.
+@kernel function mg_convert_kernel!(dst, @Const(src), Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            dst[i, j] = convert(eltype(dst), src[i, j])
+        end
+    end
+end
+
+@kernel function mg_add_converted_kernel!(dst, @Const(src), Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        if i <= Nx && j <= Ny
+            dst[i, j] += convert(eltype(dst), src[i, j])
+        end
+    end
+end
+
 # Pin one DOF to remove the constant nullspace of the all-Neumann operator.
 # We pin cell (1,1) to zero by projecting the constant out of the correction /
 # subtracting its mean. For the V-cycle we instead enforce a zero-mean RHS and
@@ -350,36 +372,57 @@ end
 # dominated the latency-bound SIMPLE cavity solve.
 # =============================================================================
 
+# Grid/operator scalars (h², 1/h², σ) are converted to the FIELD eltype before
+# the launch: for the default Float64 hierarchy this is an identity conversion
+# (bit-identical results, unchanged code path); for the mixed-precision Float32
+# hierarchy it keeps ALL kernel arithmetic in Float32 (no silent F64 promotion
+# inside the kernels, which would forfeit the F32 bandwidth/FLOP gain on GPU).
+
 function _mg_apply!(Lu, u, invh2, sigma, bc, Nx, Ny, kab)
-    mg_laplacian_apply_kernel!(kab)(Lu, u, invh2, sigma, bc[1], bc[2], bc[3], bc[4],
+    T = eltype(Lu)
+    mg_laplacian_apply_kernel!(kab)(Lu, u, T(invh2), T(sigma), bc[1], bc[2], bc[3], bc[4],
                                     Nx, Ny; ndrange = (Nx, Ny))
     return Lu
 end
 
 function _mg_residual!(r, u, f, invh2, sigma, bc, Nx, Ny, kab)
-    mg_residual_kernel!(kab)(r, u, f, invh2, sigma, bc[1], bc[2], bc[3], bc[4],
+    T = eltype(r)
+    mg_residual_kernel!(kab)(r, u, f, T(invh2), T(sigma), bc[1], bc[2], bc[3], bc[4],
                              Nx, Ny; ndrange = (Nx, Ny))
     return r
 end
 
 function _mg_smooth!(u, f, h2, sigma, nsweeps, bc, Nx, Ny, kab, smoother, scratch)
+    T = eltype(u)
+    h2c = T(h2)
+    sigc = T(sigma)
     if smoother === :rbgs
         for _ in 1:nsweeps
-            mg_rbgs_kernel!(kab)(u, f, h2, 0, sigma, bc[1], bc[2], bc[3], bc[4],
+            mg_rbgs_kernel!(kab)(u, f, h2c, 0, sigc, bc[1], bc[2], bc[3], bc[4],
                                  Nx, Ny; ndrange = (Nx, Ny))
-            mg_rbgs_kernel!(kab)(u, f, h2, 1, sigma, bc[1], bc[2], bc[3], bc[4],
+            mg_rbgs_kernel!(kab)(u, f, h2c, 1, sigc, bc[1], bc[2], bc[3], bc[4],
                                  Nx, Ny; ndrange = (Nx, Ny))
         end
     else # :jacobi (weighted, ω=2/3), needs a scratch buffer (ping-pong)
-        omega = eltype(u)(2 // 3)
+        omega = T(2 // 3)
         for _ in 1:nsweeps
-            mg_jacobi_kernel!(kab)(scratch, u, f, h2, omega, sigma,
+            mg_jacobi_kernel!(kab)(scratch, u, f, h2c, omega, sigc,
                                    bc[1], bc[2], bc[3], bc[4],
                                    Nx, Ny; ndrange = (Nx, Ny))
             copyto!(u, scratch)   # device-to-device, stream-ordered
         end
     end
     return u
+end
+
+function _mg_convert!(dst, src, Nx, Ny, kab)
+    mg_convert_kernel!(kab)(dst, src, Nx, Ny; ndrange = (Nx, Ny))
+    return dst
+end
+
+function _mg_add_converted!(dst, src, Nx, Ny, kab)
+    mg_add_converted_kernel!(kab)(dst, src, Nx, Ny; ndrange = (Nx, Ny))
+    return dst
 end
 
 function _mg_zero!(a, Nx, Ny, kab)
@@ -417,6 +460,19 @@ struct MGHierarchy{A}
     r::Vector{A}
     scratch::Vector{A}
 end
+
+"""
+    _mg_eltype_variant(atype, T) -> array type with element type `T`
+
+Derive the same backend array family with a different element type, e.g.
+`Array{Float64} -> Array{Float32}` or `CuArray{Float64} -> CuArray{Float32}`.
+Used to allocate the Float32 hierarchy for mixed-precision multigrid without
+any backend-specific code (`Base.typename(...).wrapper` strips ALL type
+parameters, so trailing parameters like `CuArray`'s memory kind fall back to
+their constructor defaults).
+"""
+_mg_eltype_variant(::Type{A}, ::Type{T}) where {A <: AbstractArray, T} =
+    Base.typename(A).wrapper{T}
 
 """
     build_mg_hierarchy(N, backend_array_template; min_size=4) -> MGHierarchy
@@ -514,6 +570,36 @@ function _project_zero_mean!(a, Nx, Ny, kab, scratch)
     return a
 end
 
+# -----------------------------------------------------------------------------
+# Mixed-precision defect-correction cycle. The OUTER iterate `hier.u[1]` and the
+# residual stay in Float64; the V-cycle that approximately solves the error
+# equation `A e = r` runs entirely on the Float32 hierarchy `hier32` (half the
+# bandwidth per smoothing sweep — the MG cost driver). One cycle =
+#   r64 = f - A x          (F64 residual kernel)
+#   f32 = convert(r64)     (conversion kernel)
+#   e32 ~ A^{-1} f32       (one F32 V-cycle, zero start)
+#   x  += convert(e32)     (converted-add kernel)
+# Standard iterative-refinement convergence: as long as cond(A)*eps(Float32) < 1
+# (true here: cond ~ (2N/pi)^2 ~ 1e5 at N=512, eps32 ~ 6e-8), the F64 residual
+# keeps contracting at the MG rate down to F64 tolerances. The launch sequence
+# is STATIC and reduction-free when `project=false` (fixed-cycles fast path).
+# -----------------------------------------------------------------------------
+function _mg_mixed_cycle!(hier::MGHierarchy, hier32::MGHierarchy, bcs, kab;
+                          nu1::Int, nu2::Int, ncoarse::Int, smoother::Symbol,
+                          sigma::Float64, project::Bool)
+    N = hier.sizes[1]
+    invh2 = 1.0 / hier.h[1]^2
+    _mg_residual!(hier.r[1], hier.u[1], hier.f[1], invh2, sigma, bcs, N, N, kab)
+    _mg_convert!(hier32.f[1], hier.r[1], N, N, kab)
+    project && _project_zero_mean!(hier32.f[1], N, N, kab, hier32.scratch[1])
+    _mg_zero!(hier32.u[1], N, N, kab)
+    vcycle!(hier32, 1, bcs, kab; nu1 = nu1, nu2 = nu2, ncoarse = ncoarse,
+            smoother = smoother, neumann_pin = project, sigma = sigma)
+    _mg_add_converted!(hier.u[1], hier32.u[1], N, N, kab)
+    project && _project_zero_mean!(hier.u[1], N, N, kab, hier.scratch[1])
+    return nothing
+end
+
 # Relative residual norm (L2, scaled by h to be a grid-function norm). Uses the
 # device-side residual kernel + a reduction; no host scalar indexing.
 function _mg_relresid(hier::MGHierarchy, bc, kab; fnorm, sigma::Float64 = 0.0)
@@ -581,6 +667,17 @@ Keywords
               avoids re-allocating the full level stack per call (a per-
               iteration allocation in SIMPLE loops). All level arrays are
               fully (re)initialized here, so reuse is value-identical.
+  `mixed_precision`  when true, each V-cycle becomes a Float64 defect-correction
+              step whose inner V-cycle runs entirely in Float32 (see
+              `_mg_mixed_cycle!`): residual in F64, error solve in F32,
+              correction added back in F64. Opt-in; default `false` keeps the
+              all-Float64 path bit-identical. Composes with `fixed_cycles`
+              (the mixed cycle is also a static, reduction-free launch
+              sequence). The returned solution stays Float64.
+  `hier_f32`  optional pre-built Float32 `MGHierarchy` (from
+              `build_mg_hierarchy(N, _mg_eltype_variant(atype, Float32))`) for
+              `mixed_precision=true`; reuse it across repeated solves exactly
+              like `hier`. Ignored when `mixed_precision=false`.
 
 Returns the solution `u` (N x N device array), the number of V-cycles performed,
 and the relative-residual history (one entry per cycle, on the host; EMPTY when
@@ -602,6 +699,8 @@ function solve_poisson_mg(f, N::Integer;
                           u0 = nothing,
                           fixed_cycles::Integer = 0,
                           hier::Union{Nothing, MGHierarchy} = nothing,
+                          mixed_precision::Bool = false,
+                          hier_f32::Union{Nothing, MGHierarchy} = nothing,
                           verbose::Bool = false)
     N = Int(N)
     kab = backend_ka
@@ -618,6 +717,21 @@ function solve_poisson_mg(f, N::Integer;
         hier = build_mg_hierarchy(N, atype; min_size = min_size)
     else
         hier.sizes[1] == N || throw(ArgumentError("reused hierarchy is sized $(hier.sizes[1]), need $N"))
+    end
+
+    # Mixed precision: the F32 hierarchy hosts the inner error-equation V-cycle.
+    # Allocated here only for standalone calls; repeated solvers (SIMPLE loops)
+    # should pass a shared `hier_f32` exactly like `hier`.
+    if mixed_precision
+        if hier_f32 === nothing
+            hier_f32 = build_mg_hierarchy(N, _mg_eltype_variant(atype, Float32);
+                                          min_size = min_size)
+        else
+            hier_f32.sizes[1] == N ||
+                throw(ArgumentError("reused F32 hierarchy is sized $(hier_f32.sizes[1]), need $N"))
+            eltype(hier_f32.u[1]) === Float32 ||
+                throw(ArgumentError("hier_f32 must hold Float32 arrays"))
+        end
     end
 
     # Fill the finest RHS at cell centres. Sampling a Function is a host loop into
@@ -662,10 +776,24 @@ function solve_poisson_mg(f, N::Integer;
 
     # ---- fixed-cycle mode: static launch sequence, ZERO host syncs ----------
     if nfixed > 0
-        for _ in 1:nfixed
-            vcycle!(hier, 1, bcs, kab; nu1 = Int(nu1), nu2 = Int(nu2),
-                    ncoarse = Int(ncoarse), smoother = smoother,
-                    neumann_pin = false, sigma = sig)
+        if mixed_precision
+            # Each fixed "cycle" is one F64 defect-correction pass wrapping one
+            # F32 V-cycle — still a static, reduction-free launch sequence
+            # (CUDA-graph-capturable). Zero-mean projections stay skipped (the
+            # defect correction commutes with constant shifts the same way the
+            # plain Neumann V-cycle does; the caller gauges the constant).
+            for _ in 1:nfixed
+                _mg_mixed_cycle!(hier, hier_f32, bcs, kab;
+                                 nu1 = Int(nu1), nu2 = Int(nu2),
+                                 ncoarse = Int(ncoarse), smoother = smoother,
+                                 sigma = sig, project = false)
+            end
+        else
+            for _ in 1:nfixed
+                vcycle!(hier, 1, bcs, kab; nu1 = Int(nu1), nu2 = Int(nu2),
+                        ncoarse = Int(ncoarse), smoother = smoother,
+                        neumann_pin = false, sigma = sig)
+            end
         end
         return hier.u[1], nfixed, Float64[]
     end
@@ -681,9 +809,16 @@ function solve_poisson_mg(f, N::Integer;
 
     ncycles = 0
     for cyc in 1:Int(maxcycles)
-        vcycle!(hier, 1, bcs, kab; nu1 = Int(nu1), nu2 = Int(nu2),
-                ncoarse = Int(ncoarse), smoother = smoother,
-                neumann_pin = do_project, sigma = sig)
+        if mixed_precision
+            _mg_mixed_cycle!(hier, hier_f32, bcs, kab;
+                             nu1 = Int(nu1), nu2 = Int(nu2),
+                             ncoarse = Int(ncoarse), smoother = smoother,
+                             sigma = sig, project = do_project)
+        else
+            vcycle!(hier, 1, bcs, kab; nu1 = Int(nu1), nu2 = Int(nu2),
+                    ncoarse = Int(ncoarse), smoother = smoother,
+                    neumann_pin = do_project, sigma = sig)
+        end
         ncycles += 1
         relres, _ = _mg_relresid(hier, bcs, kab; fnorm = fnorm, sigma = sig)
         push!(resid_history, relres)
