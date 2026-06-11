@@ -157,6 +157,7 @@ makedocs(;
         "Capabilities" => "capabilities.md",
         "Users" => [
             "KRK reference" => "users/krk-reference.md",
+            "Incompressible Navier–Stokes (FVFD/SIMPLE)" => "users/incompressible-navier-stokes.md",
             "Axis tutorials" => [
                 "Cartesian cavity" => "users/tutorials/cartesian-cavity.md",
                 "Thermal natural convection" => "users/tutorials/thermal-natural-convection.md",
