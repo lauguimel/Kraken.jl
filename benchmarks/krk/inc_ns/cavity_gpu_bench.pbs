@@ -1,22 +1,34 @@
 #!/bin/bash -l
-#PBS -N cavity_gpu_bench
-#PBS -l select=1:ncpus=4:ngpus=1:mem=64GB:gpu_id=A100
-#PBS -l walltime=02:00:00
+#PBS -N cavity_gpu_ablation
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=A100
+#PBS -l walltime=04:00:00
 #PBS -j oe
 #PBS -V
 
-# --- Full SIMPLE lid-driven cavity benchmark: GPU (CUDA) vs CPU, Re=1000 ---
-# Runs the backend-parametric SIMPLE cavity solver (src/methods/inc_ns/cavity_mg.jl)
-# on the CPU backend and the CUDA backend at Re=1000 on fine grids (N=256, 512;
-# add 1024 with CAVITY_BENCH_1024=1). Checks GPU<->CPU centreline parity and
-# validates both against Ghia, Ghia & Shin (1982). Reports per-N wall time (CPU
-# vs GPU), iters, GPU/CPU speed-up, max Ghia centreline error %, and parity.
+# --- SIMPLE cavity GPU ABLATION bench (per-change contribution, A100) --------
+# Runs benchmarks/krk/inc_ns/cavity_gpu_bench.jl: one legacy CPU reference at
+# 512^2 Re=1000, then the cumulative GPU ablation ladder
+#   C0 legacy -> C1 +norm_stride=25 -> C2 +fixed MG cycles (3/1)
+#   -> C3 +CUDA graph -> C4 +mixed precision (pressure+momentum).
+# Per config: wall time, outer iters, converged?, speed-up vs CPU ref, max-rel
+# u/v/p parity vs CPU ref (<1e-3), Ghia 1982 centreline error %, and GPU
+# utilization. The BENCH ITSELF starts/stops a background
+#   nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader -l 1
+# sampler around each config's TIMED SOLVE WINDOW (per-config logs
+# gpu_util_<config>_N<N>.log in $WORKDIR), so the mean/peak in the table cover
+# the solve only — no global job-wide sampler here.
 #
-# KEY METRIC: GPU utilization. We sample nvidia-smi every second during the Julia
-# run and report the mean/peak utilization, to confirm the matrix-free MG-based
-# SIMPLE solver SATURATES the A100 (the cavity solves both the momentum predictor
-# and the pressure correction with matrix-free multigrid). Compare against the
-# cuDSS pressure-Poisson baseline (~9%).
+# WALLTIME BUDGET (anchors: CPU 512^2 legacy = 3687 s, GPU 512^2 legacy = 865 s)
+#   CPU ref ~62 min; C0 ~15 min; C1..C4 monotonically less (est. 35-50 min
+#   total); JIT/instantiate/warmups ~10 min  =>  ~2 h. 4 h gives 2x margin and
+#   room for the optional 1024^2 best-config run.
+#
+# OPTIONS (export before qsub, passed through by #PBS -V, e.g.
+#   qsub -v CAVITY_BENCH_1024=1 cavity_gpu_bench.pbs):
+#   CAVITY_BENCH_1024=1     add a 1024^2 GPU-only run of the best config
+#                           (C4 -> C3 -> C2 fallback). No CPU 1024^2.
+#   CAVITY_BENCH_1024_C0=1  also run C0 at 1024^2 for contrast (~2 h alone:
+#                           only with an extended walltime).
 
 WORKDIR=$HOME/kraken_poisson_gpu_bench
 cd $WORKDIR
@@ -35,38 +47,13 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 
 julia --project=. -e 'using Pkg; Pkg.instantiate(); using CUDA; CUDA.versioninfo()' 2>&1
 
-# --- Start GPU utilization sampler (1 Hz) in the background -------------------
-GPU_UTIL_LOG=$WORKDIR/gpu_util_cavity.log
-echo "Sampling GPU utilization to $GPU_UTIL_LOG (1 Hz) during the bench..."
-nvidia-smi --query-gpu=utilization.gpu,utilization.memory --format=csv -l 1 \
-    > "$GPU_UTIL_LOG" 2>&1 &
-SMI_PID=$!
-
-echo "=== SIMPLE cavity GPU bench (GPU vs CPU, Re=1000, Ghia 1982) ==="
+echo "=== SIMPLE cavity GPU ablation bench (C0->C4 vs legacy CPU ref) ==="
 julia --project=. benchmarks/krk/inc_ns/cavity_gpu_bench.jl 2>&1
 EXIT_CODE=$?
 
-# --- Stop the sampler --------------------------------------------------------
-kill $SMI_PID 2>/dev/null
-wait $SMI_PID 2>/dev/null
-
-# --- Summarise the captured GPU utilization ----------------------------------
-# CSV columns: "utilization.gpu [%], utilization.memory [%]"; values like "37 %".
 echo "========================================"
-echo "GPU utilization summary (from $GPU_UTIL_LOG):"
-if [ -s "$GPU_UTIL_LOG" ]; then
-    # Mean of the GPU-util column (field 1), skipping the header row. Compares
-    # directly against the cuDSS pressure-Poisson baseline (~9%).
-    awk -F',' 'NR>1 {gsub(/[ %]/,"",$1); s+=$1; n++}
-               END {if (n>0) printf "  mean GPU util = %.1f%%  over %d samples\n", s/n, n;
-                    else print "  (no samples captured)"}' "$GPU_UTIL_LOG"
-    awk -F',' 'NR>1 {gsub(/[ %]/,"",$1); if($1>mx)mx=$1}
-               END {printf "  peak GPU util = %d%%\n", mx}' "$GPU_UTIL_LOG"
-    echo "  --- last 5 samples ---"
-    tail -n 5 "$GPU_UTIL_LOG"
-else
-    echo "  (gpu_util_cavity.log empty or missing)"
-fi
+echo "Per-config GPU utilization logs (solve windows; summarised in the table):"
+ls -la "$WORKDIR"/gpu_util_*.log 2>/dev/null || echo "  (no per-config logs found)"
 echo "========================================"
 echo "End: $(date)  exit=$EXIT_CODE"
 echo "========================================"
