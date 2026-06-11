@@ -68,14 +68,87 @@ end
 #   the loop reaches (i+1) via the symmetric (i>1) branch. Boundary faces:
 #     :dirichlet -> wall value T_wall is the upwind donor when flowing IN; its
 #                   contribution Fwall·T_wall/h goes to b (sign per inflow/outflow).
-#     :flux / :outflow / wall with no advective inflow value -> zero-gradient
-#                   (ghost = interior cell): the boundary face advects the
-#                   INTERIOR upwind value, i.e. a +F/h diagonal term when the flow
-#                   leaves the domain, and (for a true wall with vf=0) no flux.
+#     :flux      -> adiabatic/heat-flux wall for diffusion; no advective
+#                   boundary transport.
+#     :outflow   -> zero-gradient (ghost = interior cell): the boundary face
+#                   advects the INTERIOR upwind value, i.e. a boundary diagonal
+#                   term with the appropriate face-flux sign.
 #
-# is_solid is accepted for later cut-cell work but the regular (axis-aligned,
-# is_solid=falses) path is exact for linear fields and is all the validation needs.
+# SOLIDS:
+#   Solid cells are identity rows pinned to T=0. Fluid-solid faces contribute no
+#   diffusive or advective flux, i.e. they are adiabatic impermeable walls.
 # ---------------------------------------------------------------------------
+function _st_check_shape(name::AbstractString, A, nx::Int, ny::Int)
+    size(A) == (nx, ny) ||
+        throw(ArgumentError("$name must have size ($nx, $ny); got $(size(A))"))
+    return nothing
+end
+
+function _st_bc_kind(kind, side::Symbol)
+    k = Symbol(kind)
+    k in (:dirichlet, :flux, :outflow) ||
+        throw(ArgumentError("bc.$side kind must be :dirichlet, :flux, or :outflow; got $k"))
+    return k
+end
+
+function _st_side_bc(sidebc, n::Int, side::Symbol)
+    kinds = fill(:flux, n)
+    values = zeros(Float64, n)
+
+    if hasproperty(sidebc, :kind)
+        hasproperty(sidebc, :value) ||
+            throw(ArgumentError("bc.$side must include value"))
+        kind = _st_bc_kind(getproperty(sidebc, :kind), side)
+        value = Float64(getproperty(sidebc, :value))
+        fill!(kinds, kind)
+        fill!(values, value)
+    elseif sidebc isa AbstractVector
+        covered = falses(n)
+        for (iseg, seg) in enumerate(sidebc)
+            for prop in (:lo, :hi, :kind, :value)
+                hasproperty(seg, prop) ||
+                    throw(ArgumentError("bc.$side segment $iseg must include $prop"))
+            end
+            lo = Int(getproperty(seg, :lo))
+            hi = Int(getproperty(seg, :hi))
+            1 <= lo <= hi <= n ||
+                throw(ArgumentError("bc.$side segment $iseg range $lo:$hi must lie inside 1:$n"))
+            any(@view covered[lo:hi]) &&
+                throw(ArgumentError("bc.$side segments must not overlap"))
+            kind = _st_bc_kind(getproperty(seg, :kind), side)
+            value = Float64(getproperty(seg, :value))
+            @inbounds for q in lo:hi
+                kinds[q] = kind
+                values[q] = value
+                covered[q] = true
+            end
+        end
+    else
+        throw(ArgumentError("bc.$side must be a NamedTuple BC or a vector of segment NamedTuples"))
+    end
+
+    return (; kind=kinds, value=values)
+end
+
+function _st_boundary_bcs(bc, nx::Int, ny::Int)
+    for side in (:west, :east, :south, :north)
+        hasproperty(bc, side) || throw(ArgumentError("bc must include $side"))
+    end
+    return (west = _st_side_bc(getproperty(bc, :west), ny, :west),
+            east = _st_side_bc(getproperty(bc, :east), ny, :east),
+            south = _st_side_bc(getproperty(bc, :south), nx, :south),
+            north = _st_side_bc(getproperty(bc, :north), nx, :north))
+end
+
+function _st_west_boundary_flux(uf::AbstractMatrix, vf::AbstractMatrix,
+                                solid::AbstractMatrix{Bool}, nx::Int, ny::Int,
+                                dx::Float64, dy::Float64, j::Int)
+    Fe = (nx > 1 && !solid[2, j]) ? Float64(uf[1, j]) : 0.0
+    Fn = (j < ny && !solid[1, j + 1]) ? Float64(vf[1, j]) : 0.0
+    Fs = (j > 1 && !solid[1, j - 1]) ? Float64(vf[1, j - 1]) : 0.0
+    return Fe + (dx / dy) * (Fn - Fs)
+end
+
 function _st_assemble_system(nx::Integer, ny::Integer, dx::Real, dy::Real,
                              uf::AbstractMatrix, vf::AbstractMatrix, DT::Real,
                              is_solid::AbstractMatrix;
@@ -90,8 +163,15 @@ function _st_assemble_system(nx::Integer, ny::Integer, dx::Real, dy::Real,
 
     lin(i, j) = i + (j - 1) * nx
 
-    bc_w = bc.west;  bc_e = bc.east
-    bc_s = bc.south; bc_n = bc.north
+    _st_check_shape("uf", uf, nx, ny)
+    _st_check_shape("vf", vf, nx, ny)
+    _st_check_shape("is_solid", is_solid, nx, ny)
+    source !== nothing && _st_check_shape("source", source, nx, ny)
+    solid = Matrix{Bool}(is_solid)
+
+    bcs = _st_boundary_bcs(bc, nx, ny)
+    bc_w = bcs.west;  bc_e = bcs.east
+    bc_s = bcs.south; bc_n = bcs.north
 
     I = Int[]; J = Int[]; V = Float64[]
     sizehint!(I, 5n); sizehint!(J, 5n); sizehint!(V, 5n)
@@ -101,44 +181,53 @@ function _st_assemble_system(nx::Integer, ny::Integer, dx::Real, dy::Real,
         k = lin(i, j)
         diag = 0.0
 
-        # face mass fluxes (frozen). Interior faces from uf/vf; boundary faces
-        # carry the wall-normal velocity (0 unless a :dirichlet inlet imposes it
-        # through uf/vf — here uf/vf already encode the inlet velocity on the
-        # first/last column/row faces; we read them directly).
-        Fe = (i < nx) ? uf[i, j] : uf[i, j]   # east face vel (boundary at i==nx too)
-        Fw = (i > 1) ? uf[i - 1, j] : 0.0     # west face = east face of west nb
-        Fn = (j < ny) ? vf[i, j] : vf[i, j]   # north face vel
-        Fs = (j > 1) ? vf[i, j - 1] : 0.0     # south face
+        if solid[i, j]
+            push!(I, k); push!(J, k); push!(V, 1.0)
+            continue
+        end
+
+        # Face mass fluxes (frozen). Interior faces come from uf/vf. The west
+        # boundary face is reconstructed from the adjacent divergence-free face
+        # balance because the inc_ns handoff stores its true west face separately
+        # as `uwest`, not in the public uf matrix. Fluid-solid faces are
+        # impermeable.
+        Fe = (i < nx) ? (solid[i + 1, j] ? 0.0 : Float64(uf[i, j])) : Float64(uf[i, j])
+        Fn = (j < ny) ? (solid[i, j + 1] ? 0.0 : Float64(vf[i, j])) : Float64(vf[i, j])
+        Fs = (j > 1)  ? (solid[i, j - 1] ? 0.0 : Float64(vf[i, j - 1])) : Float64(vf[i, j])
+        Fw = (i > 1)  ? (solid[i - 1, j] ? 0.0 : Float64(uf[i - 1, j])) :
+                         _st_west_boundary_flux(uf, vf, solid, nx, ny, dx, dy, j)
 
         # ===== EAST face (x) =====
         if i < nx
-            # diffusion
-            push!(I, k); push!(J, lin(i + 1, j)); push!(V, -DT * invdx2)
-            diag += DT * invdx2
-            # advection (upwind on Fe)
-            if Fe >= 0          # donor = own cell
-                diag += Fe * invdx
-            else                # donor = east neighbour
-                push!(I, k); push!(J, lin(i + 1, j)); push!(V, Fe * invdx)
+            if !solid[i + 1, j]
+                # diffusion
+                push!(I, k); push!(J, lin(i + 1, j)); push!(V, -DT * invdx2)
+                diag += DT * invdx2
+                # advection (upwind on Fe)
+                if Fe >= 0          # donor = own cell
+                    diag += Fe * invdx
+                else                # donor = east neighbour
+                    push!(I, k); push!(J, lin(i + 1, j)); push!(V, Fe * invdx)
+                end
             end
         else
             # east boundary
-            if bc_e.kind === :dirichlet
+            kind = bc_e.kind[j]
+            value = bc_e.value[j]
+            if kind === :dirichlet
                 diag += 2.0 * DT * invdx2
-                b[k] += 2.0 * DT * invdx2 * Float64(bc_e.value)
+                b[k] += 2.0 * DT * invdx2 * value
                 # advection: wall value is the donor when flow enters (Fe<0),
                 # interior is donor when flow leaves (Fe>=0).
                 if Fe >= 0
                     diag += Fe * invdx
                 else
-                    b[k] -= Fe * invdx * Float64(bc_e.value)
+                    b[k] -= Fe * invdx * value
                 end
-            elseif bc_e.kind === :flux
+            elseif kind === :flux
                 # Neumann: zero-grad diffusion ghost (no diag term); flux source.
-                b[k] += Float64(bc_e.value) * invdx
-                # advection: zero-gradient ghost = interior value.
-                diag += Fe * invdx
-            elseif bc_e.kind === :outflow
+                b[k] += value * invdx
+            elseif kind === :outflow
                 # zero-gradient: ghost = interior; advect interior upwind value.
                 diag += Fe * invdx
             end
@@ -146,90 +235,95 @@ function _st_assemble_system(nx::Integer, ny::Integer, dx::Real, dy::Real,
 
         # ===== WEST face (x) =====
         if i > 1
-            push!(I, k); push!(J, lin(i - 1, j)); push!(V, -DT * invdx2)
-            diag += DT * invdx2
-            # advection: west face flux Fw, OUT of cell k is -Fw (Fw>0 enters k).
-            # conv contribution is -(Fw·T_w)/dx. Upwind donor on Fw:
-            if Fw >= 0          # flow enters k from west: donor = west neighbour
-                push!(I, k); push!(J, lin(i - 1, j)); push!(V, -Fw * invdx)
-            else                # flow leaves k to the west: donor = own cell
-                diag += -Fw * invdx
+            if !solid[i - 1, j]
+                push!(I, k); push!(J, lin(i - 1, j)); push!(V, -DT * invdx2)
+                diag += DT * invdx2
+                # advection: west face flux Fw, OUT of cell k is -Fw (Fw>0 enters k).
+                # conv contribution is -(Fw·T_w)/dx. Upwind donor on Fw:
+                if Fw >= 0          # flow enters k from west: donor = west neighbour
+                    push!(I, k); push!(J, lin(i - 1, j)); push!(V, -Fw * invdx)
+                else                # flow leaves k to the west: donor = own cell
+                    diag += -Fw * invdx
+                end
             end
         else
             # west boundary
-            if bc_w.kind === :dirichlet
+            kind = bc_w.kind[j]
+            value = bc_w.value[j]
+            if kind === :dirichlet
                 diag += 2.0 * DT * invdx2
-                b[k] += 2.0 * DT * invdx2 * Float64(bc_w.value)
-                # advection through west boundary: boundary flux Fw_b. The inlet
-                # face velocity is uf at the west boundary; encode via vf/uf? For
-                # a Dirichlet inlet the imposed normal velocity is read from the
-                # provided boundary; here Fw_b = 0 unless the user set an inlet
-                # velocity, in which case it is carried in `uf` on a ghost face.
-                # The contribution: -(Fw_b·T_face)/dx. Flow into domain (Fw_b>0)
-                # uses the wall value; out uses interior.
-                Fwb = 0.0  # west boundary normal vel (no ghost face stored); inlet
-                           # velocity is applied through the interior uf field.
-                if Fwb >= 0
-                    b[k] += Fwb * invdx * Float64(bc_w.value)
+                b[k] += 2.0 * DT * invdx2 * value
+                # Contribution: -(Fw*T_face)/dx. Flow into domain (Fw>0) uses the
+                # wall value; outflow uses the interior cell value.
+                if Fw >= 0
+                    b[k] += Fw * invdx * value
                 else
-                    diag += -Fwb * invdx
+                    diag += -Fw * invdx
                 end
-            elseif bc_w.kind === :flux
-                b[k] += Float64(bc_w.value) * invdx
-            elseif bc_w.kind === :outflow
+            elseif kind === :flux
+                b[k] += value * invdx
+            elseif kind === :outflow
                 # zero-gradient: nothing for diffusion; advection carries interior.
+                diag += -Fw * invdx
             end
         end
 
         # ===== NORTH face (y) =====
         if j < ny
-            push!(I, k); push!(J, lin(i, j + 1)); push!(V, -DT * invdy2)
-            diag += DT * invdy2
-            if Fn >= 0
-                diag += Fn * invdy
-            else
-                push!(I, k); push!(J, lin(i, j + 1)); push!(V, Fn * invdy)
-            end
-        else
-            if bc_n.kind === :dirichlet
-                diag += 2.0 * DT * invdy2
-                b[k] += 2.0 * DT * invdy2 * Float64(bc_n.value)
+            if !solid[i, j + 1]
+                push!(I, k); push!(J, lin(i, j + 1)); push!(V, -DT * invdy2)
+                diag += DT * invdy2
                 if Fn >= 0
                     diag += Fn * invdy
                 else
-                    b[k] -= Fn * invdy * Float64(bc_n.value)
+                    push!(I, k); push!(J, lin(i, j + 1)); push!(V, Fn * invdy)
                 end
-            elseif bc_n.kind === :flux
-                b[k] += Float64(bc_n.value) * invdy
-                diag += Fn * invdy
-            elseif bc_n.kind === :outflow
+            end
+        else
+            kind = bc_n.kind[i]
+            value = bc_n.value[i]
+            if kind === :dirichlet
+                diag += 2.0 * DT * invdy2
+                b[k] += 2.0 * DT * invdy2 * value
+                if Fn >= 0
+                    diag += Fn * invdy
+                else
+                    b[k] -= Fn * invdy * value
+                end
+            elseif kind === :flux
+                b[k] += value * invdy
+            elseif kind === :outflow
                 diag += Fn * invdy
             end
         end
 
         # ===== SOUTH face (y) =====
         if j > 1
-            push!(I, k); push!(J, lin(i, j - 1)); push!(V, -DT * invdy2)
-            diag += DT * invdy2
-            if Fs >= 0          # flow enters k from south: donor = south neighbour
-                push!(I, k); push!(J, lin(i, j - 1)); push!(V, -Fs * invdy)
-            else                # flow leaves k to the south: donor = own cell
-                diag += -Fs * invdy
+            if !solid[i, j - 1]
+                push!(I, k); push!(J, lin(i, j - 1)); push!(V, -DT * invdy2)
+                diag += DT * invdy2
+                if Fs >= 0          # flow enters k from south: donor = south neighbour
+                    push!(I, k); push!(J, lin(i, j - 1)); push!(V, -Fs * invdy)
+                else                # flow leaves k to the south: donor = own cell
+                    diag += -Fs * invdy
+                end
             end
         else
-            if bc_s.kind === :dirichlet
+            kind = bc_s.kind[i]
+            value = bc_s.value[i]
+            if kind === :dirichlet
                 diag += 2.0 * DT * invdy2
-                b[k] += 2.0 * DT * invdy2 * Float64(bc_s.value)
-                Fsb = 0.0
-                if Fsb >= 0
-                    b[k] += Fsb * invdy * Float64(bc_s.value)
+                b[k] += 2.0 * DT * invdy2 * value
+                if Fs >= 0
+                    b[k] += Fs * invdy * value
                 else
-                    diag += -Fsb * invdy
+                    diag += -Fs * invdy
                 end
-            elseif bc_s.kind === :flux
-                b[k] += Float64(bc_s.value) * invdy
-            elseif bc_s.kind === :outflow
+            elseif kind === :flux
+                b[k] += value * invdy
+            elseif kind === :outflow
                 # zero-gradient.
+                diag += -Fs * invdy
             end
         end
 
@@ -265,14 +359,17 @@ Arguments:
              `(i,j)` (x-normal), `vf[i,j]` = north face (y-normal). SAME layout
              as `inc_ns/simple.jl`.
   `DT`       scalar diffusivity (thermal diffusivity / conductivity proxy).
-  `is_solid` cut-cell mask, accepted for later use; the validated regular path
-             uses `falses(nx,ny)` (exact for linear fields).
+  `is_solid` full-cell solid mask. Solid rows are pinned to `T=0`, and
+             fluid-solid faces are adiabatic/impermeable.
   `bc`       NamedTuple keyed `west/east/south/north`, each a
-             `(kind::Symbol, value)`:
+             whole-side `(kind::Symbol, value)` BC or a vector of segments
+             `(lo, hi, kind, value)`. Segment ranges are cell indices along
+             that side: `j` for west/east, `i` for south/north. Uncovered
+             segment cells default to adiabatic `(kind=:flux, value=0)`.
                `:dirichlet` — imposed inlet/wall value `T = value`.
                `:flux`      — Neumann wall heat flux `q = value`; enters as a
                               SOURCE in `b` on the wall-adjacent row (q/h), NOT
-                              in `A` (zero-gradient diffusion ghost).
+                              in `A`; no advective boundary transport.
                `:outflow`   — zero-gradient (ghost = interior); advection carries
                               the interior upwind value.
   `source`   optional volumetric source field `S[i,j]` (heat generation /

@@ -178,6 +178,97 @@ function channel_nusselt_case(; nx::Integer = 400, ny::Integer = 60,
     return (; res, Nu_x, Nu_dev, Twall_x, Tbulk_x, dx, dy, nx, ny, Lx, H, DT, q)
 end
 
+# ---------------------------------------------------------------------------
+# Localized same-side inlet/outlet energy balance.
+#
+# A frozen U-turn velocity field enters through the lower west segment and exits
+# through the upper west segment. East/north/south are impermeable. The scalar
+# source is volumetric, so the integrated source must leave as outflow enthalpy
+# through the localized west outlet when that segment reads the boundary face
+# velocity instead of assuming Fw=0.
+# ---------------------------------------------------------------------------
+function segment_outlet_energy_case(; nx::Integer = 48, ny::Integer = 32,
+                                    Lx::Real = 4.0, Ly::Real = 2.0,
+                                    U::Real = 1.0, DT::Real = 1e-4,
+                                    S::Real = 1.0)
+    dx = Lx / nx
+    dy = Ly / ny
+    split = ny ÷ 2
+
+    phi(y) = y^2 * (Ly - y)^2
+    dphi(y) = 2.0 * y * (Ly - y) * (Ly - 2.0 * y)
+    f(x) = (1.0 - x / Lx)^2
+    df(x) = -2.0 * (1.0 - x / Lx) / Lx
+
+    ycenters = [(j - 0.5) * dy for j in 1:ny]
+    xfaces = [(i - 1) * Lx / (nx - 1) for i in 1:nx]
+    scale = U / maximum(abs, dphi.(ycenters))
+
+    uf = zeros(Float64, nx, ny)
+    vf = zeros(Float64, nx, ny)
+    @inbounds for j in 1:ny, i in 1:nx
+        uf[i, j] = scale * f(xfaces[i]) * dphi(ycenters[j])
+        yface = (j - 1) * Ly / (ny - 1)
+        xcenter = (i - 0.5) * dx
+        vf[i, j] = -scale * df(xcenter) * phi(yface)
+    end
+    vf[:, 1] .= 0.0
+    vf[:, ny] .= 0.0
+
+    source = zeros(Float64, nx, ny)
+    source[nx ÷ 3:nx, :] .= S
+
+    bc = (west = [(lo = 1, hi = split, kind = :dirichlet, value = 0.0),
+                  (lo = split + 1, hi = ny, kind = :outflow, value = 0.0)],
+          east = (kind = :flux, value = 0.0),
+          south = (kind = :flux, value = 0.0),
+          north = (kind = :flux, value = 0.0))
+
+    res = solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, bc, source)
+    solid = falses(nx, ny)
+    Q_in = sum(source) * dx * dy
+    enthalpy_out = sum(max(-_st_west_boundary_flux(uf, vf, solid, nx, ny,
+                                                   dx, dy, j), 0.0) *
+                       res.T[1, j] * dy for j in split + 1:ny)
+    rel = abs(Q_in - enthalpy_out) / Q_in
+    return (; res, Q_in, enthalpy_out, rel, split)
+end
+
+# ---------------------------------------------------------------------------
+# Solid exclusion: a full-height solid strip separates two conductive regions.
+# Source is applied only on the left. With fluid-solid faces removed, the right
+# side remains exactly at its east Dirichlet value and solid rows stay pinned.
+# ---------------------------------------------------------------------------
+function solid_barrier_case(; nx::Integer = 30, ny::Integer = 16,
+                            Lx::Real = 3.0, Ly::Real = 1.6,
+                            DT::Real = 0.5, S::Real = 1.0)
+    dx = Lx / nx
+    dy = Ly / ny
+    uf = zeros(Float64, nx, ny)
+    vf = zeros(Float64, nx, ny)
+    solid = falses(nx, ny)
+    ib = nx ÷ 2 + 1
+    solid[ib, :] .= true
+
+    source = zeros(Float64, nx, ny)
+    source[1:ib - 1, :] .= S
+
+    bc = (west = (kind = :dirichlet, value = 0.0),
+          east = (kind = :dirichlet, value = 0.0),
+          south = (kind = :flux, value = 0.0),
+          north = (kind = :flux, value = 0.0))
+    res = solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT,
+                                 is_solid = solid, bc, source)
+
+    Lleft = (ib - 1) * dx
+    wall_extrapolated_max = S * Lleft^2 / (2.0 * DT)
+    right_max = maximum(abs, @view res.T[ib + 1:nx, :])
+    solid_max = maximum(abs, res.T[solid])
+    fluid_max = maximum(res.T[.!solid])
+    return (; res, solid, ib, right_max, solid_max, fluid_max,
+            wall_extrapolated_max)
+end
+
 @testset "Scalar transport: heated channel" begin
 
     @testset "pure conduction (machine precision)" begin
@@ -214,6 +305,22 @@ end
         SCALAR_TRANSPORT_RESULTS[:nu_rel] = rel
         @test rel <= 0.02
     end
+
+    @testset "localized same-side outlet energy balance" begin
+        c = segment_outlet_energy_case()
+        SCALAR_TRANSPORT_RESULTS[:segment_energy] = c
+        @test c.res.converged
+        @test c.rel <= 0.02
+    end
+
+    @testset "solid block exclusion" begin
+        c = solid_barrier_case()
+        SCALAR_TRANSPORT_RESULTS[:solid_barrier] = c
+        @test c.res.converged
+        @test c.solid_max == 0.0
+        @test c.right_max <= 1e-10
+        @test c.fluid_max <= c.wall_extrapolated_max * (1.0 + 1e-10)
+    end
 end
 
 # Report (printed when run as a standalone script).
@@ -222,6 +329,8 @@ if (abspath(PROGRAM_FILE) == (@__FILE__)) || (get(ENV, "ST_REPORT", "0") == "1")
     od = get(SCALAR_TRANSPORT_RESULTS, :order, nothing)
     nu = get(SCALAR_TRANSPORT_RESULTS, :nusselt, nothing)
     nr = get(SCALAR_TRANSPORT_RESULTS, :nu_rel, nothing)
+    eb = get(SCALAR_TRANSPORT_RESULTS, :segment_energy, nothing)
+    sb = get(SCALAR_TRANSPORT_RESULTS, :solid_barrier, nothing)
     if cd !== nothing
         @info "conduction" l2_rel=cd.l2_rel linf=cd.linf residual=cd.res.residual_history[1] Pe=cd.res.Pe_cell
     end
@@ -230,5 +339,11 @@ if (abspath(PROGRAM_FILE) == (@__FILE__)) || (get(ENV, "ST_REPORT", "0") == "1")
     end
     if nu !== nothing
         @info "developed Nusselt" Nu_dev=nu.Nu_dev rel=nr nx=nu.nx ny=nu.ny Lx=nu.Lx Pe=nu.res.Pe_cell
+    end
+    if eb !== nothing
+        @info "segment energy balance" Q_in=eb.Q_in enthalpy_out=eb.enthalpy_out rel=eb.rel
+    end
+    if sb !== nothing
+        @info "solid barrier" solid_max=sb.solid_max right_max=sb.right_max fluid_max=sb.fluid_max bound=sb.wall_extrapolated_max
     end
 end
