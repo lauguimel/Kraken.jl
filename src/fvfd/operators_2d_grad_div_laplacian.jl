@@ -483,6 +483,28 @@ end
     end
 end
 
+"""
+    gdl_divergence_embedded_2d!(divu, ux, uy, is_solid,
+                                west_fraction, east_fraction,
+                                south_fraction, north_fraction, cell_fraction,
+                                dx, dy, west_bc, east_bc, south_bc, north_bc;
+                                backend=get_backend(divu), sync=true)
+
+Cell-centred CUT-CELL divergence of a collocated velocity field, in place into
+`divu` (KA `@kernel`, same source CPU/GPU). Face velocity = arithmetic average
+of the two adjacent cell values (zero if either is solid); face conductance =
+the `min` of the two adjacent open-face fractions; the wall-aperture imbalance
+(`west - east`, `south - north`) contributes the embedded-wall flux carried by
+the cell's own velocity; the net flux is divided by `max(cell_fraction, eps)`.
+Solid cells get `divu = 0`. Domain BCs per side: `FVFD_BC_PERIODIC` wraps,
+otherwise the boundary face uses the cell's own value and aperture (zero-flux
+when the aperture is closed).
+
+`sync=false` skips the host `KernelAbstractions.synchronize` (stream-ordered
+launches need no sync between dependent device kernels). MMS receipt:
+`test/analytical/incns_grad_div_laplacian_mms.jl`. Consumed by the standalone
+IncNS solver stack (NOT registered in `src/Kraken.jl`).
+"""
 function gdl_divergence_embedded_2d!(
     divu, ux, uy, is_solid,
     west_fraction, east_fraction, south_fraction, north_fraction, cell_fraction,
@@ -501,6 +523,24 @@ function gdl_divergence_embedded_2d!(
     return nothing
 end
 
+"""
+    gdl_divergence_2d!(divu, ux, uy, is_solid, dx, dy,
+                       west_bc, east_bc, south_bc, north_bc;
+                       backend=get_backend(divu), sync=true)
+    gdl_divergence_2d!(divu, ux, uy, is_solid,
+                       west_fraction, east_fraction,
+                       south_fraction, north_fraction, cell_fraction,
+                       dx, dy, west_bc, east_bc, south_bc, north_bc; ...)
+
+Cell-centred divergence of a collocated velocity field, in place into `divu`
+(KA `@kernel`, backend-generic). The short form is the REGULAR-grid operator
+(no aperture fractions: plain face-average central differences, solid-masked);
+the long form forwards to [`gdl_divergence_embedded_2d!`](@ref) (cut-cell
+fractions). BC tags per side: `FVFD_BC_PERIODIC` wraps; `FVFD_BC_OPEN` /
+`FVFD_BC_WALL` use the cell's own value at the boundary face.
+
+MMS receipt: `test/analytical/incns_grad_div_laplacian_mms.jl`.
+"""
 function gdl_divergence_2d!(
     divu, ux, uy, is_solid, dx, dy, west_bc, east_bc, south_bc, north_bc;
     backend=KernelAbstractions.get_backend(divu), sync::Bool=true,
@@ -529,6 +569,25 @@ function gdl_divergence_2d!(
     )
 end
 
+"""
+    gdl_pressure_gradient_embedded_2d!(gpx, gpy, p, is_solid,
+                                       west_fraction, east_fraction,
+                                       south_fraction, north_fraction, cell_fraction,
+                                       dx, dy, west_bc, east_bc, south_bc, north_bc;
+                                       backend=get_backend(gpx), sync=true)
+
+Cell-centred CUT-CELL pressure gradient `(gpx, gpy) = +∇p`, in place (KA
+`@kernel`). Built as the NEGATIVE TRANSPOSE of the embedded divergence flux form
+(duality convention: both scalar and vector cell products are weighted by
+`cell_fraction·h²`, so the receiving cell divides the transposed flux by its own
+open volume). Using the exact discrete transpose keeps `div ∘ grad` consistent
+with the assembled embedded pressure Laplacian — the property that makes a
+SIMPLE/projection step idempotent. Solid cells get zero gradient; BC tags as in
+[`gdl_divergence_embedded_2d!`](@ref).
+
+MMS receipt: `test/analytical/incns_grad_div_laplacian_mms.jl` (includes the
+discrete duality/transpose check).
+"""
 function gdl_pressure_gradient_embedded_2d!(
     gpx, gpy, p, is_solid,
     west_fraction, east_fraction, south_fraction, north_fraction, cell_fraction,
@@ -547,6 +606,23 @@ function gdl_pressure_gradient_embedded_2d!(
     return nothing
 end
 
+"""
+    gdl_pressure_gradient_2d!(gpx, gpy, p, is_solid, dx, dy,
+                              west_bc, east_bc, south_bc, north_bc;
+                              backend=get_backend(gpx), sync=true)
+    gdl_pressure_gradient_2d!(gpx, gpy, p, is_solid,
+                              west_fraction, east_fraction,
+                              south_fraction, north_fraction, cell_fraction,
+                              dx, dy, west_bc, east_bc, south_bc, north_bc; ...)
+
+Cell-centred pressure gradient `(gpx, gpy) = +∇p`, in place (KA `@kernel`,
+backend-generic). Short form = REGULAR grid (negative transpose of the regular
+face-average divergence; compact at the boundary rows); long form forwards to
+[`gdl_pressure_gradient_embedded_2d!`](@ref) (cut-cell fractions, volume-
+weighted duality). Solid cells get zero gradient.
+
+MMS receipt: `test/analytical/incns_grad_div_laplacian_mms.jl`.
+"""
 function gdl_pressure_gradient_2d!(
     gpx, gpy, p, is_solid, dx, dy, west_bc, east_bc, south_bc, north_bc;
     backend=KernelAbstractions.get_backend(gpx), sync::Bool=true,
@@ -575,6 +651,26 @@ function gdl_pressure_gradient_2d!(
     )
 end
 
+"""
+    gdl_laplacian_apply_embedded_2d!(lap, u, is_solid,
+                                     west_fraction, east_fraction,
+                                     south_fraction, north_fraction,
+                                     dx, dy, west_bc, east_bc, south_bc, north_bc;
+                                     backend=get_backend(lap), sync=true)
+    gdl_laplacian_apply_embedded_2d!(lap_ux, lap_uy, ux, uy, is_solid, ...; ...)
+
+Matrix-free CUT-CELL Laplacian apply `lap = ∇²u` (NOT the negative Laplacian),
+in place (KA `@kernel`). Each open face contributes `α (u_nb - u_c)/h²` with the
+aperture fraction `α` of [`gdl_divergence_embedded_2d!`](@ref)'s convention;
+closed/solid faces contribute nothing. This is the matrix-free apply of the
+`assemble_poisson_embedded` rows — NO `cell_fraction` division is applied, so it
+matches the assembled matrix row-for-row. Solid cells get `lap = 0`. The
+two-field method applies the same operator to `(ux, uy)` with one internal sync
+at the end.
+
+MMS receipt: `test/analytical/incns_grad_div_laplacian_mms.jl` (parity vs the
+assembled embedded operator).
+"""
 function gdl_laplacian_apply_embedded_2d!(
     lap, u, is_solid,
     west_fraction, east_fraction, south_fraction, north_fraction,
@@ -593,6 +689,24 @@ function gdl_laplacian_apply_embedded_2d!(
     return nothing
 end
 
+"""
+    gdl_laplacian_apply_2d!(lap, u, is_solid, dx, dy,
+                            west_bc, east_bc, south_bc, north_bc;
+                            backend=get_backend(lap), sync=true)
+    gdl_laplacian_apply_2d!(lap, u, is_solid,
+                            west_fraction, east_fraction,
+                            south_fraction, north_fraction, dx, dy, ...; ...)
+    gdl_laplacian_apply_2d!(lap_ux, lap_uy, ux, uy, is_solid, dx, dy, ...; ...)
+
+Matrix-free Laplacian apply `lap = ∇²u` (NOT the negative Laplacian), in place
+(KA `@kernel`, backend-generic). Short form = REGULAR grid (5-point stencil,
+solid-masked neighbours, `FVFD_BC_PERIODIC` wraps, other BC tags drop the
+boundary face — zero-flux); the fraction form forwards to
+[`gdl_laplacian_apply_embedded_2d!`](@ref); the two-field form applies the
+operator to `(ux, uy)` in two launches with one final sync.
+
+MMS receipt: `test/analytical/incns_grad_div_laplacian_mms.jl`.
+"""
 function gdl_laplacian_apply_2d!(
     lap, u, is_solid, dx, dy, west_bc, east_bc, south_bc, north_bc;
     backend=KernelAbstractions.get_backend(lap), sync::Bool=true,

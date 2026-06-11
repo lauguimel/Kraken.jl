@@ -87,8 +87,25 @@ end
 
 Factorize the constant operator `A` ONCE for `backend` and return a reusable
 cache. `spd=true` selects Cholesky; `spd=false` selects an LU/LDLᵀ fallback.
-`pin_k0>0` pins reference dof `k0` (singular operator); the RHS is pinned per
-solve inside `lin_solve!`.
+`pin_k0>0` pins reference dof `k0` (singular all-Neumann/periodic operator) at
+factorize time via `pin_reference_dof`; the RHS is then pinned consistently per
+solve inside [`lin_solve!`](@ref).
+
+This is one of the TWO functions of the backend-parametric factorize-once seam
+(dispatch keyed on the `LinearSolveBackend` singleton tag):
+
+  * `CPUBackendTag()` (default) — this file; `SparseMatrixCSC{Float64,Int}`,
+    CHOLMOD Cholesky / LDLᵀ / UMFPACK LU. LinearAlgebra + SparseArrays only.
+  * `CUDABackendTag()` — `linear_solve_cuda.jl`, loaded ONLY under
+    `using CUDA, CUDSS`; same two functions for `CuSparseMatrixCSR{Float64,Int32}`
+    (cuDSS). Because `pin_reference_dof` is a CPU routine, the CUDA method takes
+    the ALREADY-PINNED matrix as `A` plus an `A_unpinned` keyword; `pin_k0>0`
+    there only drives the per-solve RHS pinning (done on device).
+
+Measured win (issue #8, Aqua A100): the factorize-once cuDSS pressure solve runs
+~30x faster than CPU CHOLMOD at 1M DOF, with the amortized back-substitution at
+4.7 ms/solve (`benchmarks/krk/inc_ns/poisson_gpu_bench.jl`). Standalone — NOT
+registered in `src/Kraken.jl`; include `src/solve/linear_solve.jl` directly.
 """
 function lin_factorize(A::SparseMatrixCSC{Float64,Int};
                        backend::LinearSolveBackend = CPUBackendTag(),
@@ -100,9 +117,19 @@ end
 """
     lin_solve!(cache, b) -> x
 
-Solve `A x = b` reusing the cached factorization. `b` may be a vector; returns a
-`Vector{Float64}`. NEVER re-factorizes. For a pinned operator the RHS is adjusted
-to enforce `x[k0] = pin value` consistently with the pinned matrix.
+Solve `A x = b` reusing the cached factorization built by
+[`lin_factorize`](@ref). NEVER re-factorizes — this is the per-outer-iteration
+call of the factorize-once seam (the pressure-Poisson operator on a fixed grid is
+geometry-only and constant across every SIMPLE iteration; only `b` changes).
+
+For a pinned operator (`cache.pin_k0 > 0`) the RHS is adjusted per solve to
+enforce `x[k0] = 0` consistently with the pinned matrix (the cache keeps the
+ORIGINAL unpinned operator for this), so the seam looks identical for pinned and
+non-pinned operators at the call site.
+
+Returns a `Vector{Float64}` on the CPU backend; the CUDA method
+(`linear_solve_cuda.jl`, loaded under `using CUDA, CUDSS`) accepts a host or
+device `b` and returns a `CuVector{Float64}`.
 """
 function lin_solve!(cache::LinearSolveCache, b::AbstractVector)
     return lin_solve!(cache.backend, cache, b)

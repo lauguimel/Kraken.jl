@@ -577,6 +577,31 @@ previous revision):
 
 Returns a NamedTuple with `u, v, p` (nx x ny host `Array`s for convenience),
 `residual_history`, `iters`, `converged`, grid metrics, and `checkerboard`.
+
+Validation & performance receipts
+  * Ghia, Ghia & Shin (1982) centreline profiles: max deviation 0.689% of
+    `U_lid` at Re=100 (128², gate <=5%) and 2.31% at Re=1000 (512², improving
+    with grid) — `test/analytical/incns_cavity_mg_ghia.jl` (set
+    `INCNS_MG_GHIA_SKIP_RE1000=1` to skip the long Re=1000 case) and
+    `benchmarks/results/cavity_gpu_aqua_a100.md` (issue #7).
+  * GPU↔CPU BIT-EXACT parity (‖Δ‖∞ ~1e-16): the same source run with
+    `backend_ka=CUDABackend(), atype=CuArray{Float64}` reproduces the CPU
+    fields — `benchmarks/krk/inc_ns/cavity_gpu_bench.jl`.
+  * Fast path (`norm_stride=25, mg_cycles=3, mom_mg_cycles=1`, the defaults):
+    converged fields deviate <=4.3e-5 RELATIVE from the stride-1
+    tolerance-driven solve and stop 11 iterations later (i.e. slightly MORE
+    converged) — `test/scratch/incns_cavity_mg_fastpath_driver.jl`.
+  * Mixed precision (`mg_mixed_precision`/`mom_mg_mixed_precision`): converged
+    Ghia Re=100 fields deviate <=8.2e-10 from the all-Float64 path —
+    `test/scratch/incns_cavity_mg_mixed_precision_driver.jl`.
+  * CUDA-graph front-end: `solve_incns_cavity_mg_cuda_graph`
+    (`cavity_mg_cuda.jl`, loaded only under `using CUDA`) replays each
+    off-stride iteration as one graph launch through the `offstride_executor`
+    seam (issue #8).
+
+Standalone — NOT registered in `src/Kraken.jl`; include
+`src/methods/inc_ns/cavity_mg.jl` directly (it pulls in
+`src/solve/poisson_mg.jl`).
 """
 function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
                                U_lid::Real=1.0, Re::Real=100.0,

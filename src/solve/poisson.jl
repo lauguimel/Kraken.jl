@@ -174,6 +174,28 @@ function assemble_poisson_neumann_pinned(N::Integer, f::Function, u_exact::Funct
     return pin_reference_dof(A, b, k0, u_exact(x0, y0))
 end
 
+"""
+    solve_poisson(A, b, N) -> Matrix{Float64}
+
+Solve an assembled Poisson system `A u = b` on an `N x N` cell-centred unit-square
+grid and return the solution reshaped to `(N, N)` (layout `u[i, j]`, linear index
+`k = i + (j-1)N`).
+
+Routes through the factorize-once linear-solve seam ([`lin_factorize`](@ref) /
+[`lin_solve!`](@ref)) with the CPU backend (`CPUBackendTag()`, CHOLMOD Cholesky,
+`spd=true`), so the result is bit-identical to `cholesky(Symmetric(A)) \\ b`.
+This single-RHS entry point builds the cache and consumes it immediately; for
+repeated solves with the SAME operator (e.g. a SIMPLE outer loop), call
+`lin_factorize` once and `lin_solve!` per RHS instead — that is where the
+factorize-once win is realised.
+
+The all-Neumann operator from `assemble_poisson_neumann_unpinned` is singular and
+makes this throw (Cholesky `check=true`); pin a reference DOF first
+(`pin_reference_dof` / `assemble_poisson_neumann_pinned`).
+
+Part of the standalone IncNS solver stack — NOT registered in `src/Kraken.jl`;
+include `src/solve/poisson.jl` directly. Receipt: `test/analytical/poisson_mms.jl`.
+"""
 function solve_poisson(A::SparseMatrixCSC{Float64, Int}, b::AbstractVector{<:Real}, N::Integer)
     N = _check_grid_size(N)
     size(A, 1) == N * N || throw(ArgumentError("A size must match N^2"))
@@ -188,11 +210,41 @@ function solve_poisson(A::SparseMatrixCSC{Float64, Int}, b::AbstractVector{<:Rea
     return reshape(Vector{Float64}(u), N, N)
 end
 
+"""
+    solve_poisson_dirichlet(N, f) -> Matrix{Float64}
+
+Solve `-∇²u = f` on the unit square with homogeneous Dirichlet boundaries on an
+`N x N` cell-centred grid. The 5-point operator is assembled by
+`assemble_poisson_dirichlet` with the GHOST-0 convention: a missing neighbour
+across a Dirichlet face adds `+1/h²` to the diagonal (the ghost value is 0 at the
+ghost CELL CENTRE, not "+2/h²" half-spacing-corrected). Inhomogeneous Dirichlet
+data must be folded into the RHS by the caller. `f(x, y)` is sampled at cell
+centres `((i-0.5)h, (j-0.5)h)`, `h = 1/N`.
+
+This is the assembled CPU reference path; the matrix-free GPU path with the SAME
+operator convention is [`solve_poisson_mg`](@ref). Validated second-order by the
+MMS testset `test/analytical/poisson_mms.jl` and used as the parity reference in
+`test/analytical/poisson_mg_mms.jl`.
+"""
 function solve_poisson_dirichlet(N::Integer, f::Function)
     A, b = assemble_poisson_dirichlet(N, f)
     return solve_poisson(A, b, N)
 end
 
+"""
+    solve_poisson_neumann(N, f, u_exact; k0=1) -> Matrix{Float64}
+
+Solve the all-Neumann (zero-flux) Poisson problem `-∇²u = f` on the unit square,
+`N x N` cell-centred grid. The all-Neumann operator is singular (constant
+nullspace: a missing neighbour SUBTRACTS `1/h²` from the diagonal, zero-flux
+mirror); the system is regularised by pinning reference DOF `k0` to the exact
+value `u_exact` at that cell centre via `pin_reference_dof` (row/col `k0`
+replaced by identity, RHS adjusted consistently). `u_exact` is evaluated ONLY at
+the pinned cell centre — it anchors the additive constant.
+
+Receipt: `test/analytical/poisson_mms.jl` (unpinned operator has zero row sums
+and `solve_poisson` throws on it; pinned variant converges at second order).
+"""
 function solve_poisson_neumann(N::Integer, f::Function, u_exact::Function; k0::Integer=1)
     A, b = assemble_poisson_neumann_pinned(N, f, u_exact; k0=k0)
     return solve_poisson(A, b, N)

@@ -245,6 +245,35 @@ function assemble_poisson_embedded(N::Integer, face_frac_x, face_frac_y, vol_fra
     return sparse(I, J, V, n, n), b
 end
 
+"""
+    solve_poisson_embedded(N, face_frac_x, face_frac_y, vol_frac, f;
+                           outer_bc=:neumann, embedded_bc=:neumann,
+                           outer_dirichlet=g, embedded_dirichlet=g) -> Matrix{Float64}
+
+Solve the cut-cell (embedded-boundary) Poisson problem `-∇²u = f` on the unit
+square: assemble via `assemble_poisson_embedded`, then solve through
+[`solve_poisson`](@ref) (factorize-once CPU CHOLMOD seam).
+
+Aperture-fraction convention (see file header): `face_frac_x :: (N+1, N)` and
+`face_frac_y :: (N, N+1)` are OPEN fractions of the x-/y-normal faces (shared
+interior faces, plus the box faces at indices 1 and N+1); `vol_frac :: (N, N)` is
+the open volume fraction. Fully solid cells (`vol_frac == 0`) are kept as
+isolated identity rows with `b = 0`, so the global `N²` indexing stays compatible
+with the regular-grid solver. The fluid-fluid conductance of an interior face is
+the symmetric `α/h²` pair; with `embedded_bc=:dirichlet` the BLOCKED part
+`β = 1-α` of each cut-cell face becomes a Dirichlet wall contributing `2β/h²`
+(half-spacing) to the diagonal and `2β/h² · g` to the RHS.
+
+With the default all-Neumann BCs the assembled operator is singular: do NOT call
+this directly — assemble, pin a fluid DOF (`first_fluid_dof` +
+`pin_reference_dof`), and call `solve_poisson`, as the MMS tests do. Direct calls
+are valid whenever a Dirichlet face makes the operator non-singular.
+
+Receipt: `test/analytical/poisson_embedded_mms.jl` (all-ones fractions reproduce
+the regular solver; tilted half-plane geometry `tilted_half_plane_fractions`
+converges ~2nd order in the fluid L2 norm). Standalone — NOT registered in
+`src/Kraken.jl`.
+"""
 function solve_poisson_embedded(N::Integer, face_frac_x, face_frac_y, vol_frac,
                                 f::Function; kwargs...)
     A, b = assemble_poisson_embedded(N, face_frac_x, face_frac_y, vol_frac, f; kwargs...)

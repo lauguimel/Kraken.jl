@@ -682,6 +682,24 @@ Keywords
 Returns the solution `u` (N x N device array), the number of V-cycles performed,
 and the relative-residual history (one entry per cycle, on the host; EMPTY when
 `fixed_cycles > 0`).
+
+Validation & performance receipts
+  * MMS second order, V-cycle count flat vs N (the multigrid hallmark), parity
+    vs the assembled CHOLMOD solver, and the singular Neumann variant:
+    `test/analytical/poisson_mg_mms.jl`.
+  * GPU (issue #8, Aqua A100): V-cycle counts stay flat at 10–13 from 16k to
+    16M DOF (O(N) per cycle, O(1) cycles) and MG-GPU reaches ~43x MG-CPU at
+    16M DOF, saturating the device (peak 99% util) where cuDSS idles —
+    `benchmarks/krk/inc_ns/poisson_mg_gpu_bench.jl`,
+    `benchmarks/results/poisson_mg_gpu_aqua_a100.md`. For moderate-N 2D steady
+    problems the factorize-once cuDSS path still wins per-solve (different
+    regimes; see the results note).
+  * GPU↔CPU parity at machine epsilon (‖Δ‖∞ ~1e-14, same source via the KA
+    backend swap).
+
+Standalone — NOT registered in `src/Kraken.jl`; include
+`src/solve/poisson_mg.jl` directly (it pulls in `linear_solve.jl` for the
+backend tags).
 """
 function solve_poisson_mg(f, N::Integer;
                           bc::Symbol = :dirichlet,

@@ -231,6 +231,18 @@ Returns a NamedTuple with fields:
   `iters`              number of outer iterations performed
   `converged`          whether `tol` was reached
   `dx, dy, ycenters`   grid metrics for analytic comparison
+
+Structure: per outer iteration, a DIRECT momentum solve with frozen pressure
+(the assembled SPD viscous `-Laplacian`, factorized ONCE through the
+[`lin_factorize`](@ref)/[`lin_solve!`](@ref) seam), then Rhie-Chow face
+velocities, then the pinned pressure-correction Poisson solve (same seam,
+`pin_k0=1`) and the compact-gradient velocity/pressure corrections. Convergence
+requires BOTH the continuity residual AND the velocity settle below `tol`.
+
+Validated against the analytic Poiseuille parabola at 0.033% L2 error
+(`test/analytical/incns_poiseuille.jl`). The MG/GPU sibling exercising the full
+pressure-velocity coupling is [`solve_incns_cavity_mg`](@ref). Standalone — NOT
+registered in `src/Kraken.jl`; include `src/methods/inc_ns/simple.jl` directly.
 """
 function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Real,
                             relax=(u = 0.7, p = 0.3),

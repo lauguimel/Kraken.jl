@@ -91,6 +91,27 @@ function fractions_from_fvfd(eb)
     return vol_frac, face_frac_x, face_frac_y
 end
 
+"""
+    assemble_poisson_embedded_from_fvfd(eb, f; outer_bc=:neumann,
+                                        embedded_bc=:neumann,
+                                        outer_dirichlet=g, embedded_dirichlet=g)
+        -> (A, b)
+
+Bridge from a duck-typed FVFD embedded-boundary object `eb` (fields
+`cell_fraction`, `west_fraction`, `east_fraction`, `south_fraction`,
+`north_fraction` — the per-cell convention of the FVFD geometry layer) to the
+embedded Poisson assembly: converts to the `(vol_frac, face_frac_x, face_frac_y)`
+aperture arrays via [`fractions_from_fvfd`](@ref) — clamping fractions into
+`[0, 1]` within `sqrt(eps)` tolerance and validating that shared interior faces
+agree (`east_fraction[i,j] == west_fraction[i+1,j]`, etc.) — then calls
+`assemble_poisson_embedded`. Requires a square grid (`Nx == Ny`).
+
+Same singularity caveat as [`solve_poisson_embedded`](@ref): with all-Neumann BCs
+pin a fluid DOF before solving. Receipt:
+`test/analytical/poisson_embedded_fvfd_mms.jl` (FVFD-built fractions reproduce
+the hand-built tilted half-plane assembly and converge ~2nd order). Standalone —
+NOT registered in `src/Kraken.jl`.
+"""
 function assemble_poisson_embedded_from_fvfd(eb, f;
                                              outer_bc::Symbol=:neumann,
                                              embedded_bc::Symbol=:neumann,
