@@ -13,7 +13,10 @@
 
 using Test
 using LinearAlgebra
-using SparseArrays
+# SparseArrays is a Kraken dep but NOT in test/Project.toml: a bare
+# `using SparseArrays` fails in the Pkg.test sandbox (Julia >= 1.12 strict
+# loading, same failure mode as Gmsh/WriteVTK). Load it through Kraken.
+using Kraken.SparseArrays
 
 if !isdefined(@__MODULE__, :lin_factorize)
     include(joinpath(@__DIR__, "..", "..", "src", "solve", "linear_solve.jl"))

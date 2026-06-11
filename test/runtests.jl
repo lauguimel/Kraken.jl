@@ -6,6 +6,49 @@ if get(ENV, "KRAKEN_AD_ONLY", "false") == "true"
     exit()
 end
 
+# IncNS + solve-services tier (platform contract, linear-solve seam, Poisson
+# services, IncNS drivers, scalar transport). Runs after the LBM tier by
+# default; KRAKEN_INCNS_ONLY=true runs it alone (mirrors KRAKEN_AD_ONLY).
+# Heavy validations (Ghia cavities, MG MMS up to 512²) additionally gate on
+# KRAKEN_TEST_HEAVY=true.
+function run_incns_testset()
+    @testset "IncNS + solve services" begin
+        # Platform-contract parity (IncNS wrapper vs direct driver call).
+        include("platform/incns_contract_test.jl")
+
+        # Solve services: linear-solve seam + elliptic (Poisson) MMS receipts.
+        include("analytical/linear_solve_nonsym.jl")
+        include("analytical/poisson_mms.jl")
+        include("analytical/poisson_embedded_mms.jl")
+        include("analytical/poisson_embedded_fvfd_mms.jl")
+
+        # FVFD velocity-operator trio (grad/div/laplacian + embedded variants).
+        include("analytical/incns_grad_div_laplacian_mms.jl")
+
+        # IncNS drivers + scalar transport, analytical validation.
+        include("analytical/incns_poiseuille.jl")
+        include("analytical/incns_unsteady_taylor_green.jl")
+        include("analytical/incns_unsteady_startup_channel.jl")
+        include("analytical/incns_manifold.jl")   # fast (~4 s CPU): stays non-heavy
+        include("analytical/scalar_transport_heated_channel.jl")
+
+        # Heavy validations (long CPU runs: Ghia cavities, MG MMS up to 512²) —
+        # opt in via KRAKEN_TEST_HEAVY=true.
+        if get(ENV, "KRAKEN_TEST_HEAVY", "false") == "true"
+            include("analytical/incns_cavity_ghia.jl")
+            include("analytical/incns_cavity_mg_ghia.jl")
+            include("analytical/poisson_mg_mms.jl")
+        else
+            @info "Skipping heavy IncNS validations (set KRAKEN_TEST_HEAVY=true to run)"
+        end
+    end
+end
+
+if get(ENV, "KRAKEN_INCNS_ONLY", "false") == "true"
+    run_incns_testset()
+    exit()
+end
+
 @testset "Kraken.jl LBM" begin
     include("platform/contract_parity_test.jl")
     include("test_lbm_basic.jl")
@@ -92,3 +135,5 @@ end
         include("test_units_thermal.jl")
     end
 end
+
+run_incns_testset()

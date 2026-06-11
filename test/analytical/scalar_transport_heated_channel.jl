@@ -227,8 +227,8 @@ function segment_outlet_energy_case(; nx::Integer = 48, ny::Integer = 32,
     res = solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, bc, source)
     solid = falses(nx, ny)
     Q_in = sum(source) * dx * dy
-    enthalpy_out = sum(max(-_st_west_boundary_flux(uf, vf, solid, nx, ny,
-                                                   dx, dy, j), 0.0) *
+    enthalpy_out = sum(max(-Kraken._st_west_boundary_flux(uf, vf, solid, nx, ny,
+                                                          dx, dy, j), 0.0) *
                        res.T[1, j] * dy for j in split + 1:ny)
     rel = abs(Q_in - enthalpy_out) / Q_in
     return (; res, Q_in, enthalpy_out, rel, split)

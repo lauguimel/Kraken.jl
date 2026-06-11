@@ -8,6 +8,7 @@
 # Rung (c): smoke handoff of the returned face fields to solve_scalar_transport.
 
 using Test
+using KernelAbstractions   # CPU() — no longer inherited once the includes below auto-skip
 
 if !isdefined(@__MODULE__, :solve_incns_manifold)
     include(joinpath(@__DIR__, "..", "..", "src", "methods", "inc_ns", "manifold_flow.jl"))
@@ -58,8 +59,8 @@ function incns_manifold_plate_case(; nx::Integer=64, ny::Integer=32,
 
     uwest = fill(Float64(U_in), ny)
     div = zeros(Float64, nx, ny)
-    _mf_face_divergence!(div, res.uf, res.vf, uwest, res.dx, res.dy,
-                         nx, ny, res.is_solid)
+    Kraken._mf_face_divergence!(div, res.uf, res.vf, uwest, res.dx, res.dy,
+                                nx, ny, res.is_solid)
     fluid = findall(!, res.is_solid)
     div_l2 = sqrt(sum(abs2, div[fluid]) / length(fluid))
     solid_speed = maximum(abs.(res.u[res.is_solid])) +

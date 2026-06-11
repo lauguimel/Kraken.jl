@@ -16,6 +16,7 @@
 # and post-projection divergence at solver tolerance.
 
 using Test
+using KernelAbstractions   # CPU() — no longer inherited once the include below auto-skips
 
 if !isdefined(@__MODULE__, :solve_incns_projection)
     include(joinpath(@__DIR__, "..", "..", "src", "methods", "inc_ns", "projection.jl"))

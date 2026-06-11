@@ -11,7 +11,9 @@ if !isdefined(@__MODULE__, :gdl_divergence_2d!)
     include(INCNS_GDL_OPERATOR_PATH)
 end
 
-if !isdefined(@__MODULE__, :tilted_half_plane_fractions)
+# Guard on the EXPORTED assemble_poisson_embedded (tilted_half_plane_fractions
+# is unexported, so probing it would always re-include under `using Kraken`).
+if !isdefined(@__MODULE__, :assemble_poisson_embedded)
     include(INCNS_GDL_POISSON_PATH)
 end
 
@@ -19,8 +21,10 @@ const INCNS_GDL_NS = (16, 32, 64, 128)
 const INCNS_GDL_RESULTS = Dict{Symbol,Any}()
 
 incns_gdl_x(i, h) = (Float64(i) - 0.5) * h
-incns_gdl_periodic_bc() = (FVFD_BC_PERIODIC, FVFD_BC_PERIODIC, FVFD_BC_PERIODIC, FVFD_BC_PERIODIC)
-incns_gdl_wall_bc() = (FVFD_BC_WALL, FVFD_BC_WALL, FVFD_BC_WALL, FVFD_BC_WALL)
+incns_gdl_periodic_bc() = (Kraken.FVFD_BC_PERIODIC, Kraken.FVFD_BC_PERIODIC,
+                           Kraken.FVFD_BC_PERIODIC, Kraken.FVFD_BC_PERIODIC)
+incns_gdl_wall_bc() = (Kraken.FVFD_BC_WALL, Kraken.FVFD_BC_WALL,
+                       Kraken.FVFD_BC_WALL, Kraken.FVFD_BC_WALL)
 
 function incns_gdl_regular_geometry(N::Integer)
     return falses(N, N)
@@ -196,7 +200,7 @@ function incns_gdl_full_fluid_max_abs(field, vol_frac)
 end
 
 function incns_gdl_cut_cell_smoke(; N::Integer=32, backend=CPU())
-    face_frac_x, face_frac_y, vol_frac = tilted_half_plane_fractions(N)
+    face_frac_x, face_frac_y, vol_frac = Kraken.tilted_half_plane_fractions(N)
     is_solid, west, east, south, north =
         incns_gdl_cell_fractions_from_staggered(face_frac_x, face_frac_y, vol_frac)
     h = 1.0 / Float64(N)

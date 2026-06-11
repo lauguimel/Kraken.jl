@@ -23,6 +23,7 @@
 #   plus the factorize-once receipts (2 factorizations for 3*nsteps solves).
 
 using Test
+using KernelAbstractions   # CPU() — no longer inherited once the include below auto-skips
 
 if !isdefined(@__MODULE__, :solve_incns_projection)
     include(joinpath(@__DIR__, "..", "..", "src", "methods", "inc_ns", "projection.jl"))
