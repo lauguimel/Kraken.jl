@@ -61,8 +61,9 @@
 #
 # Backend-parametric like simple.jl: takes `backend = CPU()` (KA) so the GPU
 # path can slot in later; VALIDATED ON CPU (plain loops + CHOLMOD here).
-# KernelAbstractions + stdlib only. Standalone — NOT registered in
-# `src/Kraken.jl`; include this file directly.
+# KernelAbstractions + stdlib only. Registered in `src/Kraken.jl` (exported
+# driver; the platform wrapper IncNS(:projection) in method.jl forwards here).
+# Include guards keep it standalone-include-able.
 #
 # Public entry point:
 #   solve_incns_projection(; nx, ny, Lx, Ly, nu, dt, nsteps, bc_x, bc_y,
@@ -369,8 +370,9 @@ Returns a NamedTuple:
 Validated against analytic transients: Taylor-Green vortex (spatial/temporal
 order, energy decay) in `test/analytical/incns_unsteady_taylor_green.jl` and
 impulsively-started plane Poiseuille in
-`test/analytical/incns_unsteady_startup_channel.jl`. Standalone — NOT
-registered in `src/Kraken.jl`; include this file directly.
+`test/analytical/incns_unsteady_startup_channel.jl`. Registered in
+`src/Kraken.jl` and exported; also reachable as
+`solve(params, IncNS(:projection))` through the platform contract.
 """
 function solve_incns_projection(; nx::Integer, ny::Integer,
                                 Lx::Real, Ly::Real, nu::Real,

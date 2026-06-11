@@ -5,8 +5,9 @@
 # top/bottom, driven by a constant streamwise body force G = -dP/dx).
 #
 # Reuses the matrix-free KA grad/div/laplacian operators and the sparse
-# Poisson service (CHOLMOD). KA + stdlib only, CPU by default. Does NOT
-# subtype AbstractMethod and does NOT register with `using Kraken`.
+# Poisson service (CHOLMOD). KA + stdlib only, CPU by default. Registered in
+# `src/Kraken.jl` (exported driver; the platform wrapper IncNS(:simple) in
+# method.jl forwards here). Include guards keep it standalone-include-able.
 #
 # Public entry point:
 #   solve_incns_simple(; nx, ny, H, mu, G, relax, tol, maxiter, backend=CPU())
@@ -241,8 +242,8 @@ requires BOTH the continuity residual AND the velocity settle below `tol`.
 
 Validated against the analytic Poiseuille parabola at 0.033% L2 error
 (`test/analytical/incns_poiseuille.jl`). The MG/GPU sibling exercising the full
-pressure-velocity coupling is [`solve_incns_cavity_mg`](@ref). Standalone — NOT
-registered in `src/Kraken.jl`; include `src/methods/inc_ns/simple.jl` directly.
+pressure-velocity coupling is [`solve_incns_cavity_mg`](@ref). Registered in
+`src/Kraken.jl` and exported; also reachable as `solve(params, IncNS(:simple))`.
 """
 function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Real,
                             relax=(u = 0.7, p = 0.3),

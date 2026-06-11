@@ -19,8 +19,10 @@ explicit conservative-central advection (Euler on the first step), implicit
 Poisson for the increment `phi = p^{n+1} - p^n`. Per-axis `:periodic`/`:wall`
 BCs. Both implicit operators are constant, so they are factorized ONCE before
 the time loop via the `lin_factorize`/`lin_solve!` seam — 2 factorizations per
-run regardless of step count. **Standalone: NOT registered in `src/Kraken.jl`;
-does NOT subtype `AbstractMethod`** — include the file directly.
+run regardless of step count. **Registered in `src/Kraken.jl`** and exported
+(`solve_incns_projection`); also reachable through the platform contract as
+`solve(params, IncNS(:projection))` (`src/methods/inc_ns/method.jl`). Include
+guards keep the file standalone-include-able.
 
 ## Public surface
 

@@ -4,7 +4,8 @@
 # spans and pressure-reference outlet spans live on the west/east boundary.
 # Full-cell immersed solids are represented by is_solid; fluid-solid momentum
 # faces are no-slip Dirichlet faces, pressure-correction faces are homogeneous
-# Neumann faces. Standalone: NOT registered in src/Kraken.jl.
+# Neumann faces. Registered in src/Kraken.jl (exported driver; platform wrapper
+# IncNS(:manifold) forwards here).
 
 using KernelAbstractions
 using LinearAlgebra
@@ -397,9 +398,9 @@ end
                          relax=(u=0.7,p=0.3), tol=1e-7, maxiter=4000,
                          backend=CPU(), verbose=false)
 
-Standalone steady incompressible Navier-Stokes SIMPLE solver for a 2D manifold
-on a collocated cell-centred grid. It is not registered in `src/Kraken.jl` and
-does not subtype `AbstractMethod`; include this file directly.
+Steady incompressible Navier-Stokes SIMPLE solver for a 2D manifold on a
+collocated cell-centred grid. Registered in `src/Kraken.jl` and exported; also
+reachable as `solve(params, IncNS(:manifold))` through the platform contract.
 
 `inlet = (; side, j0, j1, u)` imposes a localized velocity Dirichlet span on the
 west/east boundary. The inlet face flux is frozen in the pressure-correction

@@ -104,8 +104,9 @@ This is one of the TWO functions of the backend-parametric factorize-once seam
 
 Measured win (issue #8, Aqua A100): the factorize-once cuDSS pressure solve runs
 ~30x faster than CPU CHOLMOD at 1M DOF, with the amortized back-substitution at
-4.7 ms/solve (`benchmarks/krk/inc_ns/poisson_gpu_bench.jl`). Standalone — NOT
-registered in `src/Kraken.jl`; include `src/solve/linear_solve.jl` directly.
+4.7 ms/solve (`benchmarks/krk/inc_ns/poisson_gpu_bench.jl`). Registered in
+`src/Kraken.jl` THROUGH `solve/poisson.jl` (which tail-includes this file —
+never include it directly there); exported by `using Kraken`.
 """
 function lin_factorize(A::SparseMatrixCSC{Float64,Int};
                        backend::LinearSolveBackend = CPUBackendTag(),

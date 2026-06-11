@@ -17,8 +17,10 @@ The backend-parametric steady SIMPLE solver for the 2D lid-driven cavity
 (all-Neumann, σ=0) solved by the matrix-free MG. The per-iteration physics is
 FUSED into four kernels; with the fixed-cycles fast path an off-stride iteration
 performs ZERO host syncs (a static launch sequence the CUDA-graph companion
-captures). **Standalone: NOT registered in `src/Kraken.jl`; no
-`AbstractMethod`** — include the file directly.
+captures). **Registered in `src/Kraken.jl`** and exported
+(`solve_incns_cavity_mg`); also reachable as `solve(params, IncNS(:cavity_mg))`
+(`src/methods/inc_ns/method.jl`). The CUDA-graph companion
+`cavity_mg_cuda.jl` stays manual-load (CUDSS is not a package dependency).
 
 ## Public surface
 

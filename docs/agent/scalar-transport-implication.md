@@ -27,9 +27,9 @@ machine precision (l2_rel ≈ 5e-14), second-order diffusion convergence
 
 ## Public surface
 
-The brick is a standalone include (NOT exported into `Kraken`, NOT subtyping
-`AbstractMethod`), mirroring the `inc_ns/simple.jl` and `inc_ns/cavity.jl`
-pattern:
+The brick is registered in `src/Kraken.jl` and its driver exported
+(`solve_scalar_transport`), mirroring the `inc_ns/simple.jl` and
+`inc_ns/cavity.jl` pattern (include guards keep it standalone-include-able):
 
 - `solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, is_solid=falses(nx,ny), bc, source=nothing, backend=nothing) -> NamedTuple` — the single entry point. Returns `(; T, residual_history, iters, converged, dx, dy, ycenters, nx, ny, DT, Pe_cell)`. `T` is the steady `nx×ny` field; `residual_history` is the one-element `[‖A·T−b‖]` (≈ machine eps); `iters == 1` always (one linear solve); `Pe_cell = max|u|·min(dx,dy)/DT`.
 - `bc` is a NamedTuple keyed `west/east/south/north`, each `(kind::Symbol, value)` with `kind ∈ {:dirichlet, :flux, :outflow}`. `:dirichlet` imposes `T = value`; `:flux` imposes a Neumann wall heat flux `q = value` injected as a SOURCE in `b` (not in `A`); `:outflow` is zero-gradient (ghost = interior, advection carries the interior upwind value).

@@ -14,7 +14,8 @@
 # NO divergence-floor gate here (that workaround was only valid for Poiseuille).
 #
 # Reuses the matrix-free KA grad/div operators conceptually but, to stay
-# standalone (no `using Kraken`, no AbstractMethod), assembles its own SPD
+# self-contained (registered in `src/Kraken.jl`; the platform wrapper
+# IncNS(:cavity) forwards here), assembles its own SPD
 # operators and uses compact transpose-consistent stencils, exactly like
 # simple.jl. KA + stdlib only, CPU.
 #

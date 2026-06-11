@@ -193,8 +193,9 @@ The all-Neumann operator from `assemble_poisson_neumann_unpinned` is singular an
 makes this throw (Cholesky `check=true`); pin a reference DOF first
 (`pin_reference_dof` / `assemble_poisson_neumann_pinned`).
 
-Part of the standalone IncNS solver stack — NOT registered in `src/Kraken.jl`;
-include `src/solve/poisson.jl` directly. Receipt: `test/analytical/poisson_mms.jl`.
+Part of the IncNS solver stack — registered in `src/Kraken.jl` (loaded by
+`using Kraken`; the include guards keep the file standalone-include-able too).
+Receipt: `test/analytical/poisson_mms.jl`.
 """
 function solve_poisson(A::SparseMatrixCSC{Float64, Int}, b::AbstractVector{<:Real}, N::Integer)
     N = _check_grid_size(N)
