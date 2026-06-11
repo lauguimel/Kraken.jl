@@ -306,29 +306,13 @@ function solve_scalar_transport(; nx::Integer, ny::Integer, dx::Real, dy::Real,
     A, b = _st_assemble_system(nx, ny, dx, dy, uf, vf, DT, is_solid;
                                bc = bc, source = source)
 
-    # A is non-symmetric (first-order upwind advection) -> a sparse LU is the
-    # correct CPU factorization. We REUSE the linear-solve seam's cache + solve
-    # path (`LinearSolveCache` + `lin_solve!`), but build the cache with an LU
-    # factor directly rather than calling `lin_factorize(A; spd=false)`.
-    #
-    # WHY NOT lin_factorize(A; spd=false): the CPU `spd=false` branch in
-    # src/solve/linear_solve.jl is `try ldlt(Symmetric(A)) catch lu(A)`. For a
-    # GENUINELY non-symmetric A, `ldlt(Symmetric(A))` does NOT throw — it silently
-    # factorizes the SYMMETRIZED matrix (upper triangle mirrored), which is a
-    # DIFFERENT operator, so the solve returns a wrong field (verified: residual
-    # ~1e2 instead of ~1e-13). The `lu` fallback is only reached on a throw, which
-    # never happens here. Since this brick must NOT edit the seam, we mirror its
-    # CPU contract by constructing the cache with `lu(A)` (the branch the seam
-    # INTENDED for non-symmetric operators) and dispatch the shared `lin_solve!`
-    # (`cache.factor \ b`). This keeps the seam's reuse/backend abstraction intact.
+    # A is non-symmetric (first-order upwind advection) -> spd=false routes the
+    # seam to a sparse LU (the CPU spd=false branch gates on `issymmetric(A)`
+    # and factorizes genuinely non-symmetric operators with `lu`). The solve is
+    # a single factorize + solve through the shared factorize-once seam; the
+    # cache would amortize re-solves if T were ever re-solved on a fresh RHS.
     btag = backend === nothing ? CPUBackendTag() : backend
-    if btag isa CPUBackendTag
-        factor = lu(A)
-        cache = LinearSolveCache(CPUBackendTag(), factor, A, A, 0, false)
-    else
-        # Non-CPU backend: defer to the seam (its non-CPU methods own the choice).
-        cache = lin_factorize(A; backend = btag, spd = false)
-    end
+    cache = lin_factorize(A; backend = btag, spd = false)
     Tvec = lin_solve!(cache, b)
     T = reshape(Vector{Float64}(Tvec), nx, ny)
 

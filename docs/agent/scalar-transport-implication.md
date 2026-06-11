@@ -51,8 +51,8 @@ Internal (file-private) assembly helper: `_st_assemble_system(nx, ny, dx, dy, uf
   off-diagonal). The Dirichlet wall-value source convention (`+2·DT/h²·T_wall` to
   `b`) mirrors `_cavity_dirichlet_rhs!`.
 - `linear-solve` — the factorize-once seam (`src/solve/linear_solve.jl`):
-  `LinearSolveCache`, `CPUBackendTag`, and `lin_solve!`. The brick reads the seam's
-  CPU solve contract (`cache.factor \ b`).
+  `lin_factorize(A; backend, spd=false)` + `lin_solve!(cache, b)`. The brick
+  routes its single direct solve fully through the seam.
 
 ## Writes to
 
@@ -67,27 +67,25 @@ Internal (file-private) assembly helper: `_st_assemble_system(nx, ny, dx, dy, uf
 ## Backend constraints
 
 - **CPU-first, KA + stdlib only.** Default `backend=nothing` routes to
-  `CPUBackendTag()`; the CPU path uses `lu(A)` (sparse UMFPACK) because the
-  upwind advection makes `A` NON-symmetric. The solve dispatches through the
-  seam's `lin_solve!`.
-- **The seam's `lin_factorize(A; spd=false)` is NOT used for the CPU path** — see
-  Failure modes. The brick builds the `LinearSolveCache` with the correct `lu(A)`
-  factor directly (the branch the seam INTENDED for non-symmetric operators).
-- A non-CPU `backend` tag is forwarded to `lin_factorize(A; backend, spd=false)`;
-  the GPU sparse-LU path (cuDSS) is the seam's responsibility, untested here.
+  `CPUBackendTag()`. The solve goes through the seam's
+  `lin_factorize(A; backend, spd=false)` + `lin_solve!`; since the upwind
+  advection makes `A` NON-symmetric, the seam's `issymmetric(A)` gate selects a
+  sparse LU (UMFPACK) on CPU.
+- A non-CPU `backend` tag is forwarded to the same `lin_factorize` call; the GPU
+  sparse-LU path (cuDSS) is the seam's responsibility, untested here.
 - The validated path uses the REGULAR (non-embedded) stencil with
   `is_solid=falses`; cut-cell support is a signature placeholder only.
 
 ## Failure modes
 
-- **Seam `spd=false` silently returns a WRONG field for non-symmetric A.** The CPU
-  `spd=false` branch in `src/solve/linear_solve.jl` is
-  `try ldlt(Symmetric(A)) catch lu(A)`. For a genuinely non-symmetric `A`,
-  `ldlt(Symmetric(A))` does NOT throw — it factorizes the SYMMETRIZED matrix (a
-  different operator), so the solve returns garbage (verified: residual ~1e2 vs
-  ~1e-13 for `lu`). The brick therefore constructs the cache with `lu(A)` itself.
-  If this is ever "simplified" back to `lin_factorize(A; spd=false)`, the Nusselt
-  rung breaks (Nu reads ~12 instead of 8.24) and `converged` flips false.
+- **Seam `spd=false` must keep its non-symmetry gate.** The CPU `spd=false`
+  branch HISTORICALLY did `try ldlt(Symmetric(A)) catch lu(A)`, which on a
+  genuinely non-symmetric `A` silently factorized the SYMMETRIZED matrix and
+  returned garbage (residual ~1e2 vs ~1e-13). FIXED in 7dd95b03e: the branch now
+  gates on `issymmetric(A)` and uses LU for truly non-symmetric operators, so the
+  brick routes through `lin_factorize(A; spd=false)` directly. If that gate ever
+  regresses, the Nusselt rung breaks (Nu reads ~12 instead of 8.24) and
+  `converged` flips false.
 - **Outlet contamination of the developed Nu.** The `:outflow` zero-gradient BC
   biases the last ~5% of streamwise cells (Nu drifts to ~8.7); the test averages
   `Nu` over 50%–95% of the channel to stay in the developed region. Averaging
@@ -114,12 +112,14 @@ bad convergence order), inspect in this order:
    per-wall BC branches (`:dirichlet` diagonal `+2DT/h²` + `b` source, `:flux`
    `b += q/h`, `:outflow` interior-upwind diagonal). 90% of wrong-field and
    wrong-Nu bugs are a face coefficient or a BC sign here.
-2. `solve_scalar_transport` — the LU-cache construction. If the residual is ~1e2
-   instead of ~1e-13, the seam's broken `spd=false` path has been reintroduced;
-   confirm the cache holds an `lu(A)` factor.
-3. `src/solve/linear_solve.jl` — the seam contract (`LinearSolveCache`,
-   `lin_solve!`, `CPUBackendTag`). Only relevant if the `lin_solve!` dispatch or
-   the struct fields change; the brick depends on `cache.factor \ b`.
+2. `solve_scalar_transport` — the seam call
+   (`lin_factorize(A; backend, spd=false)` + `lin_solve!`). If the residual is
+   ~1e2 instead of ~1e-13, the seam's `spd=false` non-symmetry gate has
+   regressed; confirm the cache holds an LU factor for this non-symmetric `A`.
+3. `src/solve/linear_solve.jl` — the seam contract (`lin_factorize`,
+   `lin_solve!`, `CPUBackendTag`). Check the `issymmetric(A)` gate in the CPU
+   `spd=false` branch (LDLᵀ only for genuinely symmetric operators, LU
+   otherwise).
 4. `src/methods/inc_ns/cavity.jl` / `simple.jl` — the SOURCE patterns this brick
    mirrors (upwind donor/acceptor, Dirichlet wall-value source, 5-point Laplacian
    assembly). Cross-check here when porting a new BC kind or a cut-cell stencil.
