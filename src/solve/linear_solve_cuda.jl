@@ -57,11 +57,12 @@ function lin_factorize(::CUDABackendTag, A::_CUDSS_GPU_MAT;
         # performs the symbolic analysis AND the numeric factorization now.
         factor = cholesky(A; view = 'F')
     else
-        factor = try
-            ldlt(A; view = 'F')
-        catch
-            lu(A)
-        end
+        # General (non-symmetric / indefinite) path: cuDSS LU. Do NOT try
+        # ldlt first — cuDSS LDLᵀ assumes a symmetric structure and does not
+        # throw on a non-symmetric matrix (mirror of the CPU-seam bug: it
+        # would silently factorize the wrong operator). Callers with a known
+        # symmetric-indefinite GPU system can call ldlt explicitly.
+        factor = lu(A)
     end
 
     return LinearSolveCache(CUDABackendTag(), factor, A, A_unpinned,

@@ -152,11 +152,19 @@ function lin_factorize(::CPUBackendTag, A::SparseMatrixCSC{Float64,Int};
     if spd
         factor = cholesky(Symmetric(A_used); check = true)
     else
-        # Non-symmetric / indefinite fallback. Try LDLᵀ first (symmetric
-        # indefinite), fall back to LU for the fully general case.
-        factor = try
-            ldlt(Symmetric(A_used))
-        catch
+        # Non-symmetric / indefinite fallback. LDLᵀ only when the matrix is
+        # GENUINELY symmetric (symmetric indefinite); otherwise LU directly.
+        # NOTE: `ldlt(Symmetric(A))` on a non-symmetric A does NOT throw — it
+        # silently factorizes the symmetrized (upper-triangle) matrix and
+        # returns wrong fields (seen as O(1e2) residuals on advection-diffusion
+        # systems). The symmetry check is O(nnz), negligible vs factorization.
+        factor = if issymmetric(A_used)
+            try
+                ldlt(Symmetric(A_used))
+            catch
+                lu(A_used)   # symmetric but LDLᵀ-unfactorizable (e.g. zero pivot)
+            end
+        else
             lu(A_used)
         end
     end
