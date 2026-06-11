@@ -23,13 +23,16 @@ the file directly.
 ## Public surface
 
 - `solve_incns_manifold(; nx, ny, Lx, Ly, Re, U_in, is_solid=nothing, inlet,
-  outlet, mu=nothing, relax=(u=0.7,p=0.3), tol=1e-7, maxiter=4000,
-  backend=CPU(), verbose=false) -> NamedTuple`. `inlet` is
+  outlet, mu=nothing, relax=(u=0.7,p=0.3), scheme=:simplec, tol=1e-7,
+  maxiter=4000, backend=CPU(), verbose=false) -> NamedTuple`. `scheme=:simple`
+  keeps the legacy pressure-correction coefficient path; `scheme=:simplec`
+  uses the SIMPLE-consistent correction denominator for the projection path.
+  `inlet` is
   `(; side::Symbol, j0::Int, j1::Int, u::Float64)`; `outlet` is
   `(; side::Symbol, j0::Int, j1::Int)`. Current localized spans are west/east.
 - Returns `u, v, p, uf, vf, is_solid, dx, dy, nx, ny, xcenters, ycenters,
   residual_history, iters, converged, vel_change, mass_imbalance, dp, Re, mu,
-  U_in, Lx, Ly, checkerboard`.
+  U_in, Lx, Ly, checkerboard, scheme`.
 - `uf[i,j]` is the east face of cell `(i,j)` and `vf[i,j]` is the north face,
   matching `cavity.jl` and the `solve_scalar_transport` consumer contract.
 - `manifold_full_cell_mask(nx, ny, Lx, Ly, plates)` builds axis-aligned
@@ -75,9 +78,15 @@ deferred to a future seam-compatible implementation.
 - Fluid-solid pressure faces are Neumann drops; fluid-solid momentum faces are
   no-slip Dirichlet `+2μ/h²` contributions. Reusing the pressure stencil for
   momentum would create slip along plates.
-- Re≈48 manifold SIMPLE can be sensitive to under-relaxation. The scratch
-  battery driver uses `relax.u≈0.2`; `relax.u≈0.5` may diverge on the localized
-  inlet/outlet case.
+- Re≈48 manifold SIMPLE is limited by the explicit deferred-convection momentum
+  predictor. On the battery geometry, `relax.u≈0.25` already diverges even on
+  the legacy pressure-correction path; coefficient-only SIMPLEC does not remove
+  that momentum stability limit. The stable battery fallback is
+  `scheme=:simplec, relax=(u=0.2,p=0.2)`.
+- `scheme=:simplec` changes the pressure-correction and velocity-correction
+  response coefficients. The Rhie-Chow face model intentionally stays on the
+  legacy coefficient so the converged finite-grid flux model is not changed by
+  the acceleration path.
 - West-boundary inlet flux is part of the internal projection but is not stored
   in `uf` because the cavity face layout only stores east faces. Consumers that
   need a west boundary advective flux must impose it through their own boundary

@@ -22,10 +22,13 @@ correction) that `incns-cavity-mg` re-implements backend-parametrically.
 
 ## Public surface
 
-- `solve_incns_simple(; nx, ny, H, mu, G, relax=(u=0.7,p=0.3), tol=1e-10,
-  maxiter=200, Lx=H, backend=CPU()) -> NamedTuple` — the only entry point.
+- `solve_incns_simple(; nx, ny, H, mu, G, relax=(u=0.7,p=0.3),
+  scheme=:simplec, tol=1e-10, maxiter=200, Lx=H, backend=CPU()) ->
+  NamedTuple` — the only entry point. `scheme=:simple` keeps the legacy
+  pressure-correction coefficient path; `scheme=:simplec` uses the
+  SIMPLE-consistent correction denominator for the pressure-correction path.
   Returns `(u, v, p, residual_history, iters, converged, vel_change, dx, dy,
-  ycenters, H, mu, G, Lx, nx, ny)`. `backend` is currently cosmetic (host
+  ycenters, H, mu, G, Lx, nx, ny, scheme)`. `backend` is currently cosmetic (host
   loops; the KA path is cavity_mg).
 - De-facto public internals tests poke: `_incns_assemble_neg_laplacian(nx, ny,
   dx, dy; bc_x, bc_y)` (`:periodic`/`:dirichlet0` "+2/h²" half-spacing ghost /
@@ -82,6 +85,9 @@ back-substitution per outer iteration — factorize-once makes the loop cheap.
 - **Momentum is solved DIRECTLY, not point-relaxed** (`αu` only damps the
   pressure coupling via `d = αu/a_p`): "adding" momentum under-relaxation
   iterations here converges at Jacobi rate — that's a regression, not a fix.
+- `scheme=:simplec` changes the pressure-correction response coefficient only;
+  the Rhie-Chow face model stays on the legacy coefficient so the converged
+  finite-grid face model is not changed by the acceleration path.
 - Receipt: `test/analytical/incns_poiseuille.jl` — analytic parabola at 0.033%
   L2 error; manual driver `test/scratch/incns_poiseuille_driver.jl`.
 
