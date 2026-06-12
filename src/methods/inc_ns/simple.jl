@@ -140,6 +140,13 @@ function _incns_simple_scheme(scheme::Symbol)
     return s
 end
 
+function _incns_momentum_advection_scheme(advection::Symbol)
+    scheme = Symbol(replace(lowercase(String(advection)), '-' => '_'))
+    scheme in (:upwind, :linear_upwind) ||
+        throw(ArgumentError("momentum_advection must be :upwind or :linear_upwind; got $advection"))
+    return scheme
+end
+
 function _incns_positive_neighbour_sum(A::SparseMatrixCSC{Float64,Int})
     nb = zeros(Float64, size(A, 1))
     @inbounds for col in 1:size(A, 2)
@@ -237,8 +244,8 @@ end
 
 """
     solve_incns_simple(; nx, ny, H, mu, G, relax=(u=0.7, p=0.3),
-                       scheme=:simplec, tol=1e-10, maxiter=200, Lx=H,
-                       backend=CPU())
+                       scheme=:simplec, momentum_advection=:linear_upwind,
+                       tol=1e-10, maxiter=200, Lx=H, backend=CPU())
 
 Standalone steady SIMPLE incompressible solver core for body-force-driven
 periodic plane Poiseuille flow.
@@ -260,6 +267,8 @@ Structure: per outer iteration, a DIRECT momentum solve with frozen pressure
 velocities, then the pinned pressure-correction Poisson solve (same seam,
 `pin_k0=1`) and the compact-gradient velocity/pressure corrections. Convergence
 requires BOTH the continuity residual AND the velocity settle below `tol`.
+`momentum_advection` is accepted for API parity with manifold/cavity steady
+solvers; this fully-developed Poiseuille rung has no nonlinear convection term.
 
 Validated against the analytic Poiseuille parabola at 0.033% L2 error
 (`test/analytical/incns_poiseuille.jl`). The MG/GPU sibling exercising the full
@@ -269,12 +278,14 @@ pressure-velocity coupling is [`solve_incns_cavity_mg`](@ref). Registered in
 function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Real,
                             relax=(u = 0.7, p = 0.3),
                             scheme::Symbol = :simplec,
+                            momentum_advection::Symbol = :linear_upwind,
                             tol::Real = 1e-10, maxiter::Integer = 200,
                             Lx::Real = H, backend = CPU())
     nx = Int(nx); ny = Int(ny)
     H = Float64(H); mu = Float64(mu); G = Float64(G); Lx = Float64(Lx)
     αu = Float64(relax.u); αp = Float64(relax.p)
     scheme_sym = _incns_simple_scheme(scheme)
+    momentum_scheme = _incns_momentum_advection_scheme(momentum_advection)
     dx = Lx / nx
     dy = H / ny
     ycenters = [(j - 0.5) * dy for j in 1:ny]
@@ -414,5 +425,6 @@ function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Re
     end
 
     return (; u, v, p, residual_history, iters, converged, vel_change,
-            dx, dy, ycenters, H, mu, G, Lx, nx, ny, scheme=scheme_sym)
+            dx, dy, ycenters, H, mu, G, Lx, nx, ny, scheme=scheme_sym,
+            momentum_advection=momentum_scheme)
 end

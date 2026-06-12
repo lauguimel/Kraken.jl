@@ -25,6 +25,7 @@ function incns_manifold_poiseuille_case(; ny::Integer=16, aspect::Integer=8,
                                         tol::Real=1e-7, maxiter::Integer=200,
                                         relax=(u=0.7, p=0.3),
                                         scheme::Symbol=:simplec,
+                                        momentum_advection::Symbol=:linear_upwind,
                                         backend=CPU())
     ny = Int(ny)
     nx = Int(aspect) * ny
@@ -32,7 +33,7 @@ function incns_manifold_poiseuille_case(; ny::Integer=16, aspect::Integer=8,
                                U_in, mu,
                                inlet=(; side=:west, j0=1, j1=ny, u=U_in),
                                outlet=(; side=:east, j0=1, j1=ny),
-                               relax, scheme, tol, maxiter, backend)
+                               relax, scheme, momentum_advection, tol, maxiter, backend)
 
     cols = Int(floor(0.75 * res.nx)):Int(floor(0.90 * res.nx))
     uprof = vec(sum(res.u[cols, :]; dims=1)) ./ length(cols)
@@ -50,6 +51,7 @@ function incns_manifold_plate_case(; nx::Integer=64, ny::Integer=32,
                                    Lx::Real=4.0, Ly::Real=1.0,
                                    U_in::Real=1.0, mu::Real=10.0,
                                    scheme::Symbol=:simplec,
+                                   momentum_advection::Symbol=:linear_upwind,
                                    backend=CPU())
     plates = [(; x0=1.75, x1=2.25, y0=0.375, y1=0.625)]
     is_solid = manifold_full_cell_mask(nx, ny, Lx, Ly, plates)
@@ -58,7 +60,7 @@ function incns_manifold_plate_case(; nx::Integer=64, ny::Integer=32,
                                inlet=(; side=:west, j0=1, j1=ny, u=U_in),
                                outlet=(; side=:east, j0=1, j1=ny),
                                relax=(u=0.7, p=0.3), tol=1e-7,
-                               maxiter=300, scheme, backend)
+                               maxiter=300, scheme, momentum_advection, backend)
 
     uwest = fill(Float64(U_in), ny)
     div = zeros(Float64, nx, ny)
@@ -94,6 +96,7 @@ end
 
     @test c.res.converged
     @test c.res.scheme === :simplec
+    @test c.res.momentum_advection === :linear_upwind
     @test c.res.iters <= 200
     @test c.res.mass_imbalance < 1e-10
     @test c.l2_rel <= 0.01
@@ -105,6 +108,12 @@ end
     order = log2(coarse.l2_rel / c.l2_rel)
     INCNS_MANIFOLD_RESULTS[:order] = order
     @test 1.7 <= order <= 2.3
+
+    up = incns_manifold_poiseuille_case(; backend, momentum_advection=:upwind)
+    INCNS_MANIFOLD_RESULTS[:poiseuille_upwind] = up
+    @test up.res.momentum_advection === :upwind
+    @test up.res.converged
+    @test up.res.iters <= 200
 end
 
 @testset "IncNS manifold full-cell plate sanity and scalar handoff" begin
@@ -113,6 +122,7 @@ end
     INCNS_MANIFOLD_RESULTS[:plate] = c
 
     @test c.res.converged
+    @test c.res.momentum_advection === :linear_upwind
     @test c.res.mass_imbalance < 1e-10
     @test c.solid_speed == 0.0
     @test c.div_l2 < 1e-10
@@ -134,18 +144,24 @@ end
 
 @testset "IncNS manifold legacy SIMPLE parity" begin
     c = incns_manifold_poiseuille_case(; ny=8, aspect=4, Lx=4.0,
-                                       scheme=:simple, backend=CPU())
+                                       scheme=:simple,
+                                       momentum_advection=:upwind, backend=CPU())
     @test c.res.scheme === :simple
+    @test c.res.momentum_advection === :upwind
     @test c.res.converged
     @test c.res.iters == 30
     @test c.res.dp ≈ 492.7252026635531 rtol=1e-13
     @test sum(c.res.u) ≈ 255.75709873039895 rtol=1e-13
     @test sum(abs, c.res.v) ≈ 4.188177731722439 rtol=1e-13
     @test c.res.mass_imbalance == 0.0
+
+    @test_throws ArgumentError incns_manifold_poiseuille_case(;
+        ny=4, aspect=2, Lx=2.0, momentum_advection=:quick)
 end
 
 let p = INCNS_MANIFOLD_RESULTS[:poiseuille],
     order = INCNS_MANIFOLD_RESULTS[:order],
+    up = INCNS_MANIFOLD_RESULTS[:poiseuille_upwind],
     plate = INCNS_MANIFOLD_RESULTS[:plate]
-    @info "incns manifold validation" profile_l2=p.l2_rel dp_rel=p.dp_rel order=order mass=p.res.mass_imbalance plate_div=plate.div_l2 plate_sym=plate.symmetry
+    @info "incns manifold validation" profile_l2=p.l2_rel dp_rel=p.dp_rel order=order iters=p.res.iters upwind_iters=up.res.iters dp=p.res.dp upwind_dp=up.res.dp dp_shift=(p.res.dp - up.res.dp) / up.res.dp mass=p.res.mass_imbalance plate_div=plate.div_l2 plate_sym=plate.symmetry
 end

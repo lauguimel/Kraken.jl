@@ -70,6 +70,13 @@ function _mf_simple_scheme(scheme::Symbol)
     return s
 end
 
+function _mf_advection_scheme(advection::Symbol)
+    scheme = Symbol(replace(lowercase(String(advection)), '-' => '_'))
+    scheme in (:upwind, :linear_upwind) ||
+        throw(ArgumentError("momentum_advection must be :upwind or :linear_upwind; got $advection"))
+    return scheme
+end
+
 function _mf_assert_gridline(value::Real, h::Real, name::AbstractString)
     q = Float64(value) / Float64(h)
     isapprox(q, round(q); atol=1e-10, rtol=1e-10) ||
@@ -98,8 +105,9 @@ function manifold_full_cell_mask(nx::Integer, ny::Integer, Lx::Real, Ly::Real, p
     return mask
 end
 
-function _mf_factorise(A::SparseMatrixCSC{Float64,Int}; pin_k0::Integer=0)
-    return lin_factorize(A; backend=CPUBackendTag(), spd=true, pin_k0=Int(pin_k0))
+function _mf_factorise(A::SparseMatrixCSC{Float64,Int};
+                       pin_k0::Integer=0, spd::Bool=true)
+    return lin_factorize(A; backend=CPUBackendTag(), spd=spd, pin_k0=Int(pin_k0))
 end
 
 _mf_solve!(cache::LinearSolveCache, b::Vector{Float64}) = lin_solve!(cache, b)
@@ -174,6 +182,108 @@ function _mf_assemble_momentum_laplacian(nx, ny, dx, dy, is_solid, bc)
         push!(I, k); push!(J, k); push!(V, diag)
     end
     return sparse(I, J, V, n, n)
+end
+
+function _mf_assemble_upwind_convection_operator(nx, ny, dx, dy, is_solid, bc,
+                                                 uf, vf, uwest)
+    n = nx * ny; invdx = 1.0 / dx; invdy = 1.0 / dy
+    Iu = Int[]; Ju = Int[]; Vu = Float64[]
+    Iv = Int[]; Jv = Int[]; Vv = Float64[]
+    sizehint!(Iu, 5n); sizehint!(Ju, 5n); sizehint!(Vu, 5n)
+    sizehint!(Iv, 5n); sizehint!(Jv, 5n); sizehint!(Vv, 5n)
+    src_u = zeros(Float64, nx, ny)
+
+    @inbounds for j in 1:ny, i in 1:nx
+        is_solid[i, j] && continue
+        k = _mf_lin(i, j, nx)
+        diag_u = 0.0; diag_v = 0.0
+        Fe = i < nx ? (!is_solid[i + 1, j] ? uf[i, j] : 0.0) : uf[i, j]
+        Fw = i > 1 ? (!is_solid[i - 1, j] ? uf[i - 1, j] : 0.0) : uwest[j]
+        Fn = j < ny ? (!is_solid[i, j + 1] ? vf[i, j] : 0.0) : 0.0
+        Fs = j > 1 ? (!is_solid[i, j - 1] ? vf[i, j - 1] : 0.0) : 0.0
+
+        if i < nx && !is_solid[i + 1, j]
+            if Fe >= 0.0
+                diag_u += Fe * invdx; diag_v += Fe * invdx
+            else
+                col = _mf_lin(i + 1, j, nx); c = Fe * invdx
+                push!(Iu, k); push!(Ju, col); push!(Vu, c)
+                push!(Iv, k); push!(Jv, col); push!(Vv, c)
+            end
+        elseif _mf_inlet_e(bc, j) && Fe < 0.0
+            src_u[i, j] += Fe * bc.uin * invdx
+        else
+            diag_u += Fe * invdx
+        end
+
+        if i > 1 && !is_solid[i - 1, j]
+            if Fw >= 0.0
+                col = _mf_lin(i - 1, j, nx); c = -Fw * invdx
+                push!(Iu, k); push!(Ju, col); push!(Vu, c)
+                push!(Iv, k); push!(Jv, col); push!(Vv, c)
+            else
+                diag_u += -Fw * invdx; diag_v += -Fw * invdx
+            end
+        elseif _mf_inlet_w(bc, j) && Fw >= 0.0
+            src_u[i, j] += -Fw * bc.uin * invdx
+        else
+            diag_u += -Fw * invdx
+        end
+
+        if j < ny && !is_solid[i, j + 1]
+            if Fn >= 0.0
+                diag_u += Fn * invdy; diag_v += Fn * invdy
+            else
+                col = _mf_lin(i, j + 1, nx); c = Fn * invdy
+                push!(Iu, k); push!(Ju, col); push!(Vu, c)
+                push!(Iv, k); push!(Jv, col); push!(Vv, c)
+            end
+        end
+
+        if j > 1 && !is_solid[i, j - 1]
+            if Fs >= 0.0
+                col = _mf_lin(i, j - 1, nx); c = -Fs * invdy
+                push!(Iu, k); push!(Ju, col); push!(Vu, c)
+                push!(Iv, k); push!(Jv, col); push!(Vv, c)
+            else
+                diag_u += -Fs * invdy; diag_v += -Fs * invdy
+            end
+        end
+
+        if diag_u != 0.0
+            push!(Iu, k); push!(Ju, k); push!(Vu, diag_u)
+        end
+        if diag_v != 0.0
+            push!(Iv, k); push!(Jv, k); push!(Vv, diag_v)
+        end
+    end
+
+    return (; Cu=sparse(Iu, Ju, Vu, n, n),
+            Cv=sparse(Iv, Jv, Vv, n, n),
+            src_u)
+end
+
+function _mf_relaxed_momentum_operator(Amom_base::SparseMatrixCSC{Float64,Int},
+                                       αu, nx, ny, is_solid, scheme_sym)
+    ap_base = Vector(diag(Amom_base))
+    extra = 1.0 / αu - 1.0
+    Amom = Amom_base + spdiagm(0 => extra .* ap_base)
+    ap = Vector(diag(Amom))
+    ap_mat = reshape(ap, nx, ny)
+    d_rc = αu ./ ap_mat
+    if scheme_sym === :simple
+        d = copy(d_rc)
+    else
+        anb = reshape(_mf_positive_neighbour_sum(Amom_base), nx, ny)
+        d_rc_inv = 1.0 ./ d_rc
+        denom = d_rc_inv .- anb
+        @inbounds for idx in eachindex(denom, is_solid)
+            !is_solid[idx] && denom[idx] <= 0.0 && (denom[idx] = d_rc_inv[idx])
+        end
+        d = 1.0 ./ denom
+    end
+    _mf_zero_solid!((d_rc, d), is_solid)
+    return (; Amom, relax_old=reshape(extra .* ap_base, nx, ny), d_rc, d)
 end
 
 function _mf_momentum_dirichlet_rhs!(src_u, src_v, nx, ny, dx, dy, is_solid, bc)
@@ -292,7 +402,8 @@ function _mf_rhie_chow_faces!(uf, vf, uwest, u, v, p, gpx, gpy, d_u, d_v,
     return nothing
 end
 
-function _mf_convection!(conv_u, conv_v, u, v, uf, vf, uwest, dx, dy, nx, ny, is_solid, bc)
+function _mf_convection_upwind!(conv_u, conv_v, u, v, uf, vf, uwest, dx, dy,
+                                nx, ny, is_solid, bc)
     invdx = 1.0 / dx
     invdy = 1.0 / dy
     @inbounds for j in 1:ny, i in 1:nx
@@ -321,6 +432,70 @@ function _mf_convection!(conv_u, conv_v, u, v, uf, vf, uwest, dx, dy, nx, ny, is
         conv_v[i, j] = (Fe * vE - Fw * vW) * invdx + (Fn * vN - Fs * vS) * invdy
     end
     return nothing
+end
+
+function _mf_linear_upwind_x(q::AbstractMatrix, is_solid::AbstractMatrix{Bool},
+                             nx::Int, i::Int, j::Int, F::Float64)
+    low = F >= 0.0 ? Float64(q[i, j]) : Float64(q[i + 1, j])
+    F >= 0.0 && i > 1 && !is_solid[i - 1, j] &&
+        return low + 0.5 * (low - Float64(q[i - 1, j]))
+    F < 0.0 && i + 1 < nx && !is_solid[i + 2, j] &&
+        return low + 0.5 * (low - Float64(q[i + 2, j]))
+    return low
+end
+
+function _mf_linear_upwind_y(q::AbstractMatrix, is_solid::AbstractMatrix{Bool},
+                             ny::Int, i::Int, j::Int, F::Float64)
+    low = F >= 0.0 ? Float64(q[i, j]) : Float64(q[i, j + 1])
+    F >= 0.0 && j > 1 && !is_solid[i, j - 1] &&
+        return low + 0.5 * (low - Float64(q[i, j - 1]))
+    F < 0.0 && j + 1 < ny && !is_solid[i, j + 2] &&
+        return low + 0.5 * (low - Float64(q[i, j + 2]))
+    return low
+end
+
+function _mf_convection_linear_upwind!(conv_u, conv_v, u, v, uf, vf, uwest,
+                                       dx, dy, nx, ny, is_solid, bc)
+    invdx = 1.0 / dx
+    invdy = 1.0 / dy
+    @inbounds for j in 1:ny, i in 1:nx
+        if is_solid[i, j]
+            conv_u[i, j] = 0.0; conv_v[i, j] = 0.0
+            continue
+        end
+        Fe = i < nx ? (!is_solid[i + 1, j] ? uf[i, j] : 0.0) : uf[i, j]
+        Fw = i > 1 ? (!is_solid[i - 1, j] ? uf[i - 1, j] : 0.0) : uwest[j]
+        Fn = j < ny ? (!is_solid[i, j + 1] ? vf[i, j] : 0.0) : 0.0
+        Fs = j > 1 ? (!is_solid[i, j - 1] ? vf[i, j - 1] : 0.0) : 0.0
+
+        uE = i < nx && !is_solid[i + 1, j] ? _mf_linear_upwind_x(u, is_solid, nx, i, j, Fe) :
+             (_mf_inlet_e(bc, j) && Fe < 0 ? bc.uin : u[i, j])
+        uW = i > 1 && !is_solid[i - 1, j] ? _mf_linear_upwind_x(u, is_solid, nx, i - 1, j, Fw) :
+             (_mf_inlet_w(bc, j) && Fw >= 0 ? bc.uin : u[i, j])
+        uN = j < ny && !is_solid[i, j + 1] ? _mf_linear_upwind_y(u, is_solid, ny, i, j, Fn) : 0.0
+        uS = j > 1 && !is_solid[i, j - 1] ? _mf_linear_upwind_y(u, is_solid, ny, i, j - 1, Fs) : 0.0
+
+        vE = i < nx && !is_solid[i + 1, j] ? _mf_linear_upwind_x(v, is_solid, nx, i, j, Fe) : 0.0
+        vW = i > 1 && !is_solid[i - 1, j] ? _mf_linear_upwind_x(v, is_solid, nx, i - 1, j, Fw) : 0.0
+        vN = j < ny && !is_solid[i, j + 1] ? _mf_linear_upwind_y(v, is_solid, ny, i, j, Fn) : 0.0
+        vS = j > 1 && !is_solid[i, j - 1] ? _mf_linear_upwind_y(v, is_solid, ny, i, j - 1, Fs) : 0.0
+
+        conv_u[i, j] = (Fe * uE - Fw * uW) * invdx + (Fn * uN - Fs * uS) * invdy
+        conv_v[i, j] = (Fe * vE - Fw * vW) * invdx + (Fn * vN - Fs * vS) * invdy
+    end
+    return nothing
+end
+
+function _mf_convection!(conv_u, conv_v, u, v, uf, vf, uwest, dx, dy, nx, ny,
+                         is_solid, bc, momentum_advection::Symbol)
+    if momentum_advection === :upwind
+        return _mf_convection_upwind!(conv_u, conv_v, u, v, uf, vf, uwest,
+                                      dx, dy, nx, ny, is_solid, bc)
+    elseif momentum_advection === :linear_upwind
+        return _mf_convection_linear_upwind!(conv_u, conv_v, u, v, uf, vf,
+                                             uwest, dx, dy, nx, ny, is_solid, bc)
+    end
+    throw(ArgumentError("momentum_advection must be :upwind or :linear_upwind; got $momentum_advection"))
 end
 
 function _mf_face_divergence!(div, uf, vf, uwest, dx, dy, nx, ny, is_solid)
@@ -416,7 +591,8 @@ end
     solve_incns_manifold(; nx, ny, Lx, Ly, Re, U_in,
                          is_solid=nothing, inlet, outlet, mu=nothing,
                          relax=(u=0.7,p=0.3), scheme=:simplec, tol=1e-7,
-                         maxiter=4000, backend=CPU(), verbose=false)
+                         maxiter=4000, backend=CPU(), verbose=false,
+                         momentum_advection=:linear_upwind)
 
 Steady incompressible Navier-Stokes SIMPLE solver for a 2D manifold on a
 collocated cell-centred grid. Registered in `src/Kraken.jl` and exported; also
@@ -442,7 +618,8 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
                               inlet, outlet, mu=nothing,
                               relax=(u=0.7, p=0.3), tol::Real=1e-7,
                               maxiter::Integer=4000, backend=CPU(),
-                              verbose::Bool=false, scheme::Symbol=:simplec)
+                              verbose::Bool=false, scheme::Symbol=:simplec,
+                              momentum_advection::Symbol=:linear_upwind)
     nx = Int(nx); ny = Int(ny)
     Lx = Float64(Lx); Ly = Float64(Ly); Re = Float64(Re); U_in = Float64(U_in)
     dx = Lx / nx
@@ -452,6 +629,7 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     0.0 < αu <= 1.0 || throw(ArgumentError("relax.u must lie in (0, 1]"))
     0.0 < αp <= 1.0 || throw(ArgumentError("relax.p must lie in (0, 1]"))
     scheme_sym = _mf_simple_scheme(scheme)
+    momentum_scheme = _mf_advection_scheme(momentum_advection)
 
     solid = _mf_check_mask(is_solid, nx, ny)
     bc = _mf_boundary_spec(ny, inlet, outlet)
@@ -480,10 +658,13 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
         d_v = 1.0 ./ denom
     end
     _mf_zero_solid!((d_rc_u, d_rc_v, d_u, d_v), solid)
-    mom_op = _mf_factorise(Amom)
-
-    Ap = _mf_assemble_pressure_operator(nx, ny, dx, dy, solid, bc, d_u, d_v)
-    p_op = _mf_factorise(Ap; pin_k0=0)
+    mom_op = nothing
+    p_op = nothing
+    if momentum_scheme === :upwind
+        mom_op = _mf_factorise(Amom)
+        Ap = _mf_assemble_pressure_operator(nx, ny, dx, dy, solid, bc, d_u, d_v)
+        p_op = _mf_factorise(Ap; pin_k0=0)
+    end
 
     src_u = zeros(Float64, nx, ny)
     src_v = zeros(Float64, nx, ny)
@@ -509,6 +690,7 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     gpx = zeros(Float64, nx, ny); gpy = zeros(Float64, nx, ny)
     uf = zeros(Float64, nx, ny); vf = zeros(Float64, nx, ny); uwest = zeros(Float64, ny)
     conv_u = zeros(Float64, nx, ny); conv_v = zeros(Float64, nx, ny)
+    conv_lu_u = zeros(Float64, nx, ny); conv_lu_v = zeros(Float64, nx, ny)
     divstar = zeros(Float64, nx, ny); divcorr = zeros(Float64, nx, ny)
     pcorr = zeros(Float64, nx, ny)
     residual_history = Float64[]
@@ -517,17 +699,53 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     vel_change = Inf
     ref_flux = max(abs(U_in), abs(bc.uin), eps())
 
-    for it in 1:Int(maxiter)
-        iters = it
+    if momentum_scheme === :linear_upwind
         _mf_compact_gradient!(gpx, gpy, p, dx, dy, nx, ny, solid, bc)
         _mf_rhie_chow_faces!(uf, vf, uwest, u, v, p, gpx, gpy, d_rc_u, d_rc_v,
                              dx, dy, nx, ny, solid, bc)
-        _mf_convection!(conv_u, conv_v, u, v, uf, vf, uwest, dx, dy, nx, ny, solid, bc)
+    end
 
-        bu = vec(src_u .- conv_u .- gpx .+ (extra .* reshape(ap_visc, nx, ny)) .* u)
-        bv = vec(src_v .- conv_v .- gpy .+ (extra .* reshape(ap_visc, nx, ny)) .* v)
-        ustar = reshape(_mf_solve!(mom_op, bu), nx, ny)
-        vstar = reshape(_mf_solve!(mom_op, bv), nx, ny)
+    for it in 1:Int(maxiter)
+        iters = it
+        if momentum_scheme === :upwind
+            _mf_compact_gradient!(gpx, gpy, p, dx, dy, nx, ny, solid, bc)
+            _mf_rhie_chow_faces!(uf, vf, uwest, u, v, p, gpx, gpy, d_rc_u, d_rc_v,
+                                 dx, dy, nx, ny, solid, bc)
+            _mf_convection!(conv_u, conv_v, u, v, uf, vf, uwest, dx, dy, nx, ny,
+                            solid, bc, momentum_scheme)
+
+            bu = vec(src_u .- conv_u .- gpx .+ (extra .* reshape(ap_visc, nx, ny)) .* u)
+            bv = vec(src_v .- conv_v .- gpy .+ (extra .* reshape(ap_visc, nx, ny)) .* v)
+            ustar = reshape(_mf_solve!(mom_op, bu), nx, ny)
+            vstar = reshape(_mf_solve!(mom_op, bv), nx, ny)
+        else
+            adv = _mf_assemble_upwind_convection_operator(nx, ny, dx, dy, solid, bc,
+                                                          uf, vf, uwest)
+            uop = _mf_relaxed_momentum_operator(Amom_visc + adv.Cu, αu, nx, ny,
+                                                solid, scheme_sym)
+            vop = _mf_relaxed_momentum_operator(Amom_visc + adv.Cv, αu, nx, ny,
+                                                solid, scheme_sym)
+            d_rc_u = uop.d_rc
+            d_rc_v = vop.d_rc
+            d_u = uop.d
+            d_v = vop.d
+            mom_u_op = _mf_factorise(uop.Amom; spd=false)
+            mom_v_op = _mf_factorise(vop.Amom; spd=false)
+            Ap = _mf_assemble_pressure_operator(nx, ny, dx, dy, solid, bc, d_u, d_v)
+            p_op = _mf_factorise(Ap; pin_k0=0)
+
+            _mf_convection_upwind!(conv_u, conv_v, u, v, uf, vf, uwest,
+                                   dx, dy, nx, ny, solid, bc)
+            _mf_convection_linear_upwind!(conv_lu_u, conv_lu_v, u, v, uf, vf, uwest,
+                                          dx, dy, nx, ny, solid, bc)
+            _mf_compact_gradient!(gpx, gpy, p, dx, dy, nx, ny, solid, bc)
+
+            bu = vec(src_u .- adv.src_u .- (conv_lu_u .- conv_u) .- gpx .+
+                     uop.relax_old .* u)
+            bv = vec(src_v .- (conv_lu_v .- conv_v) .- gpy .+ vop.relax_old .* v)
+            ustar = reshape(_mf_solve!(mom_u_op, bu), nx, ny)
+            vstar = reshape(_mf_solve!(mom_v_op, bv), nx, ny)
+        end
 
         umax_prev = max(maximum(abs, u), maximum(abs, v), ref_flux * eps())
         du = 0.0
@@ -569,5 +787,6 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     return (; u, v, p, uf, vf, is_solid=solid, dx, dy, nx, ny, xcenters,
             ycenters, residual_history, iters, converged, vel_change,
             mass_imbalance=flux.mass_imbalance, dp=flux.dp, Re, mu=μ,
-            U_in, Lx, Ly, checkerboard, scheme=scheme_sym)
+            U_in, Lx, Ly, checkerboard, scheme=scheme_sym,
+            momentum_advection=momentum_scheme)
 end
