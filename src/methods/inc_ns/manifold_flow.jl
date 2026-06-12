@@ -63,6 +63,13 @@ function _mf_check_mask(is_solid, nx::Int, ny::Int)
     return Matrix{Bool}(is_solid)
 end
 
+function _mf_simple_scheme(scheme::Symbol)
+    s = Symbol(replace(lowercase(String(scheme)), '-' => '_'))
+    s in (:simple, :simplec) ||
+        throw(ArgumentError("scheme must be :simple or :simplec"))
+    return s
+end
+
 function _mf_assert_gridline(value::Real, h::Real, name::AbstractString)
     q = Float64(value) / Float64(h)
     isapprox(q, round(q); atol=1e-10, rtol=1e-10) ||
@@ -96,6 +103,19 @@ function _mf_factorise(A::SparseMatrixCSC{Float64,Int}; pin_k0::Integer=0)
 end
 
 _mf_solve!(cache::LinearSolveCache, b::Vector{Float64}) = lin_solve!(cache, b)
+
+function _mf_positive_neighbour_sum(A::SparseMatrixCSC{Float64,Int})
+    nb = zeros(Float64, size(A, 1))
+    @inbounds for col in 1:size(A, 2)
+        for ptr in A.colptr[col]:(A.colptr[col + 1] - 1)
+            row = A.rowval[ptr]
+            row == col && continue
+            a = A.nzval[ptr]
+            a < 0.0 && (nb[row] += -a)
+        end
+    end
+    return nb
+end
 
 function _mf_assemble_momentum_laplacian(nx, ny, dx, dy, is_solid, bc)
     n = nx * ny
@@ -395,8 +415,8 @@ end
 """
     solve_incns_manifold(; nx, ny, Lx, Ly, Re, U_in,
                          is_solid=nothing, inlet, outlet, mu=nothing,
-                         relax=(u=0.7,p=0.3), tol=1e-7, maxiter=4000,
-                         backend=CPU(), verbose=false)
+                         relax=(u=0.7,p=0.3), scheme=:simplec, tol=1e-7,
+                         maxiter=4000, backend=CPU(), verbose=false)
 
 Steady incompressible Navier-Stokes SIMPLE solver for a 2D manifold on a
 collocated cell-centred grid. Registered in `src/Kraken.jl` and exported; also
@@ -422,7 +442,7 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
                               inlet, outlet, mu=nothing,
                               relax=(u=0.7, p=0.3), tol::Real=1e-7,
                               maxiter::Integer=4000, backend=CPU(),
-                              verbose::Bool=false)
+                              verbose::Bool=false, scheme::Symbol=:simplec)
     nx = Int(nx); ny = Int(ny)
     Lx = Float64(Lx); Ly = Float64(Ly); Re = Float64(Re); U_in = Float64(U_in)
     dx = Lx / nx
@@ -431,6 +451,7 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     αu = Float64(relax.u); αp = Float64(relax.p)
     0.0 < αu <= 1.0 || throw(ArgumentError("relax.u must lie in (0, 1]"))
     0.0 < αp <= 1.0 || throw(ArgumentError("relax.p must lie in (0, 1]"))
+    scheme_sym = _mf_simple_scheme(scheme)
 
     solid = _mf_check_mask(is_solid, nx, ny)
     bc = _mf_boundary_spec(ny, inlet, outlet)
@@ -444,9 +465,21 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     Amom = Amom_visc + spdiagm(0 => extra .* ap_visc)
     ap = Vector(diag(Amom))
     ap_mat = reshape(ap, nx, ny)
-    d_u = αu ./ ap_mat
-    d_v = αu ./ ap_mat
-    _mf_zero_solid!((d_u, d_v), solid)
+    d_rc_u = αu ./ ap_mat
+    d_rc_v = αu ./ ap_mat
+    if scheme_sym === :simple
+        d_u = d_rc_u
+        d_v = d_rc_v
+    else
+        anb = reshape(_mf_positive_neighbour_sum(Amom_visc), nx, ny)
+        denom = 1.0 ./ d_rc_u .- anb
+        fluid_min = minimum(denom[.!solid])
+        fluid_min > 0.0 ||
+            throw(ArgumentError("SIMPLEC correction denominator must be positive; use relax.u < 1"))
+        d_u = 1.0 ./ denom
+        d_v = 1.0 ./ denom
+    end
+    _mf_zero_solid!((d_rc_u, d_rc_v, d_u, d_v), solid)
     mom_op = _mf_factorise(Amom)
 
     Ap = _mf_assemble_pressure_operator(nx, ny, dx, dy, solid, bc, d_u, d_v)
@@ -487,7 +520,7 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     for it in 1:Int(maxiter)
         iters = it
         _mf_compact_gradient!(gpx, gpy, p, dx, dy, nx, ny, solid, bc)
-        _mf_rhie_chow_faces!(uf, vf, uwest, u, v, p, gpx, gpy, d_u, d_v,
+        _mf_rhie_chow_faces!(uf, vf, uwest, u, v, p, gpx, gpy, d_rc_u, d_rc_v,
                              dx, dy, nx, ny, solid, bc)
         _mf_convection!(conv_u, conv_v, u, v, uf, vf, uwest, dx, dy, nx, ny, solid, bc)
 
@@ -507,7 +540,7 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
         vel_change = du / umax_prev
 
         _mf_compact_gradient!(gpx, gpy, p, dx, dy, nx, ny, solid, bc)
-        _mf_rhie_chow_faces!(uf, vf, uwest, u, v, p, gpx, gpy, d_u, d_v,
+        _mf_rhie_chow_faces!(uf, vf, uwest, u, v, p, gpx, gpy, d_rc_u, d_rc_v,
                              dx, dy, nx, ny, solid, bc)
         _mf_face_divergence!(divstar, uf, vf, uwest, dx, dy, nx, ny, solid)
 
@@ -523,7 +556,7 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
         res = sqrt(sum(abs2, divcorr) / max(count(!, solid), 1)) * min(dx, dy) / ref_flux
         push!(residual_history, res)
         verbose && (it <= 5 || it % 100 == 0) &&
-            @info "manifold SIMPLE" it res vel_change
+            @info "manifold SIMPLE" scheme=scheme_sym it res vel_change
         if res < tol && vel_change < tol
             converged = true
             break
@@ -536,5 +569,5 @@ function solve_incns_manifold(; nx::Integer, ny::Integer, Lx::Real, Ly::Real,
     return (; u, v, p, uf, vf, is_solid=solid, dx, dy, nx, ny, xcenters,
             ycenters, residual_history, iters, converged, vel_change,
             mass_imbalance=flux.mass_imbalance, dp=flux.dp, Re, mu=μ,
-            U_in, Lx, Ly, checkerboard)
+            U_in, Lx, Ly, checkerboard, scheme=scheme_sym)
 end

@@ -21,10 +21,11 @@ const INCNS_POISEUILLE_RESULTS = Dict{Symbol,Any}()
 function incns_poiseuille_case(; nx::Integer = 8, ny::Integer = 64,
                                H::Real = 1.0, mu::Real = 1.0, G::Real = 1.0,
                                tol::Real = 1e-10, maxiter::Integer = 300,
+                               relax = (u = 0.7, p = 0.3),
+                               scheme::Symbol = :simplec,
                                backend = CPU())
     res = solve_incns_simple(; nx, ny, H, mu, G,
-                             relax = (u = 0.7, p = 0.3),
-                             tol, maxiter, backend)
+                             relax, scheme, tol, maxiter, backend)
 
     # Analytic parabola at cell centres.
     uan = [(G / (2mu)) * y * (H - y) for y in res.ycenters]
@@ -53,6 +54,7 @@ end
 
     # Converged.
     @test c.res.converged
+    @test c.res.scheme === :simplec
     @test c.res.iters <= 50
 
     # Cross-flow is zero.
@@ -71,4 +73,14 @@ end
     order = log2(coarse.l2_rel / fine.l2_rel)
     INCNS_POISEUILLE_RESULTS[:order] = order
     @test 1.7 <= order <= 2.3
+end
+
+@testset "IncNS SIMPLE legacy scheme parity" begin
+    c = incns_poiseuille_case(; ny = 32, scheme = :simple, backend = CPU())
+    @test c.res.scheme === :simple
+    @test c.res.converged
+    @test c.res.iters == 2
+    @test maximum(c.res.u) ≈ 0.12499999999999806 atol=1e-14
+    @test sum(c.res.u) ≈ 21.374999999999662 atol=1e-11
+    @test c.res.residual_history[end] ≈ 4.475027051936657e-16 atol=1e-28
 end

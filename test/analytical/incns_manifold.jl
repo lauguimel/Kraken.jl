@@ -23,6 +23,8 @@ function incns_manifold_poiseuille_case(; ny::Integer=16, aspect::Integer=8,
                                         Lx::Real=16.0, Ly::Real=1.0,
                                         U_in::Real=1.0, mu::Real=10.0,
                                         tol::Real=1e-7, maxiter::Integer=200,
+                                        relax=(u=0.7, p=0.3),
+                                        scheme::Symbol=:simplec,
                                         backend=CPU())
     ny = Int(ny)
     nx = Int(aspect) * ny
@@ -30,7 +32,7 @@ function incns_manifold_poiseuille_case(; ny::Integer=16, aspect::Integer=8,
                                U_in, mu,
                                inlet=(; side=:west, j0=1, j1=ny, u=U_in),
                                outlet=(; side=:east, j0=1, j1=ny),
-                               relax=(u=0.7, p=0.3), tol, maxiter, backend)
+                               relax, scheme, tol, maxiter, backend)
 
     cols = Int(floor(0.75 * res.nx)):Int(floor(0.90 * res.nx))
     uprof = vec(sum(res.u[cols, :]; dims=1)) ./ length(cols)
@@ -47,6 +49,7 @@ end
 function incns_manifold_plate_case(; nx::Integer=64, ny::Integer=32,
                                    Lx::Real=4.0, Ly::Real=1.0,
                                    U_in::Real=1.0, mu::Real=10.0,
+                                   scheme::Symbol=:simplec,
                                    backend=CPU())
     plates = [(; x0=1.75, x1=2.25, y0=0.375, y1=0.625)]
     is_solid = manifold_full_cell_mask(nx, ny, Lx, Ly, plates)
@@ -55,12 +58,16 @@ function incns_manifold_plate_case(; nx::Integer=64, ny::Integer=32,
                                inlet=(; side=:west, j0=1, j1=ny, u=U_in),
                                outlet=(; side=:east, j0=1, j1=ny),
                                relax=(u=0.7, p=0.3), tol=1e-7,
-                               maxiter=300, backend)
+                               maxiter=300, scheme, backend)
 
     uwest = fill(Float64(U_in), ny)
     div = zeros(Float64, nx, ny)
-    Kraken._mf_face_divergence!(div, res.uf, res.vf, uwest, res.dx, res.dy,
-                                nx, ny, res.is_solid)
+    # Dual-mode: standalone include defines the helper in this module; under
+    # runtests the include auto-skips and the helper lives in Kraken.
+    facediv! = isdefined(@__MODULE__, :_mf_face_divergence!) ?
+        _mf_face_divergence! : Kraken._mf_face_divergence!
+    facediv!(div, res.uf, res.vf, uwest, res.dx, res.dy,
+             nx, ny, res.is_solid)
     fluid = findall(!, res.is_solid)
     div_l2 = sqrt(sum(abs2, div[fluid]) / length(fluid))
     solid_speed = maximum(abs.(res.u[res.is_solid])) +
@@ -86,6 +93,7 @@ end
     INCNS_MANIFOLD_RESULTS[:poiseuille] = c
 
     @test c.res.converged
+    @test c.res.scheme === :simplec
     @test c.res.iters <= 200
     @test c.res.mass_imbalance < 1e-10
     @test c.l2_rel <= 0.01
@@ -122,6 +130,18 @@ end
     INCNS_MANIFOLD_RESULTS[:scalar_transport] = st
     @test st.converged
     @test all(isfinite, st.T)
+end
+
+@testset "IncNS manifold legacy SIMPLE parity" begin
+    c = incns_manifold_poiseuille_case(; ny=8, aspect=4, Lx=4.0,
+                                       scheme=:simple, backend=CPU())
+    @test c.res.scheme === :simple
+    @test c.res.converged
+    @test c.res.iters == 30
+    @test c.res.dp ≈ 492.7252026635531 rtol=1e-13
+    @test sum(c.res.u) ≈ 255.75709873039895 rtol=1e-13
+    @test sum(abs, c.res.v) ≈ 4.188177731722439 rtol=1e-13
+    @test c.res.mass_imbalance == 0.0
 end
 
 let p = INCNS_MANIFOLD_RESULTS[:poiseuille],

@@ -10,7 +10,7 @@
 # method.jl forwards here). Include guards keep it standalone-include-able.
 #
 # Public entry point:
-#   solve_incns_simple(; nx, ny, H, mu, G, relax, tol, maxiter, backend=CPU())
+#   solve_incns_simple(; nx, ny, H, mu, G, relax, scheme, tol, maxiter, backend=CPU())
 #     -> NamedTuple(u, v, p, residual_history, iters, converged, ...)
 
 using KernelAbstractions
@@ -133,6 +133,26 @@ function _incns_solve!(cache::LinearSolveCache, ::SparseMatrixCSC{Float64,Int}, 
     return lin_solve!(cache, b)
 end
 
+function _incns_simple_scheme(scheme::Symbol)
+    s = Symbol(replace(lowercase(String(scheme)), '-' => '_'))
+    s in (:simple, :simplec) ||
+        throw(ArgumentError("scheme must be :simple or :simplec"))
+    return s
+end
+
+function _incns_positive_neighbour_sum(A::SparseMatrixCSC{Float64,Int})
+    nb = zeros(Float64, size(A, 1))
+    @inbounds for col in 1:size(A, 2)
+        for ptr in A.colptr[col]:(A.colptr[col + 1] - 1)
+            row = A.rowval[ptr]
+            row == col && continue
+            a = A.nzval[ptr]
+            a < 0.0 && (nb[row] += -a)
+        end
+    end
+    return nb
+end
+
 # ---------------------------------------------------------------------------
 # Rhie-Chow face velocity interpolation.
 #
@@ -217,7 +237,8 @@ end
 
 """
     solve_incns_simple(; nx, ny, H, mu, G, relax=(u=0.7, p=0.3),
-                       tol=1e-10, maxiter=200, Lx=H, backend=CPU())
+                       scheme=:simplec, tol=1e-10, maxiter=200, Lx=H,
+                       backend=CPU())
 
 Standalone steady SIMPLE incompressible solver core for body-force-driven
 periodic plane Poiseuille flow.
@@ -247,11 +268,13 @@ pressure-velocity coupling is [`solve_incns_cavity_mg`](@ref). Registered in
 """
 function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Real,
                             relax=(u = 0.7, p = 0.3),
+                            scheme::Symbol = :simplec,
                             tol::Real = 1e-10, maxiter::Integer = 200,
                             Lx::Real = H, backend = CPU())
     nx = Int(nx); ny = Int(ny)
     H = Float64(H); mu = Float64(mu); G = Float64(G); Lx = Float64(Lx)
     αu = Float64(relax.u); αp = Float64(relax.p)
+    scheme_sym = _incns_simple_scheme(scheme)
     dx = Lx / nx
     dy = H / ny
     ycenters = [(j - 0.5) * dy for j in 1:ny]
@@ -274,10 +297,27 @@ function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Re
     ap = Vector(diag(Amom))                      # a_p (operator diagonal), length n
     mom_op = _incns_factorise(Amom)
 
-    # SIMPLE d-coefficient d = au / a_p (velocity response to a pressure gradient).
+    # Legacy Rhie-Chow coefficient. Keep this fixed across schemes so SIMPLEC
+    # changes only the pressure-correction path, not the converged face model.
     ap_mat = reshape(ap, nx, ny)
-    d_u = αu ./ ap_mat
-    d_v = αu ./ ap_mat
+    d_rc_u = αu ./ ap_mat
+    d_rc_v = αu ./ ap_mat
+
+    # SIMPLE d-coefficient d = au / a_p (legacy velocity response to a pressure
+    # gradient). SIMPLEC subtracts sum(a_nb) from the inverse of that existing
+    # response coefficient; this preserves the extra under-relaxation already
+    # encoded by the legacy d path.
+    if scheme_sym === :simple
+        d_u = d_rc_u
+        d_v = d_rc_v
+    else
+        anb = reshape(_incns_positive_neighbour_sum(Amom), nx, ny)
+        denom = 1.0 ./ d_rc_u .- anb
+        minimum(denom) > 0.0 ||
+            throw(ArgumentError("SIMPLEC correction denominator must be positive; use relax.u < 1"))
+        d_u = 1.0 ./ denom
+        d_v = 1.0 ./ denom
+    end
 
     # ----- pressure-correction operator: d * (-Laplacian), periodic-x / Neumann-y -----
     # Continuity:  div(u* + d*grad(p')) = 0  ->  d*(-Lap) p' = div(u*).
@@ -330,7 +370,7 @@ function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Re
         vel_change = du / umax_prev
 
         # ---- 3. Rhie-Chow face velocities ----
-        _incns_rhie_chow_faces!(uf, vf, u, v, p, gpx, gpy, d_u, d_v,
+        _incns_rhie_chow_faces!(uf, vf, u, v, p, gpx, gpy, d_rc_u, d_rc_v,
                                 dx, dy, nx, ny)
 
         # ---- 4. continuity residual = div(u*) ----
@@ -374,5 +414,5 @@ function solve_incns_simple(; nx::Integer, ny::Integer, H::Real, mu::Real, G::Re
     end
 
     return (; u, v, p, residual_history, iters, converged, vel_change,
-            dx, dy, ycenters, H, mu, G, Lx, nx, ny)
+            dx, dy, ycenters, H, mu, G, Lx, nx, ny, scheme=scheme_sym)
 end
