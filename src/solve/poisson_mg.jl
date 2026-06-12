@@ -697,9 +697,9 @@ Validation & performance receipts
   * GPU↔CPU parity at machine epsilon (‖Δ‖∞ ~1e-14, same source via the KA
     backend swap).
 
-Standalone — NOT registered in `src/Kraken.jl`; include
-`src/solve/poisson_mg.jl` directly (it pulls in `linear_solve.jl` for the
-backend tags).
+Registered in `src/Kraken.jl` (exported by `using Kraken`); the file remains
+standalone-include-able (its guard pulls in `linear_solve.jl` for the backend
+tags when needed).
 """
 function solve_poisson_mg(f, N::Integer;
                           bc::Symbol = :dirichlet,

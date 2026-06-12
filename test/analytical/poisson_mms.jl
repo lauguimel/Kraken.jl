@@ -1,6 +1,10 @@
 using Test
 
-include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson.jl"))
+# Auto-skips under `using Kraken` (runtests.jl); unexported helpers are
+# Kraken.-qualified below, so the package-test path never double-includes src.
+if !isdefined(@__MODULE__, :solve_poisson_dirichlet)
+    include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson.jl"))
+end
 
 const POISSON_MMS_NS = (16, 32, 64, 128)
 
@@ -17,7 +21,7 @@ function convergence_result(solve_case, u_exact)
     previous_error = NaN
     for N in POISSON_MMS_NS
         u = solve_case(N)
-        err = l2_error(u, u_exact, N)
+        err = Kraken.l2_error(u, u_exact, N)
         push!(errors, err)
 
         if !isnan(previous_error)
@@ -32,10 +36,10 @@ end
 
 @testset "Poisson regular Cartesian MMS" begin
     @testset "Unpinned Neumann singularity" begin
-        A, b = assemble_poisson_neumann_unpinned(16, neumann_rhs)
+        A, b = Kraken.assemble_poisson_neumann_unpinned(16, neumann_rhs)
         max_row_sum = maximum(abs.(vec(sum(A; dims=2))))
         @test max_row_sum < 1.0e-10
-        @test_throws Exception solve_poisson(A, b, 16)
+        @test_throws Exception Kraken.solve_poisson(A, b, 16)
     end
 
     @testset "Dirichlet second-order convergence" begin

@@ -11,6 +11,7 @@
 # checks convergence and a checkerboard-free pressure field (Rhie-Chow working).
 
 using Test
+using KernelAbstractions   # CPU() — no longer inherited once the include below auto-skips
 
 if !isdefined(@__MODULE__, :solve_incns_cavity)
     include(joinpath(@__DIR__, "..", "..", "src", "methods", "inc_ns", "cavity.jl"))

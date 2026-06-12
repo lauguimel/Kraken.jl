@@ -109,8 +109,8 @@ agree (`east_fraction[i,j] == west_fraction[i+1,j]`, etc.) — then calls
 Same singularity caveat as [`solve_poisson_embedded`](@ref): with all-Neumann BCs
 pin a fluid DOF before solving. Receipt:
 `test/analytical/poisson_embedded_fvfd_mms.jl` (FVFD-built fractions reproduce
-the hand-built tilted half-plane assembly and converge ~2nd order). Standalone —
-NOT registered in `src/Kraken.jl`.
+the hand-built tilted half-plane assembly and converge ~2nd order). Registered
+in `src/Kraken.jl` (exported by `using Kraken`).
 """
 function assemble_poisson_embedded_from_fvfd(eb, f;
                                              outer_bc::Symbol=:neumann,

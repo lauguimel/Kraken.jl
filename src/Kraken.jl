@@ -83,6 +83,43 @@ include("kernels/li_bb_3d_v2.jl")
 include("fvfd/FVFD.jl")
 include("kernels/logconformation_fv_2d.jl")
 
+# --- IncNS solver stack: linear-solve seam, elliptic services, drivers ---
+# poisson.jl MUST come first: it tail-includes solve/linear_solve.jl (the
+# factorize-once seam), which has NO self-guard — never include linear_solve.jl
+# directly here or it would double-define the seam.
+include("solve/poisson.jl")
+include("solve/poisson_embedded.jl")
+include("solve/poisson_embedded_fvfd.jl")
+include("solve/poisson_mg.jl")
+# NOT included: solve/linear_solve_cuda.jl and methods/inc_ns/cavity_mg_cuda.jl
+# (CUDSS is not a package dependency; they stay manual-load inside GPU jobs).
+include("methods/inc_ns/simple.jl")
+include("methods/inc_ns/cavity.jl")
+include("methods/inc_ns/cavity_mg.jl")
+include("methods/inc_ns/projection.jl")
+include("methods/inc_ns/manifold_flow.jl")
+include("methods/scalar_transport/thermal_transport.jl")
+include("methods/inc_ns/method.jl")   # platform-contract wrapper (IncNS <: AbstractMethod)
+
+# IncNS platform contract
+export IncNS, IncNSSolution
+# IncNS / scalar-transport drivers
+export solve_incns_simple, solve_incns_cavity, solve_incns_cavity_mg,
+       solve_incns_projection, solve_incns_manifold, manifold_full_cell_mask,
+       solve_scalar_transport
+# Linear-solve seam (factorize-once)
+export lin_factorize, lin_solve!, LinearSolveCache, LinearSolveBackend,
+       CPUBackendTag, CUDABackendTag
+# Elliptic (Poisson) services
+export solve_poisson_dirichlet, solve_poisson_neumann, pin_reference_dof,
+       assemble_poisson_embedded, solve_poisson_embedded,
+       assemble_poisson_embedded_from_fvfd, fractions_from_fvfd,
+       solve_poisson_mg, solve_poisson_mgcg
+# FVFD grad/div/laplacian velocity operators (+ embedded variants)
+export gdl_divergence_2d!, gdl_pressure_gradient_2d!, gdl_laplacian_apply_2d!,
+       gdl_divergence_embedded_2d!, gdl_pressure_gradient_embedded_2d!,
+       gdl_laplacian_apply_embedded_2d!
+
 # --- Modular BC system (uses TRT rates + feq helpers; compiles face
 #     kernels per BC type via Julia dispatch).
 include("bc/specs.jl")

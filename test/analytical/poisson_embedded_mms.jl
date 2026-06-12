@@ -1,6 +1,14 @@
 using Test
+# nnz/nonzeros — no longer inherited once the include below auto-skips.
+# Loaded through Kraken (SparseArrays is a Kraken dep, not a test dep; a bare
+# `using SparseArrays` fails in the Pkg.test sandbox on Julia >= 1.12).
+using Kraken.SparseArrays
 
-include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson_embedded.jl"))
+# Auto-skips under `using Kraken` (runtests.jl); unexported helpers are
+# Kraken.-qualified below, so the package-test path never double-includes src.
+if !isdefined(@__MODULE__, :assemble_poisson_embedded)
+    include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson_embedded.jl"))
+end
 
 const POISSON_EMBEDDED_NS = (16, 32, 64, 128)
 
@@ -46,7 +54,7 @@ end
             outer_bc=:dirichlet,
             outer_dirichlet=(x, y) -> 0.0,
         )
-        A_regular, b_regular = assemble_poisson_dirichlet(N_matrix, embedded_sine_rhs)
+        A_regular, b_regular = Kraken.assemble_poisson_dirichlet(N_matrix, embedded_sine_rhs)
 
         @test embedded_sparse_max_abs(A_embedded - A_regular) == 0.0
         @test maximum(abs.(b_embedded - b_regular)) == 0.0
@@ -60,7 +68,7 @@ end
                     outer_dirichlet=(x, y) -> 0.0,
                 )
             end,
-            (N, u) -> l2_error(u, embedded_sine_exact, N),
+            (N, u) -> Kraken.l2_error(u, embedded_sine_exact, N),
         )
 
         @test 1.8 <= mean_order <= 2.2
@@ -69,21 +77,21 @@ end
 
     @testset "All-Neumann embedded nullspace" begin
         N = 64
-        fx, fy, vf = tilted_half_plane_fractions(N)
+        fx, fy, vf = Kraken.tilted_half_plane_fractions(N)
         A, b = assemble_poisson_embedded(
             N, fx, fy, vf, (x, y) -> 0.0;
             outer_bc=:neumann,
             embedded_bc=:neumann,
         )
 
-        max_row_sum = fluid_row_sum_max(A, N, vf)
+        max_row_sum = Kraken.fluid_row_sum_max(A, N, vf)
         @test max_row_sum < 1.0e-10
 
         pin_value = 1.25
-        k0 = first_fluid_dof(vf, N)
+        k0 = Kraken.first_fluid_dof(vf, N)
         A_pinned, b_pinned = pin_reference_dof(A, b, k0, pin_value)
-        u = solve_poisson(A_pinned, b_pinned, N)
-        max_deviation = fluid_constant_deviation(u, pin_value, N, vf)
+        u = Kraken.solve_poisson(A_pinned, b_pinned, N)
+        max_deviation = Kraken.fluid_constant_deviation(u, pin_value, N, vf)
 
         @test max_deviation < 1.0e-9
         @info "Embedded Poisson all-Neumann nullspace" N=N max_row_sum=max_row_sum pin_dof=k0 max_deviation=max_deviation
@@ -92,7 +100,7 @@ end
     @testset "Embedded Dirichlet quadratic MMS convergence" begin
         errors, orders, mean_order = embedded_convergence_result(
             N -> begin
-                fx, fy, vf = tilted_half_plane_fractions(N)
+                fx, fy, vf = Kraken.tilted_half_plane_fractions(N)
                 u = solve_poisson_embedded(
                     N, fx, fy, vf, embedded_quad_rhs;
                     outer_bc=:dirichlet,
@@ -104,7 +112,7 @@ end
             end,
             (N, result) -> begin
                 u, vf = result
-                fluid_l2_error(u, embedded_quad_exact, N, vf)
+                Kraken.fluid_l2_error(u, embedded_quad_exact, N, vf)
             end,
         )
 

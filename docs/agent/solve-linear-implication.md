@@ -16,8 +16,11 @@ every SIMPLE outer iteration (~3000 of them in the cavity), so it is factorized
 ONCE and the factorization reused per RHS. Two functions are the ENTIRE
 contract; dispatch is keyed on a backend singleton tag. The CPU file is
 CUDA-free; the CUDA methods live in the companion `linear_solve_cuda.jl`,
-loaded ONLY inside a job that already did `using CUDA, CUDSS`. **Standalone:
-NOT registered in `src/Kraken.jl`.**
+loaded ONLY inside a job that already did `using CUDA, CUDSS`. **Registered in
+`src/Kraken.jl` THROUGH the tail-include in `solve/poisson.jl`** (the file has
+NO self-guard — never include it directly in `Kraken.jl`); seam names exported
+(`lin_factorize`, `lin_solve!`, `LinearSolveCache`, backend tags).
+`linear_solve_cuda.jl` stays manual-load.
 
 ## Public surface
 

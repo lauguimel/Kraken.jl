@@ -20,7 +20,7 @@ function fvfd_a2_halfplane_boundary(N::Integer)
     nx = cos(pi / 6)
     ny = sin(pi / 6)
     offset = -Float64(N) * (nx * 0.43 + ny * 0.52)
-    return fvfd_embedded_boundary_from_halfplane_2d(N, N, nx, ny, offset; FT=Float64)
+    return Kraken.fvfd_embedded_boundary_from_halfplane_2d(N, N, nx, ny, offset; FT=Float64)
 end
 
 function fvfd_convergence_result(solve_case, error_case)
@@ -63,7 +63,7 @@ end
 function fvfd_orientation_crosscheck(N::Integer=32)
     eb = fvfd_a2_halfplane_boundary(N)
     vf_real, fx_real, fy_real = fractions_from_fvfd(eb)
-    fx_a2, fy_a2, vf_a2 = tilted_half_plane_fractions(N)
+    fx_a2, fy_a2, vf_a2 = Kraken.tilted_half_plane_fractions(N)
 
     vf_diff = fvfd_assert_matches_a2(:vol_frac, vf_real, vf_a2)
     fx_diff = fvfd_assert_matches_a2(:face_frac_x, fx_real, fx_a2)
@@ -86,11 +86,11 @@ function fvfd_dirichlet_mms()
                 outer_dirichlet=fvfd_quad_exact,
                 embedded_dirichlet=fvfd_quad_exact,
             )
-            return solve_poisson(A, b, N), vf
+            return Kraken.solve_poisson(A, b, N), vf
         end,
         (N, result) -> begin
             u, vf = result
-            fluid_l2_error(u, fvfd_quad_exact, N, vf)
+            Kraken.fluid_l2_error(u, fvfd_quad_exact, N, vf)
         end,
     )
 
@@ -108,14 +108,14 @@ function fvfd_neumann_nullspace(; N::Integer=64)
         embedded_bc=:neumann,
     )
 
-    max_row_sum = fluid_row_sum_max(A, N, vf)
+    max_row_sum = Kraken.fluid_row_sum_max(A, N, vf)
     @test max_row_sum < 1.0e-9
 
     pin_value = 1.25
-    k0 = first_fluid_dof(vf, N)
+    k0 = Kraken.first_fluid_dof(vf, N)
     A_pinned, b_pinned = pin_reference_dof(A, b, k0, pin_value)
-    u = solve_poisson(A_pinned, b_pinned, N)
-    max_deviation = fluid_constant_deviation(u, pin_value, N, vf)
+    u = Kraken.solve_poisson(A_pinned, b_pinned, N)
+    max_deviation = Kraken.fluid_constant_deviation(u, pin_value, N, vf)
     @test max_deviation < 1.0e-8
 
     @info "FVFD-lowered embedded Neumann nullspace" N=N max_row_sum=max_row_sum pin_dof=k0 max_deviation=max_deviation
@@ -127,7 +127,7 @@ function fvfd_fraction_arrays_in_unit_interval(arrays...)
 end
 
 function fvfd_circle_smoke(; N::Integer=32)
-    eb = fvfd_embedded_boundary_from_circle_2d(
+    eb = Kraken.fvfd_embedded_boundary_from_circle_2d(
         N, N, 0.5 * Float64(N), 0.5 * Float64(N), 0.25 * Float64(N);
         FT=Float64,
     )
@@ -139,14 +139,14 @@ function fvfd_circle_smoke(; N::Integer=32)
         outer_bc=:neumann,
         embedded_bc=:neumann,
     )
-    max_row_sum = fluid_row_sum_max(A, N, vf)
+    max_row_sum = Kraken.fluid_row_sum_max(A, N, vf)
     @test max_row_sum < 1.0e-9
 
     pin_value = -0.75
-    k0 = first_fluid_dof(vf, N)
+    k0 = Kraken.first_fluid_dof(vf, N)
     A_pinned, b_pinned = pin_reference_dof(A, b, k0, pin_value)
-    u = solve_poisson(A_pinned, b_pinned, N)
-    max_deviation = fluid_constant_deviation(u, pin_value, N, vf)
+    u = Kraken.solve_poisson(A_pinned, b_pinned, N)
+    max_deviation = Kraken.fluid_constant_deviation(u, pin_value, N, vf)
     @test max_deviation < 1.0e-8
 
     @info "FVFD circle adapter smoke" N=N max_row_sum=max_row_sum pin_dof=k0 max_deviation=max_deviation

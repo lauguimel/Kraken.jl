@@ -14,8 +14,10 @@ Cut-cell (embedded-boundary) Poisson assembly on the unit square: the regular
 `N x N` grid is kept, geometry enters ONLY through aperture fractions
 (`face_frac_x :: (N+1,N)`, `face_frac_y :: (N,N+1)`, `vol_frac :: (N,N)`).
 Fully solid cells stay in the system as identity rows (`b=0`) so the global `N²`
-indexing of `solve-poisson` is preserved. **Standalone: NOT registered in
-`src/Kraken.jl`** — `include` the file directly (it pulls in `poisson.jl`).
+indexing of `solve-poisson` is preserved. **Registered in
+`src/Kraken.jl`** (after `poisson.jl`; `assemble_poisson_embedded` and
+`solve_poisson_embedded` exported). Include guards keep the file
+standalone-include-able.
 
 ## Public surface
 

@@ -19,8 +19,9 @@
 # upwind advection makes A NON-symmetric we use spd=false (LU/LDLᵀ fallback).
 # Reimplements NOTHING from the operators or the linear-solve seam — calls/mirrors.
 #
-# KA + stdlib only, CPU by default. Does NOT subtype AbstractMethod and does NOT
-# register with `using Kraken`. New-file-only standalone brick.
+# KA + stdlib only, CPU by default. Registered in `src/Kraken.jl` (exported
+# driver `solve_scalar_transport`); include guards keep the brick
+# standalone-include-able.
 #
 # Public entry point:
 #   solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, is_solid, bc, backend,

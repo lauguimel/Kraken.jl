@@ -81,7 +81,8 @@
 #                         backend_ka=CPU(), atype=Array{Float64}, ...)
 #     -> NamedTuple(u, v, p, residual_history, iters, converged, ...)
 #
-# KA + stdlib only; no `using Kraken`, no AbstractMethod.
+# KA + stdlib only. Registered in `src/Kraken.jl` (exported driver; the
+# platform wrapper IncNS(:cavity_mg) in method.jl forwards here).
 
 using KernelAbstractions
 using LinearAlgebra: norm
@@ -599,9 +600,9 @@ Validation & performance receipts
     off-stride iteration as one graph launch through the `offstride_executor`
     seam (issue #8).
 
-Standalone — NOT registered in `src/Kraken.jl`; include
-`src/methods/inc_ns/cavity_mg.jl` directly (it pulls in
-`src/solve/poisson_mg.jl`).
+Registered in `src/Kraken.jl` and exported (also reachable as
+`solve(params, IncNS(:cavity_mg))`); the file remains standalone-include-able
+(its guard pulls in `src/solve/poisson_mg.jl`).
 """
 function solve_incns_cavity_mg(; nx::Integer=128, ny::Integer=128,
                                U_lid::Real=1.0, Re::Real=100.0,

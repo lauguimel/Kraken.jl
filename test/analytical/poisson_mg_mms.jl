@@ -6,8 +6,14 @@
 using Test
 using LinearAlgebra: norm
 
-include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson.jl"))     # CHOLMOD reference
-include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson_mg.jl"))  # MG solver
+# Auto-skip under `using Kraken` (runtests.jl); unexported helpers are
+# Kraken.-qualified below, so the package-test path never double-includes src.
+if !isdefined(@__MODULE__, :solve_poisson_dirichlet)
+    include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson.jl"))     # CHOLMOD reference
+end
+if !isdefined(@__MODULE__, :solve_poisson_mg)
+    include(joinpath(@__DIR__, "..", "..", "src", "solve", "poisson_mg.jl"))  # MG solver
+end
 
 mg_dirichlet_exact(x, y) = sin(pi * x) * sin(pi * y)
 mg_dirichlet_rhs(x, y)   = 2.0 * pi^2 * sin(pi * x) * sin(pi * y)
@@ -22,7 +28,7 @@ mg_neumann_rhs(x, y)     = 2.0 * pi^2 * cos(pi * x) * cos(pi * y)
         for N in NS
             u, _, _ = solve_poisson_mg(mg_dirichlet_rhs, N; bc=:dirichlet,
                                        tol=1e-10, maxcycles=60, smoother=:rbgs)
-            push!(errors, l2_error(Array(u), mg_dirichlet_exact, N))
+            push!(errors, Kraken.l2_error(Array(u), mg_dirichlet_exact, N))
         end
         orders = [log2(errors[k-1] / errors[k]) for k in 2:length(errors)]
         mean_order = sum(orders) / length(orders)
@@ -71,7 +77,7 @@ mg_neumann_rhs(x, y)     = 2.0 * pi^2 * cos(pi * x) * cos(pi * y)
                                         tol=1e-10, maxcycles=80, smoother=:rbgs)
             maxcycles_seen = max(maxcycles_seen, nc)
             ua = Array(u); ua .-= sum(ua) / length(ua)
-            ex = exact_field(N, mg_neumann_exact); ex .-= sum(ex) / length(ex)
+            ex = Kraken.exact_field(N, mg_neumann_exact); ex .-= sum(ex) / length(ex)
             push!(errors, sqrt((1.0 / N)^2 * sum((ua .- ex) .^ 2)))
         end
         orders = [log2(errors[k-1] / errors[k]) for k in 2:length(errors)]

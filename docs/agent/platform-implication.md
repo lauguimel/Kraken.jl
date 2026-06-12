@@ -42,6 +42,15 @@ Phase 1 (`observe.jl`):
   `LineProfile(field, indices)`, `FieldReduction(field, reducer)`. **Integral QoIs (drag, Nusselt)
   deferred** — they need boundary integration, not pure `sample`.
 
+Second concrete method (`src/methods/inc_ns/method.jl`, mirrors the LBM wrapper):
+- `IncNS <: AbstractMethod` — `IncNS(driver)` with driver ∈
+  `{:simple, :cavity, :cavity_mg, :projection, :manifold}`;
+  `capabilities(::IncNS)` = `{ForwardSolve}` only (CUDA seam is manual-load).
+- `IncNSSolution{R} <: AbstractSolution` — thin wrapper over the driver `NamedTuple`.
+- `solve(params::NamedTuple, m::IncNS)` — splats `params` verbatim into the matching
+  `solve_incns_*` driver; `sample` pass-through methods as for `LBMSolution`.
+  Registration map: `docs/agent/incns-platform-implication.md`.
+
 ## Reads from
 
 Phase 0 reads nothing. **Phase 0b**: `solve(_, ::LBM)` forwards to `run_simulation`

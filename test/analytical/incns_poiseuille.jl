@@ -10,6 +10,7 @@
 # <= 1% in the relative L2 norm, plus zero cross-flow and the Q/G relation.
 
 using Test
+using KernelAbstractions   # CPU() — no longer inherited once the include below auto-skips
 
 if !isdefined(@__MODULE__, :solve_incns_simple)
     include(joinpath(@__DIR__, "..", "..", "src", "methods", "inc_ns", "simple.jl"))
