@@ -4,18 +4,22 @@
 All numbers are transcribed VERBATIM from the measured A100 results under
 benchmarks/results/ (no new runs, no extrapolation):
 
-    poisson_gpu_aqua_a100.md     cuDSS vs CHOLMOD, cut-cell Poisson (job 22299810)
-    poisson_mg_gpu_aqua_a100.md  matrix-free MG GPU vs CPU + V-cycles (job 22299933)
-    cavity_gpu_aqua_a100.md      end-to-end SIMPLE cavity GPU vs CPU (job 22305186)
+    poisson_gpu_aqua_a100.md            cuDSS vs CHOLMOD, cut-cell Poisson (job 22299810)
+    poisson_mg_gpu_aqua_a100.md         matrix-free MG GPU vs CPU + V-cycles (job 22299933)
+    cavity_gpu_aqua_a100.md             end-to-end SIMPLE cavity GPU vs CPU (job 22305186)
+    cavity_gpu_ablation_aqua_a100.md    GPU-efficiency ablation C0..C4 (job 22306791),
+                                        via docs/incns_figdata/cavity_gpu_ablation.csv
 
 Renders into docs/src/users/:
 
     incns-gpu-speedup.png    GPU/CPU speed-up vs DOF (cuDSS solve, matrix-free MG)
     incns-mg-vcycles.png     MG V-cycle count vs DOF (flat -> O(N) evidence)
     incns-gpu-endtoend.png   per-solve vs end-to-end SIMPLE speed-up
+    incns-gpu-ablation.png   ablation ladder: speed-up bars + GPU-utilization overlay
 
 Run: conda run -n kraken-v0-3-figures python docs/plot_incns_gpu_benchmarks.py
 """
+import csv
 import os
 import pathlib
 import sys
@@ -148,8 +152,69 @@ def end_to_end():
     print("wrote", out)
 
 
+def ablation():
+    """512² ablation ladder: speed-up bars + GPU-utilization overlay (mean+peak).
+
+    Data: docs/incns_figdata/cavity_gpu_ablation.csv, transcribed verbatim from
+    benchmarks/results/cavity_gpu_ablation_aqua_a100.md (job 22306791).
+    """
+    rows = []
+    with open(os.path.join(HERE, "incns_figdata", "cavity_gpu_ablation.csv")) as f:
+        for row in csv.DictReader(r for r in f if not r.startswith("#")):
+            rows.append(row)
+    configs = [f"{r['config']}\n{r['delta']}" for r in rows]
+    speedup = [float(r["speedup_vs_cpu"]) for r in rows]
+    u_mean = [float(r["util_mean_pct"]) for r in rows]
+    u_peak = [float(r["util_peak_pct"]) for r in rows]
+
+    c_bar, c_mean, c_peak = kd.palette(3)
+    fig, ax = plt.subplots(figsize=(9.4, 6.2), constrained_layout=True)
+    kd.grid(ax)
+
+    xs = np.arange(len(rows))
+    colors = [kd.ACCENT if r["config"] == "C3" else c_bar for r in rows]
+    bars = ax.bar(xs, speedup, width=0.56, color=colors, edgecolor="0.85", lw=0.8)
+    for b, v in zip(bars, speedup):
+        ax.text(b.get_x() + b.get_width() / 2, v + 0.7, kd.tex(f"{v:.2f}x"),
+                ha="center", color="0.92", fontsize=12)
+    ax.text(xs[3], 40.3, kd.tex("production path"),
+            ha="center", color=kd.ACCENT, fontsize=11)
+
+    ax.set_xticks(xs)
+    ax.set_xticklabels([kd.tex(c) for c in configs], fontsize=10)
+    ax.set_ylim(0, 42)
+    ax.set(ylabel=kd.tex("end-to-end GPU/CPU speed-up"),
+           title=kd.tex("GPU-efficiency ablation — SIMPLE cavity 512² Re=1000 (A100)"))
+
+    axu = ax.twinx()
+    axu.plot(xs, u_peak, "--", color=kd.CONNECT, lw=1.6, zorder=2)
+    axu.plot(xs, u_peak, **kd.reference_marker(c_peak, marker="o", ms=11), zorder=3)
+    axu.plot(xs, u_mean, "-", color=kd.CONNECT, lw=2.0, zorder=2)
+    axu.plot(xs, u_mean, **kd.kraken_marker(c_mean, marker="D", ms=9), zorder=4)
+    axu.set_ylim(0, 105)
+    axu.set_ylabel(kd.tex("GPU utilization (%)"), color="0.85")
+    axu.tick_params(axis="y", colors="0.85")
+    axu.spines["right"].set_color("0.55")
+
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=c_bar, ec="0.85",
+                      label=kd.tex("speed-up vs CPU (cumulative)")),
+        plt.Rectangle((0, 0), 1, 1, color=kd.ACCENT, ec="0.85",
+                      label=kd.tex("C3 = production GPU path (32.9x)")),
+        Line2D([0], [0], color=kd.CONNECT, lw=2.0, marker="D", ms=8, mec="0.92",
+               mfc=c_mean, label=kd.tex("GPU util, mean (solve window)")),
+        Line2D([0], [0], color=kd.CONNECT, lw=1.6, ls="--", marker="o", ms=10,
+               mfc="none", mec=c_peak, mew=2.0, label=kd.tex("GPU util, peak")),
+    ]
+    kd.dark_legend(ax, handles=handles, loc="upper left")
+    out = os.path.join(OUT, "incns-gpu-ablation.png")
+    fig.savefig(out, dpi=150)
+    print("wrote", out)
+
+
 if __name__ == "__main__":
     kd.apply()
     speedup_vs_size()
     vcycles()
     end_to_end()
+    ablation()
