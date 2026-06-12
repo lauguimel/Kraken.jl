@@ -52,3 +52,25 @@ CPU-Float64 only at this rung. `ad_step!`, `ad_thermal_cut_step!`, and `ad_ve_co
 4. `src/Kraken.jl` — include + export.
 5. `test/platform/residual_vjp_test.jl` — Enzyme-free + Enzyme-gated tests.
 6. `test/runtests.jl` — +1 include.
+
+## Phase 2b-1 — ν-channel VJP seam (M-P2b-1, 2026-06-12)
+
+### New public symbol
+- `LBMScalarParams` — parameter bundle with FREE scalar ν (geometry fields identical to `LBMGeomParams`; `s_plus`/`s_minus` derived at construction from ν via `ad_trt_rates_inline`).
+- `residual(_, ::LBM, f, p::LBMScalarParams)` — same body as `LBMGeomParams` dispatch; uses p.s_plus/s_minus (derived from ν).
+- `adjoint_vjp(_, ::LBM, f_star, p::LBMScalarParams, v)` — same body as `LBMGeomParams` dispatch; delegates to `_ad_vjp_GtT` unchanged.
+
+### New private symbols
+- `ad_step_nu!(out, f, q_wall, is_solid, u_profile, rho_out, ν, Nx, Ny)` — Enzyme-diffable wrapper: calls `ad_trt_rates_inline(ν)` then `ad_step!`. Target for `Active(ν)` Enzyme differentiation.
+- `_ad_pvjp_nu(f_star, lambda, p::LBMScalarParams) -> Float64` — Enzyme Reverse over `ad_step_nu!` with `Active(ν)`; returns dL/dν scalar cotangent. Impl in `ext/KrakenADExt.jl`.
+
+### ν chain
+- ν → (s_plus, s_minus) via `ad_trt_rates_inline` (exact inline formula, no residual).
+- dL/dν = Enzyme reverse of `ad_step_nu!` wrt `Active(ν)` with λ as seed on `out`.
+
+### Files modified (additive only)
+- `src/platform/residual.jl` — +LBMScalarParams struct, +2 dispatches.
+- `src/ad/ad_step.jl` — +`ad_step_nu!` wrapper.
+- `src/ad/ad_api.jl` — +`_ad_pvjp_nu` stub.
+- `ext/KrakenADExt.jl` — +`_ad_pvjp_nu` impl.
+- `src/Kraken.jl` — +export LBMScalarParams.

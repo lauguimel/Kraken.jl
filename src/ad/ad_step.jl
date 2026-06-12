@@ -263,3 +263,16 @@ function ad_step!(out, f, q_wall, is_solid, u_profile, rho_out,
     return nothing
 end
 
+"""
+    ad_step_nu!(out, f, q_wall, is_solid, u_profile, rho_out, ν::Float64, Nx::Int, Ny::Int)
+
+Enzyme-diffable wrapper: computes (s_plus, s_minus) from ν via `ad_trt_rates_inline`,
+then calls `ad_step!`. Use this as the target for `Enzyme.autodiff(Reverse, ad_step_nu!, ..., Active(ν), ...)`.
+`ad_step!` itself is unchanged.
+"""
+function ad_step_nu!(out, f, q_wall, is_solid, u_profile, rho_out,
+                     ν::Float64, Nx::Int, Ny::Int)
+    s_plus, s_minus = ad_trt_rates_inline(ν)
+    ad_step!(out, f, q_wall, is_solid, u_profile, rho_out, s_plus, s_minus, Nx, Ny)
+    return nothing
+end

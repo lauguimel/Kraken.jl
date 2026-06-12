@@ -6,6 +6,7 @@ using Enzyme
 import Kraken: _ad_dJdf, _ad_vjp_GtT, _ad_dqwall_terms
 import Kraken: _ad_dNudw, _ad_thermal_vjp_GtT, _ad_thermal_dqwall_terms
 import Kraken: _ad_ve_dJdw, _ad_ve_vjp_GtT, _ad_ve_dGdR_jvp
+import Kraken: _ad_pvjp_nu, ad_step_nu!
 
 _short_error(err) = first(sprint(showerror, err), min(360, lastindex(sprint(showerror, err))))
 _short_string(msg) = first(msg, min(360, lastindex(msg)))
@@ -275,6 +276,34 @@ function _ad_ve_dGdR_jvp(w_star, g, dg, q_wall, dq_wall, u_profile, p)
                     Enzyme.Const(p), Enzyme.Const(u_profile),
                     Enzyme.Const(1.0), Enzyme.Const(nothing))
     return dout
+end
+
+"""
+    _ad_pvjp_nu(f_star, lambda, p::LBMScalarParams) -> Float64
+
+Compute dL/dν = λᵀ (∂G/∂ν) via Enzyme Reverse over `ad_step_nu!` with `Active(ν)`.
+Strategy B: differentiate the ν → (s_plus, s_minus) → G chain in one Enzyme call.
+Returns a scalar — the cotangent of the loss wrt the free viscosity.
+"""
+function _ad_pvjp_nu(f_star, lambda, p::Kraken.LBMScalarParams)
+    out = zeros(Float64, size(f_star))
+    dout = copy(lambda)
+    df = zeros(Float64, size(f_star))
+    ret = Enzyme.autodiff(Enzyme.Reverse, Kraken.ad_step_nu!,
+                          Enzyme.Duplicated(out, dout),
+                          Enzyme.Duplicated(copy(f_star), df),
+                          Enzyme.Const(p.q_wall),
+                          Enzyme.Const(p.is_solid),
+                          Enzyme.Const(p.u_profile),
+                          Enzyme.Const(p.rho_out),
+                          Enzyme.Active(p.ν),
+                          Enzyme.Const(p.Nx), Enzyme.Const(p.Ny))
+    # Enzyme versions differ between compact Active-only and per-argument
+    # cotangent tuples; ν is the only Active scalar in this call.
+    for cotangent in ret[1]
+        cotangent isa Real && return Float64(cotangent)
+    end
+    error("_ad_pvjp_nu: Enzyme returned no scalar cotangent for ν")
 end
 
 end # module KrakenADExt

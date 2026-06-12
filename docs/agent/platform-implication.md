@@ -50,6 +50,12 @@ Phase 2a (`residual.jl`):
 - `residual(problem, ::LBM, u, p) -> same shape as u` — R = u - G(u,p); Enzyme-free (calls ad_step!/ad_thermal_cut_step!/ad_ve_coupled_step! directly).
 - `adjoint_vjp(problem, ::LBM, u_star, p, v) -> same shape as v` — (I - dG/du)^T v; delegates to `_ad_vjp_GtT` / `_ad_thermal_vjp_GtT` / `_ad_ve_vjp_GtT`; requires Enzyme loaded.
 
+Phase 2b-1 (`residual.jl` additive, `ad_step.jl` additive, `KrakenADExt.jl` additive):
+- `LBMScalarParams` — parameter bundle with free scalar ν; geometry fields same as `LBMGeomParams`; `s_plus`/`s_minus` derived from ν at construction.
+- `residual(problem, ::LBM, f, p::LBMScalarParams)` — identical body to `LBMGeomParams` dispatch; uses derived rates.
+- `adjoint_vjp(problem, ::LBM, f_star, p::LBMScalarParams, v)` — identical body to `LBMGeomParams` dispatch; delegates to `_ad_vjp_GtT`.
+- `_ad_pvjp_nu(f_star, lambda, p::LBMScalarParams) -> Float64` — (private) Enzyme Reverse over `ad_step_nu!` with `Active(ν)`; returns dL/dν scalar.
+
 Second concrete method (`src/methods/inc_ns/method.jl`, mirrors the LBM wrapper):
 - `IncNS <: AbstractMethod` — `IncNS(driver)` with driver ∈
   `{:simple, :cavity, :cavity_mg, :projection, :manifold}`;

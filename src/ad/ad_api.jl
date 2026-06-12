@@ -41,6 +41,14 @@ function _ad_ve_dGdR_jvp(args...)
     error(_AD_ENZYME_LOAD_ERROR)
 end
 
+# --- ν parameter VJP seam (M-P2b-1) ---
+# `_ad_pvjp_nu` : computes dL/dν = λᵀ (∂G/∂ν) via Enzyme Reverse over
+#                  ad_step_nu! with Active(ν). Returns a scalar Float64.
+#                  Impl lives in ext/KrakenADExt.jl.
+function _ad_pvjp_nu(args...)
+    error(_AD_ENZYME_LOAD_ERROR)
+end
+
 """
     steady_shape_sensitivity(; qoi=:drag, ...)
 
