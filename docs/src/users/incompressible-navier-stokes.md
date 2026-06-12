@@ -35,18 +35,20 @@ overhead but the answer itself, and LBM remains the right tool in Kraken.
 
 ## How to run
 
-The solver is currently a **standalone API**: it is *not* yet registered as a
-Kraken `AbstractMethod` and has *no* `.krk` seam — you `include` the solver file
-directly and call the entry point (the includes pull in the FVFD operators and
-the linear/multigrid solvers they need; use the root project environment).
+The solver stack is **registered in the package API**: `using Kraken` exports
+the drivers (`solve_incns_simple`, `solve_incns_cavity`, `solve_incns_cavity_mg`,
+`solve_incns_projection`, `solve_incns_manifold`) plus the platform contract
+`IncNS <: AbstractMethod` — the same call is reachable as
+`solve(params, IncNS(:cavity_mg))`, returning an `IncNSSolution`. There is *no*
+`.krk` seam yet. (The solver files remain standalone-include-able for scripts
+that don't load the package.)
 
 **Plane Poiseuille** (body-force-driven periodic channel, direct
 factorize-once linear solves):
 
 ```julia
 # julia --project=.
-using KernelAbstractions
-include("src/methods/inc_ns/simple.jl")
+using Kraken
 
 res = solve_incns_simple(; nx=8, ny=64, H=1.0, mu=1.0, G=1.0,
                          relax=(u=0.7, p=0.3), tol=1e-10, maxiter=300)
@@ -59,8 +61,7 @@ and the pressure correction), CPU:
 
 ```julia
 # julia --project=.
-using KernelAbstractions
-include("src/methods/inc_ns/cavity_mg.jl")
+using Kraken
 
 res = solve_incns_cavity_mg(; nx=128, ny=128, U_lid=1.0, Re=100.0,
                             relax=(u=0.7, p=0.3), tol=1e-7, vel_tol=1e-6,
@@ -71,12 +72,19 @@ res.converged, res.iters    # (true, ~3.2e3 outer iterations)
 The same call on an NVIDIA GPU — same source, two keyword changes:
 
 ```julia
-using CUDA
+using Kraken, CUDA
 res = solve_incns_cavity_mg(; nx=512, ny=512, U_lid=1.0, Re=1000.0,
                             relax=(u=0.5, p=0.2), tol=1e-7, vel_tol=1e-6,
                             maxiter=60000,
                             backend_ka=CUDABackend(), atype=CuArray{Float64})
 ```
+
+The latency-oriented defaults (`norm_stride=25, mg_cycles=3, mom_mg_cycles=1`)
+are already the measured fast path; the CUDA-graph executor that completes the
+production GPU configuration (see the
+[ablation below](#gpu-efficiency-ablation-where-the-time-went)) stays
+**manual-load**: `include("src/methods/inc_ns/cavity_mg_cuda.jl")` after
+`using CUDA` (it is deliberately not part of the CPU-only package).
 
 ## Validation
 
@@ -118,12 +126,14 @@ peaks and **improves with grid**: the A100 benchmark run of the same case at
 
 All numbers below are measured results from Aqua A100-SXM4-40GB runs, Float64,
 recorded in `benchmarks/results/poisson_gpu_aqua_a100.md`,
-`benchmarks/results/poisson_mg_gpu_aqua_a100.md` and
-`benchmarks/results/cavity_gpu_aqua_a100.md`; the figures are rendered by
-`docs/plot_incns_gpu_benchmarks.py`. They tell one consistent — and honest —
-story: **per-solve GPU speed-ups are large and grow with problem size, but the
-segregated SIMPLE loop as written cannot yet feed them to the end-to-end
-solve.**
+`benchmarks/results/poisson_mg_gpu_aqua_a100.md`,
+`benchmarks/results/cavity_gpu_aqua_a100.md` and
+`benchmarks/results/cavity_gpu_ablation_aqua_a100.md`; the figures are rendered
+by `docs/plot_incns_gpu_benchmarks.py`. They tell one consistent — and honest —
+story: **per-solve GPU speed-ups are large and grow with problem size; the
+segregated SIMPLE loop as first written could not feed them to the end-to-end
+solve — until the orchestration levers measured in the ablation below closed
+the gap.**
 
 ### Per-solve speed-up grows with size
 
@@ -195,13 +205,66 @@ efficiency levers above stack* (large grids + fusion + fewer syncs + mixed
 precision). Multi-GPU scaling and all-physics robustness at that speed are
 explicitly out of scope here.
 
-### GPU-efficiency ablation
+This diagnosis has since been resolved: the measured
+[GPU-efficiency ablation below](#gpu-efficiency-ablation-where-the-time-went)
+stacks these levers one by one and lands at **32.9× at 88.8 % mean
+utilization** — inside the Fluent-class band, exceeding the target.
 
-A cumulative per-change ablation (norm stride → fixed MG cycles → CUDA graph →
-mixed precision) with per-step wall time and GPU utilization is being measured
-on Aqua now.
+### GPU-efficiency ablation — where the time went
 
-<!-- ABLATION-RESULTS: pending Aqua job, filled by a follow-up mission -->
+A cumulative per-change ablation of the efficiency levers on the same 512²
+Re = 1000 cavity (A100, Float64, recorded in
+`benchmarks/results/cavity_gpu_ablation_aqua_a100.md`). The CPU reference is
+the **same improved solver** on the node's CPU — 2 704.13 s, 31 218 iterations,
+Ghia 2.308 % (the kernel fusion helped the CPU too, down from 3 686.92 s), so
+every speed-up below is conservative. GPU utilization is sampled over the
+timed solve window only.
+
+| config | change (cumulative) | wall (s) | speed-up vs CPU | GPU util mean/peak | parity max-rel | Ghia err | step gain |
+|---|---|---|---|---|---|---|---|
+| C0 | legacy kwargs (`norm_stride=1, mg_cycles=0`) | 466.22 | 5.80× | 35.5 % / 42 % | 3.3e-16 | 2.308 % | — |
+| C1 | + `norm_stride=25` | 455.11 | 5.94× | 36.1 % / 44 % | 1.0e-05 | 2.307 % | 1.02× |
+| C2 | + fixed MG cycles (3/1) | 239.64 | 11.28× | 43.9 % / 51 % | 1.0e-05 | 2.307 % | 1.90× |
+| **C3** | **+ CUDA graph** | **82.21** | **32.89×** | **88.8 % / 96 %** | 1.0e-05 | 2.307 % | **2.92×** |
+| C4 | + mixed precision (p+mom) | 94.95 | 28.48× | 81.7 % / 96 % | 1.0e-05 | 2.307 % | 0.87× |
+
+![GPU-efficiency ablation ladder](incns-gpu-ablation.png)
+
+Headline: **865 s → 82 s on the GPU path (10.5×), 4.26× → 32.9× vs CPU,
+utilization 20 % → 88.8 %** — and correctness intact end-to-end: parity vs CPU
+1.0e-5 ≪ the 1e-3 gate (the deviation is the fast path stopping 7 iterations
+later, not numerics), Ghia unchanged at 2.307 %. Reading the ladder:
+
+- **Launch latency, not bandwidth or FLOPs, was the bottleneck.** The CUDA
+  graph (C3) is the dominant lever — **2.92×** in one step, utilization jumping
+  43.9 % → 88.8 %: one graph replay per off-stride outer iteration amortizes
+  ~800 kernel launches into one.
+- **Fixed inner V-cycles (C2, 1.90×)** eliminate *all* inner MG-residual
+  reductions and host syncs (3 pressure + 1 momentum V-cycles per outer
+  iteration, no per-cycle residual check) — this is where the "fewer/batched
+  reductions" lever actually lived.
+- **Norm-stride alone is small (C1, 1.02×)**: at 512² the outer-norm host
+  syncs were already minor next to the inner reductions. Its real value is
+  *enabling* the static launch sequence that C2/C3 require.
+- **Mixed precision is a net loss once graphs amortize launches (C4, 0.87×)**:
+  the F32 V-cycle's bandwidth saving is outweighed by the F64↔F32 conversion
+  kernels and duplicate hierarchy traffic at this size — it stays **default
+  off** (it may still pay in bandwidth-bound regimes, larger grids / 3D, but
+  that is unmeasured).
+- C0 already sits above the earlier 4.26× baseline (5.80×, util ~20 % →
+  35.5 %) because the *unconditional* changes — kernel fusion 18 → 7 and
+  per-launch sync removal — are in every config, including legacy kwargs.
+
+One honest caveat: the single **1024² run did not converge** in its
+80 000-iteration budget (355.8 s, Ghia 5.52 % at stop and still relaxing, GPU
+util 97.5 %/99 %). SIMPLE's outer-iteration count grows with grid; the budget,
+not the throughput, was short — a converged 1024² number needs maxiter ≥ 150 k
+and should use C3 (that run pre-registered C4 as "best config" before the
+ablation showed C3 wins).
+
+**The production GPU path is C3**: the solver's defaults
+(`norm_stride=25, mg_cycles=3, mom_mg_cycles=1`) plus the CUDA-graph executor
+from `cavity_mg_cuda.jl`; mixed precision stays opt-in.
 
 ## Reproducing this page
 
