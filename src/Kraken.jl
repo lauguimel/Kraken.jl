@@ -27,6 +27,7 @@ export LBM, LBMSolution, solve, sample
 export observe, predict, Prediction, FieldProbe, LineProfile, FieldReduction
 export residual, adjoint_vjp
 export LBMGeomParams, LBMThermalParams, LBMVEParams, LBMScalarParams
+export ParameterSpace, loss, fit, CalibResult
 
 # --- Lattice definitions ---
 include("lattice/lattice.jl")
@@ -162,6 +163,7 @@ include("ad/ad_ve_geometry.jl")
 
 # Phase 2a platform residual/VJP seam depends on AD param types and step maps.
 include("platform/residual.jl")
+include("platform/calibration.jl")
 
 # --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
 include("curvilinear/mesh.jl")

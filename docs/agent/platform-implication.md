@@ -56,6 +56,13 @@ Phase 2b-1 (`residual.jl` additive, `ad_step.jl` additive, `KrakenADExt.jl` addi
 - `adjoint_vjp(problem, ::LBM, f_star, p::LBMScalarParams, v)` — identical body to `LBMGeomParams` dispatch; delegates to `_ad_vjp_GtT`.
 - `_ad_pvjp_nu(f_star, lambda, p::LBMScalarParams) -> Float64` — (private) Enzyme Reverse over `ad_step_nu!` with `Active(ν)`; returns dL/dν scalar.
 
+Phase 2b-2 (`calibration.jl` NEW):
+- `ParameterSpace` — named↔flat bijection with bounds, log-scale, fixed/free masks. Methods: `to_flat`, `from_flat`, `n_free`, `project!`.
+- `loss(predictions, data; weights) -> Float64` — data-misfit `(1/2)||ŷ-y||²`; Enzyme-free.
+- `fit(problem, ::LBM, data, p0, pspace; observables, kwargs...) -> CalibResult` — projected gradient + Armijo backtracking; gradient via steady adjoint chain (`_ad_pvjp_nu` for ν DOF, `_ad_dqwall_terms` for radius DOF).
+- `CalibResult` — (`p_opt`, `loss_final`, `loss_trace`, `grad_trace`, `n_iter`, `converged`, `message`).
+- `_dJ_df_lineprofile_ux` — (private) analytic dL/df for `LineProfile(:ux)` observable; Enzyme-free.
+
 Second concrete method (`src/methods/inc_ns/method.jl`, mirrors the LBM wrapper):
 - `IncNS <: AbstractMethod` — `IncNS(driver)` with driver ∈
   `{:simple, :cavity, :cavity_mg, :projection, :manifold}`;
@@ -114,6 +121,7 @@ platform fallback.
 4. `src/platform/observe.jl` — `observe`/`predict`/`Prediction` + observables
    (`FieldProbe`/`LineProfile`/`FieldReduction`).
 5. `src/platform/residual.jl` — Phase 2a: `residual`, `adjoint_vjp`, `LBMGeomParams`, `LBMThermalParams`, `LBMVEParams`, `SteadyResidual`.
+5b. `src/platform/calibration.jl` — Phase 2b-2: `ParameterSpace`, `loss`, `fit`, `CalibResult`.
 6. `src/Kraken.jl` — the `# --- Platform contract ---` include + export block (a choke file;
    edits serialized on `dev/platform`).
 7. `test/platform/contract_parity_test.jl` — capabilities, bit-for-bit parity vs `run_simulation`,
