@@ -233,8 +233,12 @@ function segment_outlet_energy_case(; nx::Integer = 48, ny::Integer = 32,
                                  advection, deferred_passes)
     solid = falses(nx, ny)
     Q_in = sum(source) * dx * dy
-    enthalpy_out = sum(max(-Kraken._st_west_boundary_flux(uf, vf, solid, nx, ny,
-                                                          dx, dy, j), 0.0) *
+    # Dual-mode: standalone include defines the helper in this module; under
+    # runtests the include auto-skips and the helper lives in Kraken.
+    westflux = isdefined(@__MODULE__, :_st_west_boundary_flux) ?
+        _st_west_boundary_flux : Kraken._st_west_boundary_flux
+    enthalpy_out = sum(max(-westflux(uf, vf, solid, nx, ny,
+                                     dx, dy, j), 0.0) *
                        res.T[1, j] * dy for j in split + 1:ny)
     rel = abs(Q_in - enthalpy_out) / Q_in
     return (; res, Q_in, enthalpy_out, rel, split)

@@ -62,8 +62,12 @@ function incns_manifold_plate_case(; nx::Integer=64, ny::Integer=32,
 
     uwest = fill(Float64(U_in), ny)
     div = zeros(Float64, nx, ny)
-    Kraken._mf_face_divergence!(div, res.uf, res.vf, uwest, res.dx, res.dy,
-                                nx, ny, res.is_solid)
+    # Dual-mode: standalone include defines the helper in this module; under
+    # runtests the include auto-skips and the helper lives in Kraken.
+    facediv! = isdefined(@__MODULE__, :_mf_face_divergence!) ?
+        _mf_face_divergence! : Kraken._mf_face_divergence!
+    facediv!(div, res.uf, res.vf, uwest, res.dx, res.dy,
+             nx, ny, res.is_solid)
     fluid = findall(!, res.is_solid)
     div_l2 = sqrt(sum(abs2, div[fluid]) / length(fluid))
     solid_speed = maximum(abs.(res.u[res.is_solid])) +
