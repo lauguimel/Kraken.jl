@@ -120,7 +120,9 @@ end
 function channel_nusselt_case(; nx::Integer = 400, ny::Integer = 60,
                               H::Real = 1.0, Lx::Real = 40.0,
                               u_max::Real = 1.0, DT::Real = 0.1,
-                              q::Real = 1.0)
+                              q::Real = 1.0,
+                              advection::Symbol = :linear_upwind,
+                              deferred_passes::Integer = 4)
     dx = Lx / nx
     dy = H / ny
     ycenters = [(j - 0.5) * dy for j in 1:ny]
@@ -138,7 +140,8 @@ function channel_nusselt_case(; nx::Integer = 400, ny::Integer = 60,
           south = (kind = :flux,      value = q),      # heated plate
           north = (kind = :flux,      value = q))      # heated plate
 
-    res = solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, bc)
+    res = solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, bc,
+                                 advection, deferred_passes)
     T = res.T
 
     # Bulk (mixing-cup) temperature per streamwise station:
@@ -190,7 +193,9 @@ end
 function segment_outlet_energy_case(; nx::Integer = 48, ny::Integer = 32,
                                     Lx::Real = 4.0, Ly::Real = 2.0,
                                     U::Real = 1.0, DT::Real = 1e-4,
-                                    S::Real = 1.0)
+                                    S::Real = 1.0,
+                                    advection::Symbol = :linear_upwind,
+                                    deferred_passes::Integer = 4)
     dx = Lx / nx
     dy = Ly / ny
     split = ny ÷ 2
@@ -224,7 +229,8 @@ function segment_outlet_energy_case(; nx::Integer = 48, ny::Integer = 32,
           south = (kind = :flux, value = 0.0),
           north = (kind = :flux, value = 0.0))
 
-    res = solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, bc, source)
+    res = solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, bc, source,
+                                 advection, deferred_passes)
     solid = falses(nx, ny)
     Q_in = sum(source) * dx * dy
     enthalpy_out = sum(max(-_st_west_boundary_flux(uf, vf, solid, nx, ny,
@@ -320,6 +326,28 @@ end
         @test c.solid_max == 0.0
         @test c.right_max <= 1e-10
         @test c.fluid_max <= c.wall_extrapolated_max * (1.0 + 1e-10)
+    end
+
+    @testset "legacy upwind parity fingerprints" begin
+        c = channel_nusselt_case(; nx = 80, ny = 20, Lx = 8.0,
+                                 H = 1.0, u_max = 1.3, DT = 0.07,
+                                 q = 0.8, advection = :upwind)
+        @test c.res.advection === :upwind
+        @test c.res.iters == 1
+        @test sum(c.res.T) ≈ 12431.075011137844 rtol = 1e-14
+        @test maximum(c.res.T) ≈ 16.834358480047527 rtol = 1e-14
+        @test c.Nu_dev ≈ 8.240863030731946 rtol = 1e-14
+        @test c.res.residual_history[1] ≈ 3.7333531359716306e-12 atol = 1e-18
+
+        s = segment_outlet_energy_case(; nx = 24, ny = 16, Lx = 4.0,
+                                       Ly = 2.0, U = 0.8, DT = 2e-4,
+                                       S = 0.7, advection = :upwind)
+        @test s.res.advection === :upwind
+        @test s.res.iters == 1
+        @test sum(s.res.T) ≈ 17071.81594621023 rtol = 1e-14
+        @test maximum(s.res.T) ≈ 751.6923570728646 rtol = 1e-14
+        @test s.enthalpy_out ≈ 3.9666666663171792 rtol = 1e-14
+        @test s.rel ≈ 8.810520940267673e-11 atol = 1e-18
     end
 end
 

@@ -15,15 +15,18 @@ depends_on:
 The scalar-transport module is the **single owner** of the DECOUPLED STEADY
 scalar advection–diffusion ("thermal transport") brick: given a FROZEN
 face-normal velocity field `(uf, vf)`, it solves `∇·(u T) − DT ∇²T = 0` to
-steady state. Because `u` is frozen the equation is LINEAR in `T`, so the steady
-state is a SINGLE direct solve `A·T = b` — there is NO outer iteration loop. It
-assembles a 5-point diffusion stencil plus a first-order UPWIND advection
-operator into one sparse CSC, applies Dirichlet / Neumann-flux / zero-gradient
-BCs, and solves through the shared factorize-once linear-solve seam. Validated by
-`test/analytical/scalar_transport_heated_channel.jl`: pure conduction recovered to
-machine precision (l2_rel ≈ 5e-14), second-order diffusion convergence
-(order ≈ 2.00), and the constant-flux parallel-plate developed Nusselt number
-`Nu = 8.2357` (analytic 8.235, rel error 8.5e-5) on a 400×60 grid, Lx=40.
+steady state. The assembled sparse CSC matrix is ALWAYS the stable first-order
+UPWIND advection operator plus the 5-point diffusion stencil. The default
+`advection=:linear_upwind` applies second-order advection by Picard deferred
+correction on the RHS only,
+`A*T(k+1) = b + F_low(T(k)) - F_high(T(k))`, reusing the SAME factorization.
+`advection=:upwind` preserves the legacy single-solve path. Validated by
+`test/analytical/scalar_transport_heated_channel.jl` and
+`test/analytical/scalar_transport_advection_order.jl`: pure conduction recovered
+to machine precision (l2_rel ≈ 5e-14), second-order diffusion convergence
+(order ≈ 2.00), constant-flux parallel-plate developed Nusselt number
+`Nu = 8.2357` (analytic 8.235, rel error 8.5e-5), and advection order ≈1.0 for
+`:upwind` vs ≈2.0 for `:linear_upwind` at Pe_cell > 5.
 
 ## Public surface
 
@@ -31,11 +34,11 @@ The brick is a standalone include (NOT exported into `Kraken`, NOT subtyping
 `AbstractMethod`), mirroring the `inc_ns/simple.jl` and `inc_ns/cavity.jl`
 pattern:
 
-- `solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, is_solid=falses(nx,ny), bc, source=nothing, backend=nothing) -> NamedTuple` — the single entry point. Returns `(; T, residual_history, iters, converged, dx, dy, ycenters, nx, ny, DT, Pe_cell)`. `T` is the steady `nx×ny` field; `residual_history` is the one-element `[‖A·T−b‖]` (≈ machine eps); `iters == 1` always (one linear solve); `Pe_cell = max|u|·min(dx,dy)/DT`.
+- `solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, is_solid=falses(nx,ny), bc, source=nothing, backend=nothing, advection=:linear_upwind, deferred_passes=4, deferred_tol=1e-8) -> NamedTuple` — the single entry point. Returns `(; T, residual_history, iters, converged, dx, dy, ycenters, nx, ny, DT, Pe_cell, advection, deferred_passes_used, deferred_converged, deferred_rel_change)`. `T` is the steady `nx×ny` field; `residual_history` stores direct linear residuals for each RHS solve; `iters == 1` for `:upwind` and `1 + deferred_passes_used` for `:linear_upwind`; `Pe_cell = max|u|·min(dx,dy)/DT`.
 - `bc` is a NamedTuple keyed `west/east/south/north`, each `(kind::Symbol, value)` with `kind ∈ {:dirichlet, :flux, :outflow}`. `:dirichlet` imposes `T = value`; `:flux` imposes a Neumann wall heat flux `q = value` injected as a SOURCE in `b` (not in `A`); `:outflow` is zero-gradient (ghost = interior, advection carries the interior upwind value).
 - `source` (optional) is a cell-centred volumetric source field `S[i,j]`; the balance becomes `div(uT) − DT·lap(T) = S` (used by the manufactured second-order convergence test). `nothing` = no source.
 
-Internal (file-private) assembly helper: `_st_assemble_system(nx, ny, dx, dy, uf, vf, DT, is_solid; bc, source) -> (A::SparseMatrixCSC, b::Vector)`.
+Internal (file-private) assembly helper: `_st_assemble_system(nx, ny, dx, dy, uf, vf, DT, is_solid; bc, source) -> (A::SparseMatrixCSC, b::Vector)`. Deferred correction helpers compute a conservative interior-face vector only; domain boundaries and fluid-solid faces fall back to first-order, so the global energy balance remains controlled by the matrix residual.
 
 ## Reads from
 
@@ -52,16 +55,18 @@ Internal (file-private) assembly helper: `_st_assemble_system(nx, ny, dx, dy, uf
   `b`) mirrors `_cavity_dirichlet_rhs!`.
 - `linear-solve` — the factorize-once seam (`src/solve/linear_solve.jl`):
   `lin_factorize(A; backend, spd=false)` + `lin_solve!(cache, b)`. The brick
-  routes its single direct solve fully through the seam.
+  factorizes the first-order matrix once and reuses the cache for each deferred
+  correction RHS.
 
 ## Writes to
 
 - **Returns a fresh `T::Matrix{Float64}` (nx×ny)** and the NamedTuple above; it
   mutates none of its inputs (`uf`, `vf`, `is_solid`, `bc`, `source` are read-only).
 - **Allocates per call**: the sparse triplet vectors `I/J/V`, the assembled
-  `A::SparseMatrixCSC`, the RHS `b`, the LU factorization, and the solution
-  vector. There is no per-iteration reuse because there is no iteration — one
-  assemble + one factorize + one solve.
+  `A::SparseMatrixCSC`, the RHS `b`, the LU factorization, the solution vector,
+  and, for `:linear_upwind`, one correction/RHS vector pair reused across Picard
+  passes. The matrix and factorization are not rebuilt during deferred
+  correction.
 - No files written, no global registry mutated, no `using Kraken` side effects.
 
 ## Backend constraints
@@ -90,10 +95,15 @@ Internal (file-private) assembly helper: `_st_assemble_system(nx, ny, dx, dy, uf
   biases the last ~5% of streamwise cells (Nu drifts to ~8.7); the test averages
   `Nu` over 50%–95% of the channel to stay in the developed region. Averaging
   including the very last cells inflates the reported Nu.
-- **First-order upwind numerical diffusion.** At larger cell Péclet the upwind
-  scheme adds artificial cross-stream diffusion that biases Nu; the channel uses a
-  fine streamwise grid (nx=400, Lx=40, Pe_cell≈0.17) so the developed value is
-  stable. Coarsening x without re-checking Nu is the trap.
+- **Deferred correction is interior-face only.** `:linear_upwind` uses an
+  unlimited upwind-side one-sided gradient in the donor cell and falls back to
+  first order next to domain boundaries and solids. This matches the current
+  orthogonal-grid boundary machinery and keeps internal corrections conservative,
+  but sharp voxel staircases can still set an accuracy floor.
+- **First-order upwind numerical diffusion.** `advection=:upwind` still adds
+  artificial diffusion at larger cell Péclet and is now mainly a legacy/parity
+  path. The default `:linear_upwind` removes the leading interior advection error
+  while retaining the same M-matrix solve.
 - **Wall-flux sign convention.** `:flux value=q` injects `+q/h` into `b` on the
   wall row (conductive flux INTO the domain). A sign flip silently inverts the
   near-wall gradient; the conduction rung (machine-precision linear profile) is the
@@ -112,18 +122,22 @@ bad convergence order), inspect in this order:
    per-wall BC branches (`:dirichlet` diagonal `+2DT/h²` + `b` source, `:flux`
    `b += q/h`, `:outflow` interior-upwind diagonal). 90% of wrong-field and
    wrong-Nu bugs are a face coefficient or a BC sign here.
-2. `solve_scalar_transport` — the seam call
+2. `_st_advection_deferred_correction!` — if only `:linear_upwind` regresses,
+   check the conservative face pair signs, zero correction across solids/domain
+   boundaries, and the near-wall fallback before touching the matrix.
+3. `solve_scalar_transport` — the seam call
    (`lin_factorize(A; backend, spd=false)` + `lin_solve!`). If the residual is
    ~1e2 instead of ~1e-13, the seam's `spd=false` non-symmetry gate has
    regressed; confirm the cache holds an LU factor for this non-symmetric `A`.
-3. `src/solve/linear_solve.jl` — the seam contract (`lin_factorize`,
+4. `src/solve/linear_solve.jl` — the seam contract (`lin_factorize`,
    `lin_solve!`, `CPUBackendTag`). Check the `issymmetric(A)` gate in the CPU
    `spd=false` branch (LDLᵀ only for genuinely symmetric operators, LU
    otherwise).
-4. `src/methods/inc_ns/cavity.jl` / `simple.jl` — the SOURCE patterns this brick
-   mirrors (upwind donor/acceptor, Dirichlet wall-value source, 5-point Laplacian
-   assembly). Cross-check here when porting a new BC kind or a cut-cell stencil.
-5. `test/analytical/scalar_transport_heated_channel.jl` — the three validation
-   rungs (conduction machine precision, manufactured second-order order, developed
-   Nu window). Adjust the Nu averaging window or grid here if the developed value
-   drifts.
+5. `src/methods/inc_ns/cavity.jl` / `simple.jl` — the SOURCE patterns this brick
+   mirrors (upwind donor/acceptor, Dirichlet wall-value source, 5-point
+   Laplacian assembly). Cross-check here when porting a new BC kind or a
+   cut-cell stencil.
+6. `test/analytical/scalar_transport_heated_channel.jl` and
+   `test/analytical/scalar_transport_advection_order.jl` — validation rungs for
+   conduction, diffusion order, Nu, segment energy, solid exclusion, legacy
+   upwind parity, and second-order advection.

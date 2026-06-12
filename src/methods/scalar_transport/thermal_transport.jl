@@ -6,10 +6,10 @@
 #   ∇·(u T) − DT ∇²T = 0
 #
 # to steady state with mixed Dirichlet / Neumann-flux / zero-gradient outflow
-# boundary conditions. Because u is FROZEN, the equation is LINEAR in T, so the
-# steady state is obtained by a SINGLE direct linear solve  A·T = b  — there is
-# NO outer iteration loop. The "thermal transport" name reflects the physical
-# interpretation T = temperature, DT = thermal diffusivity, q = wall heat flux.
+# boundary conditions. The default advection scheme keeps the stable first-order
+# upwind operator in the matrix and applies a linear-upwind correction on the RHS
+# by Picard deferred correction, reusing the same factorization. `advection =
+# :upwind` preserves the legacy single-solve first-order path.
 #
 # Reuses the matrix-assembly pattern of inc_ns/simple.jl (`_incns_assemble_neg_laplacian`,
 # 5-point Laplacian into a sparse CSC) and the cavity's first-order UPWIND
@@ -23,7 +23,8 @@
 # register with `using Kraken`. New-file-only standalone brick.
 #
 # Public entry point:
-#   solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, is_solid, bc, backend)
+#   solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, is_solid, bc, backend,
+#                          advection, deferred_passes)
 #     -> NamedTuple(T, residual_history, iters, converged, dx, dy, ycenters,
 #                   nx, ny, DT, Pe_cell)
 
@@ -89,6 +90,13 @@ function _st_bc_kind(kind, side::Symbol)
     k in (:dirichlet, :flux, :outflow) ||
         throw(ArgumentError("bc.$side kind must be :dirichlet, :flux, or :outflow; got $k"))
     return k
+end
+
+function _st_advection_scheme(advection::Symbol)
+    scheme = Symbol(replace(lowercase(String(advection)), '-' => '_'))
+    scheme in (:upwind, :linear_upwind) ||
+        throw(ArgumentError("advection must be :upwind or :linear_upwind; got $advection"))
+    return scheme
 end
 
 function _st_side_bc(sidebc, n::Int, side::Symbol)
@@ -341,9 +349,76 @@ function _st_assemble_system(nx::Integer, ny::Integer, dx::Real, dy::Real,
     return A, b
 end
 
+function _st_linear_upwind_x(T::AbstractMatrix, solid::AbstractMatrix{Bool},
+                             nx::Int, dx::Float64, i::Int, j::Int, F::Float64)
+    if F >= 0.0
+        low = Float64(T[i, j])
+        if i > 1 && !solid[i - 1, j]
+            return low + 0.5 * (low - Float64(T[i - 1, j]))
+        end
+    else
+        low = Float64(T[i + 1, j])
+        if i + 1 < nx && !solid[i + 2, j]
+            return low + 0.5 * (low - Float64(T[i + 2, j]))
+        end
+    end
+    return low
+end
+
+function _st_linear_upwind_y(T::AbstractMatrix, solid::AbstractMatrix{Bool},
+                             ny::Int, dy::Float64, i::Int, j::Int, F::Float64)
+    if F >= 0.0
+        low = Float64(T[i, j])
+        if j > 1 && !solid[i, j - 1]
+            return low + 0.5 * (low - Float64(T[i, j - 1]))
+        end
+    else
+        low = Float64(T[i, j + 1])
+        if j + 1 < ny && !solid[i, j + 2]
+            return low + 0.5 * (low - Float64(T[i, j + 2]))
+        end
+    end
+    return low
+end
+
+function _st_advection_deferred_correction!(corr::AbstractVector{Float64},
+                                            T::AbstractMatrix,
+                                            uf::AbstractMatrix, vf::AbstractMatrix,
+                                            solid::AbstractMatrix{Bool},
+                                            nx::Int, ny::Int,
+                                            dx::Float64, dy::Float64)
+    fill!(corr, 0.0)
+    lin(i, j) = i + (j - 1) * nx
+    invdx = 1.0 / dx
+    invdy = 1.0 / dy
+
+    @inbounds for j in 1:ny, i in 1:nx - 1
+        (solid[i, j] || solid[i + 1, j]) && continue
+        F = Float64(uf[i, j])
+        low = F >= 0.0 ? Float64(T[i, j]) : Float64(T[i + 1, j])
+        high = _st_linear_upwind_x(T, solid, nx, dx, i, j, F)
+        delta = F * (low - high) * invdx
+        corr[lin(i, j)] += delta
+        corr[lin(i + 1, j)] -= delta
+    end
+
+    @inbounds for j in 1:ny - 1, i in 1:nx
+        (solid[i, j] || solid[i, j + 1]) && continue
+        F = Float64(vf[i, j])
+        low = F >= 0.0 ? Float64(T[i, j]) : Float64(T[i, j + 1])
+        high = _st_linear_upwind_y(T, solid, ny, dy, i, j, F)
+        delta = F * (low - high) * invdy
+        corr[lin(i, j)] += delta
+        corr[lin(i, j + 1)] -= delta
+    end
+
+    return corr
+end
+
 """
     solve_scalar_transport(; nx, ny, dx, dy, uf, vf, DT, is_solid=falses(nx,ny),
-                           bc, backend=nothing)
+                           bc, backend=nothing, advection=:linear_upwind,
+                           deferred_passes=4)
 
 Standalone DECOUPLED STEADY scalar advection–diffusion ("thermal transport")
 solver. Given a FROZEN face-normal velocity field, solve
@@ -351,8 +426,12 @@ solver. Given a FROZEN face-normal velocity field, solve
     ∇·(u T) − DT ∇²T = 0
 
 to steady state on a collocated cell-centred grid `nx × ny` with spacing
-`dx, dy`. With `u` frozen the problem is LINEAR in `T`, so the steady state is a
-SINGLE direct solve `A·T = b` — no outer iteration loop.
+`dx, dy`. The assembled matrix is always the legacy first-order upwind
+advection plus diffusion operator. With `advection=:linear_upwind` (default), a
+second-order linear-upwind face flux is applied by deferred correction:
+`A*T(k+1) = b + F_low(T(k)) - F_high(T(k))`. The factorization is reused for
+every Picard RHS. With `advection=:upwind`, the legacy single-solve path is
+preserved.
 
 Arguments:
   `uf, vf`   FROZEN face-normal velocities. `uf[i,j]` = east face of cell
@@ -375,6 +454,12 @@ Arguments:
   `source`   optional volumetric source field `S[i,j]` (heat generation /
              manufactured-solution term): the balance becomes
              `div(uT) − DT·lap(T) = S`. `nothing` (default) means no source.
+  `advection` `:linear_upwind` for deferred second-order advection, or
+             `:upwind` for the legacy first-order single solve.
+  `deferred_passes` maximum Picard correction solves after the initial upwind
+             solve; the factorization is reused.
+  `deferred_tol` relative infinity-norm update tolerance for stopping the
+             deferred correction.
   `backend`  optional backend tag; `nothing` (default) routes to the CPU seam.
 
 Assembly mirrors `inc_ns/simple.jl` (5-point Laplacian → sparse CSC) and the
@@ -395,9 +480,19 @@ Returns a NamedTuple with fields:
 function solve_scalar_transport(; nx::Integer, ny::Integer, dx::Real, dy::Real,
                                 uf::AbstractMatrix, vf::AbstractMatrix, DT::Real,
                                 is_solid::AbstractMatrix = falses(Int(nx), Int(ny)),
-                                bc, source = nothing, backend = nothing)
+                                bc, source = nothing, backend = nothing,
+                                advection::Symbol = :linear_upwind,
+                                deferred_passes::Integer = 4,
+                                deferred_tol::Real = 1e-8)
     nx = Int(nx); ny = Int(ny)
     dx = Float64(dx); dy = Float64(dy); DT = Float64(DT)
+    scheme = _st_advection_scheme(advection)
+    max_deferred = Int(deferred_passes)
+    max_deferred >= 0 ||
+        throw(ArgumentError("deferred_passes must be non-negative; got $deferred_passes"))
+    tol_deferred = Float64(deferred_tol)
+    tol_deferred > 0.0 ||
+        throw(ArgumentError("deferred_tol must be positive; got $deferred_tol"))
     ycenters = [(j - 0.5) * dy for j in 1:ny]
 
     A, b = _st_assemble_system(nx, ny, dx, dy, uf, vf, DT, is_solid;
@@ -411,18 +506,54 @@ function solve_scalar_transport(; nx::Integer, ny::Integer, dx::Real, dy::Real,
     btag = backend === nothing ? CPUBackendTag() : backend
     cache = lin_factorize(A; backend = btag, spd = false)
     Tvec = lin_solve!(cache, b)
-    T = reshape(Vector{Float64}(Tvec), nx, ny)
+    Tvec = Vector{Float64}(Tvec)
+    T = reshape(Tvec, nx, ny)
 
     # Residual ‖A·T − b‖ (should be ~machine eps for a direct solve).
     resid = norm(A * Tvec .- b)
     residual_history = [resid]
-    converged = resid <= 1e-8 * max(norm(b), 1.0)
+    linear_converged = resid <= 1e-8 * max(norm(b), 1.0)
+
+    deferred_passes_used = 0
+    deferred_converged = scheme === :upwind
+    deferred_rel_change = 0.0
+
+    if scheme === :linear_upwind && max_deferred > 0
+        solid = Matrix{Bool}(is_solid)
+        corr = zeros(Float64, length(b))
+        rhs = similar(b)
+        _st_advection_deferred_correction!(corr, T, uf, vf, solid, nx, ny, dx, dy)
+        if norm(corr, Inf) == 0.0
+            deferred_converged = true
+        else
+            for _ in 1:max_deferred
+                @. rhs = b + corr
+                next = Vector{Float64}(lin_solve!(cache, rhs))
+                lin_resid = norm(A * next .- rhs)
+                push!(residual_history, lin_resid)
+                denom = max(norm(next, Inf), eps(Float64))
+                deferred_rel_change = norm(next .- Tvec, Inf) / denom
+                deferred_passes_used += 1
+                Tvec = next
+                T = reshape(Tvec, nx, ny)
+                linear_converged = lin_resid <= 1e-8 * max(norm(rhs), 1.0)
+                if deferred_rel_change <= tol_deferred
+                    deferred_converged = true
+                    break
+                end
+                _st_advection_deferred_correction!(corr, T, uf, vf, solid,
+                                                   nx, ny, dx, dy)
+            end
+        end
+    end
 
     # Cell Péclet number Pe = max|u|·min(dx,dy)/DT.
     umax = max(maximum(abs, uf), maximum(abs, vf))
     Pe_cell = umax * min(dx, dy) / DT
 
-    iters = 1
+    iters = 1 + deferred_passes_used
+    converged = linear_converged
     return (; T, residual_history, iters, converged, dx, dy, ycenters,
-            nx, ny, DT, Pe_cell)
+            nx, ny, DT, Pe_cell, advection = scheme,
+            deferred_passes_used, deferred_converged, deferred_rel_change)
 end
