@@ -8,7 +8,7 @@ struct _DummyMethod <: Kraken.AbstractMethod end
 @testset "platform contract (Phase 0/0b)" begin
 
     @testset "capabilities introspection" begin
-        @test capabilities(LBM()) == Set((ForwardSolve, GPUExecution, SteadyAdjoint))
+        @test capabilities(LBM()) == Set((ForwardSolve, GPUExecution, SteadyAdjoint, SteadyResidual))
         @test capabilities(_DummyMethod()) == Set{Capability}()   # default = empty (fail-safe)
     end
 

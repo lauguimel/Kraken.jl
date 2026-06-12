@@ -20,7 +20,7 @@ a marker type whose `solve` forwards to the existing `run_simulation`; it declar
 """
 struct LBM <: AbstractMethod end
 
-capabilities(::LBM) = Set((ForwardSolve, GPUExecution, SteadyAdjoint))
+capabilities(::LBM) = Set((ForwardSolve, GPUExecution, SteadyAdjoint, SteadyResidual))
 
 """
     solve(problem, method::AbstractMethod; kwargs...) -> AbstractSolution

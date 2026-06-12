@@ -21,10 +21,12 @@ include("platform/solution.jl")   # LBM, LBMSolution, solve
 include("platform/sample.jl")     # sample
 include("platform/observe.jl")    # observe, predict, Prediction, observables
 export AbstractProblem, AbstractMethod, AbstractSolution, AbstractObservable, AbstractClosure
-export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure
+export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure, SteadyResidual
 export capabilities
 export LBM, LBMSolution, solve, sample
 export observe, predict, Prediction, FieldProbe, LineProfile, FieldReduction
+export residual, adjoint_vjp
+export LBMGeomParams, LBMThermalParams, LBMVEParams
 
 # --- Lattice definitions ---
 include("lattice/lattice.jl")
@@ -157,6 +159,9 @@ include("ad/ad_adjoint.jl")
 include("ad/ad_geometry.jl")
 include("ad/ad_api.jl")
 include("ad/ad_ve_geometry.jl")
+
+# Phase 2a platform residual/VJP seam depends on AD param types and step maps.
+include("platform/residual.jl")
 
 # --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
 include("curvilinear/mesh.jl")

@@ -1,0 +1,54 @@
+---
+module: platform-residual-vjp
+path: src/platform/residual.jl
+owner_concern: platform-residual-seam
+status: phase-2a
+last_verified: 2026-06-12
+depends_on: [platform, ad-step, ad-thermal-step, ad-ve-step]
+---
+
+# platform-residual-vjp — module implication map
+
+Phase 2a of the Kraken platform contract: exposes `residual` and `adjoint_vjp`
+as thin delegations to the validated CPU-Float64 AD seams. Zero new numerics.
+
+## Public surface
+
+- `LBMGeomParams` — Newtonian parameter bundle (q_wall, is_solid, u_profile, rho_out, s_plus, s_minus, Nx, Ny).
+- `LBMThermalParams` — Thermal (Boussinesq) parameter bundle (q_wall, params::ADNatconvParams, Nx, Ny).
+- `LBMVEParams` — Viscoelastic (Oldroyd-B) parameter bundle (g::ADVEEmbeddedGeom, q_wall, u_profile, p::ADVECoupledParams).
+- `SteadyResidual` — new `Capability` enum value; declared in `capabilities(::LBM)`.
+- `residual(problem, ::LBM, u, p::T)` — steady residual R = u - G(u,p); three dispatches (T in {LBMGeomParams, LBMThermalParams, LBMVEParams}). Enzyme-free.
+- `adjoint_vjp(problem, ::LBM, u_star, p::T, v)` — (I - dG/du)^T v; three dispatches. Requires Enzyme loaded (delegates to private `_ad_*_vjp_GtT` stubs).
+
+## Reads from
+
+- `src/ad/ad_step.jl`: `ad_step!` (Newtonian one-step operator G).
+- `src/ad/ad_thermal_step.jl`: `ad_thermal_cut_step!` (thermal coupled G).
+- `src/ad/ad_ve_step.jl`: `ad_ve_coupled_step!` (VE coupled G).
+- `src/ad/ad_api.jl`: `_ad_vjp_GtT`, `_ad_thermal_vjp_GtT`, `_ad_ve_vjp_GtT` (Enzyme stubs; throw without Enzyme).
+- `ext/KrakenADExt.jl`: provides the Enzyme implementations of the VJP stubs (loaded as a weak dependency).
+- `src/platform/contract.jl`: `AbstractMethod`, `Capability`, `LBM`.
+
+## Writes to
+
+Nothing persistent. `residual` and `adjoint_vjp` allocate and return fresh arrays; no mutation of `problem`, `u`, or `p`. The param structs are immutable.
+
+## Backend constraints
+
+CPU-Float64 only at this rung. `ad_step!`, `ad_thermal_cut_step!`, and `ad_ve_coupled_step!` are plain-Julia CPU operators (Enzyme-tapeable). GPU arrays passed to these dispatches will fail at the `Array{Float64}` method narrowing; the fallback error from the generic dispatch is intentional.
+
+## Failure modes
+
+- `adjoint_vjp` without Enzyme loaded: the `_ad_*_vjp_GtT` stubs throw `"Load Enzyme to enable AD: using Enzyme"` — propagated up by design.
+- `residual` / `adjoint_vjp` for unsupported `(method, p)` pair: falls through to the generic fallback which throws `error("residual not implemented for ...")`.
+- Bit-exact parity: `adjoint_vjp` is a thin delegation; any argument ordering mismatch in the param struct would show as a nonzero `delta` in the exit criterion (plan §3 Criterion 2).
+
+## Touch order
+
+1. `src/platform/residual.jl` — param structs + dispatches.
+2. `src/platform/contract.jl` — +1 line `SteadyResidual` to `@enum Capability`.
+3. `src/platform/solution.jl` — +1 `SteadyResidual` to `capabilities(::LBM)`.
+4. `src/Kraken.jl` — include + export.
+5. `test/platform/residual_vjp_test.jl` — Enzyme-free + Enzyme-gated tests.
+6. `test/runtests.jl` — +1 include.

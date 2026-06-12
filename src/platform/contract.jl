@@ -55,9 +55,9 @@ a gradient vs finite-difference path; an NL/agent layer checks what is feasible
 before dispatch).
 
 Values: `ForwardSolve`, `GPUExecution`, `SteadyAdjoint`, `TransientAdjoint`,
-`FiniteDiff`, `NeuralClosure`.
+`FiniteDiff`, `NeuralClosure`, `SteadyResidual`.
 """
-@enum Capability ForwardSolve GPUExecution SteadyAdjoint TransientAdjoint FiniteDiff NeuralClosure
+@enum Capability ForwardSolve GPUExecution SteadyAdjoint TransientAdjoint FiniteDiff NeuralClosure SteadyResidual
 
 """
     capabilities(m::AbstractMethod) -> Set{Capability}

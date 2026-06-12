@@ -2,8 +2,8 @@
 module: platform
 path: src/platform/
 owner_concern: method-agnostic-contract
-status: phase-1
-last_verified: 2026-06-09
+status: phase-2a
+last_verified: 2026-06-12
 depends_on: []
 ---
 
@@ -13,9 +13,9 @@ The `platform/` module is the **stable, method-agnostic contract** every method 
 enters behind (the "6 nouns"). **Phase 0** added the abstract types + capability introspection.
 **Phase 0b** added the first concrete wrapper (`LBM`, `LBMSolution`, behaviour-preserving
 `solve`/`sample` forwarding to `run_simulation`). **Phase 1** adds observables + `observe`/`predict`
-— quantities comparable to data, computed **via `sample`** (the path to calibration). Still
-additive, LBM untouched. The remaining verbs (`residual`, `fit`) and `ParameterSpace`/closures land
-in later phases. Design dossier: `docs/platform/` (00-BILAN … 06-WORKFLOW); free-DOF rationale in
+— quantities comparable to data, computed **via `sample`** (the path to calibration). **Phase 2a**
+adds `residual` and `adjoint_vjp` as thin CPU-Float64 AD seam delegations. Still additive, LBM
+untouched. The remaining verb (`fit`) and `ParameterSpace`/closures land in later phases. Design dossier: `docs/platform/` (00-BILAN … 06-WORKFLOW); free-DOF rationale in
 `docs/platform/05-DOF-LIBRES.md`.
 
 ## Public surface
@@ -25,11 +25,11 @@ Defined under `src/platform/`, re-exported by `Kraken`:
 Phase 0 (`contract.jl`):
 - `AbstractProblem`, `AbstractMethod`, `AbstractSolution`, `AbstractObservable`, `AbstractClosure`.
 - `@enum Capability` = `ForwardSolve`, `GPUExecution`, `SteadyAdjoint`, `TransientAdjoint`,
-  `FiniteDiff`, `NeuralClosure`.
+  `FiniteDiff`, `NeuralClosure`, `SteadyResidual`.
 - `capabilities(m::AbstractMethod) -> Set{Capability}` — default empty; a method opts in.
 
 Phase 0b (`solution.jl`, `sample.jl`):
-- `LBM <: AbstractMethod` — `capabilities(::LBM)` = `{ForwardSolve, GPUExecution, SteadyAdjoint}`.
+- `LBM <: AbstractMethod` — `capabilities(::LBM)` = `{ForwardSolve, GPUExecution, SteadyAdjoint, SteadyResidual}`.
 - `LBMSolution{R} <: AbstractSolution` — thin wrapper over the `run_simulation` `NamedTuple`.
 - `solve(problem, ::LBM; kwargs...) -> LBMSolution` — forwards verbatim to `run_simulation`.
 - `sample(sol::LBMSolution, field[, query])` — pass-through query (`getproperty`, `:`, `idx::Tuple`).
@@ -41,6 +41,14 @@ Phase 1 (`observe.jl`):
 - `Prediction{O,V}` (observable + value); observables `FieldProbe(field, index::Tuple)`,
   `LineProfile(field, indices)`, `FieldReduction(field, reducer)`. **Integral QoIs (drag, Nusselt)
   deferred** — they need boundary integration, not pure `sample`.
+
+Phase 2a (`residual.jl`):
+- `LBMGeomParams` — parameter bundle for Newtonian CPU-Float64 AD path (q_wall, is_solid, u_profile, rho_out, s_plus, s_minus, Nx, Ny).
+- `LBMThermalParams` — parameter bundle for thermal (Boussinesq) AD path (q_wall, params::ADNatconvParams, Nx, Ny).
+- `LBMVEParams` — parameter bundle for viscoelastic (Oldroyd-B) AD path (g::ADVEEmbeddedGeom, q_wall, u_profile, p::ADVECoupledParams).
+- `SteadyResidual` (Capability enum value) — added to `capabilities(::LBM)`.
+- `residual(problem, ::LBM, u, p) -> same shape as u` — R = u - G(u,p); Enzyme-free (calls ad_step!/ad_thermal_cut_step!/ad_ve_coupled_step! directly).
+- `adjoint_vjp(problem, ::LBM, u_star, p, v) -> same shape as v` — (I - dG/du)^T v; delegates to `_ad_vjp_GtT` / `_ad_thermal_vjp_GtT` / `_ad_ve_vjp_GtT`; requires Enzyme loaded.
 
 Second concrete method (`src/methods/inc_ns/method.jl`, mirrors the LBM wrapper):
 - `IncNS <: AbstractMethod` — `IncNS(driver)` with driver ∈
@@ -68,11 +76,13 @@ no mutable state. `solve`/`predict` do not mutate `problem`.
 
 ## Backend constraints
 
-**Backend-irrelevant by construction.** Type definitions + thin dispatch; nothing here enters a
-kernel or allocates in a loop. Backend portability is expressed *through* the contract (a method
-declares `GPUExecution ∈ capabilities(m)`). `solve`/`sample`/`observe` add no backend coupling —
-whatever backend `run_simulation` ran on is preserved untouched inside `LBMSolution`. `observe`
-operates on the host arrays returned by the runner.
+Phase 0/1 remains backend-irrelevant by construction: type definitions + thin dispatch; nothing
+there enters a kernel or allocates in a loop. Backend portability is expressed *through* the
+contract (a method declares `GPUExecution in capabilities(m)`). `solve`/`sample`/`observe` add no
+backend coupling — whatever backend `run_simulation` ran on is preserved untouched inside
+`LBMSolution`. `observe` operates on the host arrays returned by the runner. Phase 2a residual/VJP
+dispatches are explicitly CPU-Float64 AD paths; unsupported arrays fall through to the generic
+platform fallback.
 
 ## Failure modes
 
@@ -85,6 +95,8 @@ operates on the host arrays returned by the runner.
 - **Name-collision watch**: `solve`/`sample`/`observe`/`predict` are exported as Kraken's own
   generic functions (no dep exports them today). When SciML enters (Phase 4), switch `solve` to
   extend `CommonSolve.solve` rather than shadow it.
+- `adjoint_vjp` without Enzyme loaded propagates the existing `_ad_*_vjp_GtT` stub error by design;
+  `residual` remains Enzyme-free.
 - The real risk stays **architectural**: over-abstraction. Guardrail (`docs/platform/06-WORKFLOW.md`
   red-team #1) — generalize the contract only when a 2nd concrete `AbstractMethod` forces it.
 
@@ -95,9 +107,11 @@ operates on the host arrays returned by the runner.
 3. `src/platform/sample.jl` — `sample` pass-through.
 4. `src/platform/observe.jl` — `observe`/`predict`/`Prediction` + observables
    (`FieldProbe`/`LineProfile`/`FieldReduction`).
-5. `src/Kraken.jl` — the `# --- Platform contract ---` include + export block (a choke file;
+5. `src/platform/residual.jl` — Phase 2a: `residual`, `adjoint_vjp`, `LBMGeomParams`, `LBMThermalParams`, `LBMVEParams`, `SteadyResidual`.
+6. `src/Kraken.jl` — the `# --- Platform contract ---` include + export block (a choke file;
    edits serialized on `dev/platform`).
-6. `test/platform/contract_parity_test.jl` — capabilities, bit-for-bit parity vs `run_simulation`,
+7. `test/platform/contract_parity_test.jl` — capabilities, bit-for-bit parity vs `run_simulation`,
    and observe/predict (Phase 1).
-7. Later phases add siblings under `src/platform/` (`residual.jl`, `calibration.jl`, `closure.jl`)
+8. `test/platform/residual_vjp_test.jl` — Phase 2a residual construction/fixed-point checks plus Enzyme-gated VJP parity.
+9. Later phases add siblings under `src/platform/` (`calibration.jl`, `closure.jl`)
    — see `docs/platform/02-PLAN-IMPLEMENTATION.md`.
