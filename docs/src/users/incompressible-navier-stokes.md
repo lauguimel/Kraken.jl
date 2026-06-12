@@ -266,6 +266,14 @@ ablation showed C3 wins).
 (`norm_stride=25, mg_cycles=3, mom_mg_cycles=1`) plus the CUDA-graph executor
 from `cavity_mg_cuda.jl`; mixed precision stays opt-in.
 
+The same ablation re-run unchanged on an **H100** replicates the ladder shape
+(steps 1.01× / 1.90× / **3.19×** / 0.95×): C3 lands at **57.3 s — 44.1× vs its
+node's CPU, 93.8 % utilization** — and mixed precision remains a net loss
+(`benchmarks/results/cavity_gpu_ablation_aqua_h100.md`, job `22307305`). The
+H100/A100 wall ratio at C3 (~1.43×) matches their bandwidth ratio rather than
+their FLOPs ratio — independent confirmation that the solver is
+latency/bandwidth-bound, not compute-bound.
+
 ## Reproducing this page
 
 | Artifact | Command |

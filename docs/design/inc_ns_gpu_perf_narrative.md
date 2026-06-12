@@ -86,6 +86,15 @@ Caveat, stated plainly: **the 1024² run did not converge** in its 80 k-iteratio
 budget (Ghia 5.52 % at stop, util 97.5 %). The budget, not the throughput, was
 short; a converged number needs maxiter ≥ 150 k and should use C3.
 
+**Cross-architecture replication (H100, job 22307305,
+`benchmarks/results/cavity_gpu_ablation_aqua_h100.md`):** the identical ablation
+on an H100 reproduces the ladder shape (1.01× / 1.90× / 3.19× / 0.95×) — C3 at
+**57.3 s, 44.1× vs its node's CPU, 93.8 % util**, mixed precision still a net
+loss. The C3 H100/A100 wall ratio (~1.43×) tracks the HBM bandwidth ratio, not
+the FLOPs ratio: independent confirmation that the converged solver is
+latency/bandwidth-bound, and that the ablation's conclusions are not an
+A100 artifact.
+
 ## 4. The honest cap, and the next lever
 
 **32.9× sits inside the ~30–100×-per-GPU band commercial FV codes (Fluent
