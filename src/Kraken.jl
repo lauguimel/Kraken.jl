@@ -26,7 +26,7 @@ export capabilities
 export LBM, LBMSolution, solve, sample
 export observe, predict, Prediction, FieldProbe, LineProfile, FieldReduction
 export residual, adjoint_vjp
-export LBMGeomParams, LBMThermalParams, LBMVEParams, LBMScalarParams
+export LBMGeomParams, LBMThermalParams, LBMVEParams, LBMScalarParams, LBMFieldParams
 export ParameterSpace, loss, fit, CalibResult
 
 # --- Lattice definitions ---

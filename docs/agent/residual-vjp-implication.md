@@ -74,3 +74,41 @@ CPU-Float64 only at this rung. `ad_step!`, `ad_thermal_cut_step!`, and `ad_ve_co
 - `src/ad/ad_api.jl` — +`_ad_pvjp_nu` stub.
 - `ext/KrakenADExt.jl` — +`_ad_pvjp_nu` impl.
 - `src/Kraken.jl` — +export LBMScalarParams.
+
+## Phase 2c-1 — Field ν(y) channel (M-P2c-1, 2026-06-13)
+
+### New public symbols
+- `LBMFieldParams` — parameter bundle with FREE per-row ν(y) field (Vector{Float64}, length Ny);
+  `s_plus_field`/`s_minus_field` derived at construction. Construct: `LBMFieldParams(geom, nu_field)`.
+- `residual(_, ::LBM, f, p::LBMFieldParams)` — calls `ad_step_nufield!`; uniform nu_field degenerates
+  to `LBMScalarParams` result bit-exactly.
+- `adjoint_vjp(_, ::LBM, f_star, p::LBMFieldParams, v)` — delegates to `_ad_vjp_GtT_nufield`
+  (Const nu_field, exact state linearization).
+
+### New private symbols
+- `ad_bulk_nufield!(out, f, q_wall, is_solid, nu_field, Nx, Ny)` — per-row TRT bulk; rates from
+  `ad_trt_rates_inline(nu_field[j])` inside the j-loop.
+- `ad_apply_zou_he_rebuild_nufield!(out, f, u_profile, rho_out, nu_field, Nx, Ny)` — per-row Zou-He
+  rebuild with per-row rates.
+- `ad_step_nufield!(out, f, q_wall, is_solid, u_profile, rho_out, nu_field, Nx, Ny)` — composition
+  of bulk + Zou-He nufield variants. Enzyme-diffable wrt `nu_field` (Duplicated array).
+- `ad_forward_solve_nufield(; ...)` — INTERNAL forward solver (same convergence loop as
+  `ad_forward_solve` but calls `ad_step_nufield!`). Not exported.
+- `_ad_pvjp_nufield(f_star, lambda, nu_field, ...) -> Vector{Float64}` — Enzyme Reverse with
+  `Duplicated(nu_field, dnu)`; returns length-Ny field cotangent in one Enzyme call (O(1) not O(Ny)).
+- `_ad_vjp_GtT_nufield(f_star, v, ..., nu_field, ...) -> Array{Float64,3}` — state VJP with
+  `Const(nu_field)`. Exact (not mean-ν approximation).
+
+### ν-field chain
+- nu_field[j] → `ad_trt_rates_inline(nu_field[j])` per row → `ad_step_nufield!` → dL/dnu[j] via
+  Enzyme Duplicated array cotangent accumulation (one pass for all j).
+- State VJP: `_ad_vjp_GtT_nufield` with Const(nu_field) — correct Jacobian ∂G/∂f at the current
+  nu_field, not mean-ν approximation.
+
+### Files modified (additive only)
+- `src/platform/residual.jl` — +`LBMFieldParams` struct, +2 dispatches.
+- `src/ad/ad_step.jl` — +`ad_bulk_nufield!`, +`ad_apply_zou_he_rebuild_nufield!`, +`ad_step_nufield!`.
+- `src/ad/ad_forward.jl` — +`ad_forward_solve_nufield` (INTERNAL).
+- `src/ad/ad_api.jl` — +`_ad_pvjp_nufield` stub, +`_ad_vjp_GtT_nufield` stub.
+- `ext/KrakenADExt.jl` — +`_ad_pvjp_nufield` impl, +`_ad_vjp_GtT_nufield` impl, +imports.
+- `src/Kraken.jl` — +export `LBMFieldParams`.

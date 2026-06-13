@@ -276,3 +276,175 @@ function ad_step_nu!(out, f, q_wall, is_solid, u_profile, rho_out,
     ad_step!(out, f, q_wall, is_solid, u_profile, rho_out, s_plus, s_minus, Nx, Ny)
     return nothing
 end
+
+"""
+    ad_bulk_nufield!(out, f, q_wall, is_solid, nu_field::Vector{Float64}, Nx::Int, Ny::Int)
+
+Per-row TRT bulk step: row j uses ν=nu_field[j] to compute (s_plus_j, s_minus_j)
+via `ad_trt_rates_inline`. Same loop body as `ad_bulk_v2_step!` but rates vary per row.
+Enzyme-diffable wrt `nu_field` (Duplicated array); `ad_bulk_v2_step!` is UNCHANGED.
+"""
+function ad_bulk_nufield!(out, f, q_wall, is_solid, nu_field::Vector{Float64}, Nx::Int, Ny::Int)
+    @inbounds for j in 1:Ny
+        s_plus_j, s_minus_j = ad_trt_rates_inline(nu_field[j])
+        for i in 1:Nx
+            if is_solid[i, j]
+                out[i, j, 1] = 4.0 / 9.0
+                out[i, j, 2] = 1.0 / 9.0
+                out[i, j, 3] = 1.0 / 9.0
+                out[i, j, 4] = 1.0 / 9.0
+                out[i, j, 5] = 1.0 / 9.0
+                out[i, j, 6] = 1.0 / 36.0
+                out[i, j, 7] = 1.0 / 36.0
+                out[i, j, 8] = 1.0 / 36.0
+                out[i, j, 9] = 1.0 / 36.0
+                continue
+            end
+
+            fp1 = f[i, j, 1]
+            fp2 = i > 1 ? f[i - 1, j, 2] : f[i, j, 4]
+            fp3 = j > 1 ? f[i, j - 1, 3] : f[i, j, 5]
+            fp4 = i < Nx ? f[i + 1, j, 4] : f[i, j, 2]
+            fp5 = j < Ny ? f[i, j + 1, 5] : f[i, j, 3]
+            fp6 = (i > 1 && j > 1) ? f[i - 1, j - 1, 6] : f[i, j, 8]
+            fp7 = (i < Nx && j > 1) ? f[i + 1, j - 1, 7] : f[i, j, 9]
+            fp8 = (i < Nx && j < Ny) ? f[i + 1, j + 1, 8] : f[i, j, 6]
+            fp9 = (i > 1 && j < Ny) ? f[i - 1, j + 1, 9] : f[i, j, 7]
+
+            qw2 = q_wall[i, j, 2]
+            if qw2 > 0.0
+                fp4 = ad_libb_branch(qw2, f[i, j, 2], fp2, f[i, j, 4])
+            end
+            qw4 = q_wall[i, j, 4]
+            if qw4 > 0.0
+                fp2 = ad_libb_branch(qw4, f[i, j, 4], fp4, f[i, j, 2])
+            end
+            qw3 = q_wall[i, j, 3]
+            if qw3 > 0.0
+                fp5 = ad_libb_branch(qw3, f[i, j, 3], fp3, f[i, j, 5])
+            end
+            qw5 = q_wall[i, j, 5]
+            if qw5 > 0.0
+                fp3 = ad_libb_branch(qw5, f[i, j, 5], fp5, f[i, j, 3])
+            end
+            qw6 = q_wall[i, j, 6]
+            if qw6 > 0.0
+                fp8 = ad_libb_branch(qw6, f[i, j, 6], fp6, f[i, j, 8])
+            end
+            qw8 = q_wall[i, j, 8]
+            if qw8 > 0.0
+                fp6 = ad_libb_branch(qw8, f[i, j, 8], fp8, f[i, j, 6])
+            end
+            qw7 = q_wall[i, j, 7]
+            if qw7 > 0.0
+                fp9 = ad_libb_branch(qw7, f[i, j, 7], fp7, f[i, j, 9])
+            end
+            qw9 = q_wall[i, j, 9]
+            if qw9 > 0.0
+                fp7 = ad_libb_branch(qw9, f[i, j, 9], fp9, f[i, j, 7])
+            end
+
+            rho, ux, uy = ad_moments_raw(fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9)
+            usq = ux * ux + uy * uy
+            feq1 = ad_feq(Val(1), rho, ux, uy, usq)
+            feq2 = ad_feq(Val(2), rho, ux, uy, usq)
+            feq3 = ad_feq(Val(3), rho, ux, uy, usq)
+            feq4 = ad_feq(Val(4), rho, ux, uy, usq)
+            feq5 = ad_feq(Val(5), rho, ux, uy, usq)
+            feq6 = ad_feq(Val(6), rho, ux, uy, usq)
+            feq7 = ad_feq(Val(7), rho, ux, uy, usq)
+            feq8 = ad_feq(Val(8), rho, ux, uy, usq)
+            feq9 = ad_feq(Val(9), rho, ux, uy, usq)
+            a = 0.5 * (s_plus_j + s_minus_j)
+            b = 0.5 * (s_plus_j - s_minus_j)
+
+            out[i, j, 1] = fp1 - s_plus_j * (fp1 - feq1)
+            out[i, j, 2] = fp2 - a * (fp2 - feq2) - b * (fp4 - feq4)
+            out[i, j, 4] = fp4 - a * (fp4 - feq4) - b * (fp2 - feq2)
+            out[i, j, 3] = fp3 - a * (fp3 - feq3) - b * (fp5 - feq5)
+            out[i, j, 5] = fp5 - a * (fp5 - feq5) - b * (fp3 - feq3)
+            out[i, j, 6] = fp6 - a * (fp6 - feq6) - b * (fp8 - feq8)
+            out[i, j, 8] = fp8 - a * (fp8 - feq8) - b * (fp6 - feq6)
+            out[i, j, 7] = fp7 - a * (fp7 - feq7) - b * (fp9 - feq9)
+            out[i, j, 9] = fp9 - a * (fp9 - feq9) - b * (fp7 - feq7)
+        end
+    end
+    return nothing
+end
+
+"""
+    ad_apply_zou_he_rebuild_nufield!(out, f, u_profile, rho_out, nu_field::Vector{Float64}, Nx::Int, Ny::Int)
+
+Per-row Zou-He rebuild: row j uses ν=nu_field[j] for TRT rates.
+Same body as `ad_apply_zou_he_rebuild!` but rates computed per-row.
+`ad_apply_zou_he_rebuild!` is UNCHANGED.
+"""
+function ad_apply_zou_he_rebuild_nufield!(out, f, u_profile, rho_out,
+                                          nu_field::Vector{Float64}, Nx::Int, Ny::Int)
+    @inbounds for j in 2:(Ny - 1)
+        s_plus_j, s_minus_j = ad_trt_rates_inline(nu_field[j])
+
+        fp1 = f[1, j, 1]
+        fp3 = f[1, j - 1, 3]
+        fp4 = f[2, j, 4]
+        fp5 = f[1, j + 1, 5]
+        fp7 = f[2, j - 1, 7]
+        fp8 = f[2, j + 1, 8]
+        u_in = u_profile[j]
+        rho_w = (fp1 + fp3 + fp5 + 2.0 * (fp4 + fp7 + fp8)) / (1.0 - u_in)
+        fp2 = fp4 + (2.0 / 3.0) * rho_w * u_in
+        fp6 = fp8 - 0.5 * (fp3 - fp5) + (1.0 / 6.0) * rho_w * u_in
+        fp9 = fp7 + 0.5 * (fp3 - fp5) + (1.0 / 6.0) * rho_w * u_in
+        F1, F2, F3, F4, F5, F6, F7, F8, F9 =
+            ad_trt_regularized_local(fp1, fp2, fp3, fp4, fp5, fp6, fp7,
+                                     fp8, fp9, s_plus_j, s_minus_j)
+        out[1, j, 1] = F1
+        out[1, j, 2] = F2
+        out[1, j, 3] = F3
+        out[1, j, 4] = F4
+        out[1, j, 5] = F5
+        out[1, j, 6] = F6
+        out[1, j, 7] = F7
+        out[1, j, 8] = F8
+        out[1, j, 9] = F9
+
+        fp1 = f[Nx, j, 1]
+        fp2 = f[Nx - 1, j, 2]
+        fp3 = f[Nx, j - 1, 3]
+        fp5 = f[Nx, j + 1, 5]
+        fp6 = f[Nx - 1, j - 1, 6]
+        fp9 = f[Nx - 1, j + 1, 9]
+        u_x = -1.0 + (fp1 + fp3 + fp5 + 2.0 * (fp2 + fp6 + fp9)) / rho_out
+        fp4 = fp2 - (2.0 / 3.0) * rho_out * u_x
+        fp7 = fp9 - 0.5 * (fp3 - fp5) - (1.0 / 6.0) * rho_out * u_x
+        fp8 = fp6 + 0.5 * (fp3 - fp5) - (1.0 / 6.0) * rho_out * u_x
+        F1, F2, F3, F4, F5, F6, F7, F8, F9 =
+            ad_trt_regularized_local(fp1, fp2, fp3, fp4, fp5, fp6, fp7,
+                                     fp8, fp9, s_plus_j, s_minus_j)
+        out[Nx, j, 1] = F1
+        out[Nx, j, 2] = F2
+        out[Nx, j, 3] = F3
+        out[Nx, j, 4] = F4
+        out[Nx, j, 5] = F5
+        out[Nx, j, 6] = F6
+        out[Nx, j, 7] = F7
+        out[Nx, j, 8] = F8
+        out[Nx, j, 9] = F9
+    end
+    return nothing
+end
+
+"""
+    ad_step_nufield!(out, f, q_wall, is_solid, u_profile, rho_out,
+                     nu_field::Vector{Float64}, Nx::Int, Ny::Int)
+
+Per-row TRT step: row j uses ν=nu_field[j], computes (s_plus_j, s_minus_j)
+via `ad_trt_rates_inline`. Enzyme-diffable wrt `nu_field` (Duplicated array).
+`ad_step!` and `ad_bulk_v2_step!` are UNCHANGED.
+"""
+function ad_step_nufield!(out, f, q_wall, is_solid, u_profile, rho_out,
+                          nu_field::Vector{Float64}, Nx::Int, Ny::Int)
+    ad_bulk_nufield!(out, f, q_wall, is_solid, nu_field, Nx, Ny)
+    ad_apply_zou_he_rebuild_nufield!(out, f, u_profile, rho_out, nu_field, Nx, Ny)
+    return nothing
+end

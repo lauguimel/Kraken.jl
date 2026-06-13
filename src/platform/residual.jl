@@ -133,6 +133,63 @@ function adjoint_vjp(::Any, ::LBM, f_star::Array{Float64,3},
 end
 
 """
+    LBMFieldParams
+
+Parameter bundle for the Newtonian LBM AD path with FREE per-row viscosity field ν(y).
+`nu_field` is a `Vector{Float64}` of length `Ny`; `s_plus_field` and `s_minus_field` are
+derived per-row rate vectors from `ad_trt_rates_inline`. Construct from `LBMGeomParams` +
+candidate ν vector: `LBMFieldParams(geom_p, nu_field)`.
+Relationship to `LBMScalarParams`: analogous but free DOF is Ny scalars instead of 1.
+"""
+struct LBMFieldParams
+    q_wall::Array{Float64,3}
+    is_solid::BitMatrix
+    u_profile::Vector{Float64}
+    rho_out::Float64
+    nu_field::Vector{Float64}
+    s_plus_field::Vector{Float64}
+    s_minus_field::Vector{Float64}
+    Nx::Int
+    Ny::Int
+end
+
+function LBMFieldParams(geom::LBMGeomParams, nu_field::Vector{Float64})
+    Ny = geom.Ny
+    length(nu_field) == Ny ||
+        throw(ArgumentError("nu_field length $(length(nu_field)) must be Ny=$Ny"))
+    s_plus_field  = [ad_trt_rates_inline(nu_field[j])[1] for j in 1:Ny]
+    s_minus_field = [ad_trt_rates_inline(nu_field[j])[2] for j in 1:Ny]
+    LBMFieldParams(geom.q_wall, geom.is_solid, geom.u_profile, geom.rho_out,
+                   copy(nu_field), s_plus_field, s_minus_field, geom.Nx, geom.Ny)
+end
+
+"""
+    residual(problem, ::LBM, f::Array{Float64,3}, p::LBMFieldParams) -> Array{Float64,3}
+
+Newtonian LBM steady residual R(f,p) = f - G(f,p) using the per-row ν(y) step.
+"""
+function residual(::Any, ::LBM, f::Array{Float64,3}, p::LBMFieldParams)
+    out = similar(f)
+    ad_step_nufield!(out, f, p.q_wall, p.is_solid, p.u_profile, p.rho_out,
+                     p.nu_field, p.Nx, p.Ny)
+    return f .- out
+end
+
+"""
+    adjoint_vjp(problem, ::LBM, f_star::Array{Float64,3}, p::LBMFieldParams, v::Array{Float64,3}) -> Array{Float64,3}
+
+Steady-adjoint VJP for the Newtonian LBM with free per-row ν(y): (I - ∂G/∂f)^T v.
+Uses `_ad_vjp_GtT_nufield` (Const nu_field — state VJP, exact for the field rates).
+Requires Enzyme loaded.
+"""
+function adjoint_vjp(::Any, ::LBM, f_star::Array{Float64,3},
+                     p::LBMFieldParams, v::Array{Float64,3})
+    GtT_v = _ad_vjp_GtT_nufield(f_star, v, p.q_wall, p.is_solid, p.u_profile,
+                                p.rho_out, p.nu_field, p.Nx, p.Ny)
+    return v .- GtT_v
+end
+
+"""
     residual(problem, ::LBM, w::Vector{Float64}, p::LBMThermalParams) -> Vector{Float64}
 
 Thermal LBM steady residual R(w,p) = w - G(w,p) (Boussinesq coupled f+g).

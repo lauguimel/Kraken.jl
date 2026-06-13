@@ -314,3 +314,171 @@ if Base.get_extension(Kraken, :KrakenADExt) !== nothing
         end
     end
 end
+
+# ============================================================================
+# M-P2c-1 tests — LBMFieldParams + field VJP (ad_step_nufield! + _ad_pvjp_nufield)
+# ============================================================================
+
+@testset "platform residual Phase 2c-1 (Enzyme-free)" begin
+
+    @testset "LBMFieldParams construction from LBMGeomParams + nu_field" begin
+        fwd = Kraken.ad_forward_solve(; Nx=16, Ny=8, cx=4.0, cy=4.0,
+                                        radius=2.0, u_in=0.05, nu=0.05,
+                                        inlet=:parabolic, tol=1e-10,
+                                        max_steps=50_000)
+        @test fwd.converged
+        geom = LBMGeomParams(fwd.q_wall, fwd.is_solid, fwd.u_profile,
+                              fwd.rho_out, fwd.s_plus, fwd.s_minus, fwd.Nx, fwd.Ny)
+        nu_field = fill(0.05, 8)
+        p = LBMFieldParams(geom, nu_field)
+        @test p.Nx == 16
+        @test p.Ny == 8
+        @test length(p.nu_field) == 8
+        @test length(p.s_plus_field) == 8
+        @test length(p.s_minus_field) == 8
+        for j in 1:8
+            s_p, s_m = Kraken.ad_trt_rates_inline(nu_field[j])
+            @test p.s_plus_field[j] ≈ s_p
+            @test p.s_minus_field[j] ≈ s_m
+        end
+    end
+
+    @testset "LBMFieldParams: wrong nu_field length throws" begin
+        fwd = Kraken.ad_forward_solve(; Nx=16, Ny=8, cx=4.0, cy=4.0,
+                                        radius=2.0, u_in=0.05, nu=0.05,
+                                        inlet=:parabolic, tol=1e-10,
+                                        max_steps=50_000)
+        geom = LBMGeomParams(fwd.q_wall, fwd.is_solid, fwd.u_profile,
+                              fwd.rho_out, fwd.s_plus, fwd.s_minus, fwd.Nx, fwd.Ny)
+        @test_throws ArgumentError LBMFieldParams(geom, fill(0.05, 5))
+    end
+
+    @testset "CONSISTENCY: ad_step_nufield! with uniform fill(ν,Ny) == ad_step! (bit-exact)" begin
+        fwd = Kraken.ad_forward_solve(; Nx=16, Ny=8, cx=4.0, cy=4.0,
+                                        radius=2.0, u_in=0.05, nu=0.05,
+                                        inlet=:parabolic, tol=1e-10,
+                                        max_steps=50_000)
+        @test fwd.converged
+        nu0 = 0.05
+        s_plus, s_minus = Kraken.ad_trt_rates_inline(nu0)
+        nu_field = fill(nu0, 8)
+
+        out_scalar = similar(fwd.f_star)
+        Kraken.ad_step!(out_scalar, fwd.f_star, fwd.q_wall, fwd.is_solid,
+                         fwd.u_profile, fwd.rho_out, s_plus, s_minus, 16, 8)
+
+        out_field = similar(fwd.f_star)
+        Kraken.ad_step_nufield!(out_field, fwd.f_star, fwd.q_wall, fwd.is_solid,
+                                 fwd.u_profile, fwd.rho_out, nu_field, 16, 8)
+
+        @test maximum(abs.(out_field .- out_scalar)) == 0.0
+    end
+
+    @testset "residual dispatch parity: LBMFieldParams(uniform) == LBMScalarParams" begin
+        fwd = Kraken.ad_forward_solve(; Nx=16, Ny=8, cx=4.0, cy=4.0,
+                                        radius=2.0, u_in=0.05, nu=0.05,
+                                        inlet=:parabolic, tol=1e-10,
+                                        max_steps=50_000)
+        geom = LBMGeomParams(fwd.q_wall, fwd.is_solid, fwd.u_profile,
+                              fwd.rho_out, fwd.s_plus, fwd.s_minus, fwd.Nx, fwd.Ny)
+        p_scalar = LBMScalarParams(geom, 0.05)
+        p_field  = LBMFieldParams(geom, fill(0.05, 8))
+        R_scalar = residual(nothing, LBM(), fwd.f_star, p_scalar)
+        R_field  = residual(nothing, LBM(), fwd.f_star, p_field)
+        @test maximum(abs.(R_field .- R_scalar)) == 0.0
+    end
+
+    @testset "ENZYME_FREE_OK: LBMFieldParams exported" begin
+        @test isdefined(Kraken, :LBMFieldParams)
+    end
+
+end
+
+if Base.get_extension(Kraken, :KrakenADExt) !== nothing
+    using LinearAlgebra
+
+    @testset "Phase 2c-1 Enzyme-gated" begin
+
+        @testset "C-1a: _ad_pvjp_nufield gradient probe (k=5, rel < 1e-2)" begin
+            Nx, Ny = 16, 8
+            nu0 = 0.05
+            nu_field = fill(nu0, Ny)
+
+            fwd = Kraken.ad_forward_solve(; Nx=Nx, Ny=Ny, cx=4.0, cy=4.0,
+                                            radius=2.0, u_in=0.05, nu=nu0,
+                                            inlet=:parabolic, tol=1e-12,
+                                            max_steps=200_000)
+            @test fwd.converged
+
+            rng = Random.MersenneTwister(123)
+            lambda = randn(rng, size(fwd.f_star)...)
+
+            dnu_adj = Kraken._ad_pvjp_nufield(fwd.f_star, lambda, nu_field,
+                                               fwd.q_wall, fwd.is_solid,
+                                               fwd.u_profile, fwd.rho_out, Nx, Ny)
+
+            @test length(dnu_adj) == Ny
+
+            h = 1e-5
+            probes = [2, 3, 5, 6, 8]
+            for j in probes
+                nuf_p = copy(nu_field); nuf_p[j] += h
+                nuf_m = copy(nu_field); nuf_m[j] -= h
+                out_p = similar(fwd.f_star)
+                out_m = similar(fwd.f_star)
+                Kraken.ad_step_nufield!(out_p, fwd.f_star, fwd.q_wall, fwd.is_solid,
+                                         fwd.u_profile, fwd.rho_out, nuf_p, Nx, Ny)
+                Kraken.ad_step_nufield!(out_m, fwd.f_star, fwd.q_wall, fwd.is_solid,
+                                         fwd.u_profile, fwd.rho_out, nuf_m, Nx, Ny)
+                dnu_fd_j = dot(lambda, (out_p .- out_m) ./ (2h))
+                rel = abs(dnu_adj[j] - dnu_fd_j) / max(abs(dnu_fd_j), 1e-15)
+                @info "C-1a probe j=$j" dnu_adj=dnu_adj[j] dnu_fd=dnu_fd_j rel=rel h=h
+                @test rel < 1e-2
+            end
+        end
+
+        @testset "C-1b: _ad_vjp_GtT_nufield state VJP probe (k=3, rel < 1e-2)" begin
+            Nx, Ny = 16, 8
+            nu0 = 0.05
+            nu_field = fill(nu0, Ny)
+
+            fwd = Kraken.ad_forward_solve(; Nx=Nx, Ny=Ny, cx=4.0, cy=4.0,
+                                            radius=2.0, u_in=0.05, nu=nu0,
+                                            inlet=:parabolic, tol=1e-12,
+                                            max_steps=200_000)
+            @test fwd.converged
+
+            rng = Random.MersenneTwister(456)
+            v = randn(rng, size(fwd.f_star)...)
+
+            df_adj = Kraken._ad_vjp_GtT_nufield(fwd.f_star, v, fwd.q_wall, fwd.is_solid,
+                                                  fwd.u_profile, fwd.rho_out,
+                                                  nu_field, Nx, Ny)
+            @test size(df_adj) == size(fwd.f_star)
+
+            # FD on state: dG^T v ≈ [G(f+h*e_k, nu_field) - G(f-h*e_k, nu_field)] / (2h)
+            # contracted with v: dot(v, delta) / (2h). Compare with df_adj[k].
+            h = 1e-5
+            # Probe 3 random linear indices
+            n_total = length(fwd.f_star)
+            rng2 = Random.MersenneTwister(789)
+            probe_idx = rand(rng2, 1:n_total, 3)
+
+            for k in probe_idx
+                f_p = copy(fwd.f_star); f_p[k] += h
+                f_m = copy(fwd.f_star); f_m[k] -= h
+                out_p = similar(fwd.f_star)
+                out_m = similar(fwd.f_star)
+                Kraken.ad_step_nufield!(out_p, f_p, fwd.q_wall, fwd.is_solid,
+                                         fwd.u_profile, fwd.rho_out, nu_field, Nx, Ny)
+                Kraken.ad_step_nufield!(out_m, f_m, fwd.q_wall, fwd.is_solid,
+                                         fwd.u_profile, fwd.rho_out, nu_field, Nx, Ny)
+                dGk_fd = dot(v, (out_p .- out_m) ./ (2h))
+                rel = abs(df_adj[k] - dGk_fd) / max(abs(dGk_fd), 1e-15)
+                @info "C-1b probe k=$k" adj=df_adj[k] fd=dGk_fd rel=rel
+                @test rel < 1e-2
+            end
+        end
+
+    end
+end

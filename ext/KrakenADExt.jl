@@ -7,6 +7,7 @@ import Kraken: _ad_dJdf, _ad_vjp_GtT, _ad_dqwall_terms
 import Kraken: _ad_dNudw, _ad_thermal_vjp_GtT, _ad_thermal_dqwall_terms
 import Kraken: _ad_ve_dJdw, _ad_ve_vjp_GtT, _ad_ve_dGdR_jvp
 import Kraken: _ad_pvjp_nu, ad_step_nu!
+import Kraken: _ad_pvjp_nufield, _ad_vjp_GtT_nufield, ad_step_nufield!
 
 _short_error(err) = first(sprint(showerror, err), min(360, lastindex(sprint(showerror, err))))
 _short_string(msg) = first(msg, min(360, lastindex(msg)))
@@ -304,6 +305,59 @@ function _ad_pvjp_nu(f_star, lambda, p::Kraken.LBMScalarParams)
         cotangent isa Real && return Float64(cotangent)
     end
     error("_ad_pvjp_nu: Enzyme returned no scalar cotangent for ν")
+end
+
+"""
+    _ad_pvjp_nufield(f_star, lambda, nu_field::Vector{Float64},
+                     q_wall, is_solid, u_profile, rho_out, Nx::Int, Ny::Int) -> Vector{Float64}
+
+Field VJP: dL/dν_j = λᵀ (∂G/∂ν_j) for all j simultaneously, via Enzyme Reverse
+over `ad_step_nufield!` with `Duplicated(nu_field, dnu)` array shadow.
+Returns `dnu` — Vector{Float64} of length Ny — the field cotangent.
+"""
+function _ad_pvjp_nufield(f_star, lambda, nu_field::Vector{Float64},
+                          q_wall, is_solid, u_profile, rho_out, Nx::Int, Ny::Int)
+    out  = zeros(Float64, size(f_star))
+    dout = copy(lambda)
+    df   = zeros(Float64, size(f_star))
+    dnu  = zeros(Float64, length(nu_field))
+
+    Enzyme.autodiff(Enzyme.Reverse, Kraken.ad_step_nufield!,
+                    Enzyme.Duplicated(out, dout),
+                    Enzyme.Duplicated(copy(f_star), df),
+                    Enzyme.Const(q_wall),
+                    Enzyme.Const(is_solid),
+                    Enzyme.Const(u_profile),
+                    Enzyme.Const(rho_out),
+                    Enzyme.Duplicated(copy(nu_field), dnu),
+                    Enzyme.Const(Nx), Enzyme.Const(Ny))
+    return dnu
+end
+
+"""
+    _ad_vjp_GtT_nufield(f_star, v, q_wall, is_solid, u_profile, rho_out,
+                         nu_field, Nx::Int, Ny::Int) -> Array{Float64,3}
+
+State VJP for field ν: dG^T · v differentiating `ad_step_nufield!` with
+`Const(nu_field)` (nu_field NOT differentiated — this is the state adjoint, not
+the parameter VJP). Returns `df` — the cotangent wrt `f_star`.
+"""
+function _ad_vjp_GtT_nufield(f_star, v, q_wall, is_solid, u_profile, rho_out,
+                             nu_field, Nx::Int, Ny::Int)
+    out  = zeros(Float64, size(f_star))
+    dout = copy(v)
+    df   = zeros(Float64, size(f_star))
+
+    Enzyme.autodiff(Enzyme.Reverse, Kraken.ad_step_nufield!,
+                    Enzyme.Duplicated(out, dout),
+                    Enzyme.Duplicated(copy(f_star), df),
+                    Enzyme.Const(q_wall),
+                    Enzyme.Const(is_solid),
+                    Enzyme.Const(u_profile),
+                    Enzyme.Const(rho_out),
+                    Enzyme.Const(nu_field),
+                    Enzyme.Const(Nx), Enzyme.Const(Ny))
+    return df
 end
 
 end # module KrakenADExt

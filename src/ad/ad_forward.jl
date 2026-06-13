@@ -173,3 +173,72 @@ function ad_thermal_forward_solve(; N::Int,
         converged=converged,
     )
 end
+
+"""
+    ad_forward_solve_nufield(; Nx, Ny, cx, cy, radius, u_in, nu_field, inlet, rho_out,
+                               tol, max_steps, f_init) -> NamedTuple
+
+Forward solve for the per-row ν(y) field variant. Iterates `ad_step_nufield!` to
+convergence using the same residual criterion as `ad_forward_solve`.
+INTERNAL — access via `Kraken.ad_forward_solve_nufield`; not exported.
+"""
+function ad_forward_solve_nufield(; Nx::Int, Ny::Int,
+                                  cx::Union{Nothing,Real}=nothing,
+                                  cy::Union{Nothing,Real}=nothing,
+                                  radius::Real,
+                                  u_in::Real,
+                                  nu_field::Vector{Float64},
+                                  inlet::Symbol=:parabolic,
+                                  rho_out::Real=1.0,
+                                  tol::Real=1e-12,
+                                  max_steps::Int=120_000,
+                                  f_init=nothing)
+    length(nu_field) == Ny ||
+        throw(ArgumentError("nu_field length $(length(nu_field)) must equal Ny=$Ny"))
+    cx_f = Float64(isnothing(cx) ? Nx ÷ 4 : cx)
+    cy_f = Float64(isnothing(cy) ? Ny ÷ 2 : cy)
+    radius_f = Float64(radius)
+    rho_out_f = Float64(rho_out)
+
+    geom = ad_geometry_cylinder(Nx, Ny, cx_f, cy_f, radius_f)
+    u_profile = ad_inlet_profile(Ny, u_in, inlet)
+
+    f_in = f_init === nothing ?
+        ad_initial_cylinder_equilibrium(Nx, Ny, u_profile) : copy(f_init)
+    f_out = similar(f_in)
+    residual_val = Inf
+    n_iter = 0
+    converged = false
+
+    for step in 1:max_steps
+        ad_step_nufield!(f_out, f_in, geom.q_wall, geom.is_solid, u_profile,
+                         rho_out_f, nu_field, Nx, Ny)
+        residual_val = ad_relative_step_residual(f_out, f_in)
+        n_iter = step
+        if residual_val < Float64(tol)
+            converged = true
+            break
+        end
+        f_in, f_out = f_out, f_in
+    end
+
+    f_star = copy(f_out)
+    return (;
+        f_star=f_star,
+        q_wall=geom.q_wall,
+        is_solid=geom.is_solid,
+        u_profile=u_profile,
+        rho_out=rho_out_f,
+        nu_field=copy(nu_field),
+        Nx=Nx,
+        Ny=Ny,
+        cx=cx_f,
+        cy=cy_f,
+        radius=radius_f,
+        u_in=Float64(u_in),
+        n_iter=n_iter,
+        residual=Float64(residual_val),
+        converged=converged,
+        inlet=inlet,
+    )
+end

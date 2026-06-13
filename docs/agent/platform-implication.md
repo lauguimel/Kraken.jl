@@ -63,6 +63,18 @@ Phase 2b-2 (`calibration.jl` NEW):
 - `CalibResult` — (`p_opt`, `loss_final`, `loss_trace`, `grad_trace`, `n_iter`, `converged`, `message`).
 - `_dJ_df_lineprofile_ux` — (private) analytic dL/df for `LineProfile(:ux)` observable; Enzyme-free.
 
+Phase 2c-1 (`residual.jl` + `ad_step.jl` + `ad_forward.jl` + `KrakenADExt.jl`, additive):
+- `LBMFieldParams` — parameter bundle with FREE per-row ν(y) field (Vector{Float64}, length Ny);
+  `s_plus_field`/`s_minus_field` derived at construction via `ad_trt_rates_inline`.
+- `residual(_, ::LBM, f, p::LBMFieldParams)` — calls `ad_step_nufield!`; degenerates to scalar
+  path bit-exactly for uniform nu_field.
+- `adjoint_vjp(_, ::LBM, f_star, p::LBMFieldParams, v)` — delegates to `_ad_vjp_GtT_nufield`
+  (exact state VJP, Const nu_field, not mean-ν approximation).
+- `_ad_pvjp_nufield(f_star, lambda, nu_field, ...) -> Vector{Float64}` — (private) Enzyme Reverse
+  with Duplicated array; O(1) Enzyme calls for all Ny rows simultaneously.
+- `_ad_vjp_GtT_nufield(f_star, v, ..., nu_field, ...) -> Array{Float64,3}` — (private) state VJP,
+  Const nu_field; implemented in `ext/KrakenADExt.jl`.
+
 Second concrete method (`src/methods/inc_ns/method.jl`, mirrors the LBM wrapper):
 - `IncNS <: AbstractMethod` — `IncNS(driver)` with driver ∈
   `{:simple, :cavity, :cavity_mg, :projection, :manifold}`;

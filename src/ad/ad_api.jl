@@ -467,3 +467,18 @@ function _steady_polymer_drag_sensitivity(; Nx::Int, Ny::Int, radius::Real,
         fd_check=fd,
     )
 end
+
+# --- ν-field VJP seams (M-P2c-1) ---
+# `_ad_pvjp_nufield` : computes dL/dν_j for each row j = λᵀ (∂G/∂ν_j) via Enzyme Reverse
+#                       over ad_step_nufield! with Duplicated(nu_field, dnu).
+#                       Returns Vector{Float64} of length Ny. Impl in ext/KrakenADExt.jl.
+# `_ad_vjp_GtT_nufield` : state VJP for field ν — same as _ad_vjp_GtT but
+#                          differentiates ad_step_nufield! with Const(nu_field).
+#                          Returns df (cotangent wrt f_star). Impl in ext/KrakenADExt.jl.
+function _ad_pvjp_nufield(args...)
+    error(_AD_ENZYME_LOAD_ERROR)
+end
+
+function _ad_vjp_GtT_nufield(args...)
+    error(_AD_ENZYME_LOAD_ERROR)
+end
