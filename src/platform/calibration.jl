@@ -124,6 +124,62 @@ function project!(ps::ParameterSpace, v::AbstractVector{Float64})
     return v
 end
 
+"""
+    _reg_loss(nu_vec::AbstractVector{<:Real}, alpha::Real) -> Float64
+
+Tikhonov smoothness penalty: (α/2) * ‖D·ν‖² = (α/2) * sum(diff(ν)²).
+Zero when nu_vec has length ≤ 1 or alpha == 0. Used with α_reg documented as
+chosen so ‖reg_grad‖/‖data_grad‖ ≈ 0.01 at the true ν(y) benchmark stratification.
+"""
+function _reg_loss(nu_vec::AbstractVector{<:Real}, alpha::Real)
+    alpha == 0.0 && return 0.0
+    length(nu_vec) <= 1 && return 0.0
+    return 0.5 * Float64(alpha) * sum(abs2, diff(nu_vec))
+end
+
+"""
+    _reg_grad(nu_vec::AbstractVector{<:Real}, alpha::Real) -> Vector{Float64}
+
+Analytic gradient of `_reg_loss` wrt each element of `nu_vec`: the finite-difference
+Laplacian ∂reg/∂ν_j = α*(2ν_j - ν_{j-1} - ν_{j+1}) at interior points,
+with one-sided differences at the endpoints. Enzyme-free.
+"""
+function _reg_grad(nu_vec::AbstractVector{<:Real}, alpha::Real)
+    n = length(nu_vec)
+    g = zeros(Float64, n)
+    alpha == 0.0 && return g
+    n <= 1 && return g
+    a = Float64(alpha)
+    for j in 2:(n - 1)
+        g[j] = a * (2.0 * nu_vec[j] - nu_vec[j - 1] - nu_vec[j + 1])
+    end
+    g[1]   = a * (nu_vec[1]   - nu_vec[2])
+    g[end] = a * (nu_vec[end] - nu_vec[end - 1])
+    return g
+end
+
+"""
+    _is_nufield_pspace(pspace::ParameterSpace) -> Bool
+
+Returns true if ALL free parameter names match the pattern `ν_j` for integer j ≥ 1.
+Used by `fit` and gradient assembly to route between the scalar and field-ν paths.
+"""
+function _is_nufield_pspace(pspace::ParameterSpace)
+    free_names = [pspace.names[i] for i in eachindex(pspace.names) if !pspace.fixed[i]]
+    isempty(free_names) && return false
+    r = r"^ν_\d+$"
+    return all(occursin(r, string(n)) for n in free_names)
+end
+
+"""
+    _extract_nufield(p_named::NamedTuple, Ny::Int) -> Vector{Float64}
+
+Extract the ν field from a NamedTuple with keys :ν_1 … :ν_Ny, in order j=1…Ny.
+"""
+function _extract_nufield(p_named::NamedTuple, Ny::Int)
+    return [Float64(p_named[Symbol("ν_$j")]) for j in 1:Ny]
+end
+
 function _sumsq_delta(y_hat, y)
     d = y_hat .- y
     return d isa Number ? abs2(d) : sum(abs2, d)
@@ -239,14 +295,20 @@ end
 """
     fit(problem, method::LBM, data, p0, pspace; observables, kwargs...) -> CalibResult
 
-Calibrate free parameters in `pspace` with projected gradient descent and
-Armijo backtracking. `problem` must be a `NamedTuple` of fixed
-`ad_forward_solve` geometry keywords; free parameters from `p0`/`pspace`
-override matching entries (`:ν` maps to `nu`).
+Calibrate free parameters in `pspace`. `problem` must be a `NamedTuple` of fixed
+`ad_forward_solve` geometry keywords; free parameters from `p0`/`pspace` override
+matching entries (`:ν` maps to `nu`).
 
-Currently supported observables are `LineProfile(:ux, indices)` and
-`FieldReduction(:Cd, identity)`. Gradients use the steady adjoint chain:
-`_ad_pvjp_nu` for scalar viscosity and `_ad_dqwall_terms` for radius.
+Supported observables: `LineProfile(:ux, indices)` and `FieldReduction(:Cd, identity)`.
+
+Optimizer selection via `method` keyword:
+- `:pgd` (default) — projected gradient descent with BB spectral step + Armijo backtracking.
+- `:lbfgs` — L-BFGS-B via `Optim.Fminbox(LBFGS())`; requires `using Optim` to be loaded first.
+
+Regularization via `reg_weight` keyword (default 0.0, backward-compatible):
+- When `reg_weight > 0` and pspace describes a ν-field (names `ν_1…ν_Ny`), adds
+  Tikhonov smoothness penalty `(reg_weight/2) * ‖D·ν‖²` to the loss and its analytic
+  gradient to the parameter gradient. Enzyme-free for the reg term.
 """
 function fit(problem, ::LBM, data, p0::NamedTuple,
              pspace::ParameterSpace;
@@ -265,7 +327,9 @@ function fit(problem, ::LBM, data, p0::NamedTuple,
              adjoint_tol::Real=AD_LINEAR_RES_TOL,
              gmres_restart::Int=240,
              gmres_max_restarts::Int=20,
-             verbose::Bool=false)
+             verbose::Bool=false,
+             reg_weight::Real=0.0,
+             method::Symbol=:pgd)
     problem isa NamedTuple ||
         throw(ArgumentError("fit expects problem::NamedTuple with ad_forward_solve geometry keywords"))
     length(observables) == length(data) ||
@@ -279,16 +343,48 @@ function fit(problem, ::LBM, data, p0::NamedTuple,
     loss_trace = Float64[]
     grad_trace = Float64[]
 
+    is_field = _is_nufield_pspace(pspace)
+
+    # Route to L-BFGS if requested (requires KrakenOptimExt / Optim loaded)
+    if method === :lbfgs
+        return _fit_lbfgs(problem, LBM(), data, p0, pspace;
+                          observables=observables,
+                          weights=weights,
+                          max_iter=max_iter,
+                          gtol=gtol,
+                          ftol=ftol,
+                          forward_tol=forward_tol,
+                          forward_max_steps=forward_max_steps,
+                          gmres_tol=gmres_tol,
+                          adjoint_tol=adjoint_tol,
+                          gmres_restart=gmres_restart,
+                          gmres_max_restarts=gmres_max_restarts,
+                          reg_weight=reg_weight,
+                          verbose=verbose)
+    elseif method !== :pgd
+        throw(ArgumentError("fit: unsupported method=$(method); supported: :pgd (default), :lbfgs (requires Optim)"))
+    end
+
     function forward_at(p_named::NamedTuple; f_init=nothing)
         kw = Dict{Symbol,Any}(pairs(problem))
         _insert_fit_params!(kw, p_named)
         kw[:tol] = Float64(forward_tol)
         kw[:max_steps] = forward_max_steps
         f_init === nothing || (kw[:f_init] = f_init)
-        haskey(kw, :nu) ||
-            throw(ArgumentError("fit needs a scalar viscosity from pspace name :ν or problem key :nu"))
-        fwd = ad_forward_solve(; kw...)
-        fwd.converged || @warn "fit: forward solve did not converge" residual=fwd.residual
+        if is_field
+            # Field ν path: extract nu_field from p_named, call nufield forward solve
+            Ny_val = Int(get(kw, :Ny, problem[:Ny]))
+            nu_fld = _extract_nufield(p_named, Ny_val)
+            haskey(kw, :nu) && delete!(kw, :nu)
+            kw[:nu_field] = nu_fld
+            fwd = ad_forward_solve_nufield(; kw...)
+            fwd.converged || @warn "fit: nufield forward solve did not converge" residual=fwd.residual
+        else
+            haskey(kw, :nu) ||
+                throw(ArgumentError("fit needs a scalar viscosity from pspace name :ν or problem key :nu"))
+            fwd = ad_forward_solve(; kw...)
+            fwd.converged || @warn "fit: forward solve did not converge" residual=fwd.residual
+        end
         return fwd
     end
 
@@ -310,7 +406,11 @@ function fit(problem, ::LBM, data, p0::NamedTuple,
         p_named = from_flat(pspace, x_flat, p0)
         fwd = forward_at(p_named; f_init=f_init)
         preds = build_preds(fwd)
-        return loss(preds, data; weights=weights), preds, fwd, p_named
+        L_data = loss(preds, data; weights=weights)
+        # Add Tikhonov regularization for field-ν problems
+        L_reg = (reg_weight > 0.0 && is_field) ?
+                _reg_loss(fwd.nu_field, reg_weight) : 0.0
+        return L_data + L_reg, preds, fwd, p_named
     end
 
     function compute_gradient_flat(fwd, preds, p_named)
@@ -333,9 +433,17 @@ function fit(problem, ::LBM, data, p0::NamedTuple,
             end
         end
 
-        apply_GtT = v -> _ad_vjp_GtT(fwd.f_star, v, fwd.q_wall, fwd.is_solid,
-                                      fwd.u_profile, fwd.rho_out,
-                                      fwd.s_plus, fwd.s_minus, fwd.Nx, fwd.Ny)
+        # Choose state VJP: field-ν path uses nufield variant; scalar uses scalar
+        if is_field
+            nu_fld = fwd.nu_field
+            apply_GtT = v -> _ad_vjp_GtT_nufield(fwd.f_star, v, fwd.q_wall,
+                                                  fwd.is_solid, fwd.u_profile,
+                                                  fwd.rho_out, nu_fld, fwd.Nx, fwd.Ny)
+        else
+            apply_GtT = v -> _ad_vjp_GtT(fwd.f_star, v, fwd.q_wall, fwd.is_solid,
+                                          fwd.u_profile, fwd.rho_out,
+                                          fwd.s_plus, fwd.s_minus, fwd.Nx, fwd.Ny)
+        end
         adj = gmres_adjoint(apply_GtT, dLdf; tol=gmres_tol,
                             restart=gmres_restart,
                             max_restarts=gmres_max_restarts,
@@ -344,31 +452,54 @@ function fit(problem, ::LBM, data, p0::NamedTuple,
 
         λ = adj.lambda
         g_flat = Float64[]
-        for i in eachindex(pspace.names)
-            pspace.fixed[i] && continue
-            name = pspace.names[i]
-            if name === :ν
-                geom = LBMGeomParams(fwd.q_wall, fwd.is_solid, fwd.u_profile,
-                                     fwd.rho_out, fwd.s_plus, fwd.s_minus,
-                                     fwd.Nx, fwd.Ny)
-                dL_dν = _ad_pvjp_nu(fwd.f_star, λ, LBMScalarParams(geom, p_named[:ν]))
-                push!(g_flat, pspace.log_scale[i] ? dL_dν * p_named[:ν] : dL_dν)
-            elseif name === :radius
-                dq_dR = dq_wall_dR_cylinder(fwd.Nx, fwd.Ny, fwd.cx, fwd.cy,
-                                            fwd.radius; FT=Float64)
-                qwall_terms = _ad_dqwall_terms(fwd.f_star, λ, fwd.q_wall,
-                                               fwd.is_solid, fwd.u_profile,
-                                               fwd.rho_out, fwd.s_plus,
-                                               fwd.s_minus, fwd.Nx, fwd.Ny,
-                                               fwd.u_ref, fwd.D, dq_dR)
-                terms = ad_assemble_radius_terms(fwd.Cd, fwd.radius, dq_dR,
-                                                 qwall_terms.explicit,
-                                                 qwall_terms.implicit)
-                dL_dR = cd_residual * (terms.explicit_qwall + terms.direct_D) +
-                         terms.implicit_qwall
-                push!(g_flat, pspace.log_scale[i] ? dL_dR * p_named[:radius] : dL_dR)
-            else
-                error("fit: gradient not implemented for parameter :$(name)")
+
+        if is_field
+            # Field-ν gradient: one Enzyme call for all Ny rows simultaneously
+            nu_fld = fwd.nu_field
+            dnu = _ad_pvjp_nufield(fwd.f_star, λ, nu_fld, fwd.q_wall,
+                                   fwd.is_solid, fwd.u_profile, fwd.rho_out,
+                                   fwd.Nx, fwd.Ny)
+            # Add analytic regularization gradient (Enzyme-free)
+            if reg_weight > 0.0
+                dnu .+= _reg_grad(nu_fld, reg_weight)
+            end
+            # Pack into flat vector: order matches pspace.names (ν_1, ν_2, …, ν_Ny)
+            for i in eachindex(pspace.names)
+                pspace.fixed[i] && continue
+                name = pspace.names[i]
+                m = match(r"^ν_(\d+)$", string(name))
+                m === nothing && error("fit: unexpected name $(name) in nufield pspace")
+                j = parse(Int, m.captures[1])
+                dL_j = dnu[j]
+                push!(g_flat, pspace.log_scale[i] ? dL_j * nu_fld[j] : dL_j)
+            end
+        else
+            for i in eachindex(pspace.names)
+                pspace.fixed[i] && continue
+                name = pspace.names[i]
+                if name === :ν
+                    geom = LBMGeomParams(fwd.q_wall, fwd.is_solid, fwd.u_profile,
+                                         fwd.rho_out, fwd.s_plus, fwd.s_minus,
+                                         fwd.Nx, fwd.Ny)
+                    dL_dν = _ad_pvjp_nu(fwd.f_star, λ, LBMScalarParams(geom, p_named[:ν]))
+                    push!(g_flat, pspace.log_scale[i] ? dL_dν * p_named[:ν] : dL_dν)
+                elseif name === :radius
+                    dq_dR = dq_wall_dR_cylinder(fwd.Nx, fwd.Ny, fwd.cx, fwd.cy,
+                                                fwd.radius; FT=Float64)
+                    qwall_terms = _ad_dqwall_terms(fwd.f_star, λ, fwd.q_wall,
+                                                   fwd.is_solid, fwd.u_profile,
+                                                   fwd.rho_out, fwd.s_plus,
+                                                   fwd.s_minus, fwd.Nx, fwd.Ny,
+                                                   fwd.u_ref, fwd.D, dq_dR)
+                    terms = ad_assemble_radius_terms(fwd.Cd, fwd.radius, dq_dR,
+                                                     qwall_terms.explicit,
+                                                     qwall_terms.implicit)
+                    dL_dR = cd_residual * (terms.explicit_qwall + terms.direct_D) +
+                             terms.implicit_qwall
+                    push!(g_flat, pspace.log_scale[i] ? dL_dR * p_named[:radius] : dL_dR)
+                else
+                    error("fit: gradient not implemented for parameter :$(name)")
+                end
             end
         end
         return g_flat

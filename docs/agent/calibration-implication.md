@@ -51,12 +51,33 @@ Gate 4c pins the direct chain against `steady_shape_sensitivity` at rel < 1e-6.
 Projected gradient descent + Armijo backtracking. No new Project.toml deps.
 Upgrade path: add Optim.jl as a weak-dependency extension for L-BFGS in a later phase.
 
+## Phase 2c-2 additions (M-P2c-2)
+
+`_reg_loss(nu_vec, alpha)` and `_reg_grad(nu_vec, alpha)` implement Tikhonov
+smoothness penalty `(α/2) ‖D·ν‖²` and its analytic gradient (discrete negative
+Laplacian). Both are Enzyme-free and used by both the PGD and L-BFGS paths.
+
+`_is_nufield_pspace(pspace)` detects whether pspace describes a ν-field (all free
+names match `ν_\d+`). Used to route `forward_at`, `compute_gradient_flat`, and
+`eval_at` between the scalar and field-ν paths.
+
+`_extract_nufield(p_named, Ny)` extracts `[p_named[:ν_j] for j in 1:Ny]`.
+
+`fit(...; reg_weight=0.0, method=:pgd)` — two new kwargs (backward-compatible
+defaults). `method=:pgd` (default) is the existing BB+Armijo loop. `method=:lbfgs`
+delegates to `_fit_lbfgs` in `ext/KrakenOptimExt.jl`; raises a documented error if
+Optim is not loaded.
+
+`ext/KrakenOptimExt.jl` — `_fit_lbfgs` uses `Optim.Fminbox(Optim.LBFGS())` with
+box bounds in the optimizer's native (log-scale or natural) space. Cache-last-forward:
+`compute_fg!` is called once per point; f and g are always consistent.
+
 ## Reads from
 
-- `src/platform/residual.jl`: `LBMGeomParams`, `LBMScalarParams`
-- `src/ad/ad_api.jl`: `_ad_pvjp_nu`, `_ad_vjp_GtT`, `_ad_dJdf`, `_ad_dqwall_terms`
+- `src/platform/residual.jl`: `LBMGeomParams`, `LBMScalarParams`, `LBMFieldParams`
+- `src/ad/ad_api.jl`: `_ad_pvjp_nu`, `_ad_pvjp_nufield`, `_ad_vjp_GtT`, `_ad_vjp_GtT_nufield`, `_ad_dJdf`, `_ad_dqwall_terms`, `_fit_lbfgs`
 - `src/ad/ad_adjoint.jl`: `gmres_adjoint`, `AD_LINEAR_RES_TOL`
-- `src/ad/ad_forward.jl`: `ad_forward_solve`
+- `src/ad/ad_forward.jl`: `ad_forward_solve`, `ad_forward_solve_nufield`
 - `src/platform/observe.jl`: `Prediction`, `LineProfile`, `FieldReduction`
 - `src/ad/ad_geometry.jl`: `dq_wall_dR_cylinder`, `ad_assemble_radius_terms`
 

@@ -53,6 +53,7 @@ end
     include("platform/contract_parity_test.jl")
     include("platform/residual_vjp_test.jl")
     include("platform/calibration_test.jl")
+    include("platform/calibration_nufield_test.jl")
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
     include("test_poiseuille_3d.jl")

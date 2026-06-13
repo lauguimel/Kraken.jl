@@ -482,3 +482,12 @@ end
 function _ad_vjp_GtT_nufield(args...)
     error(_AD_ENZYME_LOAD_ERROR)
 end
+
+# --- Optim.jl L-BFGS field-fit seam (M-P2c-2) ---
+# `_fit_lbfgs` : delegates `fit(...; method=:lbfgs, ...)` to the Fminbox(LBFGS()) driver
+#                in ext/KrakenOptimExt.jl. Without Optim loaded, raises a documented error.
+const _AD_OPTIM_LOAD_ERROR = "Load Optim to enable L-BFGS: `using " * "Optim`"
+
+function _fit_lbfgs(args...; kwargs...)
+    error(_AD_OPTIM_LOAD_ERROR)
+end

@@ -63,6 +63,19 @@ Phase 2b-2 (`calibration.jl` NEW):
 - `CalibResult` — (`p_opt`, `loss_final`, `loss_trace`, `grad_trace`, `n_iter`, `converged`, `message`).
 - `_dJ_df_lineprofile_ux` — (private) analytic dL/df for `LineProfile(:ux)` observable; Enzyme-free.
 
+Phase 2c-2 (`calibration.jl` extended, `ext/KrakenOptimExt.jl` NEW, `Project.toml` +Optim weakdep):
+- `_reg_loss(nu_vec, alpha)` + `_reg_grad(nu_vec, alpha)` — Tikhonov smoothness
+  penalty `(α/2) ‖D·ν‖²` and analytic gradient (discrete negative Laplacian); Enzyme-free.
+- `_is_nufield_pspace(pspace)` + `_extract_nufield(p_named, Ny)` — routing helpers.
+- `fit(...; reg_weight=0.0, method=:pgd)` — `reg_weight > 0` adds regularization to
+  the loss and gradient for field-ν problems; `method=:lbfgs` routes to L-BFGS.
+- `_fit_lbfgs` stub in `src/ad/ad_api.jl` + impl in `ext/KrakenOptimExt.jl` —
+  L-BFGS-B via `Optim.Fminbox(LBFGS())`; first non-Enzyme `[weakdeps]` in Kraken.
+- `Project.toml`: `Optim = "429524aa-..."` in `[weakdeps]`,
+  `KrakenOptimExt = "Optim"` in `[extensions]`, `Optim = "2"` in `[compat]`.
+- Exit gate C-2a: field twin experiment `ν(y) = 0.03 + 0.04·sin(π·(j-1)/(Ny-1))`,
+  Ny=8, σ=5e-4, reg_weight=1e-4, seed=42 — rel_L2 < 10% in ≤200 L-BFGS iters.
+
 Phase 2c-1 (`residual.jl` + `ad_step.jl` + `ad_forward.jl` + `KrakenADExt.jl`, additive):
 - `LBMFieldParams` — parameter bundle with FREE per-row ν(y) field (Vector{Float64}, length Ny);
   `s_plus_field`/`s_minus_field` derived at construction via `ad_trt_rates_inline`.
