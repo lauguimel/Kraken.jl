@@ -23,9 +23,10 @@ function incns_poiseuille_case(; nx::Integer = 8, ny::Integer = 64,
                                tol::Real = 1e-10, maxiter::Integer = 300,
                                relax = (u = 0.7, p = 0.3),
                                scheme::Symbol = :simplec,
+                               momentum_advection::Symbol = :linear_upwind,
                                backend = CPU())
     res = solve_incns_simple(; nx, ny, H, mu, G,
-                             relax, scheme, tol, maxiter, backend)
+                             relax, scheme, momentum_advection, tol, maxiter, backend)
 
     # Analytic parabola at cell centres.
     uan = [(G / (2mu)) * y * (H - y) for y in res.ycenters]
@@ -55,6 +56,7 @@ end
     # Converged.
     @test c.res.converged
     @test c.res.scheme === :simplec
+    @test c.res.momentum_advection === :linear_upwind
     @test c.res.iters <= 50
 
     # Cross-flow is zero.
@@ -76,11 +78,16 @@ end
 end
 
 @testset "IncNS SIMPLE legacy scheme parity" begin
-    c = incns_poiseuille_case(; ny = 32, scheme = :simple, backend = CPU())
+    c = incns_poiseuille_case(; ny = 32, scheme = :simple,
+                              momentum_advection = :upwind, backend = CPU())
     @test c.res.scheme === :simple
+    @test c.res.momentum_advection === :upwind
     @test c.res.converged
     @test c.res.iters == 2
     @test maximum(c.res.u) ≈ 0.12499999999999806 atol=1e-14
     @test sum(c.res.u) ≈ 21.374999999999662 atol=1e-11
     @test c.res.residual_history[end] ≈ 4.475027051936657e-16 atol=1e-28
+
+    @test_throws ArgumentError incns_poiseuille_case(;
+        nx = 4, ny = 8, momentum_advection = :quick)
 end

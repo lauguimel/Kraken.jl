@@ -3,7 +3,7 @@ module: incns-simple
 path: src/methods/inc_ns/simple.jl
 owner_concern: pressure-velocity-coupling
 status: implemented
-last_verified: 2026-06-11
+last_verified: 2026-06-12
 depends_on:
   - solve-poisson
   - solve-linear
@@ -25,13 +25,16 @@ standalone-include-able.
 ## Public surface
 
 - `solve_incns_simple(; nx, ny, H, mu, G, relax=(u=0.7,p=0.3),
-  scheme=:simplec, tol=1e-10, maxiter=200, Lx=H, backend=CPU()) ->
-  NamedTuple` — the only entry point. `scheme=:simple` keeps the legacy
-  pressure-correction coefficient path; `scheme=:simplec` uses the
-  SIMPLE-consistent correction denominator for the pressure-correction path.
+  scheme=:simplec, momentum_advection=:linear_upwind, tol=1e-10, maxiter=200,
+  Lx=H, backend=CPU()) -> NamedTuple` — the only entry point. `scheme=:simple`
+  keeps the legacy pressure-correction coefficient path; `scheme=:simplec` uses
+  the SIMPLE-consistent correction denominator for the pressure-correction path.
+  `momentum_advection` is accepted and validated for API parity with the
+  manifold/cavity steady solvers, but this fully-developed body-force Poiseuille
+  rung has no nonlinear momentum-convection term.
   Returns `(u, v, p, residual_history, iters, converged, vel_change, dx, dy,
-  ycenters, H, mu, G, Lx, nx, ny, scheme)`. `backend` is currently cosmetic (host
-  loops; the KA path is cavity_mg).
+  ycenters, H, mu, G, Lx, nx, ny, scheme, momentum_advection)`. `backend` is
+  currently cosmetic (host loops; the KA path is cavity_mg).
 - De-facto public internals tests poke: `_incns_assemble_neg_laplacian(nx, ny,
   dx, dy; bc_x, bc_y)` (`:periodic`/`:dirichlet0` "+2/h²" half-spacing ghost /
   `:neumann`), `_incns_rhie_chow_faces!`, `_incns_face_divergence!`,
@@ -90,6 +93,10 @@ back-substitution per outer iteration — factorize-once makes the loop cheap.
 - `scheme=:simplec` changes the pressure-correction response coefficient only;
   the Rhie-Chow face model stays on the legacy coefficient so the converged
   finite-grid face model is not changed by the acceleration path.
+- `momentum_advection=:upwind` and `:linear_upwind` are numerically identical in
+  this rung because nonlinear convection is absent. Keep the kwarg so platform
+  callers can pass the same scheme selector to `IncNS(:simple)` and
+  `IncNS(:manifold)`; do not add a fake convection term to this analytic case.
 - Receipt: `test/analytical/incns_poiseuille.jl` — analytic parabola at 0.033%
   L2 error; manual driver `test/scratch/incns_poiseuille_driver.jl`.
 

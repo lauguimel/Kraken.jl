@@ -30,6 +30,7 @@ function run_incns_testset()
         include("analytical/incns_unsteady_taylor_green.jl")
         include("analytical/incns_unsteady_startup_channel.jl")
         include("analytical/incns_manifold.jl")   # fast (~4 s CPU): stays non-heavy
+        include("analytical/incns_momentum_advection_order.jl")
         include("analytical/scalar_transport_heated_channel.jl")
 
         # Heavy validations (long CPU runs: Ghia cavities, MG MMS up to 512²) —
