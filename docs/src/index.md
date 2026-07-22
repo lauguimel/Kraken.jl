@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "Kraken.jl"
-  text: "GPU-native multiphysics LBM in Julia"
-  tagline: "Write a reproducible .krk case or a direct Julia driver, then run it on CUDA, Metal, or CPU backends."
+  text: "GPU-native, method-agnostic multiphysics in Julia"
+  tagline: "A method-agnostic PDE framework whose mature core method is Lattice Boltzmann. Write a reproducible .krk case or a direct Julia driver, then run it on CUDA, Metal, or CPU backends."
   image:
     src: /logo.png
     alt: Kraken
@@ -124,7 +124,12 @@ krk cavity.krk
 </div>
 ```
 
-See the [full capabilities matrix](capabilities.md) for the complete module breakdown, and the [validation matrix](users/benchmarks/validation-matrix.md) for every literature reference.
+These are the capabilities of Kraken's mature LBM core. For how LBM fits into the
+broader method-agnostic platform — and what is shipped versus on the roadmap — see
+the [architecture overview](architecture.md). See the
+[full capabilities matrix](capabilities.md) for the complete module breakdown, and
+the [validation matrix](users/benchmarks/validation-matrix.md) for every literature
+reference.
 
 ## Showcase gallery
 

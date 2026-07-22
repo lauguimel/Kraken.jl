@@ -5,8 +5,9 @@ installing the package, running the classic 2D lid-driven cavity, looking
 at the result, and then pointing you to the parts of the documentation
 that match your interests.
 
-If you already know Julia but have never touched a Lattice Boltzmann
-solver, this is the right place to start.
+If you already know Julia but have never run a Lattice Boltzmann
+simulation — the method this walkthrough uses — this is the right place
+to start.
 
 ## 1. Install Kraken.jl
 
@@ -83,8 +84,8 @@ against the reference data of Ghia et al. (1982).
 
 ## 4. What just happened?
 
-Under the hood, Kraken.jl ran a Lattice Boltzmann simulation. At every
-time step the solver does three things, in order:
+Under the hood, this case ran with Kraken's Lattice Boltzmann method. At
+every time step the solver does three things, in order:
 
 1. **Collision** — at each lattice node, the distribution functions
    relax toward a local equilibrium. The simplest flavor is BGK, and

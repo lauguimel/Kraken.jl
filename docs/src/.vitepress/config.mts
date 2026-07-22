@@ -42,6 +42,7 @@ const sectionedSidebar: Record<string, any[]> = {
   '/getting_started': section('Guide'),
   '/concepts_index': section('Guide'),
   '/capabilities': section('Guide'),
+  '/architecture': section('Guide'),
   '/users/krk-reference': section('Guide'),
   // Examples (grouped by physics; two pages re-homed from users/tutorials/)
   '/users/tutorials/': section('Examples'),
