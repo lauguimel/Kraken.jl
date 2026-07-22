@@ -20,11 +20,20 @@ the relative ladder and the mixed-precision rung are the point of this run.
 | C3 | +CUDA graph | 115.16 | 31225 | 23.70× | 1.03e-05 | 2.307 | 94.2 / 97.0 |
 | C4 | +mixed precision (p+mom) | 75.21 | 31225 | **36.29×** | 1.03e-05 | 2.307 | 89.7 / 94.0 |
 
-## 1024² status
+## 1024² status — CONVERGED (rerun 2026-07-22)
 
-C4 @ 1024²: NOT converged at maxiter=80 000 (Ghia err 5.52%, wall 389.4 s, util 95/99%).
-Consistent with the A100/H100 finding that 1024² needs maxiter ≥ 150k — converged rerun pending
-(NS-track issue #7/#8).
+The 2026-06-11 run stopped at maxiter=80 000 non-converged (Ghia 5.52%). Converged rerun with the
+1024-only bench mode (`CAVITY_BENCH_1024_ONLY`, maxiter=200 000, raw log
+[`run_1024_a6000_raw.log`](run_1024_a6000_raw.log)):
+
+| config | wall_s | iters | converged | ghia_err_pct | gpu_util_mean/peak % |
+|--------|--------|-------|-----------|--------------|----------------------|
+| C3 (+CUDA graph, F64) | 771.3 | 100 400 | true | **2.047** | 97.4 / 100.0 |
+| C4 (+mixed precision) | 491.9 | 100 400 | true | **2.047** | 95.6 / 99.0 |
+
+Both configs converge in 100 400 iterations — the old 80k cap was the only blocker, and the Ghia
+error lands at 2.05%, consistent with the 512² quality (2.31%). C3 and C4 agree to the printed
+digits at 1024², so the mixed-precision rung costs no accuracy here while saving 1.57× wall time.
 
 ## Cross-arch takeaway
 
