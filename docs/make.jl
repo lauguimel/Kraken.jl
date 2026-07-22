@@ -157,6 +157,7 @@ makedocs(;
             "Installation" => "installation.md",
             "Concepts" => "concepts_index.md",
             "Capabilities" => "capabilities.md",
+            "Architecture" => "architecture.md",
             "KRK reference" => "users/krk-reference.md",
         ],
         "Examples" => [

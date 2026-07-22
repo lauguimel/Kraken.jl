@@ -1,13 +1,18 @@
 # Capabilities matrix
 
-This page is the single-source-of-truth for **what Kraken.jl can do today**,
-what is partially implemented, and what is out of scope for v0.1.0. Every
+These are the capabilities of the **mature LBM core** within Kraken's broader
+method-agnostic platform. For how LBM fits the platform — and what is shipped
+versus on the roadmap across methods — see the
+[architecture overview](architecture.md).
+
+This page is the single-source-of-truth for **what the LBM core can do today**,
+what is partially implemented, and what is out of scope for v0.2.0. Every
 entry links to the theory page that derives it, the example that exercises
 it, and the API or .krk reference that documents how to call it.
 
-If a row says **in v0.1.0** it is part of the shipped feature set. Rows
-marked **code present, v0.2.0** exist in the codebase (and in some cases are
-fully tested) but are deliberately excluded from the v0.1.0 publication
+If a row says **in v0.2.0** it is part of the shipped feature set. Rows
+marked **code present, later release** exist in the codebase (and in some cases
+are fully tested) but are deliberately excluded from the v0.2.0 publication
 scope — they will be documented and validated in a later release.
 
 Legend: ✓ = works and tested · ~ = implemented, partial validation ·
@@ -27,7 +32,7 @@ Legend: ✓ = works and tested · ~ = implemented, partial validation ·
 | Body force (Guo forcing) | ✓ | ✓ | ✓ | ✓ | [07](theory/07_body_forces.md) | [Poiseuille 2D](examples/01_poiseuille_2d.md) | [collision](api/collision.md) |
 | Axisymmetric (z, r) | ✓ | — | ✓ | ✓ | [09](theory/09_axisymmetric.md) | [Hagen–Poiseuille](examples/09_hagen_poiseuille.md) | [drivers](api/drivers.md) |
 
-**Limitations:** MRT is D2Q9 only in v0.1.0. D3Q27 not implemented.
+**Limitations:** MRT is D2Q9 only in v0.2.0. D3Q27 not implemented.
 
 ## 2. Boundary conditions
 
@@ -46,7 +51,7 @@ Legend: ✓ = works and tested · ~ = implemented, partial validation ·
 - Expression whitelist: arithmetic, `sin/cos/tan/exp/log/sqrt/abs/clamp`,
   variables `x, y, z, t, Lx, Ly, Lz, Nx, Ny, Nz, dx, dy, dz` + `Define`d vars.
 
-**Limitations:** thermal BCs are scalar only in v0.1.0 (no `T = f(x,y,t)`).
+**Limitations:** thermal BCs are scalar only in v0.2.0 (no `T = f(x,y,t)`).
 Outflow/Neumann/symmetry are recognized by the parser but kernels are
 minimal — use with caution.
 
@@ -64,7 +69,7 @@ minimal — use with caution.
 | Validation vs De Vahl Davis (Ra=1e3) | ✓ 1.4% | — | ✓ 1.4% | ✓ | — | Nu = 1.118 ref |
 | Validation vs Fusegi (3D Ra=1e3) | — | ~ 5% | pending AQUA | ✓ | — | Nu = 1.085 ref |
 
-**Limitations in v0.1.0:**
+**Limitations in v0.2.0:**
 - ν(T) is wired at the **driver** level (`run_natural_convection_2d(; Rc=5)`)
   but **not yet dispatched from .krk**. Adding `Rc = 5` in `Physics {}` does
   not activate the variable-viscosity kernel. Workaround: call the Julia
@@ -107,7 +112,7 @@ domain-boundary rows of 3D patches creates a feedback loop that 2D does
 not exhibit (D2Q9 has only 9 pops and 4-point bilinear stencil, while
 D3Q19 has 19 pops and 8-point trilinear stencil with 5 boundary faces).
 
-Workaround for v0.1.0: use **partial-domain 3D thermal patches**
+Workaround for v0.2.0: use **partial-domain 3D thermal patches**
 (2–3-cell margin from non-thermal walls). Ongoing investigation tracked
 as a v0.2.0 follow-up.
 
@@ -203,10 +208,11 @@ automatically — covers the following:
 **Performance reference (H100):** 7675 MLUPS BGK D2Q9 at N=1024, 24k MLUPS
 with AA+Float32 kernels (see [MLUPS CPU vs GPU](benchmarks/mlups_cpu_gpu.md)).
 
-## 9. Rheology (v0.2.0 scope)
+## 9. Rheology (later-release scope)
 
-The following are **implemented in code and tested** but excluded from v0.1.0
-publication scope. They will be documented in v0.2.0.
+Beyond Oldroyd-B (the shipped, validated viscoelastic model), the following are
+**implemented in code and tested** but excluded from the v0.2.0 publication
+scope. They will be documented and validated in a later release.
 
 | Model | 2D | 3D | GPU | Thermal coupling |
 |---|:-:|:-:|:-:|:-:|
@@ -238,10 +244,10 @@ via Julia's JIT). See `src/rheology/` (models, viscosity, strain_rate).
 
 ---
 
-## Out-of-scope for v0.1.0
+## Out-of-scope for v0.2.0
 
 These features exist in the codebase (tests often pass) but are
-deliberately not documented in v0.1.0:
+deliberately not documented in v0.2.0:
 
 - **Multiphase (VOF + PLIC)** — see `src/kernels/vof_2d.jl`,
   `src/kernels/pressure_vof_2d.jl` · v0.2.0
