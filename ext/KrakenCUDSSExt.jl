@@ -1,9 +1,10 @@
 module KrakenCUDSSExt
 
 # cuDSS (GPU direct sparse) backend for the factorize-once linear-solve seam
-# (issue #8). Loaded by `using CUDSS` (weakdep; CUDA is a strong dep of Kraken
-# listed as an extra trigger so this module may `using CUDA`). Zero impact when
-# CUDA/CUDSS are absent: nothing here is reachable without the trigger.
+# (issue #8). Loaded by `using CUDSS` (weakdep trigger). CUDA is a strong dep
+# of Kraken, usable here directly (Julia >= 1.11 lets extensions use the
+# parent's strong deps — do NOT also list CUDA in [weakdeps], that breaks the
+# ext precompile env). Zero impact when CUDA/CUDSS are absent.
 #
 # ARCHITECTURE NOTE — CUDSS without LinearSolve. This ext routes through
 # Kraken's OWN seam (`lin_factorize`/`lin_solve!` on `CUDABackendTag`), not

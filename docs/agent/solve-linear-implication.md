@@ -152,3 +152,13 @@ result vector per call; despite the `!` it does NOT mutate `b` or the cache
    and MG + cache reuse), `test/analytical/poisson_cudss_gpu.jl` (GPU parity,
    gated on `CUDA.functional()`).
 7. `test/scratch/linear_solve_cache_driver.jl` — cache-reuse parity driver.
+
+## GPU validation + Julia 1.12 packaging landmine (2026-07-22)
+
+- KrakenCUDSSExt validated on RTX A6000 (driver 535, CUDA 12.2 pin): Poisson MMS parity
+  Linf 3.9e-14 (Dirichlet) / 1.6e-12 (Neumann pinned), 3/3 tests.
+- **Landmine (Julia 1.12.6, empirically bisected)**: KrakenCUDSSExt fails to precompile with
+  "Package CUDSS … does not seem to be installed" whenever a SIBLING declared weakdep
+  (Enzyme/CairoMakie/Optim) is NOT installed in the environment. KrakenLinearSolveExt is immune.
+  Workaround: co-install the sibling weakdeps (installing Enzyme fixed it); do NOT list CUDA
+  (strong dep) in [weakdeps] — extensions may use parent strong deps directly since Julia 1.11.
