@@ -1,6 +1,6 @@
 name = "Kraken"
 uuid = "b9c8ae56-6711-4442-a2ee-93cdf3c40864"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Guillaume"]
 
 [deps]
