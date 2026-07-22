@@ -121,6 +121,6 @@ stream_3d!(f_out, f_in, lattice; ndrange=(Nx, Ny, Nz))
 
 ## See in action
 
-- [Lid-driven cavity 3D](../examples/05_cavity_3d.md) — D3Q19 reference
+- [Lid-driven cavity (2D & 3D)](../examples/04_cavity_2d.md) — D3Q19 reference
   case on GPU.
 

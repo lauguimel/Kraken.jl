@@ -234,7 +234,6 @@ function apply_zou_he_west_spatial_2d!(f, ux_arr, uy_arr, Nx, Ny)
     backend = KernelAbstractions.get_backend(f)
     kernel! = zou_he_velocity_west_spatial_2d_kernel!(backend)
     kernel!(f, ux_arr, uy_arr, Ny; ndrange=(Ny,))
-    KernelAbstractions.synchronize(backend)
 end
 ```
 

@@ -1,5 +1,8 @@
 # # Reversed Vortex --- Time-Dependent Advection
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'reversed_vortex.csv',href:'/downloads/reversed_vortex/reversed_vortex.csv'},{label:'reversed_vortex.py',href:'/downloads/reversed_vortex/reversed_vortex.py'}]" />
+# ```
 #
 # ## Problem Statement
 #
@@ -71,7 +74,7 @@
 #
 # Download: [`reversed_vortex.krk`](../assets/krk/reversed_vortex.krk)
 #
-# ```
+# ```krk
 # Simulation reversed_vortex D2Q9
 # Define N = 128
 # Domain L = N x N  N = N x N

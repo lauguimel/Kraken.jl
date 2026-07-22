@@ -26,8 +26,6 @@ u_x(y) = \frac{F_x}{2\nu}\,y\,(H - y)
 
 Measured convergence order: **2.00** (least-squares fit over Ny = 16–128).
 
-![Poiseuille error convergence](../assets/figures/poiseuille_error.png)
-
 ![Poiseuille convergence log-log](../assets/figures/convergence_poiseuille.png)
 
 ### Reproduce
@@ -53,8 +51,6 @@ u_x(x,y,t) = -u_0\,\cos(kx)\,\sin(ky)\,e^{-2\nu k^2 t}
 |   128 |      4.0e-4   |      2.0      |
 
 Measured convergence order: **2.00**.
-
-![Taylor-Green convergence](../assets/figures/taylor_green_convergence.png)
 
 ![Taylor-Green convergence log-log](../assets/figures/convergence_taylor_green.png)
 
@@ -108,8 +104,11 @@ De Vahl Davis (1983).
 |    64 |                         1.093 |                      1.117 |         2.17 % |
 
 The 2.17 % error at N = 64 is consistent with published LBM results at
-this resolution. Higher resolutions and Rayleigh numbers will be added in
-a future benchmark campaign.
+this resolution. It is a coarse spot-check, **not** the headline thermal
+accuracy: the authoritative [Thermal Natural Convection](@ref) benchmark page
+resolves the same de Vahl Davis case in Float64 at 192² and reports
+**Nu = 1.126 vs 1.117 (+0.79 % error)**, staying below 1 % at every Ra
+(10³, 10⁴, 10⁵). Refer to that page for the converged result.
 
 ### Reproduce
 

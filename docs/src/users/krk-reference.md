@@ -313,8 +313,8 @@ Sweep Re = [100, 400, 1000]
 - **`natural_convection` is not a preset.** The thermal-cavity benchmark is built
   from explicit blocks (`Module thermal` + hot/cold `Boundary ... T = ...`), not a
   preset — `_expand_preset` knows only the five names above. The
-  [thermal tutorial](tutorials/thermal-natural-convection.md) writes the case
-  out explicitly. Adding `natural_convection_2d`/`_3d` presets is a natural
+  [thermal natural-convection benchmark](benchmarks/thermal-natural-convection.md)
+  writes the case out explicitly. Adding `natural_convection_2d`/`_3d` presets is a natural
   follow-up.
 - **`Setup` is intentionally open-ended.** Its keys are driver-specific and are
   not enumerated by the parser; treat it as an advanced escape hatch and validate

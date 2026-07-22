@@ -20,23 +20,34 @@ const Colorant = CairoMakie.Colorant
 const OUTDIR = joinpath(@__DIR__, "src", "assets", "showcases")
 mkpath(OUTDIR)
 
-# --- Dark theme (matches the Documenter dark page background #1f2424) ---
+# --- Dark theme (matches the Documenter dark page background #1b1b1f) ---
 
-const BG_DARK    = parse(Colorant, "#1f2424")              # page background
+const BG_DARK    = parse(Colorant, "#1b1b1f")              # page background
 const FG_LIGHT   = RGBf(0.92, 0.92, 0.92)                  # titles / labels / spines
 const FG_DIM     = RGBf(0.55, 0.55, 0.55)                  # ticks / gridlines
 
 # Dark-centred diverging colormap for signed fields: the zero blends into the
 # page background, only strong ± values pop. Replaces the light-centred :RdBu.
 const CMAP_DIVERGING = cgrad([parse(Colorant, "#4ea1d3"),
-                              parse(Colorant, "#1f2424"),
+                              parse(Colorant, "#1b1b1f"),
                               parse(Colorant, "#ff6b6b")])
+
+# High-luminosity diverging map dedicated to the von Karman vortex street:
+# vivid electric cyan on one side, hot magenta/amber on the other, with the
+# page background "#1b1b1f" kept as the exact centre so zero-vorticity regions
+# blend into the dark docs page while the vortices pop brilliantly. 5 stops
+# (bright -> mid -> dark -> mid -> bright) give a richer, more luminous ramp.
+const CMAP_VONKARMAN = cgrad([parse(Colorant, "#22d3ee"),   # electric cyan
+                              parse(Colorant, "#2dd4bf"),   # bright teal
+                              parse(Colorant, "#1b1b1f"),   # page background (zero)
+                              parse(Colorant, "#fb7185"),   # hot rose
+                              parse(Colorant, "#fbbf24")])  # vivid amber
 
 # --- Utility ---
 
 function make_gif(frames::Vector{<:Matrix}, path::String;
                   fps=10, colormap=:viridis, title="",
-                  figsize=(800, 400), clims=nothing)
+                  figsize=(800, 400), clims=nothing, decorate::Bool=true)
     isempty(frames) && return
     # Replace any NaN/Inf with 0
     for f in frames
@@ -52,7 +63,7 @@ function make_gif(frames::Vector{<:Matrix}, path::String;
     end
 
     fig = Figure(; size=figsize, backgroundcolor=BG_DARK)
-    ax = Axis(fig[1, 1]; title=title, aspect=DataAspect(),
+    ax = Axis(fig[1, 1]; title=(decorate ? title : ""), aspect=DataAspect(),
               backgroundcolor=BG_DARK,
               titlecolor=FG_LIGHT,
               xlabelcolor=FG_LIGHT, ylabelcolor=FG_LIGHT,
@@ -63,10 +74,16 @@ function make_gif(frames::Vector{<:Matrix}, path::String;
               xgridcolor=FG_DIM, ygridcolor=FG_DIM)
     obs = Observable(frames[1])
     heatmap!(ax, obs; colormap=colormap, colorrange=(vmin, vmax))
-    Colorbar(fig[1, 2]; colormap=colormap, limits=(vmin, vmax),
-             ticklabelcolor=FG_LIGHT, labelcolor=FG_LIGHT, tickcolor=FG_DIM,
-             leftspinecolor=FG_LIGHT, rightspinecolor=FG_LIGHT,
-             topspinecolor=FG_LIGHT, bottomspinecolor=FG_LIGHT)
+    if decorate
+        Colorbar(fig[1, 2]; colormap=colormap, limits=(vmin, vmax),
+                 ticklabelcolor=FG_LIGHT, labelcolor=FG_LIGHT, tickcolor=FG_DIM,
+                 leftspinecolor=FG_LIGHT, rightspinecolor=FG_LIGHT,
+                 topspinecolor=FG_LIGHT, bottomspinecolor=FG_LIGHT)
+    else
+        # Clean full-bleed variant: no axes/ticks/title/colorbar, just the field.
+        hidedecorations!(ax)
+        hidespines!(ax)
+    end
 
     record(fig, path, 1:length(frames); framerate=fps) do i
         obs[] = frames[i]
@@ -151,8 +168,13 @@ function showcase_vonkarman(; backend=CPU())
         vlim = 1.0  # fallback
     end
     make_gif(frames, joinpath(OUTDIR, "vonkarman_re200.gif");
-             fps=15, colormap=CMAP_DIVERGING, title="Von Karman vortex street (Re=200)",
+             fps=15, colormap=CMAP_VONKARMAN, title="Von Karman vortex street (Re=200)",
              figsize=(800, 300), clims=(-vlim, vlim))
+    # Clean decoration-free hero variant (no axes/ticks/title/colorbar) reusing
+    # the same frames — used full-bleed by the docs hero/CSS at /showcases/.
+    make_gif(frames, joinpath(OUTDIR, "vonkarman_re200_clean.gif");
+             fps=15, colormap=CMAP_VONKARMAN,
+             figsize=(800, 300), clims=(-vlim, vlim), decorate=false)
 end
 
 "Approximate quantile (avoids importing Statistics)."

@@ -1,5 +1,8 @@
 # # Viscoelastic Channel Flow (Oldroyd-B)
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'viscoelastic_channel.csv',href:'/downloads/viscoelastic_channel/viscoelastic_channel.csv'},{label:'viscoelastic_channel.py',href:'/downloads/viscoelastic_channel/viscoelastic_channel.py'}]" />
+# ```
 #
 # ## Problem Statement
 #

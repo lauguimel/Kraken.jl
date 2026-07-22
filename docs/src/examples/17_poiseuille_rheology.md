@@ -4,6 +4,9 @@ EditURL = "17_poiseuille_rheology.jl"
 
 # Non-Newtonian Poiseuille Flow
 
+```@raw html
+<DownloadMenu :files="[{label:'poiseuille_rheology.csv',href:'/downloads/poiseuille_rheology/poiseuille_rheology.csv'},{label:'poiseuille_rheology.py',href:'/downloads/poiseuille_rheology/poiseuille_rheology.py'}]" />
+```
 
 ## Problem Statement
 

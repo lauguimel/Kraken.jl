@@ -192,7 +192,6 @@ function collide_mrt_2d!(f, is_solid, ν; s_e=1.4, s_eps=1.4, s_q=1.2)
     s_nu = T(1.0 / (3.0 * ν + 0.5))
     kernel! = collide_mrt_2d_kernel!(backend)
     kernel!(f, is_solid, T(s_e), T(s_eps), T(s_q), s_nu; ndrange=(Nx, Ny))
-    KernelAbstractions.synchronize(backend)
 end
 ```
 

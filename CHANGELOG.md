@@ -3,6 +3,62 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] — 2026-07-22
+
+### Added
+- **Platform contract layer** (`src/platform/`): `AbstractProblem/Method/Solution/
+  Observable/Closure`, `Capability` enum, and the verbs `solve`/`sample`/`observe`/
+  `predict` — LBM wrapped bit-for-bit; `IncNS` runs under the same contract.
+- **Residual/adjoint seam**: `residual` + `adjoint_vjp` over four parameter natures
+  (geometry, scalar ν, ν(x) field, thermal), delegating to the validated AD paths.
+- **Calibration stack**: `ParameterSpace`, `loss`, `fit` (projected Barzilai–Borwein
+  + Armijo, zero new deps) and `fit(method=:lbfgs)` with Tikhonov regularisation via
+  the `KrakenOptimExt` weak dependency. Twin experiments: scalar ν recovered to 4% in
+  5 iterations; sine ν(y) field to 7.5% rel-L2.
+- **Steady incompressible Navier–Stokes co-solver** (FVFD): SIMPLE/SIMPLEC with
+  2nd-order scalar and momentum convection (implicit upwind + deferred correction),
+  matrix-free multigrid Poisson, steady scalar transport with dedicated BCs.
+- **GPU ablation ladder** (lid-driven cavity): A100 32.9×, H100 44.1× (C3, F64),
+  RTX A6000 36.3× (C4 mixed precision — the winning rung on consumer silicon);
+  1024² converges in 100.4k iterations, Ghia error 2.05%.
+- **LinearSolve.jl front-end + cuDSS direct solve** behind `[weakdeps]`
+  (`solve_poisson_direct`): assembled sparse alternative to the MG path on the same
+  discretization; CPU MMS order 2.00, GPU-validated (parity ≤1.6e-12).
+
+### Changed
+- Documentation reframed method-agnostic (architecture page, maturity table) — the
+  DocumenterVitepress site from the v0.2 line is the canonical doc toolchain.
+
+### Fixed
+- CUDSS extension trigger: CUDA removed from `[weakdeps]` (it is a strong dep;
+  extensions use parent strong deps since Julia 1.11). Known Julia 1.12 caveat
+  documented: sibling declared weakdeps must be co-installed for the CUDSS
+  extension to precompile.
+
+## v0.2.1
+
+Documentation patch — no functional or source changes.
+
+- Landing page: reworked navigation and the "What Kraken can do" capability grid.
+- Examples: per-example `.krk` download dropdowns; boundary-condition schematics
+  redrawn with a shared toolkit.
+- DocumenterVitepress theme polish (custom CSS); `.krk` syntax highlighting;
+  velocity-field lead plots; axisymmetric reference; theory-page cleanups.
+
+## v0.2.0
+
+Multiphysics release.
+
+- **Units module** (LU ↔ physical): explicit conversion between lattice
+  units and physical SI quantities for setup and post-processing.
+- **Geometry / STL immersed boundary**: arbitrary solid geometries via STL
+  import with cut-link (interpolated bounce-back) boundary treatment.
+- **Viscoelastic Oldroyd-B cylinder**: validated to within <1% of RheoTool
+  reference drag.
+- **Thermal natural convection**: validated against the de Vahl Davis
+  differentially heated cavity benchmark.
+- **GPU certification**: reference benchmarks certified on GPU backends.
+
 ## [0.1.0] — 2026-04-14
 
 ### Added (since audit, 2026-04-13/14)

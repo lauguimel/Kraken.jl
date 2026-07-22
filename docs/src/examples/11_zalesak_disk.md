@@ -4,6 +4,9 @@ EditURL = "11_zalesak_disk.jl"
 
 # Zalesak Disk --- VOF Advection Test
 
+```@raw html
+<DownloadMenu :files="[{label:'zalesak.csv',href:'/downloads/zalesak/zalesak.csv'},{label:'zalesak.py',href:'/downloads/zalesak/zalesak.py'}]" />
+```
 
 ## Problem Statement
 
@@ -73,7 +76,7 @@ extends downward from the disk centre.
 
 Download: [`zalesak.krk`](../assets/krk/zalesak.krk)
 
-```
+```krk
 Simulation zalesak D2Q9
 Define N = 100
 Define R = 15

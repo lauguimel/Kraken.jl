@@ -5,12 +5,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A GPU-portable Lattice Boltzmann (LBM) framework written in Julia, targeting
-single-phase incompressible and thermal flows on CPU, CUDA, and Apple Metal
-backends. Kraken.jl provides a compact kernel core (D2Q9, D3Q19), a
+single-phase incompressible, thermal, and viscoelastic flows on CPU, CUDA, and
+Apple Metal backends. Kraken.jl provides a compact kernel core (D2Q9, D3Q19), a
 declarative `.krk` configuration DSL, patch-based grid refinement, and
 spatial boundary conditions — all behind a small, hackable API.
 
-## Scope (v0.1.0)
+## Scope (v0.2.0)
 
 - Single-phase LBM in 2D and 3D (BGK and MRT collisions)
 - Thermal flows via double-distribution (DDF) coupling
@@ -18,9 +18,12 @@ spatial boundary conditions — all behind a small, hackable API.
 - Spatial boundary conditions (Zou–He, bounce-back, periodic, outflow)
 - `.krk` configuration DSL for parametric runs
 - GPU-portable kernels via `KernelAbstractions.jl` (CPU / CUDA / Metal)
+- Viscoelastic Oldroyd-B (log-conformation) — validated to <1% vs RheoTool on the confined cylinder
+- Physical ↔ lattice unit-conversion module; STL / analytical immersed-boundary geometry
 
-Multiphase flows, non-Newtonian rheology, and viscoelastic models are
-present in the source tree but are not part of the v0.1.0 public API.
+Multiphase flows and the broader non-Newtonian rheology family are present in
+the source tree but remain experimental and are not part of the validated
+v0.2.0 surface.
 
 For a complete, up-to-date feature matrix — with status (✓/~/✗), links to
 theory pages, examples, and API — see the
@@ -101,7 +104,7 @@ If you use Kraken.jl in academic work, please cite:
   title   = {Kraken.jl: a GPU-portable Lattice Boltzmann framework in Julia},
   year    = {2026},
   url     = {https://github.com/lauguimel/Kraken.jl},
-  version = {0.1.0},
+  version = {0.2.0},
 }
 ```
 

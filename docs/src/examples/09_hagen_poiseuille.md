@@ -4,6 +4,10 @@ EditURL = "09_hagen_poiseuille.jl"
 
 # Hagen--Poiseuille Flow (Axisymmetric)
 
+```@raw html
+<DownloadMenu :files="[{label:'hagen_poiseuille.krk',href:'/downloads/hagen_poiseuille/hagen_poiseuille.krk'},{label:'hagen_poiseuille.csv',href:'/downloads/hagen_poiseuille/hagen_poiseuille.csv'},{label:'hagen_poiseuille.py',href:'/downloads/hagen_poiseuille/hagen_poiseuille.py'}]" />
+```
+
 **Concepts:** [Axisymmetric LBM](../theory/09_axisymmetric.md) ·
 [Body forces](../theory/07_body_forces.md)
 
@@ -142,7 +146,7 @@ We extract the axial velocity profile ``u_z(r)`` from a cross-section and
 compare it to the analytical parabola.
 
 ```julia
-R_eff   = Nr - 0.5                            # effective radius (half-way BB)
+R_eff   = Nr                                  # pipe radius: half-way BB wall at j=Nr
 j_fluid = 1:Nr                                # all nodes: axis to wall
 r_phys  = [j - 0.5 for j in j_fluid]          # physical radial coordinate
 u_ana   = [Fz / (4ν) * (R_eff^2 - r^2) for r in r_phys]
@@ -185,7 +189,7 @@ errors  = Float64[]
 for Nr_i in Nr_list
     ρ_i, uz_i, _, _ = run_hagen_poiseuille_2d(;
         Nz=4, Nr=Nr_i, ν=ν, Fz=Fz, scheme=:li, max_steps=30000)
-    R_i  = Nr_i - 0.5
+    R_i  = Nr_i
     jf   = 1:Nr_i
     u_a  = [Fz / (4ν) * (R_i^2 - (j - 0.5)^2) for j in jf]
     u_n  = [uz_i[2, j] for j in jf]

@@ -200,7 +200,6 @@ function prolongate_f_rescaled_2d!(f_fine, f_coarse, rho_c, ux_c, uy_c,
             ratio, Nx_inner, Ny_inner, n_ghost,
             i_c_start, j_c_start, Nx_c, Ny_c, alpha;
             ndrange=(Nx_f, Ny_f))
-    KernelAbstractions.synchronize(backend)
 end
 ```
 
