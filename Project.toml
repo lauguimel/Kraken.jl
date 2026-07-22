@@ -18,19 +18,26 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
 [weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CUDSS = "45b445bb-4962-46a0-9369-b3df9d0f772e"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 
 [extensions]
 KrakenADExt = "Enzyme"
+KrakenCUDSSExt = ["CUDSS", "CUDA"]
+KrakenLinearSolveExt = "LinearSolve"
 KrakenMakieExt = "CairoMakie"
 KrakenOptimExt = "Optim"
 
 [compat]
 Atomix = "1.1.3"
 CUDA = "5"
+CUDSS = "0.3, 0.4, 0.5, 0.6"
 Enzyme = "0.13.138"
+LinearSolve = "2.30, 3"
 Optim = "2"
 FFTW = "1.10.0"
 ForwardDiff = "0.10, 1"
@@ -47,7 +54,8 @@ julia = "1.10"
 [extras]
 Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "KernelAbstractions", "Enzyme"]
+test = ["Test", "KernelAbstractions", "Enzyme", "LinearSolve"]

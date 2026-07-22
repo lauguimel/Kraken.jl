@@ -94,8 +94,13 @@ include("solve/poisson.jl")
 include("solve/poisson_embedded.jl")
 include("solve/poisson_embedded_fvfd.jl")
 include("solve/poisson_mg.jl")
+# LinearSolve.jl / cuDSS front-end tags + assembled-direct driver; the backend
+# methods live in ext/KrakenLinearSolveExt.jl and ext/KrakenCUDSSExt.jl
+# ([weakdeps] — `using Kraken` stays backend-free).
+include("solve/linear_solve_frontend.jl")
 # NOT included: solve/linear_solve_cuda.jl and methods/inc_ns/cavity_mg_cuda.jl
-# (CUDSS is not a package dependency; they stay manual-load inside GPU jobs).
+# (CUDSS is not a package dependency; they stay manual-load inside GPU jobs.
+#  Package users get the same cuDSS seam via ext/KrakenCUDSSExt.jl instead).
 include("methods/inc_ns/simple.jl")
 include("methods/inc_ns/cavity.jl")
 include("methods/inc_ns/cavity_mg.jl")
@@ -113,6 +118,8 @@ export solve_incns_simple, solve_incns_cavity, solve_incns_cavity_mg,
 # Linear-solve seam (factorize-once)
 export lin_factorize, lin_solve!, LinearSolveCache, LinearSolveBackend,
        CPUBackendTag, CUDABackendTag
+# LinearSolve.jl / cuDSS front-ends (ext-backed; see [weakdeps])
+export PoissonLinearSolve, solve_poisson_direct
 # Elliptic (Poisson) services
 export solve_poisson_dirichlet, solve_poisson_neumann, pin_reference_dof,
        assemble_poisson_embedded, solve_poisson_embedded,

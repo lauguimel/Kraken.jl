@@ -1,9 +1,9 @@
 ---
 module: solve-linear
-path: src/solve/linear_solve.jl; src/solve/linear_solve_cuda.jl
+path: src/solve/linear_solve.jl; src/solve/linear_solve_cuda.jl; src/solve/linear_solve_frontend.jl; ext/KrakenLinearSolveExt.jl; ext/KrakenCUDSSExt.jl
 owner_concern: backend-dispatch
 status: implemented
-last_verified: 2026-06-11
+last_verified: 2026-07-22
 depends_on:
   - solve-poisson
 ---
@@ -20,7 +20,22 @@ loaded ONLY inside a job that already did `using CUDA, CUDSS`. **Registered in
 `src/Kraken.jl` THROUGH the tail-include in `solve/poisson.jl`** (the file has
 NO self-guard — never include it directly in `Kraken.jl`); seam names exported
 (`lin_factorize`, `lin_solve!`, `LinearSolveCache`, backend tags).
-`linear_solve_cuda.jl` stays manual-load.
+`linear_solve_cuda.jl` stays manual-load (bench scripts); package users get the
+SAME cuDSS seam through the `KrakenCUDSSExt` package extension instead.
+
+Issue #8 adds two [weakdeps] package-extension backends behind the seam
+(ADR rule: no solver-backend dependency under plain `using Kraken`; precedent
+KrakenOptimExt): `KrakenLinearSolveExt` (trigger `LinearSolve`) backs the new
+`PoissonLinearSolve` tag, and `KrakenCUDSSExt` (triggers `CUDSS` + `CUDA`;
+CUDA is a strong dep listed as an extra trigger so the ext may `using CUDA`)
+backs `CUDABackendTag` for package users. The exts are INDEPENDENT — cuDSS is
+reached through Kraken's own seam, NOT through LinearSolve's CUDSS bindings,
+so either loads without the other. `src/solve/linear_solve_frontend.jl` holds
+the CPU-only tag + ext-indirection stubs (`_ls_factorize`/`_ls_solve!`/
+`_cudss_factorize`, the `_fit_lbfgs` stub-error pattern — no method
+overwriting) and the assembled-direct driver `solve_poisson_direct`, the
+drop-in alternative to `solve_poisson_mg` on the SAME poisson.jl
+discretization.
 
 ## Public surface
 
@@ -34,6 +49,26 @@ NO self-guard — never include it directly in `Kraken.jl`); seam names exported
   pinned if applicable), `A_unpinned` (for RHS pinning), `pin_k0`, `spd`.
 - Tags: `LinearSolveBackend` (abstract), `CPUBackendTag`, `CUDABackendTag`.
   New backend = new tag + the two methods.
+- `PoissonLinearSolve(; alg=nothing, kwargs...) <: LinearSolveBackend` —
+  seam tag for the LinearSolve.jl route (ext-backed). `alg=nothing` picks
+  `CHOLMODFactorization()` (`spd=true`) / `UMFPACKFactorization()`
+  (`spd=false`), mirroring the CPU seam; `kwargs` forward to
+  `LinearSolve.init`. The ext caches a `LinearSolve.init` problem in
+  `LinearSolveCache.factor`; factorization happens at first `lin_solve!` and
+  is reused per RHS (same factorize-once contract).
+- `solve_poisson_direct(f, N; bc=:dirichlet, method=PoissonLinearSolve(),
+  k0=1) -> Matrix{Float64}` — assembled direct alternative to
+  `solve_poisson_mg` on the SAME 5-point discretization (poisson.jl
+  assemblers). `bc=:neumann` pins DOF `k0` to 0 (zero-anchored gauge —
+  zero-mean both fields before MMS comparison). `method` accepts any
+  `LinearSolveBackend`: `PoissonLinearSolve()` (needs `using LinearSolve`),
+  `CPUBackendTag()` (built-in CHOLMOD), `CUDABackendTag()` (needs
+  `using CUDA, CUDSS`; result gathered back to host).
+- `KrakenCUDSSExt` additions: host-matrix `lin_factorize(A_csc;
+  backend=CUDABackendTag(), pin_k0)` (pins on CPU, uploads BOTH matrices,
+  cuDSS-factorizes) and a `CuSparseMatrixCSR` generic keyword entry — plus the
+  same `CUDABackendTag` seam methods as the manual-load file (which attaches
+  to the INCLUDING module, so no method clash).
 - CUDA companion (`linear_solve_cuda.jl`): the `CUDABackendTag` methods for
   `CuSparseMatrixCSR{Float64,Int32}` via CUDSS.jl (`cholesky/ldlt/lu(A)` once,
   `ldiv!` per RHS). The CUDA `lin_factorize` takes the ALREADY-PINNED matrix
@@ -90,6 +125,14 @@ result vector per call; despite the `!` it does NOT mutate `b` or the cache
 - The CUDA file at include time asserts nothing about CUDSS versions; the cache
   `factor` field is `Any`-typed via the type parameter, so an API rename in
   CUDSS surfaces at `ldiv!`, not at include.
+- **Ext not loaded**: `PoissonLinearSolve` seam calls error with a
+  `using LinearSolve` hint; `lin_factorize(A_csc; backend=CUDABackendTag())`
+  errors with a `using CUDA, CUDSS` hint (stub fallbacks in
+  `linear_solve_frontend.jl`). A `MethodError` instead of these hints means a
+  call bypassed the documented entries.
+- **Weakdeps gotcha**: after adding/altering [weakdeps], run `Pkg.resolve()`
+  before `Pkg.precompile()` (same as the KrakenOptimExt rollout) or the ext
+  will silently not load.
 
 ## Touch order
 
@@ -101,4 +144,11 @@ result vector per call; despite the `!` it does NOT mutate `b` or the cache
    drift.
 4. Consumers if the seam is fine: `src/methods/inc_ns/simple.jl`
    (`_incns_factorise`/`_incns_solve!`), `benchmarks/krk/inc_ns/poisson_gpu_bench.jl`.
-5. `test/scratch/linear_solve_cache_driver.jl` — cache-reuse parity driver.
+5. `src/solve/linear_solve_frontend.jl` — tag/stub/driver layer
+   (`PoissonLinearSolve`, `solve_poisson_direct`, ext indirection).
+6. `ext/KrakenLinearSolveExt.jl` / `ext/KrakenCUDSSExt.jl` — ext-backend
+   failures (LinearSolve API drift, cuDSS upload/pinning). Receipts:
+   `test/analytical/poisson_linearsolve_mms.jl` (CPU MMS + parity vs CHOLMOD
+   and MG + cache reuse), `test/analytical/poisson_cudss_gpu.jl` (GPU parity,
+   gated on `CUDA.functional()`).
+7. `test/scratch/linear_solve_cache_driver.jl` — cache-reuse parity driver.

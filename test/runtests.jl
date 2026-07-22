@@ -22,6 +22,26 @@ function run_incns_testset()
         include("analytical/poisson_embedded_mms.jl")
         include("analytical/poisson_embedded_fvfd_mms.jl")
 
+        # LinearSolve.jl front-end (weakdep ext). Guard the LOAD, not the
+        # tests (Enzyme-guard pattern), so real ext failures still surface
+        # when LinearSolve IS present in the environment.
+        let ls_ok = try
+                @eval Main using LinearSolve
+                true
+            catch
+                false
+            end
+            if ls_ok
+                include("analytical/poisson_linearsolve_mms.jl")
+            else
+                @info "Skipping LinearSolve front-end tests (LinearSolve not loadable in this environment)"
+            end
+        end
+
+        # cuDSS GPU direct path (weakdep ext) — self-gated on CUDA.functional()
+        # inside the file; skips cleanly on CPU-only boxes.
+        include("analytical/poisson_cudss_gpu.jl")
+
         # FVFD velocity-operator trio (grad/div/laplacian + embedded variants).
         include("analytical/incns_grad_div_laplacian_mms.jl")
 
