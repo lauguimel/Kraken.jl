@@ -103,6 +103,12 @@ const GHIA_DATA = Dict(100 => GHIA_RE100_UX, 1000 => GHIA_RE1000_UX)
 const SMOKE = get(ENV, "CAVITY_BENCH_SMOKE", "") in ("1", "true", "TRUE")
 const WANT_1024 = get(ENV, "CAVITY_BENCH_1024", "") in ("1", "true", "TRUE")
 const WANT_1024_C0 = get(ENV, "CAVITY_BENCH_1024_C0", "") in ("1", "true", "TRUE")
+# 1024-only mode: skip the CPU reference and the 512^2 ladder, run 1024^2
+# directly on the configs in CAVITY_BENCH_1024_CONFIGS (comma-separated ids).
+# No speedup/parity columns (they need the reference); convergence + Ghia only.
+const ONLY_1024 = get(ENV, "CAVITY_BENCH_1024_ONLY", "") in ("1", "true", "TRUE")
+const CONFIGS_1024 = split(get(ENV, "CAVITY_BENCH_1024_CONFIGS", "C3,C4"), ",")
+const MAXITER_1024 = parse(Int, get(ENV, "CAVITY_BENCH_1024_MAXITER", "80000"))
 
 # Max-relative parity over the solution fields u, v, p vs the CPU reference.
 const PARITY_TOL = 1e-3
@@ -119,7 +125,7 @@ function bench_case()
 end
 
 case_1024() = (N=1024, Re=1000.0, relax=(u=0.5, p=0.2),
-               tol=1e-7, vel_tol=1e-6, maxiter=80000)
+               tol=1e-7, vel_tol=1e-6, maxiter=MAXITER_1024)
 
 # ---------------------------------------------------------------------------
 # The CUMULATIVE ablation ladder. `solver` are the kwargs layered on top of the
@@ -361,6 +367,41 @@ function main()
     println("    parity = max-rel over u/v/p fields vs CPU reference, target < $(PARITY_TOL)")
     println("    GPU available: $(_GPU_OK), graph wrapper loaded: $(_GRAPH_LOADED)")
     println()
+
+    # --- 1024-only mode: no CPU reference, no 512^2 ladder ---
+    if ONLY_1024 && !SMOKE
+        if !_GPU_OK
+            println("1024-only mode requested but no functional CUDA: abort.")
+            return
+        end
+        c1k = case_1024()
+        println("    MODE: 1024-ONLY — configs $(join(CONFIGS_1024, ", ")), maxiter=$(c1k.maxiter), no CPU ref")
+        cfgs = ablation_configs()
+        rows = Any[]
+        for id in CONFIGS_1024
+            idx = findfirst(x -> x.id == strip(id), cfgs)
+            if idx === nothing
+                println("    unknown config id '$(id)' — skipped")
+                continue
+            end
+            cfg = cfgs[idx]
+            if cfg.graph && !_GRAPH_LOADED
+                push!(rows, skip_row(cfg, c1k, "graph wrapper not loadable"))
+                continue
+            end
+            push!(rows, run_config(cfg, c1k; ref=nothing, gpu=true))
+        end
+        print_table(rows)
+        ran1k = [r for r in rows if r.status == :ok]
+        conv1k = !isempty(ran1k) && all(r.converged for r in ran1k)
+        ghia1k_ok = all(r.ghia < 8.0 for r in ran1k if !isnan(r.ghia))
+        if conv1k && ghia1k_ok
+            println("STATUS: GREEN — all 1024^2 configs converged, Ghia-err < 8%.")
+        else
+            println("STATUS: RED — non-converged or Ghia-err >= 8% at 1024^2.")
+        end
+        return (conv1k && ghia1k_ok) ? 0 : 1
+    end
 
     # --- CPU reference (legacy kwargs): speed-up denominator + parity fields ---
     legacy = (norm_stride=1, mg_cycles=0)
