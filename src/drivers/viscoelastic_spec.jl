@@ -14,25 +14,25 @@
     AbstractPolymerModel
 
 Constitutive closure mapping conformation tensor C to polymer stress τ_p.
-Concrete subtypes: `OldroydB`, `FENEP` (planned), `Giesekus` (planned).
+Concrete subtypes: `OldroydBSpec`, `FENEP` (planned), `Giesekus` (planned).
 """
 abstract type AbstractPolymerModel end
 
 """
-    OldroydB(; G, λ)
+    OldroydBSpec(; G, λ)
 
 Linear Oldroyd-B: τ_p = G · (C − I) with G = ν_p / λ.
 - `G`: polymer shear modulus
 - `λ`: polymer relaxation time
 """
-struct OldroydB{T<:AbstractFloat} <: AbstractPolymerModel
+struct OldroydBSpec{T<:AbstractFloat} <: AbstractPolymerModel
     G::T
     λ::T
 end
-OldroydB(; G, λ) = OldroydB(promote(float(G), float(λ))...)
+OldroydBSpec(; G, λ) = OldroydBSpec(promote(float(G), float(λ))...)
 
-polymer_modulus(m::OldroydB) = m.G
-polymer_relaxation_time(m::OldroydB) = m.λ
+polymer_modulus(m::OldroydBSpec) = m.G
+polymer_relaxation_time(m::OldroydBSpec) = m.λ
 
 """
     LogConfOldroydB(; G, λ)
@@ -72,7 +72,7 @@ In-place update τ_p ← f(C) from the constitutive closure.
 """
 function update_polymer_stress!(τ_p_xx, τ_p_xy, τ_p_yy,
                                   C_xx, C_xy, C_yy,
-                                  m::OldroydB)
+                                  m::OldroydBSpec)
     G = eltype(τ_p_xx)(m.G)
     if iszero(G)
         fill!(τ_p_xx, zero(eltype(τ_p_xx)))
