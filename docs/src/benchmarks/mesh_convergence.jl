@@ -17,6 +17,33 @@ using Kraken
 using CairoMakie
 using Printf
 
+# ### Dark docs theme
+#
+# Render the convergence figure on the live Vitepress page colour (``#1b1b1f``)
+# with light text/ticks/spines/grid and a dark-readable legend so it sits
+# seamlessly on the dark page.
+
+const KRAKEN_DARK = "#1b1b1f"
+set_theme!(Theme(
+    backgroundcolor = KRAKEN_DARK,
+    textcolor = "gray92",
+    Axis = (
+        backgroundcolor = KRAKEN_DARK,
+        titlecolor = "gray92",
+        xlabelcolor = "gray92", ylabelcolor = "gray92",
+        xticklabelcolor = "gray85", yticklabelcolor = "gray85",
+        xtickcolor = "gray70", ytickcolor = "gray70",
+        xgridcolor = ("gray60", 0.18), ygridcolor = ("gray60", 0.18),
+        xminorgridcolor = ("gray60", 0.10), yminorgridcolor = ("gray60", 0.10),
+        leftspinecolor = "gray55", rightspinecolor = "gray55",
+        topspinecolor = "gray55", bottomspinecolor = "gray55",
+    ),
+    Legend = (
+        backgroundcolor = KRAKEN_DARK, labelcolor = "gray92",
+        titlecolor = "gray92", framecolor = "gray45",
+    ),
+))
+
 # ### Resolutions to test
 #
 # We use small Nx (streamwise is not the convergence direction) and vary Ny
@@ -142,7 +169,7 @@ scatterlines!(ax, dx_tg,      errors_tg;      label="Taylor-Green",  marker=:dia
 ## Reference slope: O(Δx²)
 dx_ref = [dx_channel[1], dx_channel[end]]
 e_ref  = errors_pois[1] .* (dx_ref ./ dx_ref[1]).^2
-lines!(ax, dx_ref, e_ref; color=:gray, linestyle=:dash, label="slope −2")
+lines!(ax, dx_ref, e_ref; color="gray70", linestyle=:dash, label="slope −2")
 
 axislegend(ax; position=:rb)
 fig

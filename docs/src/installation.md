@@ -65,11 +65,15 @@ CUDA.versioninfo()
 ```julia
 using Kraken
 
-# Check available backends
+# Check the available compute backends (CPU + any detected GPU)
 available_backends()
 
-# Run a quick test
-run_cavity(; N=32, Re=100.0, dt=0.001, nsteps=100)
+# Run a tiny lid-driven cavity as a smoke test
+config = LBMConfig(D2Q9(); Nx=32, Ny=32, ν=0.1, u_lid=0.1, max_steps=100)
+run_cavity_2d(config)
 ```
 
-If the cavity simulation completes without errors, Kraken.jl is correctly installed.
+If the cavity simulation completes without errors, Kraken.jl is correctly
+installed. From here, head to [Getting started](getting_started.md) for your
+first real simulation, or to the [`.krk` overview](krk/overview.md) to describe
+a run declaratively.

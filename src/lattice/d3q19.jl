@@ -49,6 +49,18 @@ const _D3Q19_OPP = SVector{19, Int32}(
 weights(::D3Q19) = _D3Q19_W
 velocities_x(::D3Q19) = _D3Q19_CX
 velocities_y(::D3Q19) = _D3Q19_CY
+"""
+    velocities_z(::D3Q19)
+
+Public function in the lattice trait API.
+See the method definition below for argument requirements, array layout, and backend expectations.
+
+```julia
+using Kraken
+
+methods(Kraken.velocities_z)
+```
+"""
 velocities_z(::D3Q19) = _D3Q19_CZ
 opposite(::D3Q19) = _D3Q19_OPP
 

@@ -1,0 +1,74 @@
+#!/bin/bash -l
+# 3D natural-convection — the single HEAVY case: N=128, Float64, Aqua (PBS Pro), CUDA.
+#
+# This is the top rung of the Ra=1e5 mesh ladder claimed on
+# docs/src/users/benchmarks/thermal-natural-convection.md §"3D — cubic cavity"
+# ("HPC-class"). Split out from natconv_3d_meshladder_aqua.pbs because the 128^3
+# F64 working set wants the headroom of an 80GB GPU.
+#
+# GPU-memory gotcha: `gpu_mem=60gb` is the documented selector that lands the job
+# on an 80GB A100/H100 (the shorthand `gpu_mem=60gb` is accepted; a bare
+# `gpu_id=...` with no memory hint may land on a 40GB card).
+#
+# Footprint estimate (D3Q19 x 2 distributions, 128^3 = 2.097M cells, F64):
+#   f_in+f_out+g_in+g_out = 4 * 19 * 2.097M * 8 B  ~= 1.27 GB (device)
+#   macros rho,ux,uy,uz,Temp = 5 * 2.097M * 8 B    ~= 0.08 GB
+#   host g_cpu staging (transient)                  ~= 0.32 GB
+#   total device << 40 GB; 80 GB is comfort headroom, not a hard need.
+#
+# Submit (Boss runs this — do NOT auto-submit):
+#   qsub hpc/natconv_3d_128_f64_aqua.pbs
+#   # Ra-subset, e.g. only the top rung:
+#   qsub -v KRK_NC3D_RALIST=1e5 hpc/natconv_3d_128_f64_aqua.pbs
+#
+#PBS -N kraken_nc3d_128_f64
+#PBS -l select=1:ncpus=8:ngpus=1:mem=48GB:gpu_mem=60gb
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -V
+
+set -euo pipefail
+
+WORKDIR="${PBS_O_WORKDIR:-$HOME/Kraken.jl}"
+cd "$WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-8}"
+if ! command -v julia >/dev/null 2>&1; then
+    module load Julia/1.10.4-linux-x86_64
+fi
+
+export KRK_NC3D_BACKEND="${KRK_NC3D_BACKEND:-cuda}"
+export KRK_NC3D_FT="${KRK_NC3D_FT:-float64}"
+export KRK_NC3D_NLIST="${KRK_NC3D_NLIST:-128}"
+export KRK_NC3D_RALIST="${KRK_NC3D_RALIST:-1e3,1e4,1e5}"
+export KRK_NC3D_STEPMULT="${KRK_NC3D_STEPMULT:-18}"
+export KRK_NC3D_OUT="${KRK_NC3D_OUT:-$WORKDIR/benchmarks/results/repro/thermal/kraken_natconv_3d_128_f64_${PBS_JOBID%%.*}.csv}"
+
+echo "========================================"
+echo "Job:        ${PBS_JOBID:-local}"
+echo "Node:       $(hostname)"
+echo "GPU:        $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo N/A)"
+echo "Start:      $(date)"
+echo "Precision:  $KRK_NC3D_FT  N list: $KRK_NC3D_NLIST  Ra list: $KRK_NC3D_RALIST"
+echo "Output CSV: $KRK_NC3D_OUT"
+echo "========================================"
+
+nvidia-smi || true
+
+julia --project=. -e 'using Pkg; Pkg.instantiate(); using CUDA; CUDA.versioninfo()'
+
+LOG="$WORKDIR/hpc/natconv_3d_128_f64_${PBS_JOBID%%.*}.log"
+set -o pipefail
+julia --project=. benchmarks/natconv_3d_meshladder_sweep.jl 2>&1 | tee "$LOG"
+rc=${PIPESTATUS[0]}
+
+echo "========================================"
+echo "End:    $(date)"
+echo "Exit:   $rc"
+echo "Result: $KRK_NC3D_OUT"
+ls -lh "$KRK_NC3D_OUT" 2>/dev/null || echo "  (CSV not written — check log)"
+echo "========================================"
+
+exit $rc

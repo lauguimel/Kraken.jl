@@ -1,0 +1,3 @@
+flow,method,Nx,Ny,steps,ux_mean,uy_mean,mass_rel_drift,elapsed_s
+bfs,leaf_oracle,28,14,1200,2.375161143159e-02,-1.731916587404e-03,4.929136760746e-03,1.312493
+bfs,amr_route_native,28,14,1200,2.395427811713e-02,-1.734692472595e-03,9.349271034317e-03,0.865988

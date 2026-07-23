@@ -1,0 +1,18 @@
+# M-GEO-7 3D sphere drag case (raw LU, Re=20) — mirrors the validated
+# analytic-sphere scaffold (run_sphere_libb_3d / test_sphere_libb.jl):
+# R_LU=8, blockage 16/60 ~ 27%, u_in=0.04, nu=u_in*2R/Re=0.032.
+# The STL sphere is centred at LU (30,30,30) = (Nx/4, Ny/2, Nz/2).
+
+Simulation mgeo7_sphere_drag D3Q19
+
+Domain L = 120 x 60 x 60  N = 120 x 60 x 60
+Physics nu = 0.032
+
+Obstacle sph wall=libb stl(file = "examples/geometry_stl/sphere_drag.stl")
+
+Boundary west  velocity(ux = 0.04, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 10000 steps

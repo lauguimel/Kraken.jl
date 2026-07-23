@@ -1,9 +1,11 @@
 # I/O and diagnostics
 
-I/O utilities write simulation state to ParaView-compatible VTK files
-(rectilinear grids in 2D/3D) and to `.pvd` time-series collections. The
-`DiagnosticsLogger` writes one CSV row per probe step; `setup_output_dir`
-centralises run-directory creation.
+I/O utilities write simulation state to ParaView-compatible VTK
+files (rectilinear grid in 2D/3D, multi-block for refined domains)
+and to `.pvd` time-series collections. The `DiagnosticsLogger`
+writes one CSV row per probe step (residuals, drag, Nusselt, …);
+`setup_output_dir` centralises run-directory creation and
+optional cleanup.
 
 
 ## Quick reference
@@ -16,6 +18,8 @@ centralises run-directory creation.
 | `setup_output_dir` | Create (or clean) a run output directory |
 | `write_snapshot_2d!` | Write one 2D macroscopic snapshot (VTK) |
 | `write_snapshot_3d!` | Write one 3D macroscopic snapshot (VTK) |
+| `write_vtk_multiblock` | Write a multi-block VTK (e.g. refined patches) |
+| `write_snapshot_refined_2d!` | Write a refined-domain snapshot |
 | `DiagnosticsLogger` | CSV diagnostics log descriptor |
 | `open_diagnostics` | Open a `DiagnosticsLogger` |
 | `log_diagnostics!` | Append one row (step, residuals, etc.) |
@@ -107,4 +111,5 @@ mutable struct DiagnosticsLogger
     columns::Vector{String}
 end
 ```
+
 

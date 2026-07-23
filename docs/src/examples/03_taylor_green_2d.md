@@ -4,17 +4,22 @@ EditURL = "03_taylor_green_2d.jl"
 
 # Taylor--Green Vortex (2D)
 
+```@raw html
+<DownloadMenu :files="[{label:'taylor_green.krk',href:'/downloads/taylor_green/taylor_green.krk'},{label:'taylor_green.csv',href:'/downloads/taylor_green/taylor_green.csv'},{label:'taylor_green.py',href:'/downloads/taylor_green/taylor_green.py'}]" />
+```
+
 **Concepts:** [LBM fundamentals](../theory/01_lbm_fundamentals.md) ·
 [BGK collision](../theory/03_bgk_collision.md)
 
-**Validates against:** analytical exponential decay
-``u(t) = u_0\,\exp(-2\nu k^2 t)``
+**Validates against:** analytical exponential decay of the velocity amplitude
+``u(t) = u_0\,\exp(-2\nu k^2 t)`` (hence the kinetic energy ``\propto u^2``
+decays as ``E(t) = E_0\,\exp(-4\nu k^2 t)``)
 
-**Download:** <a href="../assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
+**Download:** [`taylor_green.krk`](../assets/krk/taylor_green.krk)
 
-**Hardware:** local CPU baseline, ~5s wall-clock at N = 64×64
+**Hardware:** Apple M3 Max, ~5s wall-clock at N = 64×64
 
-![Taylor-Green vorticity](../assets/figures/taylor_green_vorticity.png)
+![Velocity magnitude field of the Taylor-Green vortex.  The four counter-rotating vortices appear as a regular array of fast-flowing rings separated by quiet stagnation points, the sinusoidal pattern preserved as the field decays in place.](taylor_green_umag.svg)
 
 ---
 
@@ -134,9 +139,9 @@ regime where numerical dissipation is most visible.
 
 ## Simulation File
 
-Download: <a href="../assets/krk/taylor_green.krk" download><code>taylor_green.krk</code></a>
+Download: [`taylor_green.krk`](../assets/krk/taylor_green.krk)
 
-```
+```krk
 # Taylor-Green vortex decay in a fully periodic domain
 # Validation: exponential decay rate exp(-2*nu*k^2*t)
 
@@ -194,7 +199,10 @@ exponential decay ``E(t) = E_0 \exp(-4\nu k^2 t)``.
 steps_list = 0:200:2000
 E_num = Float64[]
 E_ana = Float64[]
-E0    = 0.5 * u0^2
+# MEAN kinetic-energy density of u = u0·(−cos kx sin ky, sin kx cos ky):
+# ⟨½(ux²+uy²)⟩ = u0²/4 (the cos²/sin² spatial averages each give ¼).
+# NOT the peak ½u0², which would sit 2× above the measured energy.
+E0    = u0^2 / 4
 
 for s in steps_list
     if s == 0
@@ -209,18 +217,9 @@ for s in steps_list
     end
     push!(E_ana, E0 * exp(-4ν * k^2 * s))
 end
-
-using CairoMakie
-fig = Figure(size=(500, 400))
-ax = Axis(fig[1, 1], xlabel="Time step", ylabel="Kinetic energy", title="Taylor–Green energy decay — N = $N")
-lines!(ax, collect(steps_list), E_ana, label="Analytical")
-scatter!(ax, collect(steps_list), E_num, markersize=6, label="LBM")
-axislegend(ax, position=:rt)
-save(joinpath(@__DIR__, "taylor_green_decay.svg"), fig)
-fig
 ```
 
-![Taylor-Green vortex energy decay at N = 64.  Blue line: analytical exponential decay E(t) = E0 exp(-4 nu k^2 t).  Orange dots: LBM simulation measured at intervals of 200 time steps.  The numerical energy follows the analytical curve precisely, confirming that the BGK collision operator produces the correct effective viscosity nu = 0.01.  After 2000 steps, the energy has decayed to approximately 46 percent of its initial value.](taylor_green_decay.svg)
+![Taylor-Green vortex energy decay at N = 64.  Blue line: analytical exponential decay E(t) = E0 exp(-4 nu k^2 t) with E0 = u0^2/4 (mean kinetic-energy density).  Orange dots: Kraken simulation measured at intervals of 200 time steps.  The numerical energy follows the analytical curve to within 0.3 percent, confirming that the BGK collision operator produces the correct effective viscosity nu = 0.01.  After 2000 steps, the energy has decayed to approximately 46 percent of its initial value.](taylor_green_decay.svg)
 
 The numerical energy decay follows the analytical exponential with
 excellent agreement.  This confirms that the effective viscosity of the
@@ -262,13 +261,6 @@ for j in 1:N, i in 1:N
     jp = mod1(j + 1, N); jm = mod1(j - 1, N)
     ωz[i, j] = 0.5 * (uy[ip, j] - uy[im, j]) - 0.5 * (ux[i, jp] - ux[i, jm])
 end
-
-fig2 = Figure(size=(500, 400))
-ax2 = Axis(fig2[1, 1], xlabel="x", ylabel="y", title="Vorticity ωz — t = $max_steps", aspect=DataAspect())
-hm = heatmap!(ax2, 1:N, 1:N, ωz, colormap=:RdBu)
-Colorbar(fig2[1, 2], hm, label="ωz")
-save(joinpath(@__DIR__, "taylor_green_vorticity.svg"), fig2)
-fig2
 ```
 
 ![Vorticity field at t = 2000 steps.  The balanced (red-blue) colour map shows the four counter-rotating vortices of the Taylor-Green pattern.  The spatial structure is identical to the initial condition --- the sinusoidal pattern is preserved exactly, only the amplitude has decreased due to viscous decay.  Red regions correspond to positive (counter-clockwise) vorticity, blue to negative (clockwise).  The smooth, symmetric pattern confirms that no spurious asymmetries or numerical artifacts have developed during the simulation.](taylor_green_vorticity.svg)

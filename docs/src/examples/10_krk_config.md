@@ -4,13 +4,17 @@ EditURL = "10_krk_config.jl"
 
 # Configuration Files (`.krk`)
 
+```@raw html
+<DownloadMenu :files="[{label:'cavity.krk',href:'/downloads/krk_config/cavity.krk'},{label:'poiseuille.krk',href:'/downloads/krk_config/poiseuille.krk'},{label:'cylinder.krk',href:'/downloads/krk_config/cylinder.krk'},{label:'couette.krk',href:'/downloads/krk_config/couette.krk'}]" />
+```
+
 **Concepts:** [Spatial boundary conditions](../theory/19_spatial_bcs.md) ·
 `.krk` DSL parser, presets, helpers
 
 **Validates against:** tutorial example — no quantitative validation target.
 Each .krk in this tutorial is a working case covered by other example pages.
 
-**Download:** <a href="../assets/krk/cavity.krk" download><code>cavity.krk</code></a> (and the other .krk files
+**Download:** [`cavity.krk`](../assets/krk/cavity.krk) (and the other .krk files
 linked from their respective example pages)
 
 **Hardware:** n/a (tutorial, cases run from other pages)
@@ -76,9 +80,9 @@ Time-dependent BCs like `ux = 0.1*sin(2*pi*t/5000)` are re-evaluated each step.
 
 ## Example 1 — Lid-driven cavity
 
-Download: <a href="../assets/krk/cavity.krk" download><code>cavity.krk</code></a>
+Download: [`cavity.krk`](../assets/krk/cavity.krk)
 
-```
+```krk
 Simulation cavity D2Q9
 Domain  L = 1 x 1   N = 128 x 128
 Physics nu = 0.128
@@ -106,9 +110,9 @@ post-processing.
 
 ## Example 2 — Poiseuille flow (body force)
 
-Download: <a href="../assets/krk/poiseuille.krk" download><code>poiseuille.krk</code></a>
+Download: [`poiseuille.krk`](../assets/krk/poiseuille.krk)
 
-```
+```krk
 Simulation poiseuille D2Q9
 Domain  L = 0.125 x 1.0  N = 4 x 32
 Physics nu = 0.1  Fx = 1e-5
@@ -128,9 +132,9 @@ forcing scheme.
 
 ## Example 3 — Cylinder with parabolic inlet
 
-Download: <a href="../assets/krk/cylinder.krk" download><code>cylinder.krk</code></a>
+Download: [`cylinder.krk`](../assets/krk/cylinder.krk)
 
-```
+```krk
 Simulation cylinder D2Q9
 Domain  L = 10 x 2.5  N = 200 x 50
 
@@ -163,9 +167,9 @@ The west boundary uses a **spatial** Zou--He profile: the expression
 
 ## Example 4 — Couette flow
 
-Download: <a href="../assets/krk/couette.krk" download><code>couette.krk</code></a>
+Download: [`couette.krk`](../assets/krk/couette.krk)
 
-```
+```krk
 Simulation couette D2Q9
 Domain  L = 0.125 x 1.0  N = 4 x 32
 
@@ -201,11 +205,10 @@ Obstacle cylinder { (x - 5)^2 + (y - Ly/2)^2 <= 0.3^2 }
 
 ---
 
-## Parser-only: STL geometry syntax
+## STL geometry import
 
-The parser can read `stl(...)` parameters, but the v0.1.0 runner in this
-branch does not voxelize STL geometry. Use expression-based `Obstacle`
-regions for public examples.
+Complex geometries can be imported from STL files (binary or ASCII).
+The mesh is voxelized onto the LBM grid using ray casting.
 
 ### Syntax
 
@@ -223,9 +226,14 @@ Obstacle body stl(file = "geometry.stl", scale = 0.001, translate = [1.0, 0.5, 0
 | `translate` | `[0,0,0]` | Translation vector ``(t_x, t_y, t_z)`` (applied after scale) |
 | `z_slice` | `0.0`   | z-plane for 2D cross-section (only for D2Q9) |
 
-### Reserved syntax
+For **2D simulations** (D2Q9), the STL is sliced at `z = z_slice` to extract
+a 2D contour, then voxelized via 2D ray casting.
+For **3D simulations** (D3Q19), full volumetric ray casting along the z-axis
+is used.
 
-```
+### Example: airfoil from STL
+
+```krk
 Simulation airfoil D2Q9
 Domain  L = 4 x 2  N = 400 x 200
 Physics nu = 0.01
@@ -241,8 +249,9 @@ Run 50000 steps
 Output vtk every 1000 [rho, ux, uy]
 ```
 
-This syntax is reserved for development branches until the runner and
-validation artifacts are present in this branch.
+!!! note "Watertight meshes"
+    The STL surface must be closed (watertight) for the ray-casting voxelization
+    to produce correct inside/outside classification.
 
 ---
 

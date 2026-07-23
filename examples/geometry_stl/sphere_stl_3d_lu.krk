@@ -1,0 +1,16 @@
+# M-GEO-5 raw-LU twin of sphere_stl_3d_mm.krk.
+# Hand-scaled values: STL scale=20.0, u_LU=0.005, nu=0.02.
+
+Simulation mgeo5_stl_sphere_3d_lu D3Q19
+
+Domain L = 80 x 20 x 20  N = 80 x 20 x 20
+Physics nu = 0.02
+
+Obstacle sph wall=libb stl(file = "examples/geometry_stl/sphere.stl", scale = 20.0)
+
+Boundary west  velocity(ux = 0.005, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 30 steps

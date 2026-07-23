@@ -1,52 +1,54 @@
 # Hardware
 
-Every benchmark CSV should carry a `hardware_id` that maps to
-`benchmarks/hardware.toml`.
+All benchmark results in this section are tagged with a hardware identifier
+that maps to an entry in
+[`benchmarks/hardware.toml`](https://github.com/lauguimel/Kraken.jl/blob/lbm/benchmarks/hardware.toml).
 
-## Declared machines
+## Machines used
 
-### `apple_m3max`
-
-| Property | Value |
-|---|---|
-| Kind | GPU |
-| Model | Apple M3 Max |
-| Backend | Metal |
-| Notes | Local development artifact; not the public headline benchmark |
-
-### `aqua_h100`
+### `apple_m2` — CPU baseline
 
 | Property | Value |
-|---|---|
-| Kind | GPU |
-| Model | NVIDIA H100 80 GB PCIe |
-| Host | QUT AQUA cluster |
+|:---------|:------|
+| Model    | Apple M3 Max |
+| Cores    | 8 (4P + 4E) |
+| RAM      | 16 GB unified |
+| OS       | macOS 14 |
+| Julia    | 1.11 |
+| Notes    | Single-thread unless stated otherwise |
+
+### `aqua_h100` — GPU target
+
+| Property  | Value |
+|:----------|:------|
+| Model     | NVIDIA H100 80 GB PCIe |
+| Host      | QUT AQUA cluster (`aqua.qut.edu.au`) |
 | Scheduler | PBS Pro |
-| Notes | Preferred GPU target for public benchmark reruns |
+| CUDA      | 12.x |
+| Driver    | 550+ |
+| Julia     | 1.11 |
+| Notes     | Requested via `gpu_id=H100` |
 
-### `aqua_a100`
+## Adding your own hardware
 
-| Property | Value |
-|---|---|
-| Kind | GPU |
-| Model | NVIDIA A100 |
-| Host | QUT AQUA cluster |
-| Notes | Secondary comparison target |
+1. Open `benchmarks/hardware.toml` and add a new TOML section:
 
-## Legacy artifacts
+   ```toml
+   [my_workstation]
+   kind   = "cpu"          # or "gpu"
+   model  = "AMD Ryzen 9 7950X"
+   cores  = 16
+   ram_gb = 64
+   os     = "Ubuntu 24.04"
+   julia  = "1.11"
+   notes  = "Description of the setup"
+   ```
 
-Some existing CSVs still carry the `apple_m2` hardware id. Keep them as raw
-historical data if needed, but do not use Apple laptop labels as the public
-performance story. The recommended public comparison is CPU baseline plus
-H100, with committed CSV provenance.
+2. Run the benchmarks with the matching ID:
 
-## Adding hardware
+   ```bash
+   julia --project benchmarks/run_all.jl --hardware-id=my_workstation
+   ```
 
-Add a new table to `benchmarks/hardware.toml`, then run benchmarks with the
-matching id:
-
-```bash
-julia --project=. benchmarks/run_all.jl --hardware-id=my_machine
-```
-
-Commit the generated CSV together with any documentation update that cites it.
+3. Results land in `benchmarks/results/` with your hardware ID in the
+   filename. Consider opening a PR to add your numbers to the docs.

@@ -1,0 +1,82 @@
+#!/bin/bash -l
+#PBS -N M8_BETA_HIWI
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M8 extension — Kraken Oldroyd-B cylinder, two sweeps on Aqua A100 (F64 CUDA):
+#   (A) beta-sweep at moderate Wi: beta in {0.59,0.3,0.1,0.01} x Wi in {0.5,1.0},
+#       R=50. Tests solvent/polymer ratio sensitivity, descending into the
+#       strongly-polymeric hard corner (user request). Provenance-gated: the
+#       lattice carries nu_total=nu_s+nu_p=0.15 (viscoelastic_logfv_2d.jl:246),
+#       so tau=0.95 stays in the TRT magic window for ALL beta -> this measures
+#       polymer-stress physics, NOT an LBM-tau collapse. beta=0.01 Wi=1 is the
+#       hardest corner; a NaN there maps the beta-Wi stability boundary.
+#   (B) Wi_max staircase at beta=0.59: R in {30,50} x Wi in {1.5,2,3,5,7,10},
+#       climbing to NaN to chart the HWNP envelope Wi_max(R). Local Metal-F32
+#       canary floor: NaN in (2,3] at R30 (F64 expected >= that).
+#
+# Diffusive scaling: nu_total=0.15 fixed -> u_mean = Re_R*nu_total/R
+#   (R=50:0.003, R=30:0.005); lambda = Wi*R/u_mean computed per case.
+# halfwayBB default (the M8-validated wall BC). muscl_superbee. bsd=1.0.
+# 300k steps F64. KRAKEN_SAVE_FIELDS=1 (wall decomposition for the page).
+# Per-cell CSV + SUMMARY.csv under tmp/m8_beta_highwi/<jobid>/<cell>/ — the
+# beta cell runs FIRST (user priority) so a truncated run still yields it.
+#
+# Submit from repo root:
+#   qsub bench/viscoelastic_logfv/run_cyl_m8_beta_highwi_a100.pbs
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+JOBID="${PBS_JOBID:-manual}"
+DRIVER=bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+nvidia-smi || true
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+echo "=== M8 beta+highWi starting at $(date) ==="
+
+# Generic cell launcher: $1=label $2=R $3=u_mean $4=BETA_LIST $5=WI_LIST
+run_cell() {
+    local label=$1 R=$2 u=$3 betas=$4 wis=$5
+    echo ""
+    echo "--- $label : R=$R u_mean=$u beta={$betas} Wi={$wis} $(date) ---"
+    KRAKEN_BACKEND=cuda KRAKEN_FT=float64 \
+    KRAKEN_R_LIST=$R KRAKEN_U_MEAN=$u \
+    KRAKEN_BETA_LIST=$betas KRAKEN_WI_LIST=$wis \
+    KRAKEN_RE_LIST=1.0 KRAKEN_BSD_LIST=1.0 \
+    KRAKEN_L_UP_LIST=15.0 KRAKEN_L_DOWN_LIST=15.0 \
+    KRAKEN_EMBEDDED_GRADIENT=0 KRAKEN_EMBEDDED_ADVECTION=0 \
+    KRAKEN_EMBEDDED_FORCE=0 KRAKEN_EMBEDDED_DRAG=0 KRAKEN_EMBEDDED_GEOMETRY=qwall \
+    KRAKEN_ADVECTION_SCHEME=muscl_superbee KRAKEN_WALL_BC=halfwayBB \
+    KRAKEN_MAX_STEPS_BASE=300000 KRAKEN_AVG_WINDOW_FRAC=0.2 \
+    KRAKEN_SAVE_FIELDS=1 \
+    KRAKEN_OUTPUT_DIR="tmp/m8_beta_highwi/${JOBID}/${label}" \
+    julia --project=. "$DRIVER" || echo "!!! cell $label FAILED (continuing) $(date)"
+}
+
+# (A) beta-sweep first (user priority) — R=50, moderate Wi.
+run_cell beta_R50      50 0.003 "0.59,0.3,0.1,0.01" "0.5,1.0"
+# (B) Wi_max staircase — beta=0.59, R=50 then R=30.
+run_cell staircase_R50 50 0.003 "0.59" "1.5,2.0,3.0,5.0,7.0,10.0"
+run_cell staircase_R30 30 0.005 "0.59" "1.5,2.0,3.0,5.0,7.0,10.0"
+
+echo ""
+echo "=== M8 beta+highWi complete $(date) ==="
+echo "Cd summary (Wi=col5, beta=col7, Cd=col26, nan=3rd-from-last):"
+for cell in beta_R50 staircase_R50 staircase_R30; do
+    for f in "tmp/m8_beta_highwi/${JOBID}/${cell}"/cyl_bigsweep_v2_*.csv; do
+        [ -f "$f" ] || continue
+        awk -F, 'NR==1{for(i=1;i<=NF;i++)h[$i]=i} NR==2{printf "  %s beta=%s Wi=%s Cd=%s nan=%s\n", FILENAME, $(h["beta"]), $(h["Wi"]), $(h["Cd_kraken"]), $(h["nan_flag"])}' "$f"
+    done
+done

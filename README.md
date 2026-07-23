@@ -1,24 +1,33 @@
 # Kraken.jl
 
 [![Build Status](https://github.com/lauguimel/Kraken.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/lauguimel/Kraken.jl/actions/workflows/CI.yml)
-[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://lauguimel.github.io/Kraken.jl/dev)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://lauguimel.github.io/Kraken.jl/stable)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A GPU-portable Lattice Boltzmann (LBM) framework written in Julia, targeting
-single-phase incompressible and thermal flows on CPU, CUDA, and Apple Metal
-backends. Kraken.jl provides a compact kernel core (D2Q9, D3Q19), a
-declarative `.krk` configuration DSL, and spatial boundary conditions — all
-behind a small, hackable API.
+single-phase incompressible, thermal, and viscoelastic flows on CPU, CUDA, and
+Apple Metal backends. Kraken.jl provides a compact kernel core (D2Q9, D3Q19), a
+declarative `.krk` configuration DSL, patch-based grid refinement, and
+spatial boundary conditions — all behind a small, hackable API.
 
-## Scope (v0.1.0)
+## Scope (v0.2.0)
 
-- Single-phase Newtonian LBM in 2D and 3D (BGK collision)
-- Thermal flows via double-distribution function (DDF) coupling
-- Boundary conditions: Zou-He velocity/pressure, bounce-back, periodic, outflow
-- Spatial and time-dependent boundary expressions
+- Single-phase LBM in 2D and 3D (BGK and MRT collisions)
+- Thermal flows via double-distribution (DDF) coupling
+- Patch-based nested grid refinement (Filippova–Hänel rescaling)
+- Spatial boundary conditions (Zou–He, bounce-back, periodic, outflow)
 - `.krk` configuration DSL for parametric runs
 - GPU-portable kernels via `KernelAbstractions.jl` (CPU / CUDA / Metal)
-- VTK output for ParaView post-processing
+- Viscoelastic Oldroyd-B (log-conformation) — validated to <1% vs RheoTool on the confined cylinder
+- Physical ↔ lattice unit-conversion module; STL / analytical immersed-boundary geometry
+
+Multiphase flows and the broader non-Newtonian rheology family are present in
+the source tree but remain experimental and are not part of the validated
+v0.2.0 surface.
+
+For a complete, up-to-date feature matrix — with status (✓/~/✗), links to
+theory pages, examples, and API — see the
+[**Capabilities matrix**](docs/src/capabilities.md).
 
 ## Installation
 
@@ -34,47 +43,47 @@ For GPU execution, also add the backend of your choice (`CUDA.jl` or
 
 ## Quickstart
 
-### From a `.krk` configuration file
+Run a 2D lid-driven cavity from a `.krk` configuration file:
 
 ```julia
 using Kraken
 
-result = run_simulation("examples/cavity.krk")
+# Load a parametric configuration
+cfg = Kraken.load_krk("examples/configs/cavity_2d.krk")
+
+# Run the simulation (CPU by default; set backend=:cuda or :metal for GPU)
+sol = Kraken.run(cfg; backend = :cpu)
 
 # Inspect the final velocity field
-ux, uy = result.ux, result.uy
+ux, uy = sol.u[:, :, 1], sol.u[:, :, 2]
 ```
 
-### From the Julia API
+Or build a case directly from Julia:
 
 ```julia
 using Kraken
 
-config = LBMConfig(D2Q9(); Nx=128, Ny=128, ν=0.1, u_lid=0.1, max_steps=20000)
-result = run_cavity_2d(config)
+grid   = Kraken.Grid2D(Nx = 256, Ny = 256)
+params = Kraken.LBMParams(nu = 1e-3, u_lid = 0.1)
+bcs    = Kraken.cavity_bcs(grid)
+
+sol = Kraken.simulate(grid, params, bcs; nsteps = 10_000, backend = :cpu)
 ```
 
-### Parametric override via `.krk`
+See `docs/` and the `examples/` directory for more cases (Poiseuille,
+Couette, Taylor–Green, cylinder flow, Rayleigh–Bénard, Hagen–Poiseuille,
+3D cavity, and grid-refinement demos).
 
-```julia
-result = run_simulation("examples/cavity.krk"; Nx=256, Ny=256, nu=0.05)
-```
+## Features
 
-## Examples
-
-| Example | Physics | .krk |
-|---------|---------|------|
-| Poiseuille flow | Body-force driven channel | `poiseuille.krk` |
-| Couette flow | Shear-driven channel | `couette.krk` |
-| Taylor-Green vortex | Decaying vortex (periodic) | `taylor_green.krk` |
-| Lid-driven cavity 2D | Recirculating flow | `cavity.krk` |
-| Lid-driven cavity 3D | 3D extension | `cavity_3d.krk` |
-| Cylinder flow | Obstacle via predicate | `cylinder.krk` |
-| Heat conduction | 1D thermal diffusion | `heat_conduction.krk` |
-| Rayleigh-Benard | Buoyancy-driven convection | `rayleigh_benard.krk` |
-
-See `docs/` and `examples/` for full documentation with validation against
-analytical solutions and reference data (Ghia et al. 1982, De Vahl Davis 1983).
+- D2Q9 and D3Q19 lattices
+- BGK and MRT collision operators
+- Thermal coupling via double-distribution functions
+- Patch-based nested grid refinement with conservative rescaling
+- Declarative `.krk` DSL for reproducible parametric studies
+- GPU-portable kernels: single source, runs on CPU / CUDA / Metal
+- VTK output for ParaView post-processing
+- ~2000 unit tests covering kernels, BCs, refinement, and end-to-end drivers
 
 ## Documentation
 
@@ -95,7 +104,7 @@ If you use Kraken.jl in academic work, please cite:
   title   = {Kraken.jl: a GPU-portable Lattice Boltzmann framework in Julia},
   year    = {2026},
   url     = {https://github.com/lauguimel/Kraken.jl},
-  version = {0.1.0},
+  version = {0.2.0},
 }
 ```
 

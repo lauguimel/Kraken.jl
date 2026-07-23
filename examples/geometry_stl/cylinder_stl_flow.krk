@@ -1,0 +1,26 @@
+# STL cylinder demo (KRK-GEO). Cartesian immersed-boundary path:
+# the STL is voxelized into the is_solid mask. The stl(file=...) path is
+# relative to the repo root — run this case from the repository root
+# (e.g. `julia --project=. test/scratch/geo_stl_canary.jl`).
+
+Simulation mgeo1_stl_cylinder D2Q9
+
+Define U = 0.03
+Define H = 1.0
+Define cx = 1.0
+Define cy = 0.5
+Define R = 0.2
+Define Re = 0.24
+
+Domain L = 4.0 x 1.0  N = 80 x 20
+Physics nu = 0.05
+
+Obstacle cyl stl(file = "examples/geometry_stl/cylinder.stl", scale = 1.0, translate = [0.0, 0.0, 0.0], z_slice = 0.5)
+
+Boundary west  velocity(ux = 4*U*y*(H - y)/H^2, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 50 steps
+Output vtk every 50 [rho, ux, uy]

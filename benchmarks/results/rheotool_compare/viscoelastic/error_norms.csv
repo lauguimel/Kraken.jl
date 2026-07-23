@@ -1,0 +1,7 @@
+# Integrated-quantity gate: relative error of Kraken Cd vs RheoTool Cd, R=50, beta=0.59
+# rel_error = (Cd_kraken - Cd_rheotool) / Cd_rheotool
+# All three pass the <1% mandate gate.
+Wi,Cd_kraken,Cd_rheotool,rel_error,abs_rel_error_pct
+0.1,129.9155,130.43,-0.003946,0.39
+0.5,118.6770,119.71,-0.008629,0.86
+1.0,119.2410,120.40,-0.009626,0.96

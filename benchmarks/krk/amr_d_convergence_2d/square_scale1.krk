@@ -1,0 +1,27 @@
+# AMR D convergence square obstacle, scale 1 template.
+
+Simulation amr_d_square_scale1 D2Q9
+
+Define scale = 1
+Define Fx = 2e-5
+Define omega = 1.0
+Define rho0 = 1.0
+Define obstacle_i0 = 22
+Define obstacle_i1 = 27
+Define obstacle_j0 = 12
+Define obstacle_j1 = 17
+
+Domain L = 24 x 14  N = 24 x 14
+Physics nu = 0.16666666666666666 Fx = 2e-5
+
+Obstacle square { x >= 10.5 && x <= 13.5 && y >= 5.5 && y <= 8.5 }
+
+Boundary west periodic
+Boundary east periodic
+Boundary south wall
+Boundary north wall
+
+Refine publication_patch { region = [2, 0, 22, 14], ratio = 2 }
+
+Run 80 steps
+Diagnostics every 20 [step, ux, uy]

@@ -1,0 +1,7 @@
+# RheoTool reference, rheoFoam (OpenFOAM-9, Oldroyd-BLog, log-conformation), 2-core MPI, steady at t=20
+# Cylinder/Oldroyd-BLog tutorial geometry, R=50-equivalent, beta=0.59, Re=1, D/H=0.5
+# Cd = total drag coefficient (solvent + polymer)
+Wi,Cd
+0.1,130.43
+0.5,119.71
+1.0,120.40

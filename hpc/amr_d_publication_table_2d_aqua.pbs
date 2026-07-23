@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -N kraken_amrD_pub2d
+#PBS -l select=1:ncpus=4:mem=32GB
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -V
+
+set -euo pipefail
+
+WORKDIR="${PBS_O_WORKDIR:-$HOME/Kraken.jl}"
+cd "$WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-4}"
+export KRK_AMR_D_FLOWS="${KRK_AMR_D_FLOWS:-square,cylinder}"
+export KRK_AMR_D_SCALES="${KRK_AMR_D_SCALES:-1,2,4}"
+export KRK_AMR_D_BASE_STEPS="${KRK_AMR_D_BASE_STEPS:-2400}"
+export KRK_AMR_D_STEP_EXPONENT="${KRK_AMR_D_STEP_EXPONENT:-1}"
+export KRK_AMR_D_AVG_WINDOW="${KRK_AMR_D_AVG_WINDOW:-600}"
+export KRK_AMR_D_PATCH_STRATEGY="${KRK_AMR_D_PATCH_STRATEGY:-interface_buffered}"
+export KRK_AMR_TAG="${KRK_AMR_TAG:-aqua_D_pub_${PBS_JOBID%%.*}}"
+
+echo "========================================"
+echo "Job: ${PBS_JOBID:-local}"
+echo "Node: $(hostname)"
+echo "Start: $(date)"
+echo "KRK_AMR_D_FLOWS=$KRK_AMR_D_FLOWS"
+echo "KRK_AMR_D_SCALES=$KRK_AMR_D_SCALES"
+echo "KRK_AMR_D_BASE_STEPS=$KRK_AMR_D_BASE_STEPS"
+echo "KRK_AMR_D_STEP_EXPONENT=$KRK_AMR_D_STEP_EXPONENT"
+echo "KRK_AMR_D_AVG_WINDOW=$KRK_AMR_D_AVG_WINDOW"
+echo "KRK_AMR_D_PATCH_STRATEGY=$KRK_AMR_D_PATCH_STRATEGY"
+echo "========================================"
+
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. benchmarks/amr_d_publication_table_2d.jl
+
+echo "========================================"
+echo "End: $(date)"
+echo "Results:"
+ls -lh benchmarks/results/amr_d_publication_*_2d_*.csv
+echo "========================================"

@@ -1,0 +1,43 @@
+#!/bin/bash -l
+#PBS -N kraken_amrD_gallery
+#PBS -l select=1:ncpus=4:mem=32GB
+#PBS -l walltime=08:00:00
+#PBS -j oe
+#PBS -V
+
+set -euo pipefail
+
+WORKDIR="${PBS_O_WORKDIR:-$HOME/Kraken.jl}"
+cd "$WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-4}"
+export KRK_AMR_D_GALLERY_FLOWS="${KRK_AMR_D_GALLERY_FLOWS:-couette,poiseuille_xband,poiseuille_yband,bfs,square,cylinder}"
+export KRK_AMR_D_GALLERY_SCALES="${KRK_AMR_D_GALLERY_SCALES:-1,2,4}"
+export KRK_AMR_D_GALLERY_BASE_STEPS="${KRK_AMR_D_GALLERY_BASE_STEPS:-1200}"
+export KRK_AMR_D_GALLERY_STEP_EXPONENT="${KRK_AMR_D_GALLERY_STEP_EXPONENT:-2}"
+export KRK_AMR_D_GALLERY_AVG_WINDOW="${KRK_AMR_D_GALLERY_AVG_WINDOW:-300}"
+export KRK_AMR_TAG="${KRK_AMR_TAG:-aqua_D_gallery_${PBS_JOBID%%.*}}"
+
+echo "========================================"
+echo "Job: ${PBS_JOBID:-local}"
+echo "Node: $(hostname)"
+echo "Start: $(date)"
+echo "KRK_AMR_D_GALLERY_FLOWS=$KRK_AMR_D_GALLERY_FLOWS"
+echo "KRK_AMR_D_GALLERY_SCALES=$KRK_AMR_D_GALLERY_SCALES"
+echo "KRK_AMR_D_GALLERY_BASE_STEPS=$KRK_AMR_D_GALLERY_BASE_STEPS"
+echo "KRK_AMR_D_GALLERY_STEP_EXPONENT=$KRK_AMR_D_GALLERY_STEP_EXPONENT"
+echo "KRK_AMR_D_GALLERY_AVG_WINDOW=$KRK_AMR_D_GALLERY_AVG_WINDOW"
+echo "KRK_AMR_TAG=$KRK_AMR_TAG"
+echo "========================================"
+
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. benchmarks/amr_d_convergence_gallery_2d.jl
+
+echo "========================================"
+echo "End: $(date)"
+echo "Results:"
+ls -lh benchmarks/results/amr_d_convergence_gallery_2d_${KRK_AMR_TAG}.csv
+ls -lh benchmarks/results/amr_d_cylinder_nested4_probe_2d_${KRK_AMR_TAG}.csv
+ls -lh benchmarks/results/figures/amr_d_*_${KRK_AMR_TAG}.png
+echo "========================================"

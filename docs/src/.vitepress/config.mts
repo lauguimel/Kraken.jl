@@ -3,6 +3,7 @@ import { tabsMarkdownPlugin } from 'vitepress-plugin-tabs'
 import mathjax3 from "markdown-it-mathjax3";
 import footnote from "markdown-it-footnote";
 import path from 'path'
+import krkGrammar from './krk.tmLanguage.json'
 
 function getBaseRepository(base: string): string {
   if (!base || base === '/') return '/';
@@ -18,10 +19,9 @@ const navTemp = {
   nav: 'REPLACE_ME_DOCUMENTER_VITEPRESS',
 }
 
-// DocumenterVitepress fills both `nav` and `sidebar` with the same flat
-// tree. We keep the top-nav as-is but split the left sidebar by section
-// so a user who clicks "Theory" in the top-nav only sees the Theory tree
-// on the left, not every top-level category expanded at once.
+// DocumenterVitepress fills both `nav` and `sidebar` from `makedocs(pages=...)`.
+// Keep the generated top-nav as-is, but show only relevant top-level groups in
+// the left sidebar for each URL prefix.
 const sidebarHolder = {
   sidebar: 'REPLACE_ME_DOCUMENTER_VITEPRESS',
 }
@@ -32,17 +32,29 @@ function section(name: string): any[] {
   return found ? [found] : []
 }
 
+function sections(...names: string[]): any[] {
+  return names.flatMap(name => section(name))
+}
+
 const sectionedSidebar: Record<string, any[]> = {
-  '/theory/': section('Theory'),
-  '/tutorials/': section('Tutorials'),
-  '/examples/': section('Tutorials'),
+  // Guide
+  '/installation': section('Guide'),
+  '/getting_started': section('Guide'),
+  '/concepts_index': section('Guide'),
+  '/capabilities': section('Guide'),
+  '/architecture': section('Guide'),
+  '/users/krk-reference': section('Guide'),
+  '/users/incompressible-navier-stokes': section('Guide'),
+  // Examples (grouped by physics; two pages re-homed from users/tutorials/)
+  '/users/tutorials/': section('Examples'),
+  '/examples/': section('Examples'),
+  // Benchmarks (validation cases + performance)
+  '/users/benchmarks/': section('Benchmarks'),
   '/benchmarks/': section('Benchmarks'),
+  // Reference (.krk DSL + API + Julia API + Theory)
   '/krk/': section('Reference'),
   '/api/': section('Reference'),
-  '/installation': section('Getting Started'),
-  '/getting_started': section('Getting Started'),
-  '/concepts_index': section('Getting Started'),
-  '/capabilities': section('Getting Started'),
+  '/theory/': section('Reference'),
   '/': flatSidebar,
 }
 
@@ -60,7 +72,13 @@ export default defineConfig({
   lastUpdated: true,
   cleanUrls: true,
   outDir: 'REPLACE_ME_DOCUMENTER_VITEPRESS',
-  ignoreDeadLinks: false,
+  ignoreDeadLinks: [
+    // Downloadable .krk example files are served as raw assets, not VitePress
+    // routes, so the dead-link checker cannot resolve them (works under Documenter).
+    /\.krk$/,
+    // Pre-existing unresolved Documenter @ref cross-reference (krk-reference Presets).
+    /@ref$/,
+  ],
   head: [
     ['link', { rel: 'icon', href: 'REPLACE_ME_DOCUMENTER_VITEPRESS_FAVICON' }],
     ['script', {src: `${getBaseRepository(baseTemp.base)}versions.js`}],
@@ -97,6 +115,12 @@ export default defineConfig({
       md.use(mathjax3),
       md.use(footnote)
     },
+    // Register the .krk TextMate grammar so ```krk fenced blocks are highlighted.
+    // Kept inside the `markdown` object so DocumenterVitepress's REPLACE_ME
+    // substitution preserves it.
+    languages: [
+      { ...(krkGrammar as any), name: 'krk', scopeName: 'source.krk' }
+    ],
     theme: {
       light: "github-light",
       dark: "github-dark"}

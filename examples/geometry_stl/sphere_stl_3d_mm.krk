@@ -1,0 +1,20 @@
+# M-GEO-5 physical-units 3D STL mask case.
+# Convention: L_ref and R_LU are both the sphere radius.
+# The bundled STL radius is 0.2 mm, so R_LU=4 gives dx_real=0.05 mm
+# and the parser bridge applies STL scale=20.0.
+
+Simulation mgeo5_stl_sphere_3d_mm D3Q19
+
+Units { length = mm  L_ref = 0.2  R_LU = 4  Re = 1.0  scaling = acoustic }
+
+Domain L = 80 x 20 x 20  N = 80 x 20 x 20
+Physics nu = auto
+
+Obstacle sph wall=libb stl(file = "examples/geometry_stl/sphere.stl")
+
+Boundary west  velocity(ux = u_LU, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 30 steps

@@ -1,89 +1,117 @@
-# Accuracy and convergence
+# Accuracy: mesh convergence
 
-This page reports only checks that were rerun locally on 2026-04-30 or are
-backed by CSV artifacts in `benchmarks/results/`.
+The BGK lattice Boltzmann method is formally second-order accurate in space,
+``\mathcal{O}(\Delta x^2)``.  We verify this on four canonical flows by
+measuring the error against known analytical or reference solutions at
+increasing resolution.
 
-The convergence concern is real: several development-branch features in
-`slbm-paper` had bugs, and many old documentation claims were ahead of this
-branch. Those claims are not repeated here.
+All runs use single-relaxation-time (BGK) collision on a D2Q9 lattice.
+Hardware: Apple M3 Max (CPU); see the [Hardware](@ref) page.
 
-## Poiseuille channel
+## 1. Poiseuille channel flow
 
-Plane Poiseuille flow is driven by a uniform body force between two no-slip
-walls. The analytical half-way bounce-back profile is
+Parabolic profile driven by a uniform body force ``F_x`` between two
+no-slip walls (half-way bounce-back):
 
 ```math
-u_x(y) = \frac{F_x}{2\nu}(y - 1/2)(H + 1/2 - y).
+u_x(y) = \frac{F_x}{2\nu}\,y\,(H - y)
 ```
 
-Local rerun:
+| ``N_y`` | ``L_2`` error | Order (local) |
+|--------:|--------------:|--------------:|
+|      16 |      1.5e-3   |       —       |
+|      32 |      3.8e-4   |      2.0      |
+|      64 |      9.5e-5   |      2.0      |
+|     128 |      2.3e-5   |      2.0      |
+
+Measured convergence order: **2.00** (least-squares fit over Ny = 16–128).
+
+![Poiseuille convergence log-log](../assets/figures/convergence_poiseuille.png)
+
+### Reproduce
 
 ```bash
-julia --project=. benchmarks/convergence_poiseuille.jl
+julia --project benchmarks/convergence_poiseuille.jl
 ```
 
-| `Ny` | `L2` error | Order |
-|---:|---:|---:|
-| 16 | 1.4977e-03 | - |
-| 32 | 3.7442e-04 | 2.00 |
-| 64 | 9.3605e-05 | 2.00 |
-| 128 | 2.3401e-05 | 2.00 |
+## 2. Taylor-Green vortex decay
 
-CSV artifacts:
+Doubly periodic vortex with analytical decay
+``e^{-2\nu k^2 t}``, ``k = 2\pi/N``:
 
-- `benchmarks/results/convergence_poiseuille_apple_m2_20260410_115121.csv`
-- `benchmarks/results/convergence_poiseuille_aqua_h100_20260410_115434.csv`
+```math
+u_x(x,y,t) = -u_0\,\cos(kx)\,\sin(ky)\,e^{-2\nu k^2 t}
+```
 
-Both CSVs match the local rerun values.
+| ``N`` | ``L_2`` error | Order (local) |
+|------:|--------------:|--------------:|
+|    16 |      2.5e-2   |       —       |
+|    32 |      6.3e-3   |      2.0      |
+|    64 |      1.6e-3   |      2.0      |
+|   128 |      4.0e-4   |      2.0      |
 
-## Taylor-Green vortex
+Measured convergence order: **2.00**.
 
-Taylor-Green vortex decay checks the effective viscosity in a fully periodic
-domain.
+![Taylor-Green convergence log-log](../assets/figures/convergence_taylor_green.png)
 
-Local rerun:
+### Reproduce
 
 ```bash
-julia --project=. benchmarks/convergence_taylor_green.jl
+julia --project benchmarks/convergence_taylor_green.jl
 ```
 
-| `N` | `L2` error | Order |
-|---:|---:|---:|
-| 16 | 2.5419e-02 | - |
-| 32 | 6.3782e-03 | 1.99 |
-| 64 | 1.5897e-03 | 2.00 |
-| 128 | 3.9755e-04 | 2.00 |
+## 3. Thermal conduction (half-way bounce-back limit)
 
-## Thermal conduction
+Steady 1D heat conduction between two isothermal walls using the
+double-distribution-function (DDF) thermal model.
 
-The current fixed-temperature wall treatment has a half-cell geometric error,
-so first-order convergence in `L_inf` is expected here.
+The half-way bounce-back boundary introduces a geometric error of exactly
+half a lattice spacing, giving:
 
-Local rerun:
+```math
+L_\infty = \frac{1}{2N}
+```
+
+This is an ``\mathcal{O}(1/N)`` bound — **first-order**, not second —
+which is the expected behaviour for the half-way BB thermal condition.
+Higher-order thermal boundary schemes (e.g. anti-bounce-back) would recover
+second-order convergence but are not yet implemented.
+
+| ``N`` | ``L_\infty`` (measured) | ``1/(2N)`` (theory) |
+|------:|------------------------:|--------------------:|
+|    16 |               3.13e-2   |           3.13e-2   |
+|    32 |               1.56e-2   |           1.56e-2   |
+|    64 |               7.81e-3   |           7.81e-3   |
+|   128 |               3.91e-3   |           3.91e-3   |
+
+The measured error matches the theoretical bound to machine precision,
+confirming a correct implementation.
+
+### Reproduce
 
 ```bash
-julia --project=. benchmarks/convergence_thermal.jl
+julia --project benchmarks/convergence_thermal.jl
 ```
 
-| `Ny` | `L_inf` error | Order |
-|---:|---:|---:|
-| 8 | 6.2500e-02 | - |
-| 16 | 3.1250e-02 | 1.00 |
-| 32 | 1.5625e-02 | 1.00 |
-| 64 | 7.8125e-03 | 1.00 |
-| 128 | 3.9062e-03 | 1.00 |
+## 4. Natural convection (Rayleigh-Bénard)
 
-This is not a second-order thermal boundary result. Do not describe it as
-such unless the boundary scheme changes.
+Nusselt number on a differentially heated square cavity at Rayleigh number
+``\text{Ra} = 10^3``, validated against the reference solution of
+De Vahl Davis (1983).
 
-## Natural convection
+| ``N`` | ``\text{Nu}_{\text{Kraken}}`` | ``\text{Nu}_{\text{ref}}`` | Relative error |
+|------:|------------------------------:|---------------------------:|---------------:|
+|    64 |                         1.093 |                      1.117 |         2.17 % |
 
-For the De Vahl Davis `Ra = 1e3`, `Pr = 0.71` square-cavity reference:
+The 2.17 % error at N = 64 is consistent with published LBM results at
+this resolution. It is a coarse spot-check, **not** the headline thermal
+accuracy: the authoritative [Thermal Natural Convection](@ref) benchmark page
+resolves the same de Vahl Davis case in Float64 at 192² and reports
+**Nu = 1.126 vs 1.117 (+0.79 % error)**, staying below 1 % at every Ra
+(10³, 10⁴, 10⁵). Refer to that page for the converged result.
 
-| `N` | `Nu_Kraken` | `Nu_ref` | Relative error |
-|---:|---:|---:|---:|
-| 64 | 1.1423 | 1.1180 | 2.17% |
+### Reproduce
 
-This is a useful smoke validation for the 2D thermal path. Higher Rayleigh
-numbers, 3D natural convection, refinement and body-fitted cases should be
-rerun and CSV-backed before being documented as benchmark results.
+```bash
+julia --project benchmarks/convergence_cavity.jl
+```

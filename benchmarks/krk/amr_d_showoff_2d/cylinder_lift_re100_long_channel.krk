@@ -1,0 +1,31 @@
+# AMR D show-off target: unsteady lift on a cylinder in a long open channel.
+# This is a reproducible target case, not a completed D validation gate yet:
+# nested open-channel obstacle runtime must pass surgical tests first.
+
+Simulation amr_d_cylinder_lift_re100_long_channel D2Q9
+
+Define Re = 100
+Define u_in = 0.05
+Define omega = 1.953125
+Define rho0 = 1.0
+Define cx = 32.0
+Define cy = 20.0
+Define R = 4.0
+Define cx_leaf = 256.5
+Define cy_leaf = 160.5
+Define radius_leaf = 32
+
+Domain L = 160 x 40  N = 160 x 40
+Physics nu = 0.004 Fx = 0
+
+Obstacle cylinder { (x - cx)^2 + (y - cy)^2 <= R^2 }
+
+Boundary west velocity(ux = 0.05, uy = 0)
+Boundary east pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Refine cylinder_wake { region = [20, 8, 96, 32], ratio = 8 }
+
+Run 200000 steps
+Diagnostics every 200 [step, ux, uy, rho, mass, drag, lift, cd, cl]

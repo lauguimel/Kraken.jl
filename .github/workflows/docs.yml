@@ -1,14 +1,13 @@
 name: Documentation
 on:
   push:
-    branches: [main, lbm, release/*]
+    branches: [main, dev/v0.3-campaign, 'release/**']
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, dev/v0.3-campaign]
+  workflow_dispatch:
 permissions:
   contents: write
-  pull-requests: write
-  statuses: write
 jobs:
   docs:
     runs-on: ubuntu-latest
@@ -21,12 +20,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: |
+      - name: Instantiate docs environment
+        run: |
           julia --project=docs -e '
             using Pkg
             Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()'
-      - run: julia --project=docs docs/make.jl
+      - name: Build docs and check links
+        run: julia --project=docs docs/make.jl
         env:
+          DOCUMENTER_LINKCHECK: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
