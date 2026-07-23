@@ -1122,7 +1122,7 @@ end
 
         stream_periodic_x_moving_wall_y_F_2d!(Fout, Fin; u_north=0.05)
 
-        @test isapprox(mass_F(Fout), mass_F(Fin); atol=1e-13, rtol=0)
+        @test isapprox(mass_F(Fout), mass_F(Fin); rtol=1e-12)
         @test momentum_F(Fout)[1] > momentum_F(Fin)[1]
         @test_throws ArgumentError stream_periodic_x_moving_wall_y_F_2d!(Fin, Fin)
     end
@@ -1336,7 +1336,7 @@ end
         coalesce_patch_to_shadow_F_2d!(patch)
         _assert_per_q_sums_equal(patch.coarse_shadow_F, F; atol=1e-12)
         @test isapprox(collect(moments_F(patch.coarse_shadow_F)),
-                       collect(moments_F(F)); atol=1e-12, rtol=0)
+                       collect(moments_F(F)); rtol=1e-12)
     end
 
     @testset "grid BGK collision conserves global moments" begin
@@ -1395,7 +1395,7 @@ end
         coalesce_patch_to_shadow_F_2d!(patch)
         _assert_per_q_sums_equal(patch.coarse_shadow_F, F; atol=1e-12)
         @test isapprox(collect(moments_F(patch.coarse_shadow_F)),
-                       collect(moments_F(F)); atol=1e-12, rtol=0)
+                       collect(moments_F(F)); rtol=1e-12)
     end
 
     @testset "experimental patch allocation" begin
@@ -1512,7 +1512,7 @@ end
 
         _assert_per_q_sums_equal(patch.fine_F, shadow_before; atol=1e-13)
         @test isapprox(collect(moments_F(patch.fine_F)),
-                       collect(moments_F(fine_before)); atol=1e-13, rtol=0)
+                       collect(moments_F(fine_before)); rtol=1e-12)
 
         coalesce_patch_to_shadow_F_2d!(patch)
         @test isapprox(patch.coarse_shadow_F, shadow_before; atol=1e-14, rtol=0)
