@@ -155,6 +155,7 @@ makedocs(;
         "Guide" => [
             "Getting started" => "getting_started.md",
             "Installation" => "installation.md",
+            "Running on HPC clusters" => "users/hpc.md",
             "Concepts" => "concepts_index.md",
             "Capabilities" => "capabilities.md",
             "Architecture" => "architecture.md",

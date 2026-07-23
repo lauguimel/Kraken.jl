@@ -43,6 +43,7 @@ const sectionedSidebar: Record<string, any[]> = {
   '/concepts_index': section('Guide'),
   '/capabilities': section('Guide'),
   '/architecture': section('Guide'),
+  '/users/hpc': section('Guide'),
   '/users/krk-reference': section('Guide'),
   '/users/incompressible-navier-stokes': section('Guide'),
   // Examples (grouped by physics; two pages re-homed from users/tutorials/)
