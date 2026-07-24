@@ -3,6 +3,20 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.1] — 2026-07-24
+
+### Added
+- HPC cluster guide (`users/hpc`): user-space juliaup install, CUDA runtime
+  pinning gotcha, complete PBS Pro example (Aqua, QUT), SLURM variant,
+  Apptainer note, batch best practices.
+
+### Fixed
+- `OldroydB` name clash between the legacy driver spec and the rheology model
+  (renamed `OldroydBSpec`) — broke precompilation on Julia 1.11.
+- Known test failures from the v0.3.0 cut (#16): rtol-based conservative-tree
+  assertions, streaming thresholds with margin, STL fixture path.
+- Requires Julia >= 1.11 (extension mechanism); stdlib compat widened.
+
 ## [0.3.0] — 2026-07-22
 
 ### Added
