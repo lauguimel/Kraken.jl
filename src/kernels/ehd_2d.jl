@@ -173,7 +173,7 @@ function collide_electric_charge_regularized_2d!(f, Ex, Ey, tau_q, K)
 end
 
 @kernel function apply_phi_nee_walls_2d_kernel!(f, @Const(phi), phi_bottom, phi_top, Ny)
-    i = @index(Global)
+    i, = @index(Global, NTuple)
     @inbounds begin
         T = eltype(f)
         for qdir in 1:9
@@ -192,7 +192,7 @@ end
 
 @kernel function apply_charge_nee_walls_2d_kernel!(f, @Const(qfield), @Const(Ex), @Const(Ey),
                                                    q_bottom, grad_top, K, Ny)
-    i = @index(Global)
+    i, = @index(Global, NTuple)
     @inbounds begin
         qb = q_bottom
         qt = qfield[i, Ny - 1] - grad_top

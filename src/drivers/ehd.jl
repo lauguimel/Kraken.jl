@@ -107,7 +107,7 @@ the faithful wall-node NEE charge update matches the diffusion-free base state.
 function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
                                   alpha=1e-4, delta_U=1.0,
                                   charge_scheme=:srt,
-                                  max_steps=20000, charge_tol=1e-10,
+                                  max_steps=100000, charge_tol=1e-8,
                                   phi_tol=1e-4, phi_max_iter=10000,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
     Nx < 3 && throw(ArgumentError("Nx must be at least 3."))

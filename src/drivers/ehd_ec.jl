@@ -1,0 +1,276 @@
+function _ehd_ec_lattice_params(Ny, C, M, T_ehd, Ma_E, alpha, delta_U, gamma; FT)
+    H = FT(Ny - 1)
+    cs = inv(sqrt(FT(3)))
+    K = FT(Ma_E) * H * cs / FT(delta_U)
+    nu = FT(M)^2 * K * FT(delta_U) / FT(T_ehd)
+    tau = FT(0.5) + FT(3) * nu
+    eps_e = (FT(M) * K)^2
+    q_inj = FT(C) * eps_e * FT(delta_U) / H^2
+    D = FT(alpha) * K * FT(delta_U)
+    tau_U = FT(0.5) + FT(3) * FT(gamma)
+    tau_q = FT(0.5) + FT(3) * D
+    dt_star = K * FT(delta_U) / H^2
+    return (H=H, cs=cs, K=K, nu=nu, tau=tau, omega=inv(tau),
+            eps=eps_e, q_inj=q_inj, D=D, tau_U=tau_U, nu_U=FT(gamma),
+            omega_U=inv(tau_U), tau_q=tau_q, omega_q=inv(tau_q),
+            dt_star=dt_star, T_check=eps_e * FT(delta_U) / (nu * K),
+            C_check=q_inj * H^2 / (eps_e * FT(delta_U)),
+            M_check=sqrt(eps_e) / K, alpha_check=D / (K * FT(delta_U)))
+end
+
+function _fill_charge_populations_ec!(f_cpu, q_init, Ey_profile, K, Nx, Ny, FT)
+    for j in 1:Ny, i in 1:Nx, qdir in 1:9
+        f_cpu[i, j, qdir] = _charge_feq_host(q_init[i, j], zero(FT), K * Ey_profile[j], qdir, FT)
+    end
+    return f_cpu
+end
+
+function _project_coulomb_force_rows!(Fx, Fy, is_solid, mode)
+    mode === :none && return nothing
+    mode in (:xy, :y) || throw(ArgumentError("force_projection must be :none, :xy, or :y."))
+    Fx_cpu = Array(Fx)
+    Fy_cpu = Array(Fy)
+    solid_cpu = Array(is_solid)
+    Nx, Ny = size(Fx_cpu)
+    for j in 1:Ny
+        count = 0
+        sx = zero(eltype(Fx_cpu))
+        sy = zero(eltype(Fy_cpu))
+        for i in 1:Nx
+            if !solid_cpu[i, j]
+                count += 1
+                sx += Fx_cpu[i, j]
+                sy += Fy_cpu[i, j]
+            end
+        end
+        if count > 0
+            mx = sx / count
+            my = sy / count
+            for i in 1:Nx
+                if !solid_cpu[i, j]
+                    mode === :xy && (Fx_cpu[i, j] -= mx)
+                    Fy_cpu[i, j] -= my
+                end
+            end
+        end
+    end
+    copyto!(Fx, Fx_cpu)
+    copyto!(Fy, Fy_cpu)
+    return nothing
+end
+
+function _ehd_maxspeed(ux, uy)
+    ux_cpu = Array(ux)
+    uy_cpu = Array(uy)
+    m = zero(eltype(ux_cpu))
+    for idx in eachindex(ux_cpu, uy_cpu)
+        s = hypot(ux_cpu[idx], uy_cpu[idx])
+        s > m && (m = s)
+    end
+    return m
+end
+
+"""
+    run_electroconvection_2d(; Nx, Ny, C, M, T, Ma_E, alpha, max_cycles, ...)
+
+Run a CPU-oriented coupled EHD electroconvection canary. The electric potential
+uses the pseudo-time DDF Poisson solve, charge uses drift equilibrium
+`u + K*E`, and Navier-Stokes uses BGK + Guo forcing with force density `q*E`.
+Sidewalls are EHD-local zero-gradient scalar NEE and post-stream free-slip flow
+mirroring ported from Jiachen's MATLAB driver.
+"""
+function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
+                                    Ma_E=1e-2, alpha=1e-4, delta_U=1.0,
+                                    gamma=0.3, max_cycles=2000,
+                                    target_t_star=nothing,
+                                    phi_tol=1e-4, phi_max_iter=10000,
+                                    phi_substeps=nothing,
+                                    charge_scheme=:regularized,
+                                    perturb_amplitude=1e-4,
+                                    perturb_mode=1,
+                                    force_projection=:none,
+                                    velocity_stop=0.2,
+                                    history_interval=1,
+                                    backend=KernelAbstractions.CPU(),
+                                    FT=Float64)
+    Nx < 4 && throw(ArgumentError("Nx must be at least 4."))
+    Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
+    charge_scheme in (:srt, :regularized) ||
+        throw(ArgumentError("charge_scheme must be :srt or :regularized."))
+    force_projection in (:none, :xy, :y) ||
+        throw(ArgumentError("force_projection must be :none, :xy, or :y."))
+
+    p = _ehd_ec_lattice_params(Ny, C, M, T, Ma_E, alpha, delta_U, gamma; FT=FT)
+    p.tau <= FT(0.5) && error("NS relaxation time must be greater than 0.5.")
+    p.tau_q <= FT(0.5) && error("Charge relaxation time must be greater than 0.5.")
+    if target_t_star !== nothing
+        target_cycles = Int(ceil(FT(target_t_star) / p.dt_star))
+        max_cycles = min(Int(max_cycles), target_cycles)
+    else
+        max_cycles = Int(max_cycles)
+    end
+
+    analytic = ehd_hydrostatic_profiles(C, Ny; FT=FT)
+    q_profile = FT(p.q_inj) .* analytic.q_star
+    Ey_profile = FT(delta_U) .* analytic.E_star ./ FT(p.H)
+    A = FT(Nx - 1) / FT(Ny - 1)
+
+    phi_f_in = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    phi_f_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    q_f_in = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    q_f_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    f_in = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+    f_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
+
+    phi = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    qfield = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Ex = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Ey = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    rho = KernelAbstractions.ones(backend, FT, Nx, Ny)
+    ux = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    uy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fx_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Fy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
+
+    q_init = zeros(FT, Nx, Ny)
+    for j in 1:Ny, i in 1:Nx
+        xstar = A * FT(i - 1) / FT(Nx - 1)
+        ystar = FT(j - 1) / FT(Ny - 1)
+        q_init[i, j] = q_profile[j] +
+                       FT(perturb_amplitude) * FT(p.q_inj) *
+                       sin(FT(pi) * ystar) *
+                       cos(FT(pi) * FT(perturb_mode) * xstar / A)
+    end
+    q_init[:, 1] .= FT(p.q_inj)
+
+    phi_init = _fill_phi_populations!(zeros(FT, Nx, Ny, 9), analytic.phi, Nx, Ny, FT)
+    q_pop_init = _fill_charge_populations_ec!(zeros(FT, Nx, Ny, 9), q_init, Ey_profile, FT(p.K), Nx, Ny, FT)
+    ns_init = zeros(FT, Nx, Ny, 9)
+    for qdir in 1:9
+        ns_init[:, :, qdir] .= ehd_w(Val(qdir), FT)
+    end
+    solid_cpu = falses(Nx, Ny)
+    solid_cpu[:, 1] .= true
+    solid_cpu[:, Ny] .= true
+
+    copyto!(phi_f_in, phi_init)
+    copyto!(phi_f_out, phi_init)
+    copyto!(q_f_in, q_pop_init)
+    copyto!(q_f_out, q_pop_init)
+    copyto!(f_in, ns_init)
+    copyto!(f_out, ns_init)
+    copyto!(is_solid, solid_cpu)
+
+    compute_ehd_scalar_2d!(phi, phi_f_in)
+    compute_ehd_scalar_2d!(qfield, q_f_in)
+    compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
+
+    hist_capacity = cld(max_cycles, max(1, Int(history_interval)))
+    umax_history = Vector{FT}(undef, hist_capacity)
+    cycle_history = Vector{Int}(undef, hist_capacity)
+    phi_iters_last = 0
+    phi_rel_last = FT(Inf)
+    q_rel_last = FT(Inf)
+    hist_count = 0
+    steps_done = 0
+
+    for cycle in 1:max_cycles
+        steps_done = cycle
+
+        if phi_substeps === nothing
+            phi_cpu = Array(phi)
+            for iter in 1:phi_max_iter
+                phi_old = phi_cpu
+                collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
+                stream_wall_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
+                compute_ehd_scalar_2d!(phi, phi_f_out)
+                apply_phi_nee_box_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
+                compute_ehd_scalar_2d!(phi, phi_f_out)
+                phi_cpu = Array(phi)
+                phi_rel_last = maximum(abs.(phi_cpu .- phi_old)) /
+                               max(maximum(abs, phi_cpu), floatmin(FT))
+                phi_f_in, phi_f_out = phi_f_out, phi_f_in
+                phi_iters_last = iter
+                phi_rel_last <= phi_tol && break
+                iter == phi_max_iter &&
+                    error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(phi_rel_last).")
+            end
+        else
+            phi_old = Array(phi)
+            for _ in 1:Int(phi_substeps)
+                collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
+                stream_wall_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
+                compute_ehd_scalar_2d!(phi, phi_f_out)
+                apply_phi_nee_box_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
+                compute_ehd_scalar_2d!(phi, phi_f_out)
+                phi_f_in, phi_f_out = phi_f_out, phi_f_in
+            end
+            phi_cpu = Array(phi)
+            phi_rel_last = maximum(abs.(phi_cpu .- phi_old)) /
+                           max(maximum(abs, phi_cpu), floatmin(FT))
+            phi_iters_last = Int(phi_substeps)
+        end
+        compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
+
+        compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx_prev, Fy_prev, Nx, Ny)
+        enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+
+        q_before = Array(qfield)
+        if charge_scheme == :srt
+            collide_electric_charge_srt_2d!(q_f_in, ux, uy, Ex, Ey, p.tau_q, p.K)
+        else
+            collide_electric_charge_regularized_2d!(q_f_in, ux, uy, Ex, Ey, p.tau_q, p.K)
+        end
+        stream_wall_x_wall_y_2d!(q_f_out, q_f_in, Nx, Ny)
+        compute_ehd_scalar_2d!(qfield, q_f_out)
+        apply_charge_nee_box_2d!(q_f_out, qfield, ux, uy, Ex, Ey, p.q_inj, zero(FT), p.K, Nx, Ny)
+        compute_ehd_scalar_2d!(qfield, q_f_out)
+        q_cpu = Array(qfield)
+        q_rel_last = maximum(abs.(q_cpu .- q_before)) / max(maximum(abs, q_cpu), floatmin(FT))
+        q_f_in, q_f_out = q_f_out, q_f_in
+        all(isfinite, q_cpu) || error("Charge field became non-finite at cycle $(cycle).")
+
+        compute_coulomb_force_2d!(Fx, Fy, qfield, Ex, Ey, Nx, Ny)
+        _project_coulomb_force_rows!(Fx, Fy, is_solid, force_projection)
+        collide_guo_field_2d!(f_in, is_solid, Fx, Fy, p.omega)
+        stream_wall_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+        apply_free_slip_sidewalls_2d!(f_out, Nx, Ny)
+        f_in, f_out = f_out, f_in
+
+        compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx, Fy, Nx, Ny)
+        enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+        umax = _ehd_maxspeed(ux, uy)
+        isfinite(umax) || error("Flow velocity became non-finite at cycle $(cycle).")
+        umax > FT(velocity_stop) &&
+            error("Flow field became unstable at cycle $(cycle): max(|u|) = $(umax).")
+
+        if cycle % Int(history_interval) == 0
+            hist_count += 1
+            umax_history[hist_count] = umax
+            cycle_history[hist_count] = cycle
+        end
+        copyto!(Fx_prev, Fx)
+        copyto!(Fy_prev, Fy)
+    end
+
+    compute_ehd_scalar_2d!(phi, phi_f_in)
+    compute_ehd_scalar_2d!(qfield, q_f_in)
+    compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
+    compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx, Fy, Nx, Ny)
+    enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+
+    return (ux=Array(ux), uy=Array(uy), rho=Array(rho), q=Array(qfield),
+            phi=Array(phi), Ex=Array(Ex), Ey=Array(Ey), Fx=Array(Fx), Fy=Array(Fy),
+            umax_history=umax_history[1:hist_count],
+            cycle_history=cycle_history[1:hist_count],
+            steps=steps_done, Nx=Nx, Ny=Ny, A=A, C=C, M=M, T=T,
+            Ma_E=Ma_E, alpha=alpha, perturb_amplitude=perturb_amplitude,
+            perturb_mode=perturb_mode, force_projection=force_projection,
+            charge_scheme=charge_scheme, phi_substeps=phi_substeps,
+            phi_iters_last=phi_iters_last, phi_rel_last=phi_rel_last,
+            q_rel_change=q_rel_last, params=p,
+            ns_collision=:bgk_guo, sidewall_bc=:free_slip_ported)
+end

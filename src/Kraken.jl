@@ -57,6 +57,7 @@ include("kernels/fused_thermal_2d.jl")
 include("kernels/collide_mrt_2d.jl")
 include("kernels/species_2d.jl")
 include("kernels/ehd_2d.jl")
+include("kernels/ehd_bc_2d.jl")
 include("kernels/multiphase_2d.jl")
 include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
@@ -149,6 +150,7 @@ include("drivers/basic.jl")
 include("drivers/cylinder_libb.jl")
 include("drivers/thermal.jl")
 include("drivers/ehd.jl")
+include("drivers/ehd_ec.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
@@ -309,6 +311,7 @@ export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
 export run_rayleigh_benard_2d, run_natural_convection_2d, run_natural_convection_refined_2d
 export run_natural_convection_3d
+export run_electroconvection_2d
 export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_step!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!
