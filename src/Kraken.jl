@@ -58,6 +58,7 @@ include("kernels/collide_mrt_2d.jl")
 include("kernels/species_2d.jl")
 include("kernels/ehd_2d.jl")
 include("kernels/ehd_bc_2d.jl")
+include("kernels/ehd_mrt_2d.jl")
 include("kernels/multiphase_2d.jl")
 include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
@@ -332,6 +333,7 @@ export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
 export collide_mrt_2d!, collide_twophase_mrt_2d!
+export ehd_collide_mrt_2d!
 
 # Species transport
 export collide_species_2d!, compute_concentration_2d!

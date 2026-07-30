@@ -83,6 +83,7 @@ end
     include("test_thermal.jl")
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
+    include("analytical/ehd_mrt_smoke_2d.jl")
     include("test_species.jl")
     include("test_multiphase.jl")
     include("test_vof.jl")

@@ -28,46 +28,10 @@ end
 function _project_coulomb_force_rows!(Fx, Fy, is_solid, mode)
     mode === :none && return nothing
     mode in (:xy, :y) || throw(ArgumentError("force_projection must be :none, :xy, or :y."))
-    Fx_cpu = Array(Fx)
-    Fy_cpu = Array(Fy)
-    solid_cpu = Array(is_solid)
-    Nx, Ny = size(Fx_cpu)
-    for j in 1:Ny
-        count = 0
-        sx = zero(eltype(Fx_cpu))
-        sy = zero(eltype(Fy_cpu))
-        for i in 1:Nx
-            if !solid_cpu[i, j]
-                count += 1
-                sx += Fx_cpu[i, j]
-                sy += Fy_cpu[i, j]
-            end
-        end
-        if count > 0
-            mx = sx / count
-            my = sy / count
-            for i in 1:Nx
-                if !solid_cpu[i, j]
-                    mode === :xy && (Fx_cpu[i, j] -= mx)
-                    Fy_cpu[i, j] -= my
-                end
-            end
-        end
-    end
-    copyto!(Fx, Fx_cpu)
-    copyto!(Fy, Fy_cpu)
+    mode_code = mode === :xy ? 1 : 2
+    Nx, Ny = size(Fx)
+    project_coulomb_force_rows_2d!(Fx, Fy, is_solid, mode_code, Nx, Ny)
     return nothing
-end
-
-function _ehd_maxspeed(ux, uy)
-    ux_cpu = Array(ux)
-    uy_cpu = Array(uy)
-    m = zero(eltype(ux_cpu))
-    for idx in eachindex(ux_cpu, uy_cpu)
-        s = hypot(ux_cpu[idx], uy_cpu[idx])
-        s > m && (m = s)
-    end
-    return m
 end
 
 """
@@ -86,6 +50,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     phi_tol=1e-4, phi_max_iter=10000,
                                     phi_substeps=nothing,
                                     charge_scheme=:regularized,
+                                    ns_scheme=:bgk,
                                     perturb_amplitude=1e-4,
                                     perturb_mode=1,
                                     force_projection=:none,
@@ -97,6 +62,8 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
     Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
     charge_scheme in (:srt, :regularized) ||
         throw(ArgumentError("charge_scheme must be :srt or :regularized."))
+    ns_scheme in (:bgk, :mrt) ||
+        throw(ArgumentError("ns_scheme must be :bgk or :mrt."))
     force_projection in (:none, :xy, :y) ||
         throw(ArgumentError("force_projection must be :none, :xy, or :y."))
 
@@ -133,6 +100,10 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
     Fy = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Fx_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Fy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    phi_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    q_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    diag = KernelAbstractions.zeros(backend, FT, 2)
+    diag_host = Vector{FT}(undef, 2)
     is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
 
     q_init = zeros(FT, Nx, Ny)
@@ -181,17 +152,16 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         steps_done = cycle
 
         if phi_substeps === nothing
-            phi_cpu = Array(phi)
             for iter in 1:phi_max_iter
-                phi_old = phi_cpu
+                copyto!(phi_prev, phi)
                 collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
                 stream_wall_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
                 compute_ehd_scalar_2d!(phi, phi_f_out)
                 apply_phi_nee_box_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
                 compute_ehd_scalar_2d!(phi, phi_f_out)
-                phi_cpu = Array(phi)
-                phi_rel_last = maximum(abs.(phi_cpu .- phi_old)) /
-                               max(maximum(abs, phi_cpu), floatmin(FT))
+                ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
+                copyto!(diag_host, diag)
+                phi_rel_last = diag_host[1]
                 phi_f_in, phi_f_out = phi_f_out, phi_f_in
                 phi_iters_last = iter
                 phi_rel_last <= phi_tol && break
@@ -199,7 +169,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(phi_rel_last).")
             end
         else
-            phi_old = Array(phi)
+            copyto!(phi_prev, phi)
             for _ in 1:Int(phi_substeps)
                 collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
                 stream_wall_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
@@ -208,9 +178,9 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                 compute_ehd_scalar_2d!(phi, phi_f_out)
                 phi_f_in, phi_f_out = phi_f_out, phi_f_in
             end
-            phi_cpu = Array(phi)
-            phi_rel_last = maximum(abs.(phi_cpu .- phi_old)) /
-                           max(maximum(abs, phi_cpu), floatmin(FT))
+            ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
+            copyto!(diag_host, diag)
+            phi_rel_last = diag_host[1]
             phi_iters_last = Int(phi_substeps)
         end
         compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
@@ -218,7 +188,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx_prev, Fy_prev, Nx, Ny)
         enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
 
-        q_before = Array(qfield)
+        copyto!(q_prev, qfield)
         if charge_scheme == :srt
             collide_electric_charge_srt_2d!(q_f_in, ux, uy, Ex, Ey, p.tau_q, p.K)
         else
@@ -228,22 +198,29 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         compute_ehd_scalar_2d!(qfield, q_f_out)
         apply_charge_nee_box_2d!(q_f_out, qfield, ux, uy, Ex, Ey, p.q_inj, zero(FT), p.K, Nx, Ny)
         compute_ehd_scalar_2d!(qfield, q_f_out)
-        q_cpu = Array(qfield)
-        q_rel_last = maximum(abs.(q_cpu .- q_before)) / max(maximum(abs, q_cpu), floatmin(FT))
+        ehd_rel_change_2d!(diag, qfield, q_prev, Nx, Ny)
+        copyto!(diag_host, diag)
+        q_rel_last = diag_host[1]
         q_f_in, q_f_out = q_f_out, q_f_in
-        all(isfinite, q_cpu) || error("Charge field became non-finite at cycle $(cycle).")
+        diag_host[2] == zero(FT) && error("Charge field became non-finite at cycle $(cycle).")
 
         compute_coulomb_force_2d!(Fx, Fy, qfield, Ex, Ey, Nx, Ny)
         _project_coulomb_force_rows!(Fx, Fy, is_solid, force_projection)
-        collide_guo_field_2d!(f_in, is_solid, Fx, Fy, p.omega)
+        if ns_scheme == :bgk
+            collide_guo_field_2d!(f_in, is_solid, Fx, Fy, p.omega)
+        else
+            ehd_collide_mrt_2d!(f_in, Fx, Fy, is_solid, p.nu)
+        end
         stream_wall_x_wall_y_2d!(f_out, f_in, Nx, Ny)
         apply_free_slip_sidewalls_2d!(f_out, Nx, Ny)
         f_in, f_out = f_out, f_in
 
         compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx, Fy, Nx, Ny)
         enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
-        umax = _ehd_maxspeed(ux, uy)
-        isfinite(umax) || error("Flow velocity became non-finite at cycle $(cycle).")
+        ehd_maxspeed_2d!(diag, ux, uy, Nx, Ny)
+        copyto!(diag_host, diag)
+        umax = diag_host[1]
+        diag_host[2] == zero(FT) && error("Flow velocity became non-finite at cycle $(cycle).")
         umax > FT(velocity_stop) &&
             error("Flow field became unstable at cycle $(cycle): max(|u|) = $(umax).")
 
@@ -269,8 +246,9 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
             steps=steps_done, Nx=Nx, Ny=Ny, A=A, C=C, M=M, T=T,
             Ma_E=Ma_E, alpha=alpha, perturb_amplitude=perturb_amplitude,
             perturb_mode=perturb_mode, force_projection=force_projection,
-            charge_scheme=charge_scheme, phi_substeps=phi_substeps,
+            charge_scheme=charge_scheme, ns_scheme=ns_scheme, phi_substeps=phi_substeps,
             phi_iters_last=phi_iters_last, phi_rel_last=phi_rel_last,
             q_rel_change=q_rel_last, params=p,
-            ns_collision=:bgk_guo, sidewall_bc=:free_slip_ported)
+            ns_collision=(ns_scheme == :bgk ? :bgk_guo : :mrt_guo_moment),
+            sidewall_bc=:free_slip_ported)
 end

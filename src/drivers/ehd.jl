@@ -138,6 +138,10 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
     q_f_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     phi = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     qfield = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    phi_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    q_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    diag = KernelAbstractions.zeros(backend, FT, 2)
+    diag_host = Vector{FT}(undef, 2)
     Ex = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     Ey = KernelAbstractions.zeros(backend, FT, Nx, Ny)
 
@@ -149,8 +153,6 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
     copyto!(q_f_out, q_init)
     compute_ehd_scalar_2d!(phi, phi_f_in)
     compute_ehd_scalar_2d!(qfield, q_f_in)
-    phi_cpu = Array(phi)
-    q_cpu = Array(qfield)
 
     phi_iters_last = 0
     phi_rel_last = Inf
@@ -159,18 +161,18 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
 
     for step in 1:max_steps
         steps_done = step
-        q_before = q_cpu
+        copyto!(q_prev, qfield)
 
         for iter in 1:phi_max_iter
-            phi_old = phi_cpu
+            copyto!(phi_prev, phi)
             collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
             stream_periodic_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
             compute_ehd_scalar_2d!(phi, phi_f_out)
             apply_phi_nee_walls_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
             compute_ehd_scalar_2d!(phi, phi_f_out)
-            phi_cpu = Array(phi)
-            denom = max(maximum(abs, phi_cpu), floatmin(FT))
-            phi_rel_last = maximum(abs.(phi_cpu .- phi_old)) / denom
+            ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
+            copyto!(diag_host, diag)
+            phi_rel_last = diag_host[1]
             phi_f_in, phi_f_out = phi_f_out, phi_f_in
             phi_iters_last = iter
             phi_rel_last <= phi_tol && break
@@ -189,10 +191,11 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
         compute_ehd_scalar_2d!(qfield, q_f_out)
         apply_charge_nee_walls_2d!(q_f_out, qfield, Ex, Ey, p.q_inj, zero(FT), p.K, Nx, Ny)
         compute_ehd_scalar_2d!(qfield, q_f_out)
-        q_cpu = Array(qfield)
-        q_rel = maximum(abs.(q_cpu .- q_before)) / max(maximum(abs, q_cpu), floatmin(FT))
+        ehd_rel_change_2d!(diag, qfield, q_prev, Nx, Ny)
+        copyto!(diag_host, diag)
+        q_rel = diag_host[1]
         q_f_in, q_f_out = q_f_out, q_f_in
-        all(isfinite, q_cpu) || error("Charge field became non-finite at step $(step).")
+        diag_host[2] == zero(FT) && error("Charge field became non-finite at step $(step).")
         q_rel <= charge_tol && break
         step == max_steps &&
             error("EHD hydrostatic charge solve did not converge within $(max_steps) steps. Last relative change: $(q_rel).")

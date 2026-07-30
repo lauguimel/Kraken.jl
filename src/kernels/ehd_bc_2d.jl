@@ -198,6 +198,42 @@ function compute_coulomb_force_2d!(Fx, Fy, qfield, Ex, Ey, Nx, Ny)
     kernel!(Fx, Fy, qfield, Ex, Ey, Ny; ndrange=(Nx, Ny))
 end
 
+@kernel function project_coulomb_force_rows_2d_kernel!(Fx, Fy, @Const(is_solid), mode_code, Nx)
+    j, = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(Fx)
+        count = zero(Int)
+        sx = zero(T)
+        sy = zero(T)
+        for i in 1:Nx
+            if !is_solid[i, j]
+                count += 1
+                sx += Fx[i, j]
+                sy += Fy[i, j]
+            end
+        end
+        if count > 0
+            inv_count = one(T) / T(count)
+            mx = sx * inv_count
+            my = sy * inv_count
+            for i in 1:Nx
+                if !is_solid[i, j]
+                    mode_code == 1 && (Fx[i, j] -= mx)
+                    mode_code <= 2 && (Fy[i, j] -= my)
+                end
+            end
+        end
+    end
+end
+
+function project_coulomb_force_rows_2d!(Fx, Fy, is_solid, mode_code, Nx, Ny)
+    mode_code == 0 && return nothing
+    backend = KernelAbstractions.get_backend(Fx)
+    kernel! = project_coulomb_force_rows_2d_kernel!(backend)
+    kernel!(Fx, Fy, is_solid, mode_code, Nx; ndrange=(Ny,))
+    return nothing
+end
+
 @kernel function compute_macroscopic_guo_field_2d_kernel!(rho, ux, uy, @Const(f),
                                                           @Const(Fx), @Const(Fy), Ny)
     i, j = @index(Global, NTuple)

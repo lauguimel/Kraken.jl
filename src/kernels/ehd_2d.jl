@@ -59,6 +59,61 @@ function compute_ehd_scalar_2d!(field, f)
     kernel!(field, f; ndrange=(Nx, Ny))
 end
 
+@kernel function ehd_rel_change_2d_kernel!(out, @Const(field), @Const(prev), Nx, Ny)
+    k, = @index(Global, NTuple)
+    @inbounds begin
+        if k == 1
+            T = eltype(field)
+            maxdiff = zero(T)
+            maxabs = zero(T)
+            finite_flag = one(T)
+            for j in 1:Ny, i in 1:Nx
+                v = field[i, j]
+                old = prev[i, j]
+                d = abs(v - old)
+                a = abs(v)
+                maxdiff = max(maxdiff, d)
+                maxabs = max(maxabs, a)
+                finite_flag = ifelse(isfinite(v), finite_flag, zero(T))
+            end
+            out[1] = maxdiff / max(maxabs, floatmin(T))
+            out[2] = finite_flag
+        end
+    end
+end
+
+function ehd_rel_change_2d!(out, field, prev, Nx, Ny)
+    backend = KernelAbstractions.get_backend(field)
+    kernel! = ehd_rel_change_2d_kernel!(backend)
+    kernel!(out, field, prev, Nx, Ny; ndrange=(1,))
+end
+
+@kernel function ehd_maxspeed_2d_kernel!(out, @Const(ux), @Const(uy), Nx, Ny)
+    k, = @index(Global, NTuple)
+    @inbounds begin
+        if k == 1
+            T = eltype(ux)
+            umax = zero(T)
+            finite_flag = one(T)
+            for j in 1:Ny, i in 1:Nx
+                sx = ux[i, j]
+                sy = uy[i, j]
+                speed = sqrt(sx * sx + sy * sy)
+                umax = max(umax, speed)
+                finite_flag = ifelse(isfinite(speed), finite_flag, zero(T))
+            end
+            out[1] = umax
+            out[2] = finite_flag
+        end
+    end
+end
+
+function ehd_maxspeed_2d!(out, ux, uy, Nx, Ny)
+    backend = KernelAbstractions.get_backend(ux)
+    kernel! = ehd_maxspeed_2d_kernel!(backend)
+    kernel!(out, ux, uy, Nx, Ny; ndrange=(1,))
+end
+
 @kernel function collide_electric_potential_2d_kernel!(f, @Const(q), eps, ω_U, nu_U)
     i, j = @index(Global, NTuple)
     @inbounds begin
