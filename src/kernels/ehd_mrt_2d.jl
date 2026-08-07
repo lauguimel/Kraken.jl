@@ -68,12 +68,15 @@ using KernelAbstractions
             gpxx = g2 - g3 + g4 - g5
             gpxy = g6 - g7 + g8 - g9
 
-            sc = one(T)
             e_star   = e   - s_e   * (e   - e_eq)   + (one(T) - s_e   / T(2)) * ge
             eps_star = eps - s_eps * (eps - eps_eq) + (one(T) - s_eps / T(2)) * geps
-            jx_star  = jx + (one(T) - sc / T(2)) * gjx
+            # Momentum moments: j_eq = j + F/2 (half-force velocity shift), so the
+            # relaxation term -s*(j - j_eq) contributes +s*F/2 and the source term
+            # (1 - s/2)*F completes to the full Guo momentum input j* = j + F,
+            # independent of the momentum relaxation rate.
+            jx_star  = jx + gjx
             qx_star  = qx  - s_q   * (qx  - qx_eq)  + (one(T) - s_q   / T(2)) * gqx
-            jy_star  = jy + (one(T) - sc / T(2)) * gjy
+            jy_star  = jy + gjy
             qy_star  = qy  - s_q   * (qy  - qy_eq)  + (one(T) - s_q   / T(2)) * gqy
             pxx_star = pxx - s_nu  * (pxx - pxx_eq) + (one(T) - s_nu  / T(2)) * gpxx
             pxy_star = pxy - s_nu  * (pxy - pxy_eq) + (one(T) - s_nu  / T(2)) * gpxy
