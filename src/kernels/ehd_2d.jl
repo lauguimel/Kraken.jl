@@ -157,6 +157,45 @@ function compute_electric_field_2d!(Ex, Ey, f, tau_U)
     kernel!(Ex, Ey, f, eltype(f)(tau_U); ndrange=(Nx, Ny))
 end
 
+@kernel function compute_electric_field_fd_2d_kernel!(Ex, Ey, @Const(phi), xbc_code, Nx, Ny)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        T = eltype(phi)
+        if xbc_code == 1
+            Ex[i, j] = (i == 1 || i == Nx) ? zero(T) :
+                       -(phi[i + 1, j] - phi[i - 1, j]) / T(2)
+        else
+            im = i == 1 ? Nx : i - 1
+            ip = i == Nx ? 1 : i + 1
+            Ex[i, j] = -(phi[ip, j] - phi[im, j]) / T(2)
+        end
+
+        if j == 1
+            Ey[i, j] = (T(3) * phi[i, 1] - T(4) * phi[i, 2] + phi[i, 3]) / T(2)
+        elseif j == Ny
+            Ey[i, j] = (-T(3) * phi[i, Ny] + T(4) * phi[i, Ny - 1] - phi[i, Ny - 2]) / T(2)
+        else
+            Ey[i, j] = -(phi[i, j + 1] - phi[i, j - 1]) / T(2)
+        end
+    end
+end
+
+"""
+    compute_electric_field_fd_2d!(Ex, Ey, phi, xbc, Nx, Ny)
+
+Recover `E = -grad(phi)` from the direct Poisson potential on the unit lattice.
+The y-plates use second-order one-sided differences; x uses either mirror
+Neumann (`Ex=0` on side nodes) or periodic central wrap.
+"""
+function compute_electric_field_fd_2d!(Ex, Ey, phi, xbc::Symbol, Nx, Ny)
+    xbc in (:neumann, :periodic) ||
+        throw(ArgumentError("xbc must be :neumann or :periodic."))
+    backend = KernelAbstractions.get_backend(phi)
+    kernel! = compute_electric_field_fd_2d_kernel!(backend)
+    xbc_code = xbc === :neumann ? 1 : 2
+    kernel!(Ex, Ey, phi, xbc_code, Nx, Ny; ndrange=(Nx, Ny))
+end
+
 @kernel function collide_electric_charge_srt_2d_kernel!(f, @Const(Ex), @Const(Ey), tau_q, K)
     i, j = @index(Global, NTuple)
     @inbounds begin

@@ -107,6 +107,7 @@ the faithful wall-node NEE charge update matches the diffusion-free base state.
 function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
                                   alpha=1e-4, delta_U=1.0,
                                   charge_scheme=:srt,
+                                  phi_scheme=:lbm,
                                   max_steps=100000, charge_tol=1e-8,
                                   phi_tol=1e-4, phi_max_iter=10000,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
@@ -114,6 +115,8 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
     Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
     charge_scheme in (:srt, :regularized) ||
         throw(ArgumentError("charge_scheme must be :srt or :regularized."))
+    phi_scheme in (:lbm, :direct) ||
+        throw(ArgumentError("phi_scheme must be :lbm or :direct."))
 
     p = _ehd_lattice_params(Ny, C, M, Ma_E, alpha, delta_U; FT=FT)
     p.tau_q <= FT(0.5) && error("Charge relaxation time must be greater than 0.5.")
@@ -153,6 +156,11 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
     copyto!(q_f_out, q_init)
     compute_ehd_scalar_2d!(phi, phi_f_in)
     compute_ehd_scalar_2d!(qfield, q_f_in)
+    poisson_setup = phi_scheme === :direct ? ehd_poisson_setup(Nx, Ny, p.eps; xbc=:periodic, backend=backend) : nothing
+    if phi_scheme === :direct
+        ehd_poisson_solve!(phi, poisson_setup, qfield)
+        compute_electric_field_fd_2d!(Ex, Ey, phi, :periodic, Nx, Ny)
+    end
 
     phi_iters_last = 0
     phi_rel_last = Inf
@@ -163,24 +171,30 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
         steps_done = step
         copyto!(q_prev, qfield)
 
-        for iter in 1:phi_max_iter
-            copyto!(phi_prev, phi)
-            collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
-            stream_periodic_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
-            compute_ehd_scalar_2d!(phi, phi_f_out)
-            apply_phi_nee_walls_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
-            compute_ehd_scalar_2d!(phi, phi_f_out)
-            ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
-            copyto!(diag_host, diag)
-            phi_rel_last = diag_host[1]
-            phi_f_in, phi_f_out = phi_f_out, phi_f_in
-            phi_iters_last = iter
-            phi_rel_last <= phi_tol && break
-            iter == phi_max_iter &&
-                error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(phi_rel_last).")
+        if phi_scheme === :direct
+            ehd_poisson_solve!(phi, poisson_setup, qfield)
+            compute_electric_field_fd_2d!(Ex, Ey, phi, :periodic, Nx, Ny)
+            phi_iters_last = 1
+            phi_rel_last = zero(FT)
+        else
+            for iter in 1:phi_max_iter
+                copyto!(phi_prev, phi)
+                collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
+                stream_periodic_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
+                compute_ehd_scalar_2d!(phi, phi_f_out)
+                apply_phi_nee_walls_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
+                compute_ehd_scalar_2d!(phi, phi_f_out)
+                ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
+                copyto!(diag_host, diag)
+                phi_rel_last = diag_host[1]
+                phi_f_in, phi_f_out = phi_f_out, phi_f_in
+                phi_iters_last = iter
+                phi_rel_last <= phi_tol && break
+                iter == phi_max_iter &&
+                    error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(phi_rel_last).")
+            end
+            compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
         end
-
-        compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
 
         if charge_scheme == :srt
             collide_electric_charge_srt_2d!(q_f_in, Ex, Ey, p.tau_q, p.K)
@@ -201,8 +215,10 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
             error("EHD hydrostatic charge solve did not converge within $(max_steps) steps. Last relative change: $(q_rel).")
     end
 
-    compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
-    compute_ehd_scalar_2d!(phi, phi_f_in)
+    if phi_scheme === :lbm
+        compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
+        compute_ehd_scalar_2d!(phi, phi_f_in)
+    end
     compute_ehd_scalar_2d!(qfield, q_f_in)
     phi_cpu = Array(phi)
     q_cpu = Array(qfield)
@@ -229,6 +245,7 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
             steps=steps_done, q_rel_change=q_rel,
             phi_iters_last=phi_iters_last, phi_rel_last=phi_rel_last,
             Nx=Nx, Ny=Ny, C=C, M=M, Ma_E=Ma_E, alpha=alpha,
-            charge_scheme=charge_scheme, bc=:non_equilibrium_extrapolation,
+            charge_scheme=charge_scheme, phi_scheme=phi_scheme,
+            bc=:non_equilibrium_extrapolation,
             y_mapping=:wall_nodes_interior_half_link, params=p)
 end

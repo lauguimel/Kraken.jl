@@ -28,9 +28,18 @@ function _parse_symbol(s)
 end
 
 function _cuda_backend()
-    @eval using CUDA
-    CUDA.functional() || error("CUDA requested but CUDA.functional() is false")
-    return CUDA.CUDABackend()
+    # The functional() check lives INSIDE the @eval and the backend is built via
+    # invokelatest: referencing CUDA from this function's original world age
+    # throws UndefVarError ("binding may be too new").
+    try
+        @eval Main begin
+            using CUDA, CUDSS
+            CUDA.functional() || error("CUDA requested but CUDA.functional() is false")
+        end
+    catch err
+        error("CUDA sweep requested but CUDA/CUDSS could not be loaded/functional. Co-install sibling weakdeps as noted in docs/agent/solve-linear-implication.md. Original error: $(sprint(showerror, err))")
+    end
+    return Base.invokelatest(() -> Main.CUDA.CUDABackend())
 end
 
 function _growth_series(steps, speeds)
@@ -65,29 +74,30 @@ end
 
 function _write_summary(csv_path, md_path, rows)
     open(csv_path, "w") do io
-        println(io, "T,ns_scheme,charge_scheme,steps,final_max_abs_u,growth_rate_estimate,history_csv")
+        println(io, "T,ns_scheme,charge_scheme,phi_scheme,steps,ms_per_step,final_max_abs_u,growth_rate_estimate,history_csv")
         for row in rows
-            @printf(io, "%.12g,%s,%s,%d,%.12g,%.12g,%s\n",
-                    row.T, row.ns_scheme, row.charge_scheme, row.steps,
-                    row.final_max_abs_u, row.growth_rate_estimate, row.history_csv)
+            @printf(io, "%.12g,%s,%s,%s,%d,%.12g,%.12g,%.12g,%s\n",
+                    row.T, row.ns_scheme, row.charge_scheme, row.phi_scheme, row.steps,
+                    row.ms_per_step, row.final_max_abs_u, row.growth_rate_estimate,
+                    row.history_csv)
         end
     end
     open(md_path, "w") do io
         println(io, "# EHD Tc Sweep")
         println(io)
-        println(io, "| T | NS | charge | steps | final max|u| | growth estimate |")
-        println(io, "|---:|:---|:---|---:|---:|---:|")
+        println(io, "| T | NS | charge | phi | steps | ms/step | final max|u| | growth estimate |")
+        println(io, "|---:|:---|:---|:---|---:|---:|---:|---:|")
         for row in rows
-            @printf(io, "| %.6g | %s | %s | %d | %.6g | %.6g |\n",
-                    row.T, row.ns_scheme, row.charge_scheme, row.steps,
-                    row.final_max_abs_u, row.growth_rate_estimate)
+            @printf(io, "| %.6g | %s | %s | %s | %d | %.6g | %.6g | %.6g |\n",
+                    row.T, row.ns_scheme, row.charge_scheme, row.phi_scheme, row.steps,
+                    row.ms_per_step, row.final_max_abs_u, row.growth_rate_estimate)
         end
     end
 end
 
 function main(argv=ARGS)
     if "--help" in argv || "-h" in argv
-        println("usage: julia --project=. benchmarks/ehd/tc_sweep.jl [--smoke] [--gpu] [--grid=197x321] [--T=150,160,163.5,165,170,190] [--cycles=50000] [--ns-scheme=mrt] [--charge-scheme=regularized] [--phi-substeps=1|auto] [--phi-tol=1e-4] [--phi-max-iter=10000]")
+        println("usage: julia --project=. benchmarks/ehd/tc_sweep.jl [--smoke] [--gpu] [--grid=197x321] [--T=150,160,163.5,165,170,190] [--cycles=50000] [--ns-scheme=mrt] [--charge-scheme=regularized] [--phi-scheme=lbm|direct] [--phi-substeps=1|auto] [--phi-tol=1e-4] [--phi-max-iter=10000]")
         return nothing
     end
 
@@ -99,11 +109,13 @@ function main(argv=ARGS)
     cycles = parse(Int, _arg_value(argv, "--cycles", smoke ? "500" : "50000"))
     ns_scheme = smoke ? :mrt : _parse_symbol(_arg_value(argv, "--ns-scheme", "mrt"))
     charge_scheme = _parse_symbol(_arg_value(argv, "--charge-scheme", "regularized"))
+    phi_scheme = _parse_symbol(_arg_value(argv, "--phi-scheme", "lbm"))
     phi_substeps_arg = _arg_value(argv, "--phi-substeps", "1")
     phi_substeps = lowercase(String(phi_substeps_arg)) == "auto" ? nothing : parse(Int, phi_substeps_arg)
     phi_tol = parse(Float64, _arg_value(argv, "--phi-tol", "1e-4"))
     phi_max_iter = parse(Int, _arg_value(argv, "--phi-max-iter", "10000"))
     history_interval = parse(Int, _arg_value(argv, "--history-interval", smoke ? "10" : "100"))
+    force_projection = _parse_symbol(_arg_value(argv, "--force-projection", "none"))
     outdir = String(_arg_value(argv, "--output-dir", joinpath(dirname(@__DIR__), "results", "ehd")))
     mkpath(outdir)
 
@@ -115,8 +127,9 @@ function main(argv=ARGS)
         result = Kraken.run_electroconvection_2d(;
             Nx=Nx, Ny=Ny, T=T_ehd, max_cycles=cycles,
             ns_scheme=ns_scheme, charge_scheme=charge_scheme,
-            phi_substeps=phi_substeps, phi_tol=phi_tol, phi_max_iter=phi_max_iter,
-            history_interval=history_interval, force_projection=:none,
+            phi_scheme=phi_scheme, phi_substeps=phi_substeps,
+            phi_tol=phi_tol, phi_max_iter=phi_max_iter,
+            history_interval=history_interval, force_projection=force_projection,
             backend=backend, FT=Float64)
 
         T_tag = replace(@sprintf("%.6g", T_ehd), "." => "p", "-" => "m")
@@ -124,9 +137,11 @@ function main(argv=ARGS)
         history_path = joinpath(outdir, history_name)
         growth = _write_history(history_path, result.cycle_history, result.umax_history)
         push!(rows, (T=T_ehd, ns_scheme=String(ns_scheme), charge_scheme=String(charge_scheme),
-                     steps=result.steps, final_max_abs_u=last(result.umax_history),
+                     phi_scheme=String(phi_scheme),
+                     steps=result.steps, ms_per_step=result.loop_ms_per_step,
+                     final_max_abs_u=last(result.umax_history),
                      growth_rate_estimate=growth, history_csv=history_name))
-        @info "EHD Tc sweep case complete" T=T_ehd ns_scheme steps=result.steps maxu=last(result.umax_history)
+        @info "EHD Tc sweep case complete" T=T_ehd ns_scheme steps=result.steps ms_per_step=result.loop_ms_per_step maxu=last(result.umax_history)
     end
 
     summary_csv = joinpath(outdir, "tc_sweep_summary_$(tag).csv")

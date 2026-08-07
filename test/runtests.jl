@@ -84,6 +84,8 @@ end
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
     include("analytical/ehd_mrt_smoke_2d.jl")
+    include("analytical/ehd_phi_direct_2d.jl")
+    include("analytical/ehd_phi_gpu_parity_2d.jl")
     include("test_species.jl")
     include("test_multiphase.jl")
     include("test_vof.jl")
