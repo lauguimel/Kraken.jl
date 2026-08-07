@@ -1,0 +1,2 @@
+T,ns_scheme,charge_scheme,phi_scheme,steps,final_max_abs_u,growth_rate_estimate,history_csv
+150,mrt,regularized,direct,600000,9.22913392126e-08,-4.10490909905e-06,tc_sweep_T150_mrt_20260731_200046.csv
