@@ -10,6 +10,7 @@ tval = get(ENV, "T_VAL", "190")
 cycles = get(ENV, "CYCLES", "600000")
 phi_scheme = get(ENV, "PHI_SCHEME", "lbm")
 force_projection = get(ENV, "FORCE_PROJECTION", "none")
+growth_window = get(ENV, "GROWTH_WINDOW", "0.4")
 
 empty!(ARGS)
 append!(ARGS, [
@@ -19,6 +20,8 @@ append!(ARGS, [
     "--cycles=$(cycles)",
     "--phi-scheme=$(phi_scheme)",
     "--force-projection=$(force_projection)",
+    "--growth-window=$(growth_window)",
     "--gpu",
 ])
 include(joinpath(@__DIR__, "..", "benchmarks", "ehd", "tc_sweep.jl"))
+main(ARGS)

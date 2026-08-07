@@ -25,12 +25,13 @@ All runs below share the same setup:
 | hardware | 1x H100 (Aqua), one PBS job per T (`hpc/ehd_tc_one.pbs`) |
 
 Each `tc_sweep_T<T>_mrt_<stamp>.csv` is the amplitude history for one T:
-`step, max_abs_u, growth_rate_estimate`, sampled every 100 steps. The
-`growth_rate_estimate` column is the *cumulative* estimate
-log(|u|/|u|_0)/t, so it stays positive for any run whose amplitude ever grew
-above its initial value — the sign of the instability is read from the
-late-time slope of `max_abs_u`, not from that column. Each
-`tc_sweep_summary_<stamp>.{csv,md}` is the one-line digest of its job.
+`step, max_abs_u, cumulative_log_slope, growth_rate_late`, sampled every 100
+steps. The `cumulative_log_slope` column is retained as the historical
+log(|u|/|u|_0)/t diagnostic, but `growth_rate_late` is the trailing-window
+least-squares slope of log(max|u|) and is now the column that decides the
+threshold. Each `tc_sweep_summary_<stamp>.{csv,md}` is the one-line digest of
+its job; new summary stamps include the process id to avoid same-second
+per-job filename collisions.
 
 ## Retained runs
 
