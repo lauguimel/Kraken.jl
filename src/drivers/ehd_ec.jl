@@ -1,21 +1,6 @@
 function _ehd_ec_lattice_params(Ny, C, M, T_ehd, Ma_E, alpha, delta_U, gamma; FT)
-    H = FT(Ny - 1)
-    cs = inv(sqrt(FT(3)))
-    K = FT(Ma_E) * H * cs / FT(delta_U)
-    nu = FT(M)^2 * K * FT(delta_U) / FT(T_ehd)
-    tau = FT(0.5) + FT(3) * nu
-    eps_e = (FT(M) * K)^2
-    q_inj = FT(C) * eps_e * FT(delta_U) / H^2
-    D = FT(alpha) * K * FT(delta_U)
-    tau_U = FT(0.5) + FT(3) * FT(gamma)
-    tau_q = FT(0.5) + FT(3) * D
-    dt_star = K * FT(delta_U) / H^2
-    return (H=H, cs=cs, K=K, nu=nu, tau=tau, omega=inv(tau),
-            eps=eps_e, q_inj=q_inj, D=D, tau_U=tau_U, nu_U=FT(gamma),
-            omega_U=inv(tau_U), tau_q=tau_q, omega_q=inv(tau_q),
-            dt_star=dt_star, T_check=eps_e * FT(delta_U) / (nu * K),
-            C_check=q_inj * H^2 / (eps_e * FT(delta_U)),
-            M_check=sqrt(eps_e) / K, alpha_check=D / (K * FT(delta_U)))
+    spec = Units.EHDSpec{FT}(FT(T_ehd), FT(C), FT(M), FT(alpha), FT(Ma_E))
+    return Units.ehd_ec_lattice_params(spec, Ny, delta_U, gamma; FT=FT)
 end
 
 function _fill_charge_populations_ec!(f_cpu, q_init, Ey_profile, K, Nx, Ny, FT)
