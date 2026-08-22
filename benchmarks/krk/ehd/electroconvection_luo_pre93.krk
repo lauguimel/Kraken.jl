@@ -1,0 +1,10 @@
+# Electroconvection benchmark at the published Luo et al. resolution.
+# Reference: Luo, Wu, Yi & Tan, Phys. Rev. E 93, 023309 (2016).
+#
+# This 197 x 321 configuration is a GPU-scale benchmark and is not intended
+# for CI. The preset supplies the validated MRT/direct-potential EHD scheme;
+# the Domain and Run directives below override the modest preset defaults.
+
+Preset electroconvection_2d
+Domain L = 1.0 x 1.0  N = 197 x 321
+Run 50000 steps

@@ -1,0 +1,11 @@
+# EHD hydrostatic strong-injection base state.
+# Validation: Luo, Wu, Yi & Tan, Phys. Rev. E 93, 023309 (2016).
+#
+# Small CPU fixture for the .krk runner path; this is intended for CI-scale
+# analytical validation, not for production onset benchmarking.
+
+Simulation ehd_hydrostatic D2Q9
+Domain L = 1.0 x 1.0  N = 8 x 96
+Physics C = 10.0 M = 10.0 alpha = 1e-4 Ma_E = 1e-2 charge_scheme = srt
+Module ehd
+Run 100000 steps

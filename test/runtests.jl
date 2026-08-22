@@ -83,6 +83,7 @@ end
     include("test_thermal.jl")
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
+    include("analytical/ehd_krk_2d.jl")
     include("analytical/ehd_mapping_parity_2d.jl")
     include("analytical/ehd_mrt_smoke_2d.jl")
     include("analytical/ehd_phi_direct_2d.jl")
@@ -162,6 +163,7 @@ end
         include("test_units_audit.jl")
         include("test_units_krk.jl")
         include("test_units_thermal.jl")
+        include("test_units_ehd.jl")
     end
 end
 

@@ -262,6 +262,7 @@ include("drivers/run_d3q19.jl")
 include("drivers/run_refined.jl")
 include("drivers/run_refined_3d.jl")
 include("drivers/run_thermal.jl")
+include("drivers/run_ehd.jl")
 
 # --- Generic simulation runner ---
 include("simulation_runner.jl")

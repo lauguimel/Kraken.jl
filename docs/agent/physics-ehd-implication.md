@@ -23,6 +23,8 @@ coarse electroconvection onset bracket.
 
 - `run_ehd_hydrostatic_2d(; Nx, Ny, C, M, Ma_E, alpha, charge_scheme, backend, FT)` — standalone hydrostatic EHD validation driver. Returns 2D fields, x-averaged profiles, analytic profiles, relative L2 errors, convergence metadata, and lattice parameters.
 - `run_electroconvection_2d(; Nx, Ny, C, M, T, Ma_E, alpha, max_cycles, phi_substeps, force_projection, backend, FT)` — coupled CPU/GPU canary. Returns flow, charge, potential, electric field, Coulomb force, velocity history, lattice mapping, and loop diagnostics including `loop_ms_per_step` measured over the coupled loop only.
+- `Kraken.Units.EHDSpec` plus `Kraken.Units.ehd_ec_lattice_params` own the electroconvection nondimensional-to-lattice mapping for `T`, `C`, `M`, `alpha`, and `Ma_E`. The coupled driver keeps its public `T` keyword but stores the spec field as `T_ehd` to avoid colliding with the units module's numeric type convention.
+- `.krk` runner surface: `Module ehd` dispatches `Simulation ehd_hydrostatic ...` to the hydrostatic driver and `Simulation electroconvection_2d ...` to the coupled driver. EHD nondimensional groups and scheme selectors live in `Physics` params; `Preset electroconvection_2d` emits the validated MRT/direct-potential configuration.
 - Kernel-level surface: `collide_electric_potential_2d!`, `compute_electric_field_2d!`, `collide_electric_charge_srt_2d!`, `collide_electric_charge_regularized_2d!`, `compute_ehd_scalar_2d!`, scalar NEE wall/box BC kernels, EHD-local non-periodic stream, free-slip sidewall port, Coulomb force helper, and Guo-corrected macro recovery.
 
 ## Reads from
@@ -42,11 +44,11 @@ coarse electroconvection onset bracket.
 - Kernels are KernelAbstractions `@kernel` functions and use `@Const` for read-only arrays.
 - Hot kernels are allocation-free and unroll the D2Q9 operations.
 - The hydrostatic driver is backend-generic for arrays, but convergence checks copy the small validation fields to the host each step. The coupled electroconvection driver is backend-generic for arrays; `phi_scheme=:direct` has a GPU direct-solve path when CUDSS is loaded, while diagnostics and returned fields still gather to host as before.
-- No MRT/TRT charge collision, `.krk` parser branch, or simulation-runner path is included.
+- No MRT/TRT charge collision or generic parser branch is included; `.krk` EHD dispatch is a thin runner over existing EHD drivers.
 
 ## Coupled Loop Conventions
 
-- PRE/Jiachen lattice mapping: `K = Ma_E*H*cs/delta_U`, `nu = M^2*K*delta_U/T`, `tau = 0.5 + 3*nu`, `eps = (M*K)^2`, `q_inj = C*eps*delta_U/H^2`, `D = alpha*K*delta_U`, and `tau_q = 0.5 + 3*D`.
+- PRE/Jiachen lattice mapping: `K = Ma_E*H*cs/delta_U`, `nu = M^2*K*delta_U/T`, `tau = 0.5 + 3*nu`, `eps = (M*K)^2`, `q_inj = C*eps*delta_U/H^2`, `D = alpha*K*delta_U`, and `tau_q = 0.5 + 3*D`. The arithmetic source of truth is `src/units/physics/electromagn.jl`; `src/drivers/ehd_ec.jl` only constructs the EHD spec and delegates.
 - Each outer cycle solves or substeps `phi`, computes `E`, computes charge-advection macros from the previous force, advances charge with equilibrium drift `u + K*E`, forms current `F=qE`, collides NS through `collide_guo_field_2d!`, streams, applies free-slip sidewall mirroring, then recovers current Guo-corrected macros.
 - `phi_scheme=:lbm` is the faithful pseudo-time DDF path. `phi_scheme=:direct` replaces only the potential solve: it assembles the wall-node, unit-spacing 5-point operator once and solves `laplacian(phi) = -q/eps` once per outer step through the factorize-once linear-solve seam. The source sign follows `collide_electric_potential_2d!`, whose positive lattice source converges to `-q/eps` on the right-hand side.
 - Direct Poisson BCs: bottom plate `phi=1`, top plate `phi=0`; hydrostatic uses periodic x because the DDF streams periodic-x; electroconvection uses mirror Neumann x sides matching the box sidewall scalar BC. Plate rows are identity rows and interior rows carry the source. The mixed identity/stencil matrix is non-symmetric as assembled, so both direct paths use `spd=false`.
