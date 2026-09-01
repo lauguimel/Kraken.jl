@@ -128,7 +128,22 @@ end
     include("test_sphere_libb.jl")
     include("test_sphere_stl_drag_krk.jl")
     include("test_slbm_libb_3d.jl")
-    include("test_gmsh_loader.jl")
+    # Gmsh is an optional mesh-import dependency, not a Kraken dep. Guard the LOAD
+    # (same pattern as the Enzyme block below) so its absence skips cleanly instead
+    # of erroring the whole suite, while real loader failures still surface when it
+    # IS installed.
+    let gmsh_ok = try
+            @eval Main using Gmsh
+            true
+        catch
+            false
+        end
+        if gmsh_ok
+            include("test_gmsh_loader.jl")
+        else
+            @info "Skipping gmsh loader tests (Gmsh not installed in this environment)"
+        end
+    end
     include("test_multiblock_topology.jl")
     include("test_multiblock_exchange.jl")
     include("test_multiblock_canal.jl")

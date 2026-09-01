@@ -1,9 +1,15 @@
 using Test
 using Kraken
 
-function _assert_per_q_sums_equal(A, B; atol=1e-14)
+# Conservation is checked on sums over the whole grid, so the achievable
+# agreement scales with the sum's magnitude: a pure absolute tolerance asks for
+# more than the arithmetic can give. The Poiseuille canary sums to ~313 and
+# drifted 30 ulps (5.4e-15 relative), tripping atol=1e-12 — which is ~18 ulps
+# there. Keep the absolute floor for near-zero sums and add a relative band;
+# a genuine conservation break is orders of magnitude larger than this.
+function _assert_per_q_sums_equal(A, B; atol=1e-14, rtol=1e-13)
     for q in 1:9
-        @test isapprox(sum(A[:, :, q]), sum(B[:, :, q]); atol=atol, rtol=0)
+        @test isapprox(sum(A[:, :, q]), sum(B[:, :, q]); atol=atol, rtol=rtol)
     end
 end
 
