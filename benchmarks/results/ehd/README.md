@@ -71,4 +71,11 @@ grows for T >= 167, so sigma changes sign in that interval:
 **Tc ~ 166.5**, against the reference value **163.5** from Luo, Wu, Yi &
 Tan, Phys. Rev. E **93**, 023309 (2016) — a **+1.8%** deviation.
 
-Timing at this resolution is ~4.5 ms/step on H100 with the direct phi solve.
+Timing at this resolution on H100 with the direct phi solve depends on where the
+factorization runs: ~4.5 ms/step when it falls back to CPU UMFPACK (the runs
+recorded here — the cuDSS extension had not been triggered, see below), and
+1.39 ms/step with cuDSS resident on the GPU (job 24567565).
+
+The fallback is silent: loading CUDSS *after* Kraken leaves the extension
+untriggered on Julia 1.12, and the driver then moves the right-hand side to the
+host every step. Load `CUDA, CUDSS` before Kraken to get the GPU path.
