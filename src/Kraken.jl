@@ -56,6 +56,9 @@ include("kernels/thermal_3d.jl")
 include("kernels/fused_thermal_2d.jl")
 include("kernels/collide_mrt_2d.jl")
 include("kernels/species_2d.jl")
+include("kernels/ehd_2d.jl")
+include("kernels/ehd_bc_2d.jl")
+include("kernels/ehd_mrt_2d.jl")
 include("kernels/multiphase_2d.jl")
 include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
@@ -147,6 +150,9 @@ include("kernels/enzyme_rules.jl")
 include("drivers/basic.jl")
 include("drivers/cylinder_libb.jl")
 include("drivers/thermal.jl")
+include("drivers/ehd_poisson.jl")
+include("drivers/ehd.jl")
+include("drivers/ehd_ec.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
@@ -256,6 +262,7 @@ include("drivers/run_d3q19.jl")
 include("drivers/run_refined.jl")
 include("drivers/run_refined_3d.jl")
 include("drivers/run_thermal.jl")
+include("drivers/run_ehd.jl")
 
 # --- Generic simulation runner ---
 include("simulation_runner.jl")
@@ -307,6 +314,7 @@ export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
 export run_rayleigh_benard_2d, run_natural_convection_2d, run_natural_convection_refined_2d
 export run_natural_convection_3d
+export run_electroconvection_2d
 export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_step!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!
@@ -327,6 +335,7 @@ export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
 export collide_mrt_2d!, collide_twophase_mrt_2d!
+export ehd_collide_mrt_2d!
 
 # Species transport
 export collide_species_2d!, compute_concentration_2d!

@@ -25,6 +25,7 @@ const _PHYSICS_KW = Dict{Symbol,Set{Symbol}}(
         :max_polymer_substeps,
     )),
     :thermal_boussinesq => Set{Symbol}((:Re, :Pr, :Ra)),
+    :ehd_ec => Set{Symbol}((:T, :T_ehd, :C, :M, :alpha, :Ma_E)),
     :power_law => Set{Symbol}((:Re, :n, :K)),
     :multiphase => Set{Symbol}((:Re,)),
     :mhd => Set{Symbol}((:Re, :Ha, :Rm)),

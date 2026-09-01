@@ -173,6 +173,7 @@ makedocs(;
                 "Steady shape sensitivity (AD)" => "users/benchmarks/ad-shape-sensitivity.md",
                 "Steady shape sensitivity — viscoelastic (AD)" => "users/benchmarks/ad-shape-sensitivity-viscoelastic.md",
                 "GPU certification" => "users/benchmarks/gpu-certification.md",
+                "Electroconvection (EHD)" => "users/benchmarks/electroconvection.md",
             ],
         ],
         "API" => [

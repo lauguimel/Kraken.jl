@@ -13,3 +13,9 @@ output/
 # results/ at root only (top-level), NOT benchmarks/results/ which is
 # a versioned sync point for the doc figures.
 /results/
+
+# EHD Tc sweep output: one 250 kB CSV per T value per run, so new sweeps are
+# ignored by default. Runs kept as validation evidence are already tracked
+# (see benchmarks/results/ehd/README.md); promote a new one with `git add -f`.
+benchmarks/results/ehd/tc_sweep_*.csv
+benchmarks/results/ehd/tc_sweep_*.md

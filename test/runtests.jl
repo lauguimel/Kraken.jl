@@ -83,6 +83,15 @@ end
     include("test_thermal.jl")
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
+    include("analytical/ehd_hydrostatic_2d.jl")
+    include("analytical/ehd_krk_2d.jl")
+    include("analytical/ehd_mapping_parity_2d.jl")
+    include("analytical/ehd_mrt_smoke_2d.jl")
+    # ~40 s: two 50k-cycle canaries bracketing the electroconvection onset.
+    include("analytical/ehd_onset_2d.jl")
+    include("analytical/ehd_phi_direct_2d.jl")
+    include("analytical/ehd_twin_parity_2d.jl")
+    include("analytical/ehd_phi_gpu_parity_2d.jl")
     include("test_species.jl")
     include("test_multiphase.jl")
     include("test_vof.jl")
@@ -157,6 +166,7 @@ end
         include("test_units_audit.jl")
         include("test_units_krk.jl")
         include("test_units_thermal.jl")
+        include("test_units_ehd.jl")
     end
 end
 

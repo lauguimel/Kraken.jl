@@ -171,6 +171,8 @@ function run_simulation(setup::SimulationSetup;
                             callback=callback, callback_every=callback_every)
     elseif :thermal in setup.modules
         return _run_thermal(setup; backend=backend, T=T)
+    elseif :ehd in setup.modules
+        return _run_ehd(setup; backend=backend, T=T)
     elseif :viscoelastic in setup.modules
         return _run_viscoelastic(setup; backend=backend, T=T)
     elseif setup.lattice === :D3Q19

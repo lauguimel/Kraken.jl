@@ -37,6 +37,14 @@ struct ThermalBoussinesqSpec{T} <: AbstractPhysicsSpec
     Ra::T
 end
 
+struct EHDSpec{T} <: AbstractPhysicsSpec
+    T_ehd::T
+    C::T
+    M::T
+    alpha::T
+    Ma_E::T
+end
+
 struct PowerLawSpec{T} <: AbstractPhysicsSpec end
 struct MultiphaseSpec{T} <: AbstractPhysicsSpec end
 struct MHDSpec{T} <: AbstractPhysicsSpec end
