@@ -1,7 +1,12 @@
 # Concepts index
 
+Kraken is a method-agnostic PDE framework; the Lattice Boltzmann Method
+is its mature core method, and it is the one this page maps. For how LBM
+sits within the broader platform — and what is shipped versus on the
+roadmap — see the [architecture overview](architecture.md).
+
 This page is a map of the Lattice Boltzmann concepts implemented in
-Kraken.jl v0.1.0. Each entry briefly states what the concept is and why
+Kraken.jl v0.2.0. Each entry briefly states what the concept is and why
 it matters, links to the theory page that derives it, and points to
 example-tutorials that exercise it. If you are looking for a specific
 topic, this is the fastest route in.
@@ -129,10 +134,10 @@ bookkeeping grow quickly. This page explains what changes and what
 does not.
 
 - Theory: [From 2D to 3D](theory/06_from_2d_to_3d.md)
-- Examples: [Lid-driven cavity 3D](examples/05_cavity_3d.md)
+- Examples: [Lid-driven cavity (2D & 3D)](examples/04_cavity_2d.md)
 
 ## Limitations
 
-For the honest list of what is and is not in v0.1.0 — including
+For the honest list of what is and is not in v0.2.0 — including
 multiphase, non-Newtonian, and high density-ratio flows, all of which
 are deferred — see [Limitations](theory/10_limitations.md).

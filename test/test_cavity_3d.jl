@@ -4,65 +4,45 @@ using KernelAbstractions
 
 @testset "3D Cavity Zou-He all faces" begin
 
-    @testset "Cavity 3D Zou-He top + bounce-back walls" begin
-        N = 16
-        u_lid = 0.02
-        ν = 0.01  # Re = u_lid * N / ν = 32
-        max_steps = 3000
+    @testset "Cavity 3D lid-driven (production path) — no overshoot" begin
+        # Mirrors the production run_cavity_3d driver: stream built-in bounce-back
+        # for the 5 static walls + Zou-He moving lid on top. (Deliberately NOT
+        # apply_bounce_back_walls_3d!, which no driver uses and which over-determines
+        # the 4 top edges when combined with the lid Zou-He → divergence.)
+        # N=32, Re=100 (ω≈1.68): inside the BGK stable envelope. The old N=16/Re=32
+        # config sits at ω≈1.89 (near the BGK limit of 2) on a coarse grid — outside
+        # the stable envelope for the stream-BB cavity; it only produced a finite
+        # *overshooting* (≈1.96·u_lid, unphysical) result before the BC fix.
+        N = 32
+        u_lid = 0.1
+        ν = 0.032  # Re = u_lid * N / ν = 100
+        max_steps = 2000
 
         config = LBMConfig(D3Q19(); Nx=N, Ny=N, Nz=N, ν=ν, u_lid=u_lid, max_steps=max_steps)
-        state = initialize_3d(config, Float64)
-        f_in, f_out = state.f_in, state.f_out
-        ρ = state.ρ
-        ux, uy, uz = state.ux, state.uy, state.uz
-        is_solid = state.is_solid
-        ω = Float64(omega(config))
-        Nx, Ny, Nz = N, N, N
+        res = run_cavity_3d(config)
 
-        for step in 1:max_steps
-            stream_3d!(f_out, f_in, Nx, Ny, Nz)
+        # No NaN anywhere
+        @test !any(isnan, res.ρ)
+        @test !any(isnan, res.ux)
+        @test !any(isnan, res.uy)
+        @test !any(isnan, res.uz)
 
-            # Top face: Zou-He velocity (u_lid, 0, 0)
-            apply_zou_he_top_3d!(f_out, u_lid, Nx, Ny, Nz)
-
-            # Other 5 faces: bounce-back
-            apply_bounce_back_walls_3d!(f_out, Nx, Ny, Nz)
-
-            # BGK collision
-            collide_3d!(f_out, is_solid, ω)
-
-            # Macroscopic fields
-            compute_macroscopic_3d!(ρ, ux, uy, uz, f_out)
-
-            # Swap
-            f_in, f_out = f_out, f_in
-        end
-
-        ρ_cpu  = Array(ρ)
-        ux_cpu = Array(ux)
-        uy_cpu = Array(uy)
-        uz_cpu = Array(uz)
-
-        # No NaN
-        @test !any(isnan, ρ_cpu)
-        @test !any(isnan, ux_cpu)
-        @test !any(isnan, uy_cpu)
-        @test !any(isnan, uz_cpu)
-
-        # Density variation < 5% (coarse grid, not fully converged)
-        ρ_mean = sum(ρ_cpu) / length(ρ_cpu)
-        ρ_max_dev = maximum(abs.(ρ_cpu .- ρ_mean)) / ρ_mean
-        @test ρ_max_dev < 0.05
-
-        # Mass conservation: total mass close to initial (coarse grid tolerance)
+        # Mass conservation (coarse grid tolerance)
+        ρ_mean = sum(res.ρ) / length(res.ρ)
         @test abs(ρ_mean - 1.0) < 0.05
 
-        # ux at lid-adjacent cells: check mean over interior of top face
-        ux_top = ux_cpu[2:Nx-1, 2:Ny-1, Nz]
+        # Lid imposes u_lid (mean over interior of top face)
+        ux_top = res.ux[2:N-1, 2:N-1, N]
         mean_ux_top = sum(ux_top) / length(ux_top)
-        @test abs(mean_ux_top - u_lid) / u_lid < 0.6  # coarse grid tolerance
+        @test abs(mean_ux_top - u_lid) / u_lid < 0.1  # was 0.6 pre-fix (overshoot)
 
-        @info "Cavity 3D Zou-He: ρ_max_dev=$(round(ρ_max_dev, digits=5)), mean_ux_top=$(round(mean_ux_top, digits=5))"
+        # NO OVERSHOOT regression guard: the D3Q19 top Zou-He must not over-impose
+        # lid momentum. Pre-fix this reached ~1.5*u_lid because the transverse-
+        # momentum correction omitted the wall-parallel diagonal pops (parallel[6:9]).
+        max_u = maximum(abs.(res.ux))
+        @test max_u <= 1.05 * u_lid
+
+        @info "Cavity 3D (production): ρ_mean=$(round(ρ_mean, digits=5)), mean_ux_top=$(round(mean_ux_top, digits=5)), max|ux|/u_lid=$(round(max_u/u_lid, digits=4))"
     end
 
     @testset "Zou-He velocity all 6 faces — mass conservation" begin

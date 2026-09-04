@@ -16,6 +16,36 @@ using Kraken
 using CairoMakie
 using Printf
 
+# ### Dark docs theme
+#
+# Render the throughput bar chart on the live Vitepress page colour
+# (``#1b1b1f``) with light text/ticks/spines and a dark-readable legend so it
+# sits seamlessly on the dark page.
+
+const KRAKEN_DARK = "#1b1b1f"
+set_theme!(Theme(
+    backgroundcolor = KRAKEN_DARK,
+    textcolor = "gray92",
+    Axis = (
+        backgroundcolor = KRAKEN_DARK,
+        titlecolor = "gray92",
+        xlabelcolor = "gray92", ylabelcolor = "gray92",
+        xticklabelcolor = "gray85", yticklabelcolor = "gray85",
+        xtickcolor = "gray70", ytickcolor = "gray70",
+        xgridcolor = ("gray60", 0.18), ygridcolor = ("gray60", 0.18),
+        leftspinecolor = "gray55", rightspinecolor = "gray55",
+        topspinecolor = "gray55", bottomspinecolor = "gray55",
+    ),
+    Legend = (
+        backgroundcolor = KRAKEN_DARK, labelcolor = "gray92",
+        titlecolor = "gray92", framecolor = "gray45",
+    ),
+))
+
+# Dark-readable series colours (cool blue + kraken accent).
+const COLOR_CPU = "#4ea1d3"
+const COLOR_GPU = "#ff6b6b"
+
 # ### Benchmark parameters
 #
 # We use a fixed number of time steps so that the work per run scales only
@@ -100,11 +130,11 @@ ax  = Axis(fig[1, 1];
     xticks = (1:length(grid_sizes), string.(grid_sizes)),
 )
 
-barplot!(ax, 1:length(grid_sizes), mlups_cpu; label="CPU", color=:steelblue)
+barplot!(ax, 1:length(grid_sizes), mlups_cpu; label="CPU", color=COLOR_CPU)
 
 if gpu_available
     barplot!(ax, (1:length(grid_sizes)) .+ 0.35, mlups_gpu;
-             label="GPU", color=:coral, width=0.3)
+             label="GPU", color=COLOR_GPU, width=0.3)
 end
 
 axislegend(ax; position=:lt)

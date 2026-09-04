@@ -4,6 +4,10 @@ EditURL = "10_krk_config.jl"
 
 # Configuration Files (`.krk`)
 
+```@raw html
+<DownloadMenu :files="[{label:'cavity.krk',href:'/downloads/krk_config/cavity.krk'},{label:'poiseuille.krk',href:'/downloads/krk_config/poiseuille.krk'},{label:'cylinder.krk',href:'/downloads/krk_config/cylinder.krk'},{label:'couette.krk',href:'/downloads/krk_config/couette.krk'}]" />
+```
+
 **Concepts:** [Spatial boundary conditions](../theory/19_spatial_bcs.md) ·
 `.krk` DSL parser, presets, helpers
 
@@ -78,7 +82,7 @@ Time-dependent BCs like `ux = 0.1*sin(2*pi*t/5000)` are re-evaluated each step.
 
 Download: [`cavity.krk`](../assets/krk/cavity.krk)
 
-```
+```krk
 Simulation cavity D2Q9
 Domain  L = 1 x 1   N = 128 x 128
 Physics nu = 0.128
@@ -108,7 +112,7 @@ post-processing.
 
 Download: [`poiseuille.krk`](../assets/krk/poiseuille.krk)
 
-```
+```krk
 Simulation poiseuille D2Q9
 Domain  L = 0.125 x 1.0  N = 4 x 32
 Physics nu = 0.1  Fx = 1e-5
@@ -130,7 +134,7 @@ forcing scheme.
 
 Download: [`cylinder.krk`](../assets/krk/cylinder.krk)
 
-```
+```krk
 Simulation cylinder D2Q9
 Domain  L = 10 x 2.5  N = 200 x 50
 
@@ -165,7 +169,7 @@ The west boundary uses a **spatial** Zou--He profile: the expression
 
 Download: [`couette.krk`](../assets/krk/couette.krk)
 
-```
+```krk
 Simulation couette D2Q9
 Domain  L = 0.125 x 1.0  N = 4 x 32
 
@@ -229,7 +233,7 @@ is used.
 
 ### Example: airfoil from STL
 
-```
+```krk
 Simulation airfoil D2Q9
 Domain  L = 4 x 2  N = 400 x 200
 Physics nu = 0.01

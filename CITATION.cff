@@ -6,7 +6,22 @@ authors:
   - given-names: Guillaume
     family-names: Maitrejean
     affiliation: Queensland University of Technology
+    # orcid: "https://orcid.org/0000-0000-0000-0000"  # ← add if desired
+  - given-names: Emilie
+    family-names: Sauret
+    affiliation: Queensland University of Technology   # ← confirm affiliation
+    # orcid: "https://orcid.org/0000-0000-0000-0000"  # ← add if desired
 repository-code: "https://github.com/lauguimel/Kraken.jl"
+url: "https://lauguimel.github.io/Kraken.jl/stable/"
 license: MIT
-version: 0.1.0
-date-released: "2026-04-10"
+version: 0.2.0
+date-released: "2026-06-03"
+keywords:
+  - lattice Boltzmann
+  - computational fluid dynamics
+  - GPU
+  - Julia
+  - viscoelastic
+  - multiphysics
+# Zenodo DOI — uncomment and fill once the v0.2.0 release is archived on Zenodo:
+# doi: "10.5281/zenodo.XXXXXXX"

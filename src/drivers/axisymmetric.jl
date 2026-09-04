@@ -277,7 +277,8 @@ end
     run_hagen_poiseuille_2d(; Nz=4, Nr=32, ν=0.1, Fz=1e-5, max_steps=10000, backend, T)
 
 Hagen-Poiseuille pipe flow (axisymmetric). Validates axisymmetric LBM.
-Analytical: u_z(r) = Fz/(4ν) * (R² - r²) where R = Nr - 0.5.
+Analytical: u_z(r) = Fz/(4ν) * (R² - r²) where R = Nr (the halfway bounce-back
+wall at j=Nr sits half a cell beyond the last fluid node r=Nr-0.5).
 """
 function run_hagen_poiseuille_2d(; Nz=4, Nr=32, nu=nothing, ν=0.1, Fz=1e-5, max_steps=10000,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
