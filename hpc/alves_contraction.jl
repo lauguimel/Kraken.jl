@@ -70,7 +70,9 @@ for Wi in [0.5, 1.0, 2.0]
     m_logc = LogConfOldroydB(G=ν_p/λ, λ=λ)
 
     t0 = time()
-    r = try run_conformation_contraction_libb_2d(; common..., polymer_model=m_logc)
+    r = try run_conformation_contraction_libb_2d(;
+            common..., polymer_model=m_logc,
+            allow_diagnostic_log_wall_bc=true)
         catch err
             @warn "Wi=$Wi run failed" err
             (; ux=zeros(1,1), uy=zeros(1,1), tau_p_xx=zeros(1,1), tau_p_yy=zeros(1,1),

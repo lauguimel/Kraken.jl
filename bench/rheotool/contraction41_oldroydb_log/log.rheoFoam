@@ -1,0 +1,2370 @@
+/*---------------------------------------------------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  9
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+Build  : 9-b456138dc4bc
+Exec   : rheoFoam
+Date   : May 14 2026
+Time   : 05:06:00
+Host   : "ba6848fca02e"
+PID    : 472
+I/O    : uncollated
+Case   : //data
+nProcs : 1
+sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0
+
+
+SIMPLE: No convergence criteria found
+
+
+SIMPLE: No convergence criteria found
+
+
+SIMPLE: Operating solver in transient mode with 1 outer corrector
+SIMPLE: Operating solver in PISO mode
+
+
+Reading field p
+
+Reading field U
+
+Using dynamicCode for codedFixedValue smoothU at line 25 in "//data/0/U/boundaryField/inlet"
+Creating new library in "dynamicCode/smoothU/platforms/linux64GccDPInt32Opt/lib/libsmoothU_128daf6f72aae42ab289e0cdd052029347c02b2c.so"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFixedValueFvPatchFieldTemplate.C" "//data/dynamicCode/smoothU/codedFixedValueFvPatchFieldTemplate.C"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFixedValueFvPatchFieldTemplate.H" "//data/dynamicCode/smoothU/codedFixedValueFvPatchFieldTemplate.H"
+Invoking "wmake -s libso //data/dynamicCode/smoothU"
+wmake libso //data/dynamicCode/smoothU
+    ln: ./lnInclude
+    wmkdep: codedFixedValueFvPatchFieldTemplate.C
+    Ctoo: codedFixedValueFvPatchFieldTemplate.C
+    ld: //data/dynamicCode/smoothU/../platforms/linux64GccDPInt32Opt/lib/libsmoothU_128daf6f72aae42ab289e0cdd052029347c02b2c.so
+Reading/calculating face flux field phi
+
+Using openFoamSolver solver for p
+Using openFoamSolver solver for U
+Selecting constitutive equation Oldroyd-BLog
+Selecting thermoFunction: Constant
+Selecting thermoFunction: Constant
+No MRF models present
+
+No fvModels present
+No fvConstraints present
+Courant Number mean: 0 max: 0
+
+Starting time loop
+
+Using dynamicCode for coded XrTop at line 98 in "//data/system/controlDict/functions/XrTop"
+Creating new library in "dynamicCode/XrTop/platforms/linux64GccDPInt32Opt/lib/libXrTop_ccad21d6668d9fa381cb7399be99f52b531ad32f.so"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFunctionObjectTemplate.C" "//data/dynamicCode/XrTop/codedFunctionObjectTemplate.C"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFunctionObjectTemplate.H" "//data/dynamicCode/XrTop/codedFunctionObjectTemplate.H"
+Invoking "wmake -s libso //data/dynamicCode/XrTop"
+wmake libso //data/dynamicCode/XrTop
+    ln: ./lnInclude
+    wmkdep: codedFunctionObjectTemplate.C
+    Ctoo: codedFunctionObjectTemplate.C
+    ld: //data/dynamicCode/XrTop/../platforms/linux64GccDPInt32Opt/lib/libXrTop_ccad21d6668d9fa381cb7399be99f52b531ad32f.so
+Using dynamicCode for coded codeWrite at line 173 in "//data/system/controlDict/functions/codeWrite"
+Creating new library in "dynamicCode/codeWrite/platforms/linux64GccDPInt32Opt/lib/libcodeWrite_b90088fdf4a718dc84b608e9d00fa903ee9c02bf.so"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFunctionObjectTemplate.C" "//data/dynamicCode/codeWrite/codedFunctionObjectTemplate.C"
+"/opt/openfoam9/etc/codeTemplates/dynamicCode/codedFunctionObjectTemplate.H" "//data/dynamicCode/codeWrite/codedFunctionObjectTemplate.H"
+Invoking "wmake -s libso //data/dynamicCode/codeWrite"
+wmake libso //data/dynamicCode/codeWrite
+    ln: ./lnInclude
+    wmkdep: codedFunctionObjectTemplate.C
+    Ctoo: codedFunctionObjectTemplate.C
+    ld: //data/dynamicCode/codeWrite/../platforms/linux64GccDPInt32Opt/lib/libcodeWrite_b90088fdf4a718dc84b608e9d00fa903ee9c02bf.so
+Courant Number mean: 0 max: 0
+Time = 0.0002
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 1, Final residual = 8.40392600075e-09, No Iterations 2
+DILUPBiCG:  Solving for Uy:  solution singularity
+DICPCG:  Solving for p, Initial residual = 1, Final residual = 8.11062058956e-11, No Iterations 235
+time step continuity errors : sum local = 1.90901248901e-21, global = 1.8741943789e-24, cumulative = 1.8741943789e-24
+DILUPBiCG:  Solving for thetaxx, Initial residual = 1, Final residual = 3.44422077501e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0, Final residual = 0, No Iterations 0
+DILUPBiCG:  Solving for thetayy, Initial residual = 1, Final residual = 1.00886912755e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 1.67 s  ClockTime = 55 s
+
+Courant Number mean: 5.72368654859e-12 max: 2.09769498279e-08
+Time = 0.0004
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.301411481797, Final residual = 7.29741194964e-09, No Iterations 26
+DILUPBiCG:  Solving for Uy, Initial residual = 0.491501920439, Final residual = 9.90417593442e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0526418223178, Final residual = 8.88668797676e-11, No Iterations 227
+time step continuity errors : sum local = 1.64209529835e-21, global = -7.73667448935e-24, cumulative = -5.86248011044e-24
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0612434037317, Final residual = 2.78894846702e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 1, Final residual = 8.90584901752e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0227385217751, Final residual = 2.53385475883e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 2.28 s  ClockTime = 55 s
+
+Courant Number mean: 5.79875458953e-12 max: 5.13987140436e-09
+Time = 0.0006
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.336034890701, Final residual = 7.39127854633e-09, No Iterations 24
+DILUPBiCG:  Solving for Uy, Initial residual = 0.465658305395, Final residual = 7.77461778508e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.35379609136, Final residual = 8.77348474625e-11, No Iterations 233
+time step continuity errors : sum local = 7.43929376444e-21, global = 1.45358500338e-23, cumulative = 8.67336992333e-24
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0675946952892, Final residual = 8.99401403196e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.92324191777, Final residual = 1.80015908185e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0347445688833, Final residual = 3.83253115362e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 2.87 s  ClockTime = 56 s
+
+Courant Number mean: 2.2974545201e-11 max: 6.28317707518e-08
+Time = 0.0008
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.257516405795, Final residual = 6.95930469749e-09, No Iterations 26
+DILUPBiCG:  Solving for Uy, Initial residual = 0.456947509791, Final residual = 9.72141124089e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0626570422839, Final residual = 9.21013042977e-11, No Iterations 227
+time step continuity errors : sum local = 1.57504412664e-20, global = 6.55383317286e-24, cumulative = 1.52272030962e-23
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0457450698027, Final residual = 2.14048828423e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.52644965172, Final residual = 1.40030176215e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0281688005251, Final residual = 1.88138809235e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 3.46 s  ClockTime = 56 s
+
+Courant Number mean: 5.17677642578e-11 max: 1.13093681373e-07
+Time = 0.001
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.170025100891, Final residual = 9.08272578467e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.339969355501, Final residual = 9.94227135567e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0429410977068, Final residual = 9.39888689394e-11, No Iterations 225
+time step continuity errors : sum local = 1.92442122396e-20, global = -9.96563484363e-23, cumulative = -8.44291453401e-23
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.028757956177, Final residual = 1.21115083715e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.384392328291, Final residual = 5.10763810318e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0197598772951, Final residual = 4.82476855678e-18, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 4.05 s  ClockTime = 57 s
+
+Courant Number mean: 9.21852246177e-11 max: 1.60647885348e-07
+Time = 0.0012
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.122601737699, Final residual = 7.60990116696e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.273441327542, Final residual = 9.4626560273e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0344932045468, Final residual = 9.09932418668e-11, No Iterations 224
+time step continuity errors : sum local = 3.10189147862e-20, global = 8.7887957476e-24, cumulative = -7.56403495925e-23
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0197187824341, Final residual = 1.30972887938e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.305236749309, Final residual = 3.0758477876e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0145482242523, Final residual = 1.84929920128e-18, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 4.64 s  ClockTime = 58 s
+
+Courant Number mean: 1.44222051445e-10 max: 2.08158489702e-07
+Time = 0.0014
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0942388584987, Final residual = 7.39402793705e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.228775721724, Final residual = 8.80660442128e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0293856135099, Final residual = 8.80003592573e-11, No Iterations 223
+time step continuity errors : sum local = 3.70497430276e-20, global = -5.81899149493e-23, cumulative = -1.33830264542e-22
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.014659370721, Final residual = 8.74739723346e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.253662147499, Final residual = 9.86538635031e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0113696743278, Final residual = 5.02287378956e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 5.23 s  ClockTime = 58 s
+
+Courant Number mean: 2.07894686301e-10 max: 2.56778907941e-07
+Time = 0.0016
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.07572052494, Final residual = 6.94493201944e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.196391645047, Final residual = 8.12141726447e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0258410603516, Final residual = 9.38433691949e-11, No Iterations 222
+time step continuity errors : sum local = 3.8026783889e-20, global = -2.59370006382e-23, cumulative = -1.5976726518e-22
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0115561277656, Final residual = 4.34343763835e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.217154838506, Final residual = 2.8769625786e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00930072288729, Final residual = 2.4716651361e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 5.82 s  ClockTime = 59 s
+
+Courant Number mean: 2.83228295853e-10 max: 3.07109517781e-07
+Time = 0.0018
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0628704694428, Final residual = 6.4300691762e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.171597133685, Final residual = 7.4673156015e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0231872401035, Final residual = 8.63475283286e-11, No Iterations 222
+time step continuity errors : sum local = 4.68179228805e-20, global = 7.92204401333e-23, cumulative = -8.05468250468e-23
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00949828425081, Final residual = 2.32462244752e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.189892361148, Final residual = 6.7467544054e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00786656436631, Final residual = 2.47825553535e-18, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 6.39 s  ClockTime = 59 s
+
+Courant Number mean: 3.70211683641e-10 max: 3.59498788244e-07
+Time = 0.002
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0535070619761, Final residual = 5.92469364753e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.151933318842, Final residual = 6.86726191302e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0211087194631, Final residual = 7.14890635865e-11, No Iterations 222
+time step continuity errors : sum local = 6.37848411205e-20, global = 1.53913870623e-22, cumulative = 7.33670455762e-23
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00804911779122, Final residual = 4.80193660986e-18, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.168737581825, Final residual = 5.99288365363e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00682034946708, Final residual = 3.45803751968e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 7 s  ClockTime = 60 s
+
+Courant Number mean: 4.68833337058e-10 max: 4.14157417414e-07
+Time = 0.0022
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0464242444754, Final residual = 5.459802905e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.13605311992, Final residual = 6.33047424948e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0194229073658, Final residual = 8.73661317928e-11, No Iterations 221
+time step continuity errors : sum local = 7.34192093101e-20, global = 5.01143496986e-22, cumulative = 5.74510542562e-22
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00697991355339, Final residual = 3.99442486349e-18, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.15183850241, Final residual = 1.53426286798e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00602600872787, Final residual = 4.2453278977e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 7.65 s  ClockTime = 61 s
+
+Courant Number mean: 5.79088924934e-10 max: 5.07078579916e-07
+Time = 0.0024
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0409047525856, Final residual = 5.04437439276e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.123013819177, Final residual = 5.85549179578e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0180224895308, Final residual = 9.95297944842e-11, No Iterations 220
+time step continuity errors : sum local = 7.63838409142e-20, global = 1.79504008667e-22, cumulative = 7.54014551229e-22
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00616110119686, Final residual = 2.06571831218e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.138026029295, Final residual = 7.05194029223e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00540375120436, Final residual = 3.09942577617e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 8.26 s  ClockTime = 61 s
+
+Courant Number mean: 7.00975106564e-10 max: 6.15040609169e-07
+Time = 0.0026
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0364977703814, Final residual = 4.67555666967e-09, No Iterations 25
+DILUPBiCG:  Solving for Uy, Initial residual = 0.112148532283, Final residual = 5.43684780134e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0168393796761, Final residual = 7.68365084808e-11, No Iterations 220
+time step continuity errors : sum local = 7.70317201434e-20, global = 4.03763097495e-23, cumulative = 7.94390860979e-22
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00551536001602, Final residual = 2.69263113382e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.126524399644, Final residual = 7.18493764671e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0049031515067, Final residual = 2.50068898418e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 8.85 s  ClockTime = 62 s
+
+Courant Number mean: 8.34488878749e-10 max: 7.33349127884e-07
+Time = 0.0028
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0329070004734, Final residual = 9.83025197865e-09, No Iterations 24
+DILUPBiCG:  Solving for Uy, Initial residual = 0.102975104094, Final residual = 5.06793238357e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.015824244305, Final residual = 9.3348093988e-11, No Iterations 219
+time step continuity errors : sum local = 7.9552555034e-20, global = 2.31242056876e-22, cumulative = 1.02563291785e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00499378808404, Final residual = 7.83873748267e-18, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.116798253622, Final residual = 6.71715579331e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00449130490974, Final residual = 3.17198171377e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 9.42 s  ClockTime = 62 s
+
+Courant Number mean: 9.79627825289e-10 max: 8.61978545486e-07
+Time = 0.003
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.029931117612, Final residual = 9.10662120006e-09, No Iterations 24
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0951365872936, Final residual = 4.74238739388e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.014941545323, Final residual = 8.49331768683e-11, No Iterations 219
+time step continuity errors : sum local = 8.20756357787e-20, global = 5.16895099426e-22, cumulative = 1.54252801728e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00456401581667, Final residual = 2.16825179589e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.108465695549, Final residual = 2.40822921883e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00414637549762, Final residual = 2.8522326143e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 10 s  ClockTime = 63 s
+
+Courant Number mean: 1.13639015901e-09 max: 1.00090273297e-06
+Time = 0.0032
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0274284396577, Final residual = 8.48425226412e-09, No Iterations 24
+DILUPBiCG:  Solving for Uy, Initial residual = 0.088373093656, Final residual = 4.45369265678e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0141656680314, Final residual = 8.03411402634e-11, No Iterations 218
+time step continuity errors : sum local = 1.00412178109e-19, global = 3.87832679948e-23, cumulative = 1.58131128528e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00420398570688, Final residual = 4.17245591441e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.101246989329, Final residual = 6.06750840635e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00385324596789, Final residual = 3.48890657992e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 10.58 s  ClockTime = 63 s
+
+Courant Number mean: 1.30477427392e-09 max: 1.15009441706e-06
+Time = 0.0034
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0252971535215, Final residual = 7.94554481337e-09, No Iterations 24
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0824843825186, Final residual = 4.19643470417e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0134775815769, Final residual = 7.54461593983e-11, No Iterations 217
+time step continuity errors : sum local = 1.26297403072e-19, global = 1.03926731086e-21, cumulative = 2.62057859613e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00389806953839, Final residual = 4.55340190255e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0949327231284, Final residual = 3.71259096901e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00360098025751, Final residual = 3.12764994125e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 11.15 s  ClockTime = 64 s
+
+Courant Number mean: 1.48477896771e-09 max: 1.30952602756e-06
+Time = 0.0036
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0234610695042, Final residual = 9.91533657035e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0773142853716, Final residual = 3.96639170701e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0128625583285, Final residual = 6.98882630198e-11, No Iterations 217
+time step continuity errors : sum local = 1.3727254791e-19, global = 5.28152002733e-22, cumulative = 3.14873059887e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00363495998023, Final residual = 5.12137309224e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0893629118519, Final residual = 2.01752134196e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00338152394871, Final residual = 4.47059465498e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 11.72 s  ClockTime = 65 s
+
+Courant Number mean: 1.67640316322e-09 max: 1.48087161466e-06
+Time = 0.0038
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0218652024777, Final residual = 9.40921308826e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0727399003521, Final residual = 3.75915989269e-09, No Iterations 32
+DICPCG:  Solving for p, Initial residual = 0.0123095550441, Final residual = 9.30486909626e-11, No Iterations 216
+time step continuity errors : sum local = 1.44718423444e-19, global = 2.17747730449e-22, cumulative = 3.36647832932e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0034063580522, Final residual = 4.60136571647e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0844131525477, Final residual = 4.90141922855e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00318889781248, Final residual = 3.4321259155e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 12.3 s  ClockTime = 65 s
+
+Courant Number mean: 1.87964620534e-09 max: 1.66290382147e-06
+Time = 0.004
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0204663191658, Final residual = 8.94247748544e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0686685725422, Final residual = 9.75638710016e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.0118087823926, Final residual = 8.37846442448e-11, No Iterations 216
+time step continuity errors : sum local = 1.52538627475e-19, global = -7.49573091938e-23, cumulative = 3.29152102012e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00320583250229, Final residual = 5.92692679689e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0799852667261, Final residual = 1.37155677819e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00301836021768, Final residual = 2.789870625e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 12.88 s  ClockTime = 66 s
+
+Courant Number mean: 2.09450746865e-09 max: 1.85551461934e-06
+Time = 0.0042
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0192309867057, Final residual = 8.5120424546e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0650226095323, Final residual = 9.28713408689e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.0113528945685, Final residual = 8.45918571e-11, No Iterations 216
+time step continuity errors : sum local = 1.51329215195e-19, global = 5.5154584341e-22, cumulative = 3.84306686353e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00302853525364, Final residual = 4.92080495523e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0760008040741, Final residual = 4.17207934382e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00286628204071, Final residual = 4.83911461155e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 13.45 s  ClockTime = 66 s
+
+Courant Number mean: 2.32098693978e-09 max: 2.0587000607e-06
+Time = 0.0044
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0181326818478, Final residual = 8.11519691362e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0617392545173, Final residual = 8.85768293658e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.010936126487, Final residual = 9.9781099833e-11, No Iterations 215
+time step continuity errors : sum local = 1.5146264726e-19, global = 2.22230860799e-22, cumulative = 4.06529772433e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00287065262007, Final residual = 4.16953546255e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0723962152422, Final residual = 1.07083070078e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00272980359255, Final residual = 5.10688618621e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 14.03 s  ClockTime = 67 s
+
+Courant Number mean: 2.55908394397e-09 max: 2.2724552309e-06
+Time = 0.0046
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0171502216073, Final residual = 7.74844109793e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0587676954938, Final residual = 8.46390194894e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.0105530906307, Final residual = 9.32739043197e-11, No Iterations 215
+time step continuity errors : sum local = 1.49489944286e-19, global = 4.5796346347e-22, cumulative = 4.5232611878e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00272915040908, Final residual = 4.19024831441e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.06911959985, Final residual = 1.11329921455e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00260660506147, Final residual = 5.90266920921e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 14.6 s  ClockTime = 67 s
+
+Courant Number mean: 2.8087981238e-09 max: 2.49677433503e-06
+Time = 0.0048
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0162665025861, Final residual = 7.40916854858e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.056066622515, Final residual = 8.10199408553e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.0101997326504, Final residual = 9.14079022316e-11, No Iterations 215
+time step continuity errors : sum local = 1.49075598582e-19, global = -4.44725591239e-25, cumulative = 4.52281646221e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00260157935895, Final residual = 6.10118355259e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0661282317431, Final residual = 6.44087720632e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00249480126519, Final residual = 6.47940477334e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 15.17 s  ClockTime = 68 s
+
+Courant Number mean: 3.07012925323e-09 max: 2.7316507996e-06
+Time = 0.005
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0154675706307, Final residual = 7.09506710765e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0536007107577, Final residual = 7.76979768092e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00987264808359, Final residual = 8.80345207854e-11, No Iterations 215
+time step continuity errors : sum local = 1.46945656566e-19, global = -7.99788824671e-23, cumulative = 4.44283757974e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00248595058127, Final residual = 6.50493266214e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0633862595691, Final residual = 7.59541637527e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00239285107422, Final residual = 5.42199395394e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 15.74 s  ClockTime = 69 s
+
+Courant Number mean: 3.34307706279e-09 max: 2.97707736869e-06
+Time = 0.0052
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0147418714132, Final residual = 6.80410539735e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0513582758233, Final residual = 7.46421212944e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.0095685924112, Final residual = 8.77818259169e-11, No Iterations 215
+time step continuity errors : sum local = 1.58325228276e-19, global = 9.40503084711e-23, cumulative = 4.53688788821e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00238065435775, Final residual = 4.6370290142e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0608636992199, Final residual = 2.08607854646e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00229949248928, Final residual = 5.37300276152e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 16.3 s  ClockTime = 69 s
+
+Courant Number mean: 3.62764144598e-09 max: 3.23536649636e-06
+Time = 0.0054
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.014080022707, Final residual = 6.53398659273e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0493082811946, Final residual = 7.18197521364e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00928554441607, Final residual = 9.07204820743e-11, No Iterations 215
+time step continuity errors : sum local = 1.52856012741e-19, global = 6.5808499789e-22, cumulative = 5.1949728861e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00228438351601, Final residual = 7.14548015175e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0585351626365, Final residual = 1.1105948179e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00221370057079, Final residual = 7.75237622352e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 16.87 s  ClockTime = 70 s
+
+Courant Number mean: 3.92382218736e-09 max: 3.5048888316e-06
+Time = 0.0056
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0134741099898, Final residual = 6.28282875585e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0474331842855, Final residual = 6.92028123568e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00902097041692, Final residual = 9.67550961907e-11, No Iterations 215
+time step continuity errors : sum local = 1.66415797458e-19, global = 6.56403287661e-22, cumulative = 5.85137617376e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00219602578601, Final residual = 8.71346323966e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0563790798487, Final residual = 3.18489772477e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00213458596756, Final residual = 7.7642001296e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 17.43 s  ClockTime = 70 s
+
+Courant Number mean: 4.23161916332e-09 max: 3.78536112509e-06
+Time = 0.0058
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0129174610189, Final residual = 6.04865604509e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0457075097137, Final residual = 6.67709802002e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00877338132051, Final residual = 9.40848582109e-11, No Iterations 215
+time step continuity errors : sum local = 1.90142190197e-19, global = 4.15714942122e-22, cumulative = 6.26709111589e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00211462381122, Final residual = 7.81038512194e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0543769336851, Final residual = 1.12811276427e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00206136911906, Final residual = 7.57448490362e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 18 s  ClockTime = 71 s
+
+Courant Number mean: 4.55103222714e-09 max: 4.07679238701e-06
+Time = 0.006
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0124043872828, Final residual = 5.83013155538e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0441070585854, Final residual = 6.45040022218e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00854098902042, Final residual = 8.97029360436e-11, No Iterations 215
+time step continuity errors : sum local = 2.07477283657e-19, global = 3.32286657418e-22, cumulative = 6.5993777733e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00203936845299, Final residual = 9.8857625826e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0525128082914, Final residual = 3.42832875458e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00199339807018, Final residual = 9.12945111494e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 18.56 s  ClockTime = 71 s
+
+Courant Number mean: 4.88206122982e-09 max: 4.37919074427e-06
+Time = 0.0062
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0119300307312, Final residual = 5.6262162359e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0426213547161, Final residual = 6.23833488089e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00832229467146, Final residual = 9.08636373224e-11, No Iterations 215
+time step continuity errors : sum local = 2.58332317328e-19, global = 5.71952404469e-22, cumulative = 7.17133017777e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00196959732096, Final residual = 9.14489391897e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0507728196211, Final residual = 1.89665584775e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00193011950287, Final residual = 9.28344894595e-17, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 19.16 s  ClockTime = 72 s
+
+Courant Number mean: 5.2247061001e-09 max: 4.69256350968e-06
+Time = 0.0064
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0114902020041, Final residual = 5.43621609003e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0412375313309, Final residual = 6.03969166564e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00811629527519, Final residual = 9.15046061169e-11, No Iterations 215
+time step continuity errors : sum local = 2.63992794516e-19, global = 1.50613776869e-21, cumulative = 8.67746794646e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00190473222617, Final residual = 9.91787635007e-17, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0491449040831, Final residual = 1.42033789826e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00187106912931, Final residual = 1.00131485166e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 19.73 s  ClockTime = 73 s
+
+Courant Number mean: 5.57896669032e-09 max: 5.01691724591e-06
+Time = 0.0066
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0110812937503, Final residual = 5.25865406853e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0399405445907, Final residual = 5.85350142425e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00792164302686, Final residual = 9.1941329805e-11, No Iterations 215
+time step continuity errors : sum local = 2.76038963911e-19, global = -1.04546633813e-21, cumulative = 7.63200160833e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00184426215898, Final residual = 1.08361508868e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0476186501228, Final residual = 1.14538725312e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00181582295036, Final residual = 1.12678366507e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 20.3 s  ClockTime = 73 s
+
+Courant Number mean: 5.94484288895e-09 max: 5.3522578252e-06
+Time = 0.0068
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0107001817797, Final residual = 5.09234440377e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0387290047926, Final residual = 5.67863416793e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00773738330778, Final residual = 8.87759683176e-11, No Iterations 215
+time step continuity errors : sum local = 2.85487245865e-19, global = 1.92326941414e-22, cumulative = 7.82432854975e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00178773619699, Final residual = 1.13428514388e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0461848890726, Final residual = 1.12998996259e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00176400823901, Final residual = 1.14837494632e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 20.88 s  ClockTime = 74 s
+
+Courant Number mean: 6.32233467286e-09 max: 5.69859048696e-06
+Time = 0.007
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0103441142861, Final residual = 4.93616590482e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0375893998518, Final residual = 5.51355812292e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00756275215189, Final residual = 8.9125765152e-11, No Iterations 215
+time step continuity errors : sum local = 2.7534493684e-19, global = 1.46130467367e-21, cumulative = 9.28563322342e-21
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00173478183056, Final residual = 1.17587306342e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0448353548668, Final residual = 8.08065942952e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00171530962562, Final residual = 1.21191407793e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 21.47 s  ClockTime = 74 s
+
+Courant Number mean: 6.71144198335e-09 max: 6.05591988776e-06
+Time = 0.0072
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.010010761011, Final residual = 4.79027920586e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0365205865105, Final residual = 5.3578078638e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00739695816234, Final residual = 8.65330437356e-11, No Iterations 215
+time step continuity errors : sum local = 2.90791497701e-19, global = 7.67373695059e-22, cumulative = 1.00530069185e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00168506533704, Final residual = 1.26408280536e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0435627580087, Final residual = 6.54005833339e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00166944827417, Final residual = 1.24245591786e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 22.04 s  ClockTime = 75 s
+
+Courant Number mean: 7.11216580455e-09 max: 6.4242501507e-06
+Time = 0.0074
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00969804842287, Final residual = 4.65316421506e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0355125596876, Final residual = 5.21072775164e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00723924639443, Final residual = 8.68219532685e-11, No Iterations 215
+time step continuity errors : sum local = 2.93080667347e-19, global = 2.30887160447e-22, cumulative = 1.02838940789e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00163829037788, Final residual = 1.28522914397e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0423606830728, Final residual = 2.74530170787e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00162617470327, Final residual = 1.39171027895e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 22.61 s  ClockTime = 75 s
+
+Courant Number mean: 7.5245060099e-09 max: 6.80712939259e-06
+Time = 0.0076
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00940415345818, Final residual = 4.52469157032e-09, No Iterations 23
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0345582297344, Final residual = 5.07124623851e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00708905432889, Final residual = 8.45411817555e-11, No Iterations 215
+time step continuity errors : sum local = 2.89560221175e-19, global = -1.88882304243e-22, cumulative = 1.00950117747e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00159420404127, Final residual = 1.48109339178e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0412234066372, Final residual = 2.35021058082e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00158527934264, Final residual = 1.48594270384e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 23.17 s  ClockTime = 76 s
+
+Courant Number mean: 7.94846294243e-09 max: 7.20145537774e-06
+Time = 0.0078
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00912744501186, Final residual = 9.81941075984e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0336567743257, Final residual = 4.9391345487e-09, No Iterations 31
+DICPCG:  Solving for p, Initial residual = 0.00694651283608, Final residual = 8.32893884505e-11, No Iterations 215
+time step continuity errors : sum local = 2.90132639672e-19, global = 2.28715018905e-21, cumulative = 1.23821619637e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00155259047905, Final residual = 1.40021530234e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.040145786168, Final residual = 6.46606512395e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00154657949873, Final residual = 1.47299120292e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 23.73 s  ClockTime = 77 s
+
+Courant Number mean: 8.38403696969e-09 max: 7.60719733835e-06
+Time = 0.008
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00886647106071, Final residual = 9.54794457525e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0328012389849, Final residual = 9.8592541519e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00680967154875, Final residual = 8.81433465377e-11, No Iterations 215
+time step continuity errors : sum local = 2.9637029282e-19, global = 1.43660939091e-21, cumulative = 1.38187713546e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00151323915429, Final residual = 1.5663605272e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0391232099589, Final residual = 2.08925497874e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0015098904321, Final residual = 1.50815417415e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 24.31 s  ClockTime = 77 s
+
+Courant Number mean: 8.83122715012e-09 max: 8.02436136783e-06
+Time = 0.0082
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00861993448892, Final residual = 9.28869575644e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0319885374668, Final residual = 9.61767504778e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00667898906136, Final residual = 9.00317360934e-11, No Iterations 214
+time step continuity errors : sum local = 2.99093733563e-19, global = -6.56688013113e-22, cumulative = 1.31620833415e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00147596412085, Final residual = 1.65103888172e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0381516397957, Final residual = 1.40746295604e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00147505650194, Final residual = 1.66799066627e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 24.88 s  ClockTime = 78 s
+
+Courant Number mean: 9.29003331071e-09 max: 8.45296358271e-06
+Time = 0.0084
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00838668038727, Final residual = 9.0422118364e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0312161118997, Final residual = 9.38729628165e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00655402517437, Final residual = 7.61586359829e-11, No Iterations 215
+time step continuity errors : sum local = 3.03761627477e-19, global = -2.53193492518e-22, cumulative = 1.2908889849e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00144060181297, Final residual = 1.77339809684e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0372273350066, Final residual = 1.39681449403e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00144193408676, Final residual = 1.65289740243e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 25.46 s  ClockTime = 78 s
+
+Courant Number mean: 9.76045533193e-09 max: 8.89301750734e-06
+Time = 0.0086
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00816567966529, Final residual = 8.80751915479e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0304828689236, Final residual = 9.16768703484e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00643430334186, Final residual = 8.10338324933e-11, No Iterations 215
+time step continuity errors : sum local = 2.98761281863e-19, global = 1.44119698473e-22, cumulative = 1.30530095475e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00140700707559, Final residual = 1.79469897645e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.036346908294, Final residual = 1.32310283213e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00141039890086, Final residual = 1.81619538704e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 26.02 s  ClockTime = 79 s
+
+Courant Number mean: 1.02424931562e-08 max: 9.34453567818e-06
+Time = 0.0088
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00795600427592, Final residual = 8.58387588773e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0297839081413, Final residual = 8.95790932141e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00631958963024, Final residual = 7.82573727309e-11, No Iterations 215
+time step continuity errors : sum local = 3.03903596152e-19, global = -1.44656403722e-21, cumulative = 1.16064455103e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0013750483084, Final residual = 1.87739180183e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0355072594665, Final residual = 8.26530579083e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00138033417209, Final residual = 1.89562988813e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 26.58 s  ClockTime = 79 s
+
+Courant Number mean: 1.07361466917e-08 max: 9.8075299798e-06
+Time = 0.009
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0077567940218, Final residual = 8.37057608664e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0291171866656, Final residual = 8.75704035525e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00620952444832, Final residual = 9.30308557065e-11, No Iterations 214
+time step continuity errors : sum local = 3.1757821482e-19, global = 1.2246180369e-21, cumulative = 1.28310635472e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00134463246924, Final residual = 1.91480494208e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0347055944215, Final residual = 2.88819056875e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00135164322091, Final residual = 2.0574789551e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 27.15 s  ClockTime = 80 s
+
+Courant Number mean: 1.12414157331e-08 max: 1.0282011739e-05
+Time = 0.0092
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00756728471226, Final residual = 8.16692526253e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0284799528497, Final residual = 8.56502568548e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00610384788111, Final residual = 7.34063234187e-11, No Iterations 215
+time step continuity errors : sum local = 2.99931855753e-19, global = 9.26022054011e-25, cumulative = 1.28319895692e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00131616918846, Final residual = 2.11855782765e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0339393964632, Final residual = 8.2344052845e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00132423173334, Final residual = 2.08885898163e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 27.78 s  ClockTime = 81 s
+
+Courant Number mean: 1.1758300214e-08 max: 1.07679917645e-05
+Time = 0.0094
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0073867881894, Final residual = 7.97230843759e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0278737958528, Final residual = 8.38089979774e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.0060021919869, Final residual = 9.06008383286e-11, No Iterations 214
+time step continuity errors : sum local = 3.06866660775e-19, global = 4.20251351345e-22, cumulative = 1.32522409206e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00129027456838, Final residual = 2.24260843311e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0332063552005, Final residual = 4.8742919234e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00129801383016, Final residual = 2.23497596329e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 28.34 s  ClockTime = 81 s
+
+Courant Number mean: 1.22868000171e-08 max: 1.12672459429e-05
+Time = 0.0096
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00721467523746, Final residual = 7.78609441903e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0272929331841, Final residual = 8.20420007131e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00590438318528, Final residual = 8.99753366898e-11, No Iterations 214
+time step continuity errors : sum local = 3.14366873584e-19, global = -5.44539864282e-22, cumulative = 1.27077010563e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00126548365626, Final residual = 2.32518047228e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0325043645699, Final residual = 7.21293733563e-17, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00127291598853, Final residual = 2.35625484454e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 28.91 s  ClockTime = 82 s
+
+Courant Number mean: 1.28269150407e-08 max: 1.17804793574e-05
+Time = 0.0098
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00705037715117, Final residual = 7.60779262034e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0267367565509, Final residual = 8.03462556018e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00581018886773, Final residual = 9.69331443735e-11, No Iterations 214
+time step continuity errors : sum local = 3.09981431478e-19, global = 1.66813437738e-21, cumulative = 1.43758354337e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00124171919158, Final residual = 2.47810345783e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0318314855858, Final residual = 2.26315325681e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00124885827589, Final residual = 2.39954101764e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 29.46 s  ClockTime = 82 s
+
+Courant Number mean: 1.3378645186e-08 max: 1.23055845313e-05
+Time = 0.01
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00689338131041, Final residual = 7.43691438313e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0262032929816, Final residual = 7.871707129e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00571945340135, Final residual = 8.90984300731e-11, No Iterations 214
+time step continuity errors : sum local = 3.27262235435e-19, global = 5.77255443701e-22, cumulative = 1.49530908774e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00121891784311, Final residual = 2.52185727292e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0311859208686, Final residual = 1.08610678344e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00122577703131, Final residual = 2.54290649695e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 30.03 s  ClockTime = 83 s
+
+Courant Number mean: 1.39419903392e-08 max: 1.2842578367e-05
+Time = 0.0102
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00674321336418, Final residual = 7.27306604553e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0256910567711, Final residual = 7.7150634501e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00563192454943, Final residual = 8.47427775121e-11, No Iterations 214
+time step continuity errors : sum local = 3.34668072332e-19, global = 1.46703614149e-21, cumulative = 1.64201270189e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0011970343073, Final residual = 2.65864619776e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0305660490034, Final residual = 1.96451023021e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00120361195232, Final residual = 2.64624568381e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 30.59 s  ClockTime = 83 s
+
+Courant Number mean: 1.45169503701e-08 max: 1.33914771552e-05
+Time = 0.0104
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00659944444156, Final residual = 7.11579946661e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0251999838277, Final residual = 7.56414934241e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00554745417794, Final residual = 9.13773232599e-11, No Iterations 214
+time step continuity errors : sum local = 3.3325193442e-19, global = 1.69302200574e-21, cumulative = 1.81131490246e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.0011760541441, Final residual = 2.78281642167e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0299703664886, Final residual = 1.7512600326e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00118230891558, Final residual = 2.76414236755e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 31.17 s  ClockTime = 84 s
+
+Courant Number mean: 1.51035251511e-08 max: 1.39522965961e-05
+Time = 0.0106
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00646167580806, Final residual = 6.96467433548e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0247286812806, Final residual = 7.41867846056e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00546586651371, Final residual = 7.73067500796e-11, No Iterations 214
+time step continuity errors : sum local = 3.95697523817e-19, global = 1.20995153358e-21, cumulative = 1.93231005582e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00115586770657, Final residual = 2.89516152037e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0293974594526, Final residual = 1.1170222049e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00116181572506, Final residual = 2.95104772771e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 31.74 s  ClockTime = 85 s
+
+Courant Number mean: 1.57017145489e-08 max: 1.45250518232e-05
+Time = 0.0108
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00632954094123, Final residual = 6.81938680796e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0242764055002, Final residual = 7.2784565723e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00538704691627, Final residual = 8.87274260729e-11, No Iterations 214
+time step continuity errors : sum local = 4.15559428873e-19, global = 1.81257290182e-21, cumulative = 2.113567346e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00113643216886, Final residual = 3.02548076484e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0288460390264, Final residual = 1.06786767838e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0011420906006, Final residual = 3.02171134994e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 32.3 s  ClockTime = 85 s
+
+Courant Number mean: 1.63115184242e-08 max: 1.51097574242e-05
+Time = 0.011
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00620270219724, Final residual = 6.67961607274e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0238446076727, Final residual = 7.14309716764e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00531087404665, Final residual = 8.69064833287e-11, No Iterations 214
+time step continuity errors : sum local = 4.42293859358e-19, global = 1.24933804984e-21, cumulative = 2.23850115098e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00111770485724, Final residual = 3.13977032104e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0283149061302, Final residual = 1.78283576632e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.0011231029309, Final residual = 3.16967610215e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 32.87 s  ClockTime = 86 s
+
+Courant Number mean: 1.69329366355e-08 max: 1.57064274608e-05
+Time = 0.0112
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0060808483551, Final residual = 6.54507355064e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0234282215934, Final residual = 7.01233360377e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00523715636229, Final residual = 8.55780066739e-11, No Iterations 214
+time step continuity errors : sum local = 5.01353223518e-19, global = 4.19211709536e-22, cumulative = 2.28042232194e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00109964410492, Final residual = 3.29326288104e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0278029651494, Final residual = 1.09504964355e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00110481669346, Final residual = 3.27717856222e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 33.42 s  ClockTime = 86 s
+
+Courant Number mean: 1.75659690141e-08 max: 1.63150754899e-05
+Time = 0.0114
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00596369182643, Final residual = 6.41547462634e-09, No Iterations 22
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0230263950991, Final residual = 6.88594220173e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00516575895141, Final residual = 6.83437874717e-11, No Iterations 214
+time step continuity errors : sum local = 5.30332919979e-19, global = 1.01683922381e-21, cumulative = 2.38210624432e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00108221511797, Final residual = 3.47991004789e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0273091925984, Final residual = 1.73137295254e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00108717362844, Final residual = 3.39574427315e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 33.98 s  ClockTime = 87 s
+
+Courant Number mean: 1.82106154011e-08 max: 1.69388308478e-05
+Time = 0.0116
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00585096691686, Final residual = 9.82877810797e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0226383349159, Final residual = 6.76376099432e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00509889797492, Final residual = 8.26320236374e-11, No Iterations 214
+time step continuity errors : sum local = 5.48615547686e-19, global = 6.8299564233e-22, cumulative = 2.45040580855e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00106538243842, Final residual = 3.53754593266e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0268326337495, Final residual = 2.13089776598e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00107013748609, Final residual = 3.53337767245e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 34.55 s  ClockTime = 88 s
+
+Courant Number mean: 1.88668755482e-08 max: 1.75755731635e-05
+Time = 0.0118
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00574243020435, Final residual = 9.64922319435e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0222647739539, Final residual = 6.64569777377e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00503092353712, Final residual = 7.79205089493e-11, No Iterations 214
+time step continuity errors : sum local = 5.39094338548e-19, global = -6.38206915324e-22, cumulative = 2.38658511702e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00104911574766, Final residual = 3.68041053418e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0263724038478, Final residual = 3.05709388767e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00105367706857, Final residual = 3.68502016557e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 35.11 s  ClockTime = 88 s
+
+Courant Number mean: 1.95347493553e-08 max: 1.82246066642e-05
+Time = 0.012
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00563785106714, Final residual = 9.48096643482e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0219035999924, Final residual = 6.53140078394e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00496542805697, Final residual = 7.01667029913e-11, No Iterations 214
+time step continuity errors : sum local = 5.78373394473e-19, global = 7.02878208539e-22, cumulative = 2.45687293787e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00103338952316, Final residual = 3.86350070797e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0259276756899, Final residual = 1.03972349274e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00103776619572, Final residual = 3.85016862834e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 35.67 s  ClockTime = 89 s
+
+Courant Number mean: 2.02142366326e-08 max: 1.88859433811e-05
+Time = 0.0122
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00553701608196, Final residual = 9.31917038256e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0215541142672, Final residual = 6.42071967862e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00490212028524, Final residual = 6.99416324963e-11, No Iterations 214
+time step continuity errors : sum local = 5.9462333692e-19, global = 2.47093677745e-21, cumulative = 2.70396661562e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00101817725184, Final residual = 4.03081685027e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0254976657026, Final residual = 3.25883125558e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00102237760773, Final residual = 4.08894912873e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 36.22 s  ClockTime = 89 s
+
+Courant Number mean: 2.09053372598e-08 max: 1.95595984281e-05
+Time = 0.0124
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00543973004632, Final residual = 9.16275018465e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0212161795784, Final residual = 6.31335486149e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00484079135676, Final residual = 7.70685053515e-11, No Iterations 214
+time step continuity errors : sum local = 5.78482476022e-19, global = 5.48757089711e-22, cumulative = 2.75884232459e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00100345419424, Final residual = 4.13547182479e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0250816594964, Final residual = 1.43512360468e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00100748716774, Final residual = 4.18880560978e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 36.78 s  ClockTime = 90 s
+
+Courant Number mean: 2.16080510203e-08 max: 2.02455870518e-05
+Time = 0.0126
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00534581042696, Final residual = 9.0113907378e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0208890581215, Final residual = 6.20924294462e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00478126346068, Final residual = 7.47164441172e-11, No Iterations 214
+time step continuity errors : sum local = 5.67651622351e-19, global = -2.27083312997e-21, cumulative = 2.53175901159e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000989194392452, Final residual = 4.35798319587e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0246789763241, Final residual = 1.57921838885e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00099306656686, Final residual = 4.36616186318e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 37.33 s  ClockTime = 90 s
+
+Courant Number mean: 2.23223777178e-08 max: 2.0943924053e-05
+Time = 0.0128
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00525508366397, Final residual = 8.86478229962e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0205724329554, Final residual = 6.10836900384e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00472346233233, Final residual = 7.43639106834e-11, No Iterations 214
+time step continuity errors : sum local = 5.77004600979e-19, global = 1.11169527761e-21, cumulative = 2.64292853935e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000975377795252, Final residual = 4.51623165692e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0242889838434, Final residual = 1.31654761646e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000979096763302, Final residual = 4.46297876488e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 37.89 s  ClockTime = 91 s
+
+Courant Number mean: 2.3048317125e-08 max: 2.165462375e-05
+Time = 0.013
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00516739133223, Final residual = 8.7226536765e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0202655033914, Final residual = 6.01047221758e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00466726586895, Final residual = 9.95197327168e-11, No Iterations 213
+time step continuity errors : sum local = 5.76338919937e-19, global = -3.75002776745e-22, cumulative = 2.60542826168e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000961978882453, Final residual = 4.70420452767e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0239110917597, Final residual = 3.06947633433e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000965551451798, Final residual = 4.70916235044e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 38.46 s  ClockTime = 91 s
+
+Courant Number mean: 2.37858691463e-08 max: 2.23776999817e-05
+Time = 0.0132
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00508258282252, Final residual = 8.58493519361e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0199678305963, Final residual = 5.91558074638e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00461260627028, Final residual = 8.89853078441e-11, No Iterations 213
+time step continuity errors : sum local = 5.74768987478e-19, global = 4.14980581082e-21, cumulative = 3.02040884276e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000948980039436, Final residual = 4.82152003999e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0235447408969, Final residual = 2.03855265917e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000952412572582, Final residual = 4.85660549716e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 39.02 s  ClockTime = 92 s
+
+Courant Number mean: 2.45350338368e-08 max: 2.31131661232e-05
+Time = 0.0134
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00500051808029, Final residual = 8.45137474265e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0196800608683, Final residual = 5.82350644366e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00455943880034, Final residual = 7.03336928808e-11, No Iterations 214
+time step continuity errors : sum local = 5.74552224884e-19, global = -6.21264076095e-22, cumulative = 2.95828243515e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000936363304674, Final residual = 5.04810860825e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0231894068701, Final residual = 1.29293733635e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000939662303723, Final residual = 5.08325989439e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 39.57 s  ClockTime = 93 s
+
+Courant Number mean: 2.52958115048e-08 max: 2.38631254402e-05
+Time = 0.0136
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00492106518281, Final residual = 8.32175701272e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0194010196826, Final residual = 5.73415288296e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00450768663303, Final residual = 9.90311067315e-11, No Iterations 213
+time step continuity errors : sum local = 5.66617582925e-19, global = 1.30607937028e-21, cumulative = 3.08889037218e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000924113876653, Final residual = 5.22877039993e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0228445961602, Final residual = 1.87612144586e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000927285813265, Final residual = 5.23099811304e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 40.12 s  ClockTime = 93 s
+
+Courant Number mean: 2.60682020283e-08 max: 2.46265696855e-05
+Time = 0.0138
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00484410163402, Final residual = 8.19592655187e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0191299805016, Final residual = 5.64735137326e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00445729514034, Final residual = 9.18646438249e-11, No Iterations 213
+time step continuity errors : sum local = 6.28225567169e-19, global = -7.76050155649e-22, cumulative = 3.01128535661e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000912214586472, Final residual = 5.34382537552e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.022509854842, Final residual = 1.80096184979e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000915263491619, Final residual = 5.41266512055e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 40.69 s  ClockTime = 94 s
+
+Courant Number mean: 2.68522050792e-08 max: 2.54026150154e-05
+Time = 0.014
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00476951342661, Final residual = 8.07386277626e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0188666360666, Final residual = 5.56296717401e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00440819161058, Final residual = 9.1488802031e-11, No Iterations 213
+time step continuity errors : sum local = 6.02142108291e-19, global = 6.22357484856e-22, cumulative = 3.0735211051e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000900648348779, Final residual = 5.5605014685e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.022184733616, Final residual = 2.26033460353e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000903579351599, Final residual = 5.55784640522e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 41.27 s  ClockTime = 94 s
+
+Courant Number mean: 2.76478205904e-08 max: 2.61912753601e-05
+Time = 0.0142
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0046971922944, Final residual = 7.95528947286e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0186106499558, Final residual = 5.48089041104e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00436035962106, Final residual = 8.56455389389e-11, No Iterations 213
+time step continuity errors : sum local = 6.14576114505e-19, global = 2.20357472643e-21, cumulative = 3.29387857774e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000889401455073, Final residual = 5.78574868393e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0218688253093, Final residual = 1.06126977437e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000892219237393, Final residual = 5.75913913401e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 41.85 s  ClockTime = 95 s
+
+Courant Number mean: 2.84550486842e-08 max: 2.69925641867e-05
+Time = 0.0144
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00462703525437, Final residual = 7.84005735089e-09, No Iterations 21
+DILUPBiCG:  Solving for Uy, Initial residual = 0.01836171557, Final residual = 5.40102529187e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00431373797373, Final residual = 9.18435923304e-11, No Iterations 213
+time step continuity errors : sum local = 5.9198398727e-19, global = 1.64599501067e-21, cumulative = 3.45847807881e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000878460700119, Final residual = 5.97802918868e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0215617536744, Final residual = 1.20898032014e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000881169588228, Final residual = 6.02628738882e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 42.41 s  ClockTime = 95 s
+
+Courant Number mean: 2.92738887816e-08 max: 2.78064945137e-05
+Time = 0.0146
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00455894685586, Final residual = 9.86013455099e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0181195391126, Final residual = 5.32329935141e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00426967421719, Final residual = 9.36497074194e-11, No Iterations 213
+time step continuity errors : sum local = 6.15523421124e-19, global = 1.9564986696e-21, cumulative = 3.65412794577e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000867814032738, Final residual = 6.16252793774e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0212631482096, Final residual = 2.00506639208e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000870418377204, Final residual = 6.18825631535e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 43.01 s  ClockTime = 96 s
+
+Courant Number mean: 3.0104339824e-08 max: 2.86330837071e-05
+Time = 0.0148
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00449283843219, Final residual = 9.68832920552e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0178842129093, Final residual = 5.24746856349e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00422473968317, Final residual = 9.22445523011e-11, No Iterations 213
+time step continuity errors : sum local = 6.20825111653e-19, global = -3.39476408659e-22, cumulative = 3.6201803049e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000857447727592, Final residual = 6.35461456479e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0209726582712, Final residual = 1.76308371336e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000859951773234, Final residual = 6.39876982288e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 43.58 s  ClockTime = 97 s
+
+Courant Number mean: 3.09464018817e-08 max: 2.94723496333e-05
+Time = 0.015
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00442862452026, Final residual = 9.52995625681e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0176545783617, Final residual = 5.17353967646e-09, No Iterations 30
+DICPCG:  Solving for p, Initial residual = 0.00418116664884, Final residual = 9.03550070844e-11, No Iterations 213
+time step continuity errors : sum local = 5.96164627894e-19, global = -6.5640189734e-22, cumulative = 3.55454011517e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00084735233448, Final residual = 6.60553800223e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0206899578087, Final residual = 1.22746480131e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000849759842277, Final residual = 6.59801399705e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 44.13 s  ClockTime = 97 s
+
+Courant Number mean: 3.18000741814e-08 max: 3.03242950653e-05
+Time = 0.0152
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0043662239064, Final residual = 9.37541092546e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0174310588756, Final residual = 9.92049398906e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00413886716025, Final residual = 8.40240907759e-11, No Iterations 213
+time step continuity errors : sum local = 6.07201884061e-19, global = 2.42982558009e-21, cumulative = 3.79752267318e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000837517856658, Final residual = 6.8148555557e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0204147424984, Final residual = 2.10080680808e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00083983234202, Final residual = 6.82576144031e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 44.68 s  ClockTime = 98 s
+
+Courant Number mean: 3.26653570379e-08 max: 3.11897669801e-05
+Time = 0.0154
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00430556029188, Final residual = 9.22499160895e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0172133663401, Final residual = 9.77514293463e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00409762676498, Final residual = 8.22007804624e-11, No Iterations 213
+time step continuity errors : sum local = 6.06339786747e-19, global = 8.63057520086e-22, cumulative = 3.88382842519e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000827930991914, Final residual = 6.97435371483e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0201468041379, Final residual = 1.8303362542e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000830155804615, Final residual = 7.06155861525e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 45.24 s  ClockTime = 98 s
+
+Courant Number mean: 3.3542249629e-08 max: 3.20683837913e-05
+Time = 0.0156
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00424656237941, Final residual = 9.07873914116e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0170017886633, Final residual = 9.63365851147e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00405737372575, Final residual = 8.34991040579e-11, No Iterations 213
+time step continuity errors : sum local = 6.01936052195e-19, global = 1.77882503882e-21, cumulative = 4.06171092907e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000818582300334, Final residual = 7.19790118887e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.019885830468, Final residual = 2.73770274368e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000820720672206, Final residual = 7.27144974524e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 45.81 s  ClockTime = 99 s
+
+Courant Number mean: 3.4430751942e-08 max: 3.29597712691e-05
+Time = 0.0158
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00418916289884, Final residual = 8.9365801441e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.016796011765, Final residual = 9.49603603924e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00401805167685, Final residual = 8.57368193728e-11, No Iterations 213
+time step continuity errors : sum local = 6.13509001022e-19, global = -2.0966075482e-21, cumulative = 3.85205017425e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000809464899915, Final residual = 7.47068964582e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0196315055717, Final residual = 1.85676961803e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000811520111361, Final residual = 7.43431817841e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 46.37 s  ClockTime = 99 s
+
+Courant Number mean: 3.53308639207e-08 max: 3.38639403639e-05
+Time = 0.016
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00413329707477, Final residual = 8.79839206106e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0165953386024, Final residual = 9.36218025673e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00397961546147, Final residual = 8.38693293708e-11, No Iterations 213
+time step continuity errors : sum local = 6.15810262816e-19, global = -2.12511247233e-21, cumulative = 3.63953892701e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000800569593502, Final residual = 7.75508179719e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0193835695887, Final residual = 2.13603008136e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000802544355166, Final residual = 7.70526208851e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 46.93 s  ClockTime = 100 s
+
+Courant Number mean: 3.62425846474e-08 max: 3.47809016309e-05
+Time = 0.0162
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00407890418939, Final residual = 8.66400838239e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0163995625329, Final residual = 9.23182739788e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.0039420408525, Final residual = 8.40901952899e-11, No Iterations 213
+time step continuity errors : sum local = 6.08590812013e-19, global = -5.21878119788e-22, cumulative = 3.58735111504e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000791888635819, Final residual = 7.98885830169e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0191417844053, Final residual = 2.07971382687e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000793785665554, Final residual = 8.02516510292e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 47.48 s  ClockTime = 101 s
+
+Courant Number mean: 3.71659171728e-08 max: 3.5710665259e-05
+Time = 0.0164
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00402592669199, Final residual = 8.53323291518e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0162085179351, Final residual = 9.10483262972e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00390532269401, Final residual = 8.07073986159e-11, No Iterations 213
+time step continuity errors : sum local = 6.21589899006e-19, global = 1.25087918078e-22, cumulative = 3.59985990684e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000783412994202, Final residual = 8.21053487328e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0189059347107, Final residual = 2.45418176674e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000785234896328, Final residual = 8.20661154813e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 48.04 s  ClockTime = 101 s
+
+Courant Number mean: 3.81008590065e-08 max: 3.66532410896e-05
+Time = 0.0166
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00397430992818, Final residual = 8.40591752449e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0160220111616, Final residual = 8.98110614035e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.0038694119401, Final residual = 8.18247780676e-11, No Iterations 213
+time step continuity errors : sum local = 6.34232465107e-19, global = 2.07070573115e-21, cumulative = 3.80693047996e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000775135844728, Final residual = 8.44355448921e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0186758136527, Final residual = 2.53481175365e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000776885034539, Final residual = 8.48216772704e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 48.59 s  ClockTime = 102 s
+
+Courant Number mean: 3.9047408774e-08 max: 3.76086386307e-05
+Time = 0.0168
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00392400209044, Final residual = 8.28195393512e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0158399047817, Final residual = 8.86046994277e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00383429291173, Final residual = 8.08818828657e-11, No Iterations 213
+time step continuity errors : sum local = 6.28102638665e-19, global = 3.13747848969e-21, cumulative = 4.12067832893e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000767049344816, Final residual = 8.66796055398e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0184511930583, Final residual = 2.90091792978e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000768728266924, Final residual = 8.74222682421e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 49.14 s  ClockTime = 102 s
+
+Courant Number mean: 4.00055663243e-08 max: 3.85768670678e-05
+Time = 0.017
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00387495388969, Final residual = 8.16121172736e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.015662041336, Final residual = 8.74285989274e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00379992660128, Final residual = 7.99056818295e-11, No Iterations 213
+time step continuity errors : sum local = 6.32640549161e-19, global = 6.05890256914e-22, cumulative = 4.18126735462e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00075914716112, Final residual = 8.96662777707e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0182318799946, Final residual = 2.42210658164e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00076075821568, Final residual = 9.0167188075e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 49.68 s  ClockTime = 103 s
+
+Courant Number mean: 4.09753318288e-08 max: 3.95579352754e-05
+Time = 0.0172
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00382711956398, Final residual = 8.04357492925e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0154882673645, Final residual = 8.6281310026e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.0037662782498, Final residual = 9.90949308426e-11, No Iterations 212
+time step continuity errors : sum local = 6.33048072381e-19, global = 1.68985109114e-21, cumulative = 4.35025246373e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00075142256453, Final residual = 9.20301586781e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.018017693396, Final residual = 2.94192831892e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000752968068694, Final residual = 9.24532070196e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 50.23 s  ClockTime = 103 s
+
+Courant Number mean: 4.19567048082e-08 max: 4.0551851828e-05
+Time = 0.0174
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00378045117667, Final residual = 7.92900001257e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0153184256142, Final residual = 8.51617345564e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00373333198814, Final residual = 7.86435101023e-11, No Iterations 213
+time step continuity errors : sum local = 6.21447104795e-19, global = -1.39707328062e-21, cumulative = 4.21054513567e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000743869601798, Final residual = 9.46721379742e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.017808455682, Final residual = 2.5582669647e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000745351455334, Final residual = 9.4844743677e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 50.8 s  ClockTime = 104 s
+
+Courant Number mean: 4.29496846727e-08 max: 4.15586250082e-05
+Time = 0.0176
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00373490505329, Final residual = 7.81731100637e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0151523939964, Final residual = 8.40697550594e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00370105894022, Final residual = 7.65985012555e-11, No Iterations 213
+time step continuity errors : sum local = 5.97848333698e-19, global = -9.53208274653e-22, cumulative = 4.11522430821e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000736481447785, Final residual = 9.73130910843e-16, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0176039932604, Final residual = 2.41622973108e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000737901640946, Final residual = 9.78563178483e-16, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 51.35 s  ClockTime = 104 s
+
+Courant Number mean: 4.39542709172e-08 max: 4.25782628182e-05
+Time = 0.0178
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00369044485393, Final residual = 7.70842884988e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0149900400209, Final residual = 8.3003618817e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00366946196272, Final residual = 7.56170351196e-11, No Iterations 213
+time step continuity errors : sum local = 6.45663642803e-19, global = 1.13689446712e-21, cumulative = 4.22891375492e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000729253048222, Final residual = 1.00504983001e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0174041407284, Final residual = 2.88530329278e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000730613449711, Final residual = 1.00577480132e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 51.9 s  ClockTime = 105 s
+
+Courant Number mean: 4.49704642513e-08 max: 4.36107729879e-05
+Time = 0.018
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00364703212068, Final residual = 7.60226126513e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0148316490864, Final residual = 8.19625660435e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00363848938273, Final residual = 9.00760878497e-11, No Iterations 212
+time step continuity errors : sum local = 6.00742971277e-19, global = -3.99154897146e-21, cumulative = 3.82975885777e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000722179126425, Final residual = 1.02958052306e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0172087431572, Final residual = 3.010967406e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000723481545276, Final residual = 1.02931209675e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 52.45 s  ClockTime = 105 s
+
+Courant Number mean: 4.59982631733e-08 max: 4.46561629816e-05
+Time = 0.0182
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00360463018072, Final residual = 7.4986639558e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0146772393616, Final residual = 8.09456871326e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00360813566065, Final residual = 7.32163214407e-11, No Iterations 213
+time step continuity errors : sum local = 6.81382619217e-19, global = -3.05879465493e-22, cumulative = 3.79917091122e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000715255871753, Final residual = 1.06024401018e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0170176527579, Final residual = 4.21364023114e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000716502092024, Final residual = 1.06012528755e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 53 s  ClockTime = 106 s
+
+Courant Number mean: 4.70376677711e-08 max: 4.57144400134e-05
+Time = 0.0184
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00356320414433, Final residual = 7.39754498244e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0145261748646, Final residual = 7.99527356814e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00357838735455, Final residual = 7.29789803373e-11, No Iterations 213
+time step continuity errors : sum local = 6.86837558738e-19, global = 1.46479651602e-22, cumulative = 3.81381887638e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000708477915575, Final residual = 1.08522301223e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0168307314313, Final residual = 4.5828549149e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000709669627748, Final residual = 1.09361081643e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 53.56 s  ClockTime = 107 s
+
+Courant Number mean: 4.80886783399e-08 max: 4.67856110472e-05
+Time = 0.0186
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00352272054481, Final residual = 7.29882337047e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0143784917183, Final residual = 7.8982409515e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00354920966071, Final residual = 7.33351949736e-11, No Iterations 213
+time step continuity errors : sum local = 7.08442397688e-19, global = 3.81691165983e-21, cumulative = 4.19551004236e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000701840490308, Final residual = 1.12205096272e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0166478109817, Final residual = 3.82207141374e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000702979225899, Final residual = 1.11976857821e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 54.12 s  ClockTime = 107 s
+
+Courant Number mean: 4.91512933966e-08 max: 4.78696828094e-05
+Time = 0.0188
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00348314756171, Final residual = 7.20243556182e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0142339124729, Final residual = 7.80332501777e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00352059949689, Final residual = 9.95097794123e-11, No Iterations 212
+time step continuity errors : sum local = 7.57543533772e-19, global = 4.05598673864e-21, cumulative = 4.60110871623e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000695338369961, Final residual = 1.14769114469e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0164687464, Final residual = 3.51174592423e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000696425636161, Final residual = 1.14838073355e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 54.67 s  ClockTime = 108 s
+
+Courant Number mean: 5.02255129304e-08 max: 4.89666617955e-05
+Time = 0.019
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00344445474538, Final residual = 7.10836406825e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0140925574144, Final residual = 7.7104832655e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00349253277031, Final residual = 9.80055473132e-11, No Iterations 212
+time step continuity errors : sum local = 8.09010164172e-19, global = -1.35269256026e-21, cumulative = 4.4658394602e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00068896847227, Final residual = 1.18201776878e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0162934462454, Final residual = 3.49463694208e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000690005851731, Final residual = 1.18270275531e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 55.23 s  ClockTime = 108 s
+
+Courant Number mean: 5.13113366765e-08 max: 5.00765542774e-05
+Time = 0.0192
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00340661300168, Final residual = 7.01650851575e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0139541067337, Final residual = 7.61967944788e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00346498958146, Final residual = 8.5154887305e-11, No Iterations 212
+time step continuity errors : sum local = 8.97075501758e-19, global = 1.82141984488e-21, cumulative = 4.64798144469e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000682725991093, Final residual = 1.20818170528e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0161218049212, Final residual = 3.79611923943e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000683714919189, Final residual = 1.21174922556e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 55.78 s  ClockTime = 109 s
+
+Courant Number mean: 5.24087647216e-08 max: 5.11993663123e-05
+Time = 0.0194
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00336959453104, Final residual = 6.92683473066e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0138184563483, Final residual = 7.53085479891e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00343796089123, Final residual = 9.63859427885e-11, No Iterations 212
+time step continuity errors : sum local = 8.6799158645e-19, global = -3.95661786319e-21, cumulative = 4.25231965837e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000676606909034, Final residual = 1.24483488385e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0159537089807, Final residual = 4.75765861379e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00067754879629, Final residual = 1.24600615635e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 56.34 s  ClockTime = 109 s
+
+Courant Number mean: 5.35177961192e-08 max: 5.23351037453e-05
+Time = 0.0196
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00333337398394, Final residual = 6.83925734211e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0136855102947, Final residual = 7.44402789773e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00341143303697, Final residual = 9.48580144684e-11, No Iterations 212
+time step continuity errors : sum local = 9.46826990061e-19, global = 9.83700591567e-22, cumulative = 4.35068971753e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000670606787919, Final residual = 1.27459615507e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0157890517798, Final residual = 3.87385615602e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000671503323835, Final residual = 1.27950857539e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 56.9 s  ClockTime = 110 s
+
+Courant Number mean: 5.46384299348e-08 max: 5.3483772222e-05
+Time = 0.0198
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0032979245325, Final residual = 6.75365963341e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0135551973945, Final residual = 7.3590518703e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00338537912073, Final residual = 9.22332536209e-11, No Iterations 212
+time step continuity errors : sum local = 9.54425829926e-19, global = 2.7844441844e-22, cumulative = 4.37853415937e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000664722905784, Final residual = 1.30780955246e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0156277321348, Final residual = 3.9331569251e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000665575027467, Final residual = 1.31124844506e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 57.44 s  ClockTime = 110 s
+
+Courant Number mean: 5.57706657704e-08 max: 5.46453771891e-05
+Time = 0.02
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00326322166678, Final residual = 6.66997722158e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0134274464056, Final residual = 7.27583741734e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00335979464886, Final residual = 8.31901150491e-11, No Iterations 212
+time step continuity errors : sum local = 9.97624507314e-19, global = -4.2734911165e-21, cumulative = 3.95118504772e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000658951534445, Final residual = 1.3429831186e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0154696458821, Final residual = 2.69287487855e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000659760243972, Final residual = 1.34433753217e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 57.99 s  ClockTime = 111 s
+
+Courant Number mean: 5.69145031522e-08 max: 5.58199239044e-05
+Time = 0.0202
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00322924204812, Final residual = 6.58815411464e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0133021810566, Final residual = 7.19437186794e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00333468628546, Final residual = 9.25725257419e-11, No Iterations 212
+time step continuity errors : sum local = 9.94785222874e-19, global = 1.1227092845e-21, cumulative = 4.06345597617e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000653289280633, Final residual = 1.37378745994e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0153146870115, Final residual = 3.88761294962e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000654055851107, Final residual = 1.38267264493e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 58.54 s  ClockTime = 112 s
+
+Courant Number mean: 5.80699415924e-08 max: 5.70074174433e-05
+Time = 0.0204
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0031959632538, Final residual = 6.50814446518e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0131793287019, Final residual = 7.11463694731e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00331003318597, Final residual = 9.24147107977e-11, No Iterations 212
+time step continuity errors : sum local = 1.07714286762e-18, global = -1.70316015987e-21, cumulative = 3.89313996018e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00064773236359, Final residual = 1.41205935673e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0151627653633, Final residual = 4.38541298834e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000648457928444, Final residual = 1.41372365387e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 59.09 s  ClockTime = 112 s
+
+Courant Number mean: 5.92369806505e-08 max: 5.82078627e-05
+Time = 0.0206
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0031633636935, Final residual = 6.42989145086e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0130588171591, Final residual = 7.03654754941e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00328581053073, Final residual = 9.16497995097e-11, No Iterations 212
+time step continuity errors : sum local = 1.0740484341e-18, global = 7.83758743011e-21, cumulative = 4.6768987032e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000642278462283, Final residual = 1.44746926618e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0150138002933, Final residual = 4.83834168162e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000642964101262, Final residual = 1.44822717887e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 59.66 s  ClockTime = 113 s
+
+Courant Number mean: 6.04156209118e-08 max: 5.94212644003e-05
+Time = 0.0208
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00313142282513, Final residual = 6.3533187288e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.012940557828, Final residual = 6.96010221582e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00326200073243, Final residual = 8.97650568849e-11, No Iterations 212
+time step continuity errors : sum local = 1.09077062598e-18, global = -1.0880822382e-21, cumulative = 4.56809047938e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000636924113628, Final residual = 1.47848681399e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0148677057082, Final residual = 4.05558823132e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000637570851802, Final residual = 1.48351504346e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 60.21 s  ClockTime = 113 s
+
+Courant Number mean: 6.16058610958e-08 max: 6.06476270979e-05
+Time = 0.021
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00310012071619, Final residual = 6.2783698949e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0128245105473, Final residual = 6.88525278342e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00323859125191, Final residual = 8.99928395156e-11, No Iterations 212
+time step continuity errors : sum local = 1.1246900061e-18, global = -5.85504662291e-22, cumulative = 4.50954001315e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000631666982089, Final residual = 1.51607320151e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0147243968725, Final residual = 3.71060104193e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000632275759475, Final residual = 1.52029765649e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 60.78 s  ClockTime = 114 s
+
+Courant Number mean: 6.28077006098e-08 max: 6.18869551901e-05
+Time = 0.0212
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00306943847847, Final residual = 6.2049939926e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0127106299183, Final residual = 6.81192827955e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00321557041196, Final residual = 8.34940548104e-11, No Iterations 212
+time step continuity errors : sum local = 1.11175204367e-18, global = -3.4331461285e-22, cumulative = 4.47520855186e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000626504233187, Final residual = 1.55052318268e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0145837951744, Final residual = 4.07174149154e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000627076090102, Final residual = 1.55806825164e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 61.36 s  ClockTime = 115 s
+
+Courant Number mean: 6.40211389382e-08 max: 6.31392529148e-05
+Time = 0.0214
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00303935772164, Final residual = 6.13313291128e-09, No Iterations 20
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0125988560392, Final residual = 6.74005112978e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00319293613159, Final residual = 8.88116631521e-11, No Iterations 212
+time step continuity errors : sum local = 1.20594502924e-18, global = 1.35268477778e-21, cumulative = 4.61047702964e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000621433008688, Final residual = 1.59222352468e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.014445823731, Final residual = 4.36947298172e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000621968845374, Final residual = 1.593794296e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 61.9 s  ClockTime = 115 s
+
+Courant Number mean: 6.52461755891e-08 max: 6.44045243588e-05
+Time = 0.0216
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00300986093199, Final residual = 9.93261874893e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0124891409758, Final residual = 6.6696357307e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00317210731779, Final residual = 9.20105698771e-11, No Iterations 212
+time step continuity errors : sum local = 1.1872115717e-18, global = 1.33788167334e-21, cumulative = 4.74426519697e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000616450756812, Final residual = 1.62757333928e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0143104124791, Final residual = 5.13070443555e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000616951529553, Final residual = 1.63135092803e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 62.45 s  ClockTime = 116 s
+
+Courant Number mean: 6.64828098778e-08 max: 6.56827472254e-05
+Time = 0.0218
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00298093344438, Final residual = 9.82956229116e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0123820020025, Final residual = 6.60055864886e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00314959595919, Final residual = 8.46994791285e-11, No Iterations 212
+time step continuity errors : sum local = 1.18715768837e-18, global = 4.36935194666e-21, cumulative = 5.18120039164e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000611556324598, Final residual = 1.66734528783e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0141774912933, Final residual = 6.09679858873e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000612022896937, Final residual = 1.67010796421e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 63 s  ClockTime = 116 s
+
+Courant Number mean: 6.77310417339e-08 max: 6.69739874699e-05
+Time = 0.022
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00295255411923, Final residual = 9.73077717438e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0122759624624, Final residual = 6.53269762522e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.0031276689801, Final residual = 8.12479603219e-11, No Iterations 212
+time step continuity errors : sum local = 1.18376180691e-18, global = -4.57558250377e-21, cumulative = 4.72364214126e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000606746155497, Final residual = 1.70676347032e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0140469904049, Final residual = 5.0268646996e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000607179311357, Final residual = 1.70875750126e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 63.56 s  ClockTime = 117 s
+
+Courant Number mean: 6.89908707437e-08 max: 6.82782201464e-05
+Time = 0.0222
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00292471090316, Final residual = 9.63475496225e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0121718710271, Final residual = 6.46615074427e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00310633402846, Final residual = 8.16261524572e-11, No Iterations 212
+time step continuity errors : sum local = 1.15507730374e-18, global = 4.80572646557e-21, cumulative = 5.20421478782e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00060201789522, Final residual = 1.74606400644e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0139188469314, Final residual = 6.71217564494e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000602418394419, Final residual = 1.74776655813e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 64.12 s  ClockTime = 117 s
+
+Courant Number mean: 7.02622961977e-08 max: 6.95954429461e-05
+Time = 0.0224
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00289738770306, Final residual = 9.5407207142e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0120697253775, Final residual = 6.40092290807e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00308542187455, Final residual = 8.35597856447e-11, No Iterations 212
+time step continuity errors : sum local = 1.16227097199e-18, global = 5.5265677145e-22, cumulative = 5.25948046496e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000597369702379, Final residual = 1.78767524393e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0137929958313, Final residual = 5.74980680963e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000597738227503, Final residual = 1.78897380958e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 64.66 s  ClockTime = 118 s
+
+Courant Number mean: 7.15453188106e-08 max: 7.09256578276e-05
+Time = 0.0226
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00287057000085, Final residual = 9.44845623147e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0119697014655, Final residual = 6.33692510863e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00306487497516, Final residual = 8.3945160562e-11, No Iterations 212
+time step continuity errors : sum local = 1.16892295697e-18, global = -4.77880833393e-21, cumulative = 4.78159963157e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000592799247496, Final residual = 1.82382626583e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0136694146276, Final residual = 5.76520611752e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00059313667325, Final residual = 1.82596312563e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 65.21 s  ClockTime = 118 s
+
+Courant Number mean: 7.28399371475e-08 max: 7.22688676733e-05
+Time = 0.0228
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00284424400995, Final residual = 9.35790235339e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0118714120449, Final residual = 6.27411621499e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00304467179225, Final residual = 7.84911014815e-11, No Iterations 212
+time step continuity errors : sum local = 1.13437302835e-18, global = -1.75591101374e-21, cumulative = 4.6060085302e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00058830533715, Final residual = 1.8699872838e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0135480475665, Final residual = 6.05040716746e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000588612597571, Final residual = 1.87115582846e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 65.78 s  ClockTime = 119 s
+
+Courant Number mean: 7.41461503998e-08 max: 7.36250755201e-05
+Time = 0.023
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00281839629994, Final residual = 9.26899076081e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0117748179343, Final residual = 6.2124700803e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.0030247916633, Final residual = 8.01355650356e-11, No Iterations 212
+time step continuity errors : sum local = 1.18896720219e-18, global = -1.87388964959e-21, cumulative = 4.41861956524e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000583885254755, Final residual = 1.91227805473e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0134288079433, Final residual = 6.09753681191e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000584163287936, Final residual = 1.91059300495e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 66.33 s  ClockTime = 120 s
+
+Courant Number mean: 7.54639584275e-08 max: 7.49942843717e-05
+Time = 0.0232
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00279301386314, Final residual = 9.18166678808e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0116798728748, Final residual = 6.15196459164e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00300521547048, Final residual = 7.85995359974e-11, No Iterations 212
+time step continuity errors : sum local = 1.16908635926e-18, global = 2.11019290299e-21, cumulative = 4.62963885554e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000579537269279, Final residual = 1.95335255295e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0133116280421, Final residual = 6.31860408165e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000579786699191, Final residual = 1.95494211473e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 66.88 s  ClockTime = 120 s
+
+Courant Number mean: 7.67933618031e-08 max: 7.63764971456e-05
+Time = 0.0234
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00276808426918, Final residual = 9.09589228647e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0115865327746, Final residual = 6.09256802736e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00298593192251, Final residual = 7.5381192202e-11, No Iterations 212
+time step continuity errors : sum local = 1.17691447862e-18, global = -6.73064671113e-21, cumulative = 3.95657418442e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000575259744868, Final residual = 1.99773941205e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0131964551944, Final residual = 6.4298857506e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000575481211239, Final residual = 1.99738386386e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 67.43 s  ClockTime = 121 s
+
+Courant Number mean: 7.81343587741e-08 max: 7.77717166563e-05
+Time = 0.0236
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00274359543204, Final residual = 9.01165298951e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0114947575429, Final residual = 6.03429369889e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00296693562521, Final residual = 7.71504349082e-11, No Iterations 212
+time step continuity errors : sum local = 1.153277238e-18, global = -1.87980098225e-21, cumulative = 3.7685940862e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000571050911014, Final residual = 2.04066574562e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0130832372258, Final residual = 6.25554833357e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000571245071171, Final residual = 2.04090811647e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 67.98 s  ClockTime = 121 s
+
+Courant Number mean: 7.94869486757e-08 max: 7.91799456182e-05
+Time = 0.0238
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00271953614578, Final residual = 8.92889427557e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0114045046913, Final residual = 5.97708485383e-09, No Iterations 29
+DICPCG:  Solving for p, Initial residual = 0.00294823536984, Final residual = 7.42953580091e-11, No Iterations 212
+time step continuity errors : sum local = 1.20275487298e-18, global = -9.87328699922e-22, cumulative = 3.66986121621e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000566909114433, Final residual = 2.08337452437e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0129719290655, Final residual = 7.52846344963e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00056708805098, Final residual = 2.08509316014e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 68.53 s  ClockTime = 122 s
+
+Courant Number mean: 8.08511308898e-08 max: 8.06011866402e-05
+Time = 0.024
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00269589514002, Final residual = 8.84768180773e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0113157320201, Final residual = 9.9731056685e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00292982506623, Final residual = 7.64170554519e-11, No Iterations 212
+time step continuity errors : sum local = 1.15439180544e-18, global = 4.14086949862e-22, cumulative = 3.71126991119e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000562832811428, Final residual = 2.13188965709e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0128624926023, Final residual = 7.60487810913e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000563002019307, Final residual = 2.12949074361e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 69.09 s  ClockTime = 122 s
+
+Courant Number mean: 8.22269053882e-08 max: 8.20354422564e-05
+Time = 0.0242
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00267266123896, Final residual = 8.76790454481e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.011228399586, Final residual = 9.87971750669e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00291168294575, Final residual = 9.59585169712e-11, No Iterations 211
+time step continuity errors : sum local = 1.1800948966e-18, global = -4.16740737794e-21, cumulative = 3.2945291734e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000558819913953, Final residual = 2.17434364551e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0127548703158, Final residual = 6.79476746673e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000558979679086, Final residual = 2.17461896019e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 69.65 s  ClockTime = 123 s
+
+Courant Number mean: 8.3614272129e-08 max: 8.34827148532e-05
+Time = 0.0244
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00264982396189, Final residual = 8.68948671437e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0111424762375, Final residual = 9.78782896381e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00289380371096, Final residual = 9.40059545595e-11, No Iterations 211
+time step continuity errors : sum local = 1.17275893184e-18, global = 5.41330850155e-21, cumulative = 3.83586002355e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000554869392887, Final residual = 2.22031426087e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.012649016749, Final residual = 7.95881892916e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000555019911542, Final residual = 2.22429458364e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 70.2 s  ClockTime = 123 s
+
+Courant Number mean: 8.50132295744e-08 max: 8.49430067489e-05
+Time = 0.0246
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00262737323578, Final residual = 8.61238413931e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0110579312615, Final residual = 9.69750069261e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00287618161747, Final residual = 9.96086368238e-11, No Iterations 211
+time step continuity errors : sum local = 1.18842749435e-18, global = 8.85715377575e-21, cumulative = 4.72157540113e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000550979226012, Final residual = 2.26878736693e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0125448885982, Final residual = 7.41084776565e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000551120982951, Final residual = 2.27008716721e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 70.76 s  ClockTime = 124 s
+
+Courant Number mean: 8.64237771792e-08 max: 8.64163201671e-05
+Time = 0.0248
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00260529923956, Final residual = 8.53656221848e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0109747279003, Final residual = 9.60869048401e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00285881065704, Final residual = 9.8426100476e-11, No Iterations 211
+time step continuity errors : sum local = 1.18714472614e-18, global = 3.81912546946e-21, cumulative = 5.10348794807e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000547147914601, Final residual = 2.31773311612e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0124424437377, Final residual = 7.41904206817e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00054728122689, Final residual = 2.31575813633e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 71.32 s  ClockTime = 125 s
+
+Courant Number mean: 8.78459149098e-08 max: 8.79026572425e-05
+Time = 0.025
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0025835925677, Final residual = 8.46201449388e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0108928308563, Final residual = 9.52140353416e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00284168575293, Final residual = 9.16876598668e-11, No Iterations 211
+time step continuity errors : sum local = 1.22270019e-18, global = -1.37022073316e-21, cumulative = 4.96646587476e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000543374170894, Final residual = 2.36391591857e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0123416404649, Final residual = 7.43160918591e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000543499371389, Final residual = 2.36693123685e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 71.87 s  ClockTime = 125 s
+
+Courant Number mean: 8.92796442854e-08 max: 8.94020200216e-05
+Time = 0.0252
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0025622441103, Final residual = 8.38869361904e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0108122058686, Final residual = 9.43565341611e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00282480422532, Final residual = 8.81176950829e-11, No Iterations 211
+time step continuity errors : sum local = 1.19703272291e-18, global = -1.69634282795e-21, cumulative = 4.79683159196e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000539656702183, Final residual = 2.41358911791e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0122424408406, Final residual = 8.24533220299e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000539774080597, Final residual = 2.41418901969e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 72.42 s  ClockTime = 126 s
+
+Courant Number mean: 9.07249624896e-08 max: 9.09144104826e-05
+Time = 0.0254
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00254124504414, Final residual = 8.31656081411e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0107328315824, Final residual = 9.35132473571e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00280815756755, Final residual = 8.74974479145e-11, No Iterations 211
+time step continuity errors : sum local = 1.24521216929e-18, global = -1.0325527426e-21, cumulative = 4.6935763177e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000535994777079, Final residual = 2.46247991057e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0121448078633, Final residual = 8.36285188453e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000536104602687, Final residual = 2.46531563974e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 72.97 s  ClockTime = 126 s
+
+Courant Number mean: 9.2181868829e-08 max: 9.24398304919e-05
+Time = 0.0256
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00252058680927, Final residual = 8.24560822047e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0106546779577, Final residual = 9.26843607683e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00279174806898, Final residual = 9.40557167607e-11, No Iterations 211
+time step continuity errors : sum local = 1.15513689797e-18, global = 4.87804978964e-21, cumulative = 5.18138129667e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000532387050726, Final residual = 2.51183741732e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0120487039992, Final residual = 7.53584724526e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00053248956042, Final residual = 2.51473655774e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 73.52 s  ClockTime = 127 s
+
+Courant Number mean: 9.3650362596e-08 max: 9.39782818578e-05
+Time = 0.0258
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00250025971865, Final residual = 8.17583548555e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0105777694237, Final residual = 9.18690795706e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00277556484414, Final residual = 9.15902986779e-11, No Iterations 211
+time step continuity errors : sum local = 1.17564741698e-18, global = -1.18801764882e-20, cumulative = 3.99336364785e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.00052883263835, Final residual = 2.56367419972e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.011954093446, Final residual = 8.8895077686e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00052892814728, Final residual = 2.56481599085e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 74.06 s  ClockTime = 127 s
+
+Courant Number mean: 9.51304445582e-08 max: 9.55297663038e-05
+Time = 0.026
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00248025433011, Final residual = 8.10717602892e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.010502048213, Final residual = 9.10674603438e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00275960227584, Final residual = 8.49949383514e-11, No Iterations 211
+time step continuity errors : sum local = 1.18654164506e-18, global = -5.12023620805e-21, cumulative = 3.48134002704e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000525330462799, Final residual = 2.61674618102e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0118609426641, Final residual = 9.01062955526e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000525419166604, Final residual = 2.61665405679e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 74.61 s  ClockTime = 128 s
+
+Courant Number mean: 9.66221160447e-08 max: 9.70942854844e-05
+Time = 0.0262
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00246056359154, Final residual = 8.03961647433e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0104277145487, Final residual = 9.02788519965e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00274385594212, Final residual = 9.16893775523e-11, No Iterations 211
+time step continuity errors : sum local = 1.21038505547e-18, global = -3.76727053219e-21, cumulative = 3.10461297383e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000521878443022, Final residual = 2.66723240015e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0117692171461, Final residual = 9.10546435066e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000521960571645, Final residual = 2.66812564281e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 75.16 s  ClockTime = 128 s
+
+Courant Number mean: 9.81253741646e-08 max: 9.86718409747e-05
+Time = 0.0264
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00244118045627, Final residual = 7.97314011214e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0103546859623, Final residual = 8.95030770603e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00272831972984, Final residual = 8.91755405228e-11, No Iterations 211
+time step continuity errors : sum local = 1.21666996307e-18, global = 2.44509762356e-21, cumulative = 3.34912273618e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000518475503204, Final residual = 2.72254845624e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0116788846525, Final residual = 8.46500843188e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000518551248257, Final residual = 2.7222248648e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 75.71 s  ClockTime = 129 s
+
+Courant Number mean: 9.96402174099e-08 max: 0.000100262434282
+Time = 0.0266
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00242209566314, Final residual = 7.90775445755e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0102827356395, Final residual = 8.87398557711e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00271299041815, Final residual = 8.6106012154e-11, No Iterations 211
+time step continuity errors : sum local = 1.19547938925e-18, global = -3.53956909064e-21, cumulative = 2.99516582712e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000515120434056, Final residual = 2.77608862748e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0115899133641, Final residual = 9.63259886804e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000515190020603, Final residual = 2.77653306624e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 76.26 s  ClockTime = 129 s
+
+Courant Number mean: 1.01166645871e-07 max: 0.000101866066843
+Time = 0.0268
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00240330628772, Final residual = 7.84337020684e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0102118381582, Final residual = 8.7988399486e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00269786560239, Final residual = 8.40470227603e-11, No Iterations 211
+time step continuity errors : sum local = 1.17968089412e-18, global = -3.65930213268e-21, cumulative = 2.62923561385e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000511812303271, Final residual = 2.82837973982e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0115022724587, Final residual = 9.73249587394e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000511875929469, Final residual = 2.82782356006e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 76.81 s  ClockTime = 130 s
+
+Courant Number mean: 1.02704659423e-07 max: 0.00010348274003
+Time = 0.027
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00238480307846, Final residual = 7.77995617217e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0101419606521, Final residual = 8.72487838917e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00268293712946, Final residual = 8.24302507401e-11, No Iterations 211
+time step continuity errors : sum local = 1.20841030806e-18, global = 3.57328299503e-21, cumulative = 2.98656391335e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000508550255427, Final residual = 2.8826501694e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0114159329196, Final residual = 9.61153985923e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000508608147434, Final residual = 2.88314721475e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 77.37 s  ClockTime = 131 s
+
+Courant Number mean: 1.04254256674e-07 max: 0.00010511245515
+Time = 0.0272
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00236658042222, Final residual = 7.71749666284e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0100730896559, Final residual = 8.65204336672e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00266820479822, Final residual = 8.09406349001e-11, No Iterations 211
+time step continuity errors : sum local = 1.23159531155e-18, global = -1.81846418699e-21, cumulative = 2.80471749465e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000505333574566, Final residual = 2.93751690205e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0113308643155, Final residual = 9.6179948402e-16, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000505385926125, Final residual = 2.93953228693e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 77.93 s  ClockTime = 131 s
+
+Courant Number mean: 1.05815437012e-07 max: 0.000106755213445
+Time = 0.0274
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.0023486334359, Final residual = 7.65600604873e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.0100051996791, Final residual = 8.58030725664e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00265366749258, Final residual = 7.75354117237e-11, No Iterations 211
+time step continuity errors : sum local = 1.22079987286e-18, global = 4.56229011098e-21, cumulative = 3.26094650575e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000502160877259, Final residual = 2.99432400854e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0112470343613, Final residual = 1.05866015615e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000502207854803, Final residual = 2.99639869909e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 78.47 s  ClockTime = 132 s
+
+Courant Number mean: 1.07388199764e-07 max: 0.000108411016098
+Time = 0.0276
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00233095594969, Final residual = 7.59545319895e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00993827058143, Final residual = 8.50966064859e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00263931381847, Final residual = 7.87748037432e-11, No Iterations 211
+time step continuity errors : sum local = 1.22881717927e-18, global = 2.26002302504e-21, cumulative = 3.48694880826e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000499031159971, Final residual = 3.05407933732e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0111644022296, Final residual = 1.05938972774e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000499072936211, Final residual = 3.05124982387e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 79.01 s  ClockTime = 132 s
+
+Courant Number mean: 1.08972544128e-07 max: 0.000110079864231
+Time = 0.0278
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00231354185815, Final residual = 7.53584161402e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00987227974079, Final residual = 8.44007418893e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00262514019235, Final residual = 8.25658906866e-11, No Iterations 211
+time step continuity errors : sum local = 1.2519911245e-18, global = 8.64203920748e-21, cumulative = 4.351152729e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000495944255435, Final residual = 3.10992189572e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0110829412314, Final residual = 1.09911488215e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000495981000034, Final residual = 3.11040450078e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 79.55 s  ClockTime = 133 s
+
+Courant Number mean: 1.10568470175e-07 max: 0.00011176175891
+Time = 0.028
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00229638585809, Final residual = 7.47712346472e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00980721068301, Final residual = 8.37155879151e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00261114359918, Final residual = 7.46657509007e-11, No Iterations 211
+time step continuity errors : sum local = 1.22324432222e-18, global = -2.14384090814e-21, cumulative = 4.13676863819e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000492899224176, Final residual = 3.16413011401e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0110026396717, Final residual = 1.10751522875e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00049293110011, Final residual = 3.16862910104e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 80.09 s  ClockTime = 133 s
+
+Courant Number mean: 1.12175977091e-07 max: 0.00011345670114
+Time = 0.0282
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00227948182669, Final residual = 7.41926273394e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00974304430685, Final residual = 8.30411426167e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.002597320784, Final residual = 7.17423942352e-11, No Iterations 211
+time step continuity errors : sum local = 1.19018787869e-18, global = 3.42231253497e-21, cumulative = 4.47899989169e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000489894550789, Final residual = 3.22605327052e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0109234781877, Final residual = 1.14005083336e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000489921738178, Final residual = 3.22863022246e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 80.64 s  ClockTime = 134 s
+
+Courant Number mean: 1.1379506387e-07 max: 0.000115164691879
+Time = 0.0284
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00226282417499, Final residual = 7.36225400586e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00967975881212, Final residual = 8.23766327186e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00258366835887, Final residual = 7.69016766743e-11, No Iterations 211
+time step continuity errors : sum local = 1.29928195157e-18, global = -1.84546761823e-21, cumulative = 4.29445312986e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000486929410684, Final residual = 3.28813168898e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0108454338754, Final residual = 1.11795049761e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.00048695205588, Final residual = 3.28658308761e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 81.19 s  ClockTime = 134 s
+
+Courant Number mean: 1.15425730932e-07 max: 0.000116885732028
+Time = 0.0286
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00224640745243, Final residual = 7.30606793406e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00961733772031, Final residual = 8.17220792827e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00257019211752, Final residual = 7.40037595797e-11, No Iterations 211
+time step continuity errors : sum local = 1.27479988446e-18, global = 2.53944942789e-21, cumulative = 4.54839807265e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000484002995769, Final residual = 3.3475182786e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0107684950346, Final residual = 1.0309850426e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000484021281262, Final residual = 3.35018373005e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 81.83 s  ClockTime = 135 s
+
+Courant Number mean: 1.17067977314e-07 max: 0.000118619822429
+Time = 0.0288
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00223022661165, Final residual = 7.2506820181e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00955576310834, Final residual = 8.10771967836e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00255688484762, Final residual = 7.35409799705e-11, No Iterations 211
+time step continuity errors : sum local = 1.21959125975e-18, global = -6.13168743837e-21, cumulative = 3.93522932881e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000481114541987, Final residual = 3.40911449495e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0106926561339, Final residual = 1.07608558049e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000481128622686, Final residual = 3.41037011047e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 82.37 s  ClockTime = 136 s
+
+Courant Number mean: 1.1872180207e-07 max: 0.000120366963886
+Time = 0.029
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00221427514915, Final residual = 7.19610782068e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00949501938063, Final residual = 8.04420813609e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00254373647171, Final residual = 8.63744003367e-11, No Iterations 210
+time step continuity errors : sum local = 1.18858379541e-18, global = -8.3249249363e-23, cumulative = 3.92690440388e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000478263527689, Final residual = 3.47078238977e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0106178725379, Final residual = 1.30647842352e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000478273543049, Final residual = 3.47145417818e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 82.9 s  ClockTime = 136 s
+
+Courant Number mean: 1.20387204371e-07 max: 0.000122127157151
+Time = 0.0292
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00219854721705, Final residual = 9.95526506042e-09, No Iterations 18
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00943509020597, Final residual = 7.98161507165e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00253340039121, Final residual = 9.99032714009e-11, No Iterations 210
+time step continuity errors : sum local = 1.23630186589e-18, global = 3.37684270975e-21, cumulative = 4.26458867485e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000475449094588, Final residual = 3.53171037995e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0105441188379, Final residual = 1.3199771493e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000475455196551, Final residual = 3.53262252442e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 83.43 s  ClockTime = 137 s
+
+Courant Number mean: 1.22064182876e-07 max: 0.000123900463411
+Time = 0.0294
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00218303634043, Final residual = 7.09052862163e-09, No Iterations 19
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00937609737282, Final residual = 7.92001935402e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00251963105948, Final residual = 9.27199294789e-11, No Iterations 210
+time step continuity errors : sum local = 1.23298816664e-18, global = 3.89375658319e-21, cumulative = 4.65396433317e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000472670639409, Final residual = 3.59901081789e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0104713676591, Final residual = 1.16006040033e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000472672985445, Final residual = 3.59639369302e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 83.98 s  ClockTime = 137 s
+
+Courant Number mean: 1.23752736674e-07 max: 0.000125686683873
+Time = 0.0296
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00216774492624, Final residual = 9.86860608549e-09, No Iterations 18
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00931733006799, Final residual = 7.85896930128e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.0025066762455, Final residual = 9.40525051288e-11, No Iterations 210
+time step continuity errors : sum local = 1.24532694271e-18, global = 2.58154738557e-22, cumulative = 4.67977980703e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000469927242131, Final residual = 3.65919074529e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0103995984381, Final residual = 1.28623133581e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000469925941489, Final residual = 3.66155779103e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 84.52 s  ClockTime = 138 s
+
+Courant Number mean: 1.25452865669e-07 max: 0.000127486084235
+Time = 0.0298
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00215266142126, Final residual = 9.9533083662e-09, No Iterations 18
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00925988752824, Final residual = 7.79914701189e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00249345624115, Final residual = 9.89953150154e-11, No Iterations 210
+time step continuity errors : sum local = 1.16731936782e-18, global = 9.46286682132e-21, cumulative = 5.62606648916e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000467218207184, Final residual = 3.72825609868e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0103287944163, Final residual = 1.2804782452e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000467213430246, Final residual = 3.72791860286e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 85.07 s  ClockTime = 138 s
+
+Courant Number mean: 1.27164569009e-07 max: 0.000129298474198
+Time = 0.03
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00213778882293, Final residual = 9.89333077483e-09, No Iterations 18
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00920281841069, Final residual = 7.73994008572e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00248065331287, Final residual = 7.40855798241e-11, No Iterations 211
+time step continuity errors : sum local = 1.19246962863e-18, global = -2.43992363601e-21, cumulative = 5.38207412556e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000464543147689, Final residual = 3.79160180775e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.010258936676, Final residual = 1.25738808029e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000464534976336, Final residual = 3.791496632e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 85.61 s  ClockTime = 139 s
+
+Courant Number mean: 1.28887847597e-07 max: 0.000131123904533
+Time = 0.0302
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00212311839847, Final residual = 9.83171633347e-09, No Iterations 18
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00914649341803, Final residual = 7.6815273412e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00246827317522, Final residual = 9.3486381523e-11, No Iterations 210
+time step continuity errors : sum local = 1.23313305206e-18, global = 6.82705836202e-21, cumulative = 6.06477996176e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000461901026108, Final residual = 3.85887396733e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0101900107562, Final residual = 1.35284554347e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000461889576937, Final residual = 3.85979175381e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 86.16 s  ClockTime = 139 s
+
+Courant Number mean: 1.30622703556e-07 max: 0.000132962388486
+Time = 0.0304
+
+Inner iteration:  0
+
+DILUPBiCG:  Solving for Ux, Initial residual = 0.00210864720048, Final residual = 9.77062146108e-09, No Iterations 18
+DILUPBiCG:  Solving for Uy, Initial residual = 0.00909097314582, Final residual = 7.62393548555e-09, No Iterations 28
+DICPCG:  Solving for p, Initial residual = 0.00245613037745, Final residual = 9.94045167177e-11, No Iterations 210
+time step continuity errors : sum local = 1.27929624419e-18, global = -9.60081983575e-22, cumulative = 5.9687717634e-20
+DILUPBiCG:  Solving for thetaxx, Initial residual = 0.000459291266285, Final residual = 3.92556504951e-15, No Iterations 1
+DILUPBiCG:  Solving for thetaxy, Initial residual = 0.0101219983001, Final residual = 1.34578701403e-15, No Iterations 1
+DILUPBiCG:  Solving for thetayy, Initial residual = 0.000459276631573, Final residual = 3.92610385174e-15, No Iterations 1
+DILUPBiCG:  Solving for thetazz, Initial residual = 0, Final residual = 0, No Iterations 0
+ExecutionTime = 86.71 s  ClockTime = 140 s
+
+Courant Number mean: 1.32369131895e-07 max: 0.000134813929214
+Time = 0.0306
+
+Inner iteration:  0
+

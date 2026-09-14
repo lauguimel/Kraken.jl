@@ -1,0 +1,52 @@
+#!/bin/bash -l
+#PBS -N krk_logfv_nav
+#PBS -l select=1:ncpus=8:ngpus=1:mem=96GB:gpu_id=A100
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m ae
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND=cuda
+export KRAKEN_FT=float64
+export KRAKEN_LOGFV_CYLINDER_SUITE=rheotool
+export KRAKEN_R_LIST=30,35
+export KRAKEN_WI_LIST=0.5
+export KRAKEN_U_MEAN=0.005
+export KRAKEN_BETA=0.59
+export KRAKEN_RUN_NEWTONIAN=0
+export KRAKEN_RUN_VISCOELASTIC=1
+export KRAKEN_STEPS=200000
+export KRAKEN_SCALE_STEPS_WITH_R=1
+export KRAKEN_MAX_STEPS_CAP=0
+export KRAKEN_AVG_DIVISOR=5
+export KRAKEN_DRAG_STRIDE=200
+export KRAKEN_LOGFV_BSD_FRACTION=1.0
+export KRAKEN_POLYMER_SUBSTEPS=auto
+export KRAKEN_SUBCYCLE_RELATIVE_TOLERANCE=0.01
+export KRAKEN_MAX_DEFORMATION_INCREMENT=0.05
+export KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT=0.07
+export KRAKEN_MAX_POLYMER_SUBSTEPS=64
+export KRAKEN_FORCE_BOUNDARY_FILL=bc_aware
+export KRAKEN_SAVE_FIELDS=1
+export KRAKEN_WRITE_FIELD_VTK=1
+export KRAKEN_CONTINUE_ON_ERROR=1
+export KRAKEN_OUTPUT_DIR="results/viscoelastic_logfv/rheotool_embedded_normalavg_${PBS_JOBID:-manual}"
+
+nvidia-smi
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo "=== log-FV RheoTool normal-average embedded-gradient sweep at $(date) ==="
+julia --project=. bench/viscoelastic_logfv/logfv_cylinder_cd_convergence.jl
+echo "=== Done at $(date) ==="

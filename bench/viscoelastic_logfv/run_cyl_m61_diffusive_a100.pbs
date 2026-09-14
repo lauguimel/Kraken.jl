@@ -1,0 +1,123 @@
+#!/bin/bash -l
+#PBS -N M61_DIFFUSIVE
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=01:30:00
+#PBS -j oe
+#PBS -m ae
+
+# M61 — Diffusive scaling control (constant tau_LU) at R=10/30/50.
+#
+# Methodological control for the F64 U-shape (114.53 / 118.10 / 115.75
+# at R=10/30/50). Current M59 setup uses acoustic scaling: u_LU=0.005
+# constant -> nu_LU = u_LU*R/Re scales with R -> tau_BGK = 0.5+3*nu_LU
+# varies with R (0.65 / 0.95 / 1.25 at R=10/30/50). Not apples-to-apples.
+#
+# Diffusive scaling: fix tau_LU at R=30 anchor (nu_LU=0.15, tau=0.95),
+# and vary u_LU per R: u_LU = nu_LU * Re / R.
+#
+#   R=10 -> u_LU = 0.015 (Ma=0.026)  lambda_LU = Wi*R/u_LU = 666.7
+#   R=30 -> u_LU = 0.005 (Ma=0.0087) lambda_LU = 6000.0       (anchor, same as M59)
+#   R=50 -> u_LU = 0.003 (Ma=0.0052) lambda_LU = 16666.7
+#
+# Wi=1, beta=0.59, Re=1 preserved. tau_LU constant -> any tau-dependent
+# numerical bias controlled out.
+#
+# Hypothesis: if U-shape disappears -> acoustic-scaling artifact.
+#             if U-shape persists -> physical/numerical effect not
+#                                    tau-driven.
+#
+# Caveat: max_steps=300k fixed per R. R=50 with u_LU=0.003 gives only
+# ~0.6 flow-through, so R=50 may be under-converged. If U-shape signal
+# is large (>2 Cd), tconv likely not the dominant uncertainty. Followup
+# matched-FT run as M61-bis if needed.
+#
+# Setup: M48 fixture (eg=ea=ef=ed=0 qwall halfwayBB muscl_superbee
+#        BSD=1 Wi=1 beta=0.59 Re=1 L=15R cap=64), F64.
+# Cost estimate (A100 F64 300k):
+#   R=10 ~3 min, R=30 ~5 min, R=50 ~8 min. Total ~16 min + precompile.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Common setup (M48 fixture).
+export KRAKEN_BETA_LIST="0.59"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+export KRAKEN_ADVECTION_SCHEME="muscl_superbee"
+export KRAKEN_WALL_BC="halfwayBB"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+export KRAKEN_MAX_STEPS_BASE="300000"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+ROOT_OUT="tmp/m61_diffusive/${PBS_JOBID:-manual}"
+mkdir -p "$ROOT_OUT"
+
+echo "=== M61 diffusive scaling matrix (tau fixed) starting at $(date) ==="
+
+# --- R=10 with u_LU=0.015 (matches nu_LU=0.15 = R=30 anchor) ---
+echo ""
+echo "--- R=10 u_LU=0.015 (tau_BGK=0.95) ---"
+export KRAKEN_R_LIST="10"
+export KRAKEN_U_MEAN="0.015"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R10_uLU015"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# --- R=30 with u_LU=0.005 (anchor; reproduces M59-C polymer Wi=1) ---
+echo ""
+echo "--- R=30 u_LU=0.005 (tau_BGK=0.95, anchor matches M59-C 118.10) ---"
+export KRAKEN_R_LIST="30"
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R30_uLU005"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# --- R=50 with u_LU=0.003 (matches nu_LU=0.15) ---
+echo ""
+echo "--- R=50 u_LU=0.003 (tau_BGK=0.95; only 0.6 FT at 300k, may under-converge) ---"
+export KRAKEN_R_LIST="50"
+export KRAKEN_U_MEAN="0.003"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R50_uLU003"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== M61 done at $(date) ==="
+echo ""
+echo "Cd matrix (Cd_kraken, col 26):"
+for d in R10_uLU015 R30_uLU005 R50_uLU003; do
+    f=$(ls "${ROOT_OUT}/${d}"/cyl_bigsweep_v2_*.csv 2>/dev/null | head -1)
+    if [ -n "$f" ]; then
+        cd_val=$(awk -F, 'NR==2 {print $26}' "$f")
+        echo "  $d : Cd_kraken=$cd_val"
+    fi
+done
+
+echo ""
+echo "Comparison: acoustic (M59-B/C) vs diffusive (this run):"
+echo "  R=10: acoustic F64 = 114.53; diffusive F64 = ???"
+echo "  R=30: acoustic F64 = 118.10; diffusive F64 = ??? (should match if scaling ok)"
+echo "  R=50: acoustic F64 = 115.75; diffusive F64 = ???"

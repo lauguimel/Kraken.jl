@@ -1,0 +1,22 @@
+#!/bin/sh
+cd ${0%/*} || exit 1    # run from this directory
+
+# Source tutorial run functions
+. $WM_PROJECT_DIR/bin/tools/RunFunctions
+
+# Get application directory
+application=`getApplication`
+
+NCPUS=${1:-1}
+
+runApplication blockMesh
+
+runApplication mirrorMesh -noFunctionObjects -overwrite
+
+if [ "$NCPUS" -gt 1 ]; then
+    runApplication decomposePar -force
+    runParallel $application
+    runApplication reconstructPar -latestTime
+else
+    runApplication $application
+fi

@@ -244,6 +244,7 @@ function _fused_trt_libb_v2_guo_field_step!(::Val{:bouzidi_fl_twopass},
     # bugs" #1 (HIGH).
     # Pass-3 arg order = canonical sort of the brick's required_args:
     #   :f_out, :ρ_out, :is_solid, :q_wall, :Nx, :Ny
+    @trace_enter :pass3_cutlink_rho
     pass3! = build_lbm_kernel(backend, _TRT_LIBB_V2_GUO_FIELD_BOUZIDI_FL_TWOPASS_PASS3_SPEC)
     pass3!(f_out, ρ, is_solid, q_wall, Nx, Ny;
            ndrange=(Nx, Ny))

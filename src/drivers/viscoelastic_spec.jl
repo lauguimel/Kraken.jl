@@ -14,7 +14,7 @@
     AbstractPolymerModel
 
 Constitutive closure mapping conformation tensor C to polymer stress τ_p.
-Concrete subtypes: `OldroydB`, `FENEP` (planned), `Giesekus` (planned).
+Concrete subtypes: `OldroydB`, `LogConfOldroydB`, `FENEPPolymer`.
 """
 abstract type AbstractPolymerModel end
 
@@ -55,6 +55,31 @@ LogConfOldroydB(; G, λ) = LogConfOldroydB(promote(float(G), float(λ))...)
 
 polymer_modulus(m::LogConfOldroydB) = m.G
 polymer_relaxation_time(m::LogConfOldroydB) = m.λ
+
+"""
+    FENEPPolymer(; G, λ, L_max)
+
+FENE-P Peterlin closure for a conformation tensor normalized so that C = I is
+the stress-free equilibrium:
+
+```text
+f(C) = (L_max^2 - d) / (L_max^2 - tr(C))
+τ_p = G · (f(C) C - I)
+```
+
+The 2D direct stress helper below uses `d = 2`; the log-FV production driver
+uses the same normalized form in its source and stress kernels.
+"""
+struct FENEPPolymer{T<:AbstractFloat} <: AbstractPolymerModel
+    G::T
+    λ::T
+    L_max::T
+end
+FENEPPolymer(; G, λ, L_max) = FENEPPolymer(promote(float(G), float(λ), float(L_max))...)
+
+polymer_modulus(m::FENEPPolymer) = m.G
+polymer_relaxation_time(m::FENEPPolymer) = m.λ
+polymer_lmax(m::FENEPPolymer) = m.L_max
 
 """
     uses_log_conformation(model) -> Bool
@@ -102,6 +127,25 @@ function update_polymer_stress!(τ_p_xx, τ_p_xy, τ_p_yy,
     @. τ_p_xx = G * (C_xx - 1)
     @. τ_p_xy = G * C_xy
     @. τ_p_yy = G * (C_yy - 1)
+    return nothing
+end
+
+function update_polymer_stress!(τ_p_xx, τ_p_xy, τ_p_yy,
+                                  C_xx, C_xy, C_yy,
+                                  m::FENEPPolymer)
+    T = eltype(τ_p_xx)
+    G = T(m.G)
+    L2 = T(m.L_max)^2
+    L2 > T(2) || throw(ArgumentError("FENEPPolymer requires L_max^2 > 2 for 2D stress"))
+    if iszero(G)
+        fill!(τ_p_xx, zero(T))
+        fill!(τ_p_xy, zero(T))
+        fill!(τ_p_yy, zero(T))
+        return nothing
+    end
+    @. τ_p_xx = G * (((L2 - T(2)) / (L2 - (C_xx + C_yy))) * C_xx - 1)
+    @. τ_p_xy = G * ((L2 - T(2)) / (L2 - (C_xx + C_yy))) * C_xy
+    @. τ_p_yy = G * (((L2 - T(2)) / (L2 - (C_xx + C_yy))) * C_yy - 1)
     return nothing
 end
 

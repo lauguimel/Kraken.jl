@@ -1,0 +1,112 @@
+#!/bin/bash -l
+#PBS -N M59_TCONV_R50
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=03:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M59 — Temporal convergence probe for R=50 Wi=1 eg=false (post M48 cleanup).
+#
+# Context: M48 toggle-flip postmortem (2026-05-26) restored eg=false baseline.
+# Local Metal F32 produced U-shape R=10/30/50 Cd = 114.77 / 116.28 / 111.84.
+# Question: is the R=50 dip a real polymer/numerical effect, or is R=50
+# under-converged at 300k like R=60 was at M46-B (drift -3.81 Cd between
+# 100k and 400k, accelerating)?
+#
+# Local M59 substep sweep already established polymer_substeps cap is NOT
+# binding at R=50 (cap=32 bit-for-bit identical to baseline cap=64).
+#
+# This probe: R=50 F64 cap=64 at max_steps = {300k, 600k, 1.2M}.
+#   - Case 1 (300k = 0.83 flow-through): anchor + F32/F64 control vs local
+#     baseline 111.84. If Cd_F64 != 111.84 -> F32 noise contributes.
+#   - Case 2 (600k = 1.67 flow-through): full first-pass tconv check.
+#   - Case 3 (1.2M = 3.33 flow-through): far tconv check, settle plateau.
+#
+# If Cd monotonically decreases from 300k to 1.2M like M46-B at R=60
+# -> temporal non-convergence IS effect B of the U-shape, settle by
+# running M44 R=10/R=30 at matching flow-through and recompute the U-shape.
+# If Cd stable from 300k to 1.2M -> tconv refuted at R=50, triage F32
+# noise (compare F64@300k vs F32@300k=111.84) or other discriminators.
+#
+# Setup: matches M48 fixture (halfwayBB + muscl_superbee + qwall +
+# bsd=1.0 + beta=0.59 Wi=1 Re=1 + L=15R + eg=ea=ef=ed=0 + cap=64).
+# Cost estimate: R=50 300k ~8 min, 600k ~16 min, 1.2M ~32 min.
+#                Total ~60 min + precompile. Walltime ceiling 3h.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Setup matches M48 fixture (eg=false halfwayBB cap=64).
+export KRAKEN_R_LIST="50"
+export KRAKEN_BETA_LIST="0.59"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+export KRAKEN_ADVECTION_SCHEME="muscl_superbee"
+export KRAKEN_WALL_BC="halfwayBB"
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+ROOT_OUT="tmp/m59_tconv_R50/${PBS_JOBID:-manual}"
+mkdir -p "$ROOT_OUT"
+
+echo "=== M59 R=50 temporal convergence probe starting at $(date) ==="
+echo "Goal: is R=50 dip in U-shape a temporal-convergence artifact?"
+
+# R=50 Wi=1 at max_steps=300k (anchor + F32/F64 control)
+echo ""
+echo "--- R=50 Wi=1 max_steps=300k (F64 anchor, local F32 baseline 111.84) ---"
+export KRAKEN_MAX_STEPS_BASE="300000"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R50_300k"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# R=50 Wi=1 at max_steps=600k (first-pass tconv)
+echo ""
+echo "--- R=50 Wi=1 max_steps=600k (~1.67 flow-through) ---"
+export KRAKEN_MAX_STEPS_BASE="600000"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R50_600k"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# R=50 Wi=1 at max_steps=1.2M (far tconv)
+echo ""
+echo "--- R=50 Wi=1 max_steps=1.2M (~3.33 flow-through, plateau check) ---"
+export KRAKEN_MAX_STEPS_BASE="1200000"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/R50_1200k"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== M59 R=50 tconv done at $(date) ==="
+echo "Compare (col 26 = Cd_kraken):"
+for d in R50_300k R50_600k R50_1200k; do
+    f=$(ls "${ROOT_OUT}/${d}"/cyl_bigsweep_v2_*.csv 2>/dev/null | head -1)
+    if [ -n "$f" ]; then
+        cd_val=$(awk -F, 'NR==2 {print $26}' "$f")
+        echo "  $d : Cd_kraken=$cd_val"
+    fi
+done

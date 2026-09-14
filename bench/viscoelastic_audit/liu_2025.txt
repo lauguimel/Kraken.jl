@@ -1,0 +1,3158 @@
+arXiv:2508.16997v1 [physics.flu-dyn] 23 Aug 2025
+
+An improved lattice Boltzmann method with a novel
+conservative boundary scheme for viscoelastic fluid flows
+Yuan Yua,b,c,∗, Siwei Chena , Lei Wangd , Hai-zhuan Yuana,∗, Shi Shua
+a
+
+School of Mathematics and Computational Science, Xiangtan
+University, Xiangtan, 411105, China
+b
+National Center for Applied Mathematics in Hunan, Xiangtan, 411105, China
+c
+Hunan Key Laboratory for Computation and Simulation in Science and Engineering,
+Xiangtan University, Xiangtan, 411105, China
+d
+School of Mathematics and Physics, China University of
+Geosciences, Wuhan, 430074, China
+
+Abstract
+The high Weissenberg number problem has been a persistent challenge in
+the numerical simulation of viscoelastic fluid flows. This paper presents an
+improved lattice Boltzmann method for solving viscoelastic flow problems
+at high Weissenberg numbers. The proposed approach employs two independent two-relaxation-time regularized lattice Boltzmann models to solve
+the hydrodynamic field and conformation tensor field of viscoelastic fluid
+flows, respectively. The viscoelastic stress computed from the conformation
+tensor is directly embedded into the hydrodynamic field using a newly proposed local velocity discretization scheme, thereby avoiding spatial gradient
+calculations. The constitutive equations are treated as convection-diffusion
+equations and solved using an improved convection-diffusion model specifically designed for this purpose, incorporating a novel auxiliary source term
+that eliminates the need for spatial and temporal derivative computations.
+Additionally, a conservative non-equilibrium bounce-back (CNEBB) scheme
+is proposed for implementing solid wall boundary conditions in the constitutive equations. The robustness of the present algorithm is validated through
+a series of benchmark problems. The simplified four-roll mill problem demonstrates that the method effectively improves numerical accuracy and stability
+∗
+
+Corresponding author.
+Email addresses: yuyuan@xtu.edu.cn (Yuan Yu), yhz@xtu.edu.cn (Hai-zhuan
+Yuan)
+Preprint submitted to Journal of Computational Physics
+
+August 26, 2025
+
+in bulk regions containing stress singularities. The Poiseuille flow problem
+validates the accuracy of the current algorithm with the CNEBB boundary
+scheme at extremely high Weissenberg numbers (tested up to Wi = 10,000).
+The flow past a circular cylinder problem confirms the superior stability and
+applicability of the algorithm for complex curved boundary problems compared to other existing common schemes.
+Keywords: lattice Boltzmann method, high Weissenberg number problem,
+viscoelastic fluid, conservative boundary scheme
+1. Introduction
+Viscoelastic fluids are ubiquitous in industrial applications and natural
+phenomena, ranging from polymer processing [1] and food manufacturing [2]
+to biological systems [3] and enhanced oil recovery [4, 5]. These fluids exhibit both viscous and elastic properties, displaying complex rheological behaviors such as normal stress differences, memory effects, and shear-thinning
+or shear-thickening characteristics [6]. The accurate numerical simulation
+of viscoelastic fluid flows is crucial for understanding and optimizing various industrial processes, as well as advancing our fundamental knowledge
+in computational rheology. However, despite over four decades of intensive
+research, the numerical simulation of viscoelastic fluids remains one of the
+most challenging problems in computational fluid dynamics [7].
+The primary obstacle in simulating viscoelastic fluid flows is the high
+Weissenberg number problem (HWNP) [8, 7], which manifests as severe numerical instabilities when the Weissenberg number (Wi) – representing the
+ratio of elastic relaxation time to the characteristic flow time scale – exceeds a critical threshold. The HWNP is characterized by several detrimental phenomena: exponential growth of stress components, loss of solution
+convergence, catastrophic numerical breakdown, and mesh-dependent solutions that violate grid convergence principles [7]. The underlying mechanism
+stems from the hyperbolic nature of the constitutive equations in regions
+of strong extensional flow, where elastic stresses undergo rapid spatial and
+temporal variations that challenge conventional discretization schemes. This
+fundamental limitation significantly constrains the practical utility of computational methods for viscoelastic flows, particularly in industrial applications
+where moderate to high Weissenberg numbers are prevalent and elastic effects
+dominate flow behavior.
+2
+
+To address the HWNP, researchers have developed various strategies that
+can be broadly categorized into three approaches. The first approach involves modifying the constitutive equations to prevent unbounded stress
+growth. Notable examples include the Giesekus model [9], which introduces
+a nonlinear mobility coefficient to account for intermolecular friction between
+polymer chains, and finite extensibility models such as FENE-P and FENECR [10, 11], which impose maximum stretch ratios on molecular chains to prevent excessive stress growth under large deformations. These modifications
+improve numerical stability while capturing important physical phenomena
+such as shear-thinning behavior and finite chain extensibility. In contrast,
+the Oldroyd-B model [12], which incorporates memory effects through the
+upper-convected derivative but lacks stress saturation mechanisms, allows
+unlimited stress growth in extensional flows. This characteristic makes the
+Oldroyd-B model particularly challenging for numerical simulations at high
+Wi, yet it remains a fundamental benchmark for testing numerical methods
+because it exposes core difficulties without artificial stabilization [7].
+The second approach focuses on improving numerical discretization schemes.
+The Elastic-Viscous Stress Splitting (EVSS) method [13, 14, 15] separates total stress into elastic and viscous components to reduce coupling oscillations.
+The Streamline Upwind Petrov-Galerkin (SUPG) method [16, 17] applies upstream weighting to convection terms to minimize directional errors. Additionally, specialized formulations such as the log-conformation approach [18]
+ensure positive-definiteness of the conformation tensor to avoid numerical
+breakdown from exponential stress growth. These numerical improvements
+have extended the range of computable Weissenberg numbers while preserving original constitutive equations, though stable simulations at extremely
+high Wi remain challenging for complex geometries.
+The third approach involves alternative numerical frameworks, among
+which the lattice Boltzmann method (LBM) has emerged as a promising candidate [19]. LBM offers several advantages: its kinetic foundation provides a
+natural framework for complex physics, the streaming step corresponds to the
+exact solution of the d’Alembert advection equation and is therefore free from
+numerical diffusion, the method is inherently parallel, and boundary conditions can be implemented through local operations. This exact d’Alembert
+solution property is particularly valuable for transport-dominated problems
+where traditional methods suffer from numerical diffusion [20]. Recent theoretical advances by Bellotti [21, 22] have provided rigorous mathematical
+frameworks for analyzing lattice Boltzmann schemes, including their consis3
+
+tency, stability, and convergence properties through modified equation analysis and connections to finite difference methods. These theoretical foundations strengthen the mathematical basis for LBM applications to complex
+fluid problems. These features make LBM attractive for viscoelastic fluid
+simulations, where accurate coupling between flow fields and stress evolution
+is essential.
+Research on LBM for viscoelastic fluids has followed several directions.
+For macroscopic constitutive equations, Malaspinas et al.[23] established
+the foundation by discretizing both conservation and constitutive equations
+within the LBM framework, successfully simulating benchmark flows though
+with reduced accuracy at higher Wi. Su et al.[24] developed a tensor distribution function approach that eliminated redundant terms in stress tensor evolution, demonstrating improved stability for high-Wi cavity flows.
+Recent work by Zhang et al.[25] introduced a viscoelastic lattice Boltzmann flux solver incorporating stress-splitting techniques while maintaining second-order spatial accuracy. Alternative approaches have targeted
+the Fokker-Planck equation for polymer conformation distribution[26, 27],
+though computational requirements scale unfavorably with system complexity. Hybrid methods combining LBM with traditional schemes have also been
+explored [28, 29], achieving improved efficiency while maintaining accuracy.
+Despite these advances, existing LBM approaches for viscoelastic fluids
+face significant limitations in addressing the HWNP. Maximum achievable
+Weissenberg numbers remain modest for benchmark problems, and key phenomena such as flow instabilities in complex geometries are difficult to capture reliably. While LBM’s exact advection property largely eliminates issues related to convective term treatment and stress tensor discretization
+that plague traditional finite difference and finite element methods, boundary
+condition implementation emerges as a critical limiting factor. Furthermore,
+theoretical analysis of LBM initialization and boundary treatments remains
+an active area of research [21, 22], with proper initialization schemes being
+crucial for maintaining consistency and stability, particularly for extended
+state space problems like viscoelastic flows where multiple field variables must
+be simultaneously evolved. The handling of boundary conditions represents
+a particularly under-explored aspect in LBM for viscoelastic flows, despite
+being extensively studied for velocity fields. While boundary conditions for
+velocity fields have been well-established in LBM, the treatment of the conformation tensor at solid boundaries has received limited attention. The
+standard bounce-back scheme in LBM, though effective for velocity fields,
+4
+
+does not account for the specific physical requirements of the conformation
+tensor field at solid boundaries. The trace of the conformation tensor, representing the mean-square end-to-end distance of polymer chains, should
+satisfy conservation properties consistent with polymer physics to maintain
+physical fidelity. Specifically, in the absence of chemical reactions or chain
+scission, the trace of the conformation tensor should remain constant along
+material lines, a principle that extends to boundary regions where polymer
+chains interact with solid surfaces. When these conservation principles are
+violated at boundaries, artificial polymer stretching or compression occurs,
+generating spurious stresses that can propagate into the bulk flow and potentially trigger numerical instabilities, particularly at elevated Weissenberg
+numbers where small perturbations can lead to catastrophic breakdown.
+In this work, we develop an improved lattice Boltzmann method for
+Oldroyd-B viscoelastic fluid flows that addresses several key limitations of
+existing approaches. Our method incorporates three main innovations. First,
+we employ separate two-relaxation-time (TRT) regularized lattice Boltzmann
+models [30, 31] for the hydrodynamic and conformation tensor fields, with
+the viscoelastic stress tensor directly incorporated in velocity-discrete form
+to eliminate gradient calculations. Second, we develop a new convectiondiffusion LB model for the constitutive equation that includes an auxiliary source term, avoiding both spatial and temporal gradient computations. Third, we introduce a novel conservative non-equilibrium bounce-back
+(CNEBB) scheme that ensures proper conservation properties of the conformation tensor at solid boundaries. This conservation property is achieved
+by maintaining the physical constraint that the trace of the conformation
+tensor should remain constant along streamlines, even at boundary nodes.
+Through systematic validation on benchmark problems including the fourroll mill flow, force-driven Poiseuille flow, and flow past a circular cylinder,
+we demonstrate that this approach enables stable simulations at Weissenberg
+numbers substantially higher than previously reported in LBM studies for the
+Oldroyd-B model, while maintaining computational efficiency and accuracy.
+The remainder of this paper is organized as follows. Section 2 presents
+the governing equations for Oldroyd-B viscoelastic fluids. Section 3 describes
+our improved LBM formulation, including the two-relaxation-time regularized models for hydrodynamic and polymer fields (Sections 3.1 and 3.2),
+and the conservative boundary scheme for the conformation tensor evolution
+(Section 3.3). Section 4 presents validation results through benchmark problems including the simplified four-roll mill flow (Section 4.1), force-driven
+5
+
+Poiseuille flow (Section 4.2), and flow past a circular cylinder (Section 4.3).
+Section 5 summarizes our findings and discusses future research directions.
+2. Governing equations
+In this work, we consider weakly compressible isothermal viscoelastic fluids described by the Oldroyd-B constitutive model. The weakly compressible
+assumption allows for small density variations while maintaining computational efficiency, making it particularly suitable for lattice Boltzmann implementations. The viscoelastic behavior arises from the presence of dissolved
+polymer chains, which contribute an additional stress component to the total
+stress tensor. This leads to a coupled system involving two distinct physical fields: the hydrodynamic field governing fluid motion and the polymer
+field characterizing the microstructural evolution of polymer chains. The
+coupling between these fields captures the essential physics of viscoelastic
+flows, where polymer deformation influences fluid stresses and, conversely,
+fluid motion drives polymer chain evolution.
+2.1. Hydrodynamic Field Equations
+The hydrodynamic field is governed by the weakly compressible NavierStokes equations (NSE) as follows:
+∂t ρ + ∂α (ρuα ) = 0,
+∂t (ρuα ) + ∂β (ρuα uβ + pδαβ ) = ∂β [µs (∂α uβ + ∂β uα )] + ∂β Tαβ + Fα ,
+
+(1a)
+(1b)
+
+where ρ is the density, uα is the fluid velocity at time t and spatial location xα
+with the subscript α being the generic index, δαβ is the Kronecker delta, p is
+the pressure, µs is the dynamic viscosity of the solvent, Tαβ is the viscoelastic
+stress tensor which describes the effect of the polymers on the solvent, and
+Fα is the body force acting on the fluid. The Einstein summation convention
+is employed throughout, with Greek indices ranging over spatial dimensions.
+2.2. Polymer Field Evolution
+The evolution of the polymer microstructure is described through the
+conformation tensor Aαβ , which represents the second moment of the polymer
+chain end-to-end vector distribution. The conformation tensor satisfies the
+transport equation [7]
+1
+∂Aαβ
++∂γ (Aαβ uγ ) = ∂γ (κ∂γ Aαβ )− F(Aαβ )+Aαγ ∂γ uβ +Aγβ ∂γ uα +Aαβ ∂γ uγ ,
+∂t
+λ
+(2)
+6
+
+where κ is the centre-of-mass diffusion coefficient, λ is the characteristic relaxation time, and F(Aαβ ) is a model-dependent function defining the constitutive relationship. The terms on the right-hand side represent, respectively,
+diffusion, relaxation toward equilibrium, and deformation due to velocity gradients. The final term accounts for weak compressibility effects and vanishes
+for incompressible flows.
+2.3. Stress-Conformation Coupling
+The hydrodynamic and polymer fields are coupled through the Kramers
+formula
+µp
+(3)
+ταβ = F(Aαβ ),
+λ
+where µp is the polymer contribution to viscosity. This relationship connects
+the microscopic polymer configuration to the macroscopic stress field.
+In Eqs. (2) and (3), the functions F(Aαβ ) can take different forms
+in various constitutive models [7], such as the Oldroyd-B model [12], the
+Giesekus model [9], the finitely extensible nonlinear elastic (FENE) type
+models [32, 10, 11], the Phan-Thien-Tanner (PTT) model [33], and the upperconvected Maxwell (UCM) model [7], among others. The choice of function
+F(Aαβ ) is not limited in this study, as it appears in our model in the form
+of a source term. To facilitate the verification of the reliability of the model,
+this study has opted to consider the most popular and simple Oldroyd-B
+model with
+F(Aαβ ) = Aαβ − δαβ .
+(4)
+Thus, the extension of the model presented in this study to various complex
+viscoelastic fluid models is straightforward.
+2.4. Dimensionless Parameters
+The behavior of the Oldroyd-B viscoelastic fluid described in the above
+model can be characterized by the four dimensionless quantities: the Reynolds
+number (Re), the Weissenberg number (Wi), the viscosity ratio (β), and the
+Schmidt number (Sc).
+The Reynolds number Re in viscoelastic fluid governs the relative significance of inertial forces versus viscous forces in fluid flow flow and is defined
+as
+ρUc Lc
+,
+(5)
+Re =
+µ0
+
+7
+
+where Uc is the characteristic velocity, Lc is the characteristic length, µ0 is
+the total dynamic viscosity with µ0 = µs + µp .
+The Weissenberg number Wi, which describes the relative importance of
+elastic effects compared to shear effects in viscoelastic fluids, is defined as:
+Wi =
+
+λUc
+.
+Lc
+
+(6)
+
+The viscosity ratio β describes the ratio of the solvent viscosity to the
+total viscosity given as
+µs
+(7)
+β= .
+µ0
+The Schmidt number Sc characterizes the relative rate of momentum
+diffusion to solute diffusion within a fluid. It is defined as follows:
+νs
+Sc = ,
+(8)
+κ
+where νs = µρs is kinematic viscosity of solvent. Numerous studies have
+demonstrated the actual existence of centre-of-mass diffusion. Consequently,
+assigning a value of κ = 0 and Sc = ∞ is considered to be unrealistic. Here,
+the diffusion coefficients of several common dilute polymer solutions are presented in Table 1. It is evident from the table that, despite the small magnitude of the center-of-mass diffusion coefficients κ, they cannot be neglected
+due to the inherently small self-diffusion coefficient of water (O(10−9 )). There
+is a broad range of variation in the Schmidt number Sc, which can significantly decrease with increasing solute concentration or molecular weight of
+the polymer. The Sc values for the various common viscoelastic polymer
+solutions displayed in the table range between O(1) and O(104 ). It is noteworthy that the diffusion coefficient κ decreases sharply with an increasing
+number of DNA base pairs (bp) [34]. For instance, a single human DNA
+molecule, containing tens of millions to several hundred million base pairs,
+implies the possibility of higher Sc numbers, such as Sc greater than or equal
+to O(106 ). So a comparatively broad range of Schmidt numbers (Sc) will be
+discussed in this paper.
+2.5. Numerical Parameters
+In addition to the dimensionless numbers characterizing the physical
+properties of fluids, this paper also considers three additional dimensionless parameters to ensure the robustness of numerical simulations: the Mach
+8
+
+Table 1: Diffusion coefficients κ of common substances in water and corresponding Sc.
+
+Diffusion coefficient (in water)
+
+κ (m2 /s)
+
+Sc
+
+Water [35]
+Human serum albumin [36]
+30S particle of ribosome [37]
+Single mRNA molecules [38]
+DNA (21bp) [34]
+DNA (6000bp) [34]
+
+2.3 × 10−9
+6.1 × 10−11
+1.8×−11
+1.0 × 10−13
+5.3 × 10−11
+8.1 × 10−13
+
+1
+3.8 × 101
+1.3 × 102
+2.3 × 104
+4.3 × 101
+2.8 × 103
+
+number (Ma), the viscous incompressibility parameter (T ), and the Péclet
+number (Pe). The Mach number Ma is defined as:
+Ma =
+
+Uc
+.
+cs
+
+(9)
+
+In this work, it is crucial to ensure that M a ≤ 0.2 to satisfy the condition of
+weak compressibility of fluids. The definition of the viscous incompressibility
+parameter T is [39]
+Ma2
+,
+(10)
+T =
+Re
+which is introduced to enhance the robustness of the TRT-RLB model in low
+Reynolds number problems. For such low-Reynolds-number flows, Gsell et
+al. [39] and our recent results [30] recommend T ≤ 10−2 , which we adopt for
+problems without stress singularities such as Poiseuille flow. For problems
+containing stress singularities that demand high stability requirements, we
+set T = 10−4 . The Péclet number is defined as
+Lc Uc
+= ReSc.
+(11)
+Pe =
+κ
+It is an effective measure for assessing the robustness of methods used to
+solve the constitutive equations Eq. (2).
+3. Numerical methods
+3.1. The two-relaxation-time regularized lattice Boltzmann model for the hydrodynamic field
+The accurate simulation of viscoelastic fluids requires a robust hydrodynamic solver capable of handling intense variations in stress fields, thereby
+9
+
+maintaining numerical stability at high Weissenberg numbers. In our recent
+work [31], we developed a two-relaxation-time regularized lattice Boltzmann
+(TRT-RLB) model for the Navier-Stokes equations that achieves secondorder spatial accuracy and demonstrates superior numerical stability compared to standard TRT and RLB models, particularly for high Reynolds number flows. The TRT-RLB model combines the advantages of both TRT and
+RLB approaches: the TRT scheme provides enhanced stability through dual
+relaxation parameters, while the regularization procedure eliminates spurious high-frequency modes that can compromise accuracy. Building upon this
+foundation, we extend the TRT-RLB framework to incorporate viscoelastic
+effects through a novel local discretization approach that directly integrates
+the stress tensor without requiring spatial derivatives.
+Traditional implementations of viscoelastic effects in LBM involve computing the viscoelastic force Fp,α = ∂β ταβ and incorporating it through forcing schemes [40]. However, this approach introduces errors due to gradient
+calculations and compromises the local nature of LBM. To address this limitation, we present a completely local discretization of the viscoelastic stress
+tensor that directly incorporates ταβ into the TRT-RLB framework without
+requiring spatial derivatives.
+In the present model, the mesoscopic evolution equation is given as follows:
+
+
+
+Hi,α neq Hi,αβ neq
+1
+neq
+eq
+A
+A0 + 2 Aα +
+fi (xα + eiα ∆t, t + ∆t) = fi + wi 1 −
+τs,1
+cs
+2c4s αβ
+
+
+Hi,αβγ neq
+1
++ wi 1 −
+Aαβγ + Gi ∆t + Fi ∆t + Ti ∆t,
+(12)
+τs,2
+6c6s
+where fi and fieq are the distribution function and the equilibrium distribution function associated with the discrete velocity eiα in the i-th direction
+ranging from 0 to (q − 1) for a given d-dimensional DdQq lattice model.
+The equilibrium of the third-order Hermite expansion to suppress Galilean
+invariance errors:
+
+
+Hi,α uα Hi,αβ uα uβ Hi,αβγ uα uβ uγ
+eq
+fi = wi ρ Hi +
++
++
+,
+(13)
+c2s
+2c4s
+6c6s
+where wi are the weight coefficients, cs is the lattice speed of sound depended
+on the discrete velocity model, Hi , Hi,α , Hi,αβ and Hi,αβγ denote Hermite
+polynomials of various orders. The macroscopic density and velocity are
+10
+
+recovered through moment relations:
+X
+
+X
+
+fi = ρ,
+
+i
+
+eiα fi = ρuα −
+
+i
+
+∆t
+Fα .
+2
+
+The off-equilibrium moments of orders 0 through 3 are defined as
+X
+Aneq
+=
+(fi − fieq ) ,
+0
+
+(14)
+
+(15a)
+
+i
+
+Aneq
+α =
+
+X
+
+Hi,α (fi − fieq ) ,
+
+(15b)
+
+Hi,αβ (fi − fieq ) ,
+
+(15c)
+
+Hi,αβγ (fi − fieq ) ,
+
+(15d)
+
+i
+
+Aneq
+αβ =
+
+X
+i
+
+Aneq
+αβγ =
+
+X
+i
+
+neq
+where Aneq
+xxx = Ayyy can be employed to reduce computational complexity.
+The relaxation times τs,1 and τs,2 are related to the solvent viscosity and
+stability parameter through
+
+
+1
+2
+µs = ρcs τs,1 −
+∆t,
+(16)
+2
+
+and
+
+
+Λs =
+
+1
+τs,1 −
+2
+
+
+
+1
+τs,2 −
+,
+2
+
+(17)
+
+where Λs = 1/6 is the magic parameter for the hydrodynamic system [39].
+The additional discrete source term Gi will be responsible for eliminating
+the cubic defects in Galilean invariance on standard lattice, Ti will contribute
+to incorporate the viscoelastic effect, and Fi will account for any body forces.
+Although the extension to three dimensions is straightforward and will
+be implemented in the future, we only consider the two-dimensional cases
+for simplicity in this article. Thus we chose the two-dimensional discrete
+velocity model on standard lattices, namely the D2Q9 model with a GaussHermite quadrature of fifth-order degree [41, 42]. In this model, the weight
+coefficients are given as w0 = 4/9, w1,2,3.4 = 1/9, w5,6.7.8 = 1/36, the lattice
+speed of sound is described as cs = √13 c, where the lattice speed c = ∆x/∆t
+with ∆x and ∆t being the spatial and temporal step respectively, and the
+11
+
+discrete velocities are given by
+
+(0, 0)
+
+
+
+ 
+π(i−1)
+π(i−1)
+cos 2 , sin 2
+c
+eiα =
+
+
+√ 
+
+ 2 cos π(i−9/2) , sin π(i−9/2) c
+2
+
+2
+
+i = 0,
+for i = 1 to 4,
+
+(18)
+
+for i = 5 to 8,
+
+Following the work of Feng et al. [43], the correction source term is given as
+
+
+1
+Hi,αβ
+Gi = −wi 1 −
+∂γ Φαβγ ,
+(19)
+2τs,1
+6c6s
+where
+ 3
+ ρux α = β = γ = x,
+ρu3 α = β = γ = y,
+Φαβγ =
+ y
+0
+others ,
+
+
+∂γ Φαβγ = ∂x ρu3x δαx δβx + ∂y ρu3y δαy δβy .
+
+(20)
+(21)
+
+The newly proposed discrete viscoelastic source term in this article is defined
+as
+Hi,αβ ταβ
+(22)
+Ti = −wi
+2c4s τs,1 ∆t
+where ταβ is the viscoelastic stress tensor which describes the effect of the
+polymers on the solvent. Furthermore, a first-order Hermite expansion of
+discrete forcing term is incorporated to improve the accuracy [44, 45], which
+can be expressed as
+
+
+Hi,α
+1
+Fi = 1 −
+wi 2 Fα
+(23)
+2τs,1
+cs
+With the aid of the equation of state p = ρc2s , the aforementioned mesoscopic model can be readily recovered to the NSE as shown in Eqs. (1) via
+the Chapman-Enskog analysis technique [30].
+3.2. The improved two-relaxation-time regularized lattice Boltzmann model
+for the polymer field
+To model the evolution of the viscoelastic stress tensor ταβ , a common
+approach is to solve the continuum-level differential constitutive equations
+with respect to the configuration tensor Aαβ . Once these equations are solved,
+the stress tensor ταβ can be calculated from the configuration tensor Aαβ
+12
+
+by Eqs. (3) and (4). It should be noted that we assume the viscoelastic
+fluid to be isotropic, which means that for 2D problems, the viscoelastic
+configuration tensor has only three mutually independent components: Axx ,
+Ayy , and Axy . Consequently, we must solve the following convection-diffusion
+equation (CDE) three times concurrently and independently:
+∂t ϕ + ∂α (ϕuα ) = ∂α (κ∂α ϕ) + S,
+
+(24)
+
+where the variables ϕ and S represent the three different components of Aαβ
+and Φαβ , respectively, in practice, with
+1
+Φαβ = − (Aαβ − δαβ ) + Aαγ ∂γ uβ + Aγβ ∂γ uα + Aαβ ∂γ uγ .
+λ
+
+(25)
+
+To solve Eq. (24), we propose an improved regularized lattice Boltzmann
+model in which the mesoscopic distribution functions gi (xα , t) satisfy the
+following evolution process:
+
+
+
+1
+Hi,α neq
+eq
+neq
+gi (xα + eiα ∆t, t + ∆t) = gi + wi 1 −
+B0 + 2 Bα
+τp,1
+cs
+
+
+1
+Hi,αβ neq
++ wi 1 −
+B
+τp,2
+2c4s αβ
+2
+ei ∆t + Fei ∆t + ∆t ∂t Fei ,
+(26)
++G
+2
+where the field quantities on the right-hand side of the equation, such as
+neq
+ei , and Fei , all depend on (x, t), although we have
+gieq , B0neq , Bαneq , Bαβ
+, G
+omitted this dependency for simplicity in our notation. We use the D2Q9
+instead of the D2Q5 lattice model because Li et al. [46] have shown that
+the D2Q9 lattice model offers better accuracy in dealing with convectiondominant problems, albeit with increased computational overhead. Therefore, the parameters related to the discrete velocity model, including eiα , wi ,
+and cs , remain consistent with the settings described in the previous section.
+A second-order Hermite expansion is used to improve the accuracy of the
+equilibrium distribution function gieq , as shown below:
+
+
+Hi,αβ
+Hi,α
+eq
+uα uβ .
+(27)
+gi = wi ϕ 1 + 2 uα +
+cs
+2c4s
+The regularization procedure requires the computation of off-equilibrium
+moments of different orders. The zero-order off-equilibrium moment B0neq is
+13
+
+derived as
+B0neq =
+
+X
+
+(gi − gieq ) = 0,
+
+(28)
+
+i
+
+which vanishes due to the zero-order moment conservation relation
+X
+X eq
+gi =
+gi = ϕ.
+i
+
+(29)
+
+i
+
+Similarly, the first-order and second-order off-equilibrium moments are defined as
+X
+Bαneq =
+Hi,α (gi − gieq ) ,
+(30a)
+i
+neq
+Bαβ
+=
+
+X
+
+Hi,αβ (gi − gieq ) .
+
+(30b)
+
+i
+
+In contrast to the approach taken by Malaspinas et al. [23], a higher-order
+discrete source term is employed to enhance the accuracy. Additionally, we
+ei that considers the NSE-CDE coupling.
+propose a new correction term G
+Unlike the formulation proposed by Shi et al. [47], the correction term presented here circumvents the calculation of velocity gradients ∂α uα and instead
+involves calculations of nearly negligible density gradients ∂α ρ, which is parei is
+ticularly applicable to weakly compressible fluids. The auxiliary term G
+defined as
+
+
+
+eiα ϕ
+1
+2
+ei = wi 1 −
+F
+−
+c
+∂
+ρ
+.
+(31)
+G
+α
+α
+s
+2τp,1 c2s ρ
+For the completely incompressible case, this reduces to
+
+
+1
+eiα ϕ
+e i = wi 1 −
+G
+Fα ,
+2τp,1 c2s ρ
+
+(32)
+
+where Fα is the force term in the NSE as introduced in the previous subsection.
+The force term Fei is given by
+
+
+1
+eiα
+e
+Fi = wi S + 1 −
+wi 2 uα S.
+(33)
+2τp,1
+cs
+Through Chapman-Enskog multiscale expansion analysis, it can be proven
+that the above model correctly recovers Eq. (24) and exhibits the following
+14
+
+transport coefficient relationship:
+
+
+1
+κ = τp,1 −
+∆tc2s .
+2
+
+(34)
+
+The second relaxation time τp,2 is determined by the magic parameter
+Λp [31, 48]:
+Λp
++ 0.5,
+(35)
+τp,2 =
+τp,1 − 0.5
+where the optimal value of Λp depends on the convection-diffusion scaling and
+will be specified for each test case. Through multiscale analysis, it has been
+shown that τp,2 does not affect the macroscopic equation recovery, making Λp
+a free parameter that can be optimized for numerical stability and accuracy.
+The determination of appropriate Λp values has been subject to preliminary
+numerical analysis in our recent work [31], and its selection will be detailed
+in the validation section for different flow configurations.
+The temporal derivative ∂t Fei in Eq. (26) is calculated using the following
+finite difference scheme:
+∂t Fei (xα , t) =
+
+Fei (xα , t) − Fei (xα , t − ∆t)
+.
+∆t
+
+(36)
+
+This model adopts the standard D2Q9 lattice, and the macroscopic quantity ϕ satisfies the following relationship:
+X
+X eq
+gi =
+gi = ϕ.
+(37)
+i
+
+i
+
+3.3. Conservative boundary scheme for the convection-diffusion system governing constitutive equation evolution
+This section presents a novel boundary condition scheme for the convectiondiffusion lattice Boltzmann method that ensures strict conservation of the
+conformation tensor at solid boundaries. As will be demonstrated in subsequent analyses, this method proves essential for achieving numerical stability
+in wall-bounded viscoelastic flows at high Weissenberg numbers.
+In viscoelastic flow simulations, the conformation tensor exhibits sharp
+gradients near solid boundaries that undergo rapid temporal evolution. Existing boundary treatment methods typically employ zeroth- or first-order
+
+15
+
+extrapolation schemes when imposing boundary conditions for the conformation tensor (or equivalently, the polymeric stress tensor). These approximations inevitably introduce numerical errors that manifest as non-physical
+”leakage” of the conformation tensor components across the boundary. This
+spurious loss of conformation tensor conservation is analogous to the welldocumented mass conservation errors encountered in discrete kinetic methods
+when implementing no-slip boundary conditions. Such conservation violations become particularly problematic at high Weissenberg numbers, where
+they can trigger numerical instabilities and compromise solution accuracy.
+To address this fundamental challenge, we develop a boundary treatment
+method that maintains strict conservation of all conformation tensor components while simultaneously enforcing the no-slip condition without numerical
+artifacts. Drawing inspiration from the mass-conserving boundary schemes
+developed by Yu et al. [49] for multiphase lattice Boltzmann methods, we
+formulate a conservative non-equilibrium bounce-back (CNEBB) method tailored specifically for the convection-diffusion equation governing conformation tensor evolution.
+The proposed method operates as follows. When implementing the nonequilibrium bounce-back procedure to reconstruct the unknown post-streaming
+distribution functions, we lack access to the exact macroscopic quantities at
+time t + ∆t. To address this challenge, following the approach pioneered
+by Yu et al. [49], we compute the conformation tensor component at the
+subsequent time step using:
+X
+X
+gη† (xb , t)
+(38)
+gγ (xb , t + ∆t) +
+ϕ(xb , t + ∆t) =
+η∈H
+
+γ∈Γ
+
+where xb denotes the outermost fluid nodes adjacent to the solid boundary,
+Γ represents the set of lattice directions with known post-streaming distribution functions, H denotes the set of velocity directions pointing toward the
+solid boundary at each boundary node xb , and gη† denotes the post-collision
+distribution functions prior to streaming.
+With the conserved quantity ϕ thus determined, the equilibrium distribution function is subsequently computed using Eq. (27). The unknown distribution functions are then reconstructed by utilizing the non-equilibrium
+information from the opposite lattice directions:
+gi = gieq + gīneq = gieq + (gī − gīeq )
+16
+
+(39)
+
+where i ∈ H and ī denotes the lattice direction opposite to i. This reconstruction assumes that the non-equilibrium components exhibit anti-symmetric
+behavior at the boundary, consistent with the physical bounce-back mechanism.
+Finally, to ensure exact conservation of ϕ, the rest distribution function
+is updated according to:
+X
+g0 = ϕ(xb , t + ∆t) −
+gi (xb , t + ∆t)
+(40)
+i̸=0
+
+The proposed conservative NEBB method constitutes a significant enhancement of the classical non-equilibrium bounce-back approach. Consequently, it preserves the versatility of the classical method, demonstrating
+equal efficacy for straight wall boundaries and staircase-approximated curved
+boundaries while offering seamless extension to three-dimensional configurations. Moreover, the method’s exclusive reliance on post-collision distribution functions, without direct involvement in the collision process itself,
+ensures broad compatibility across diverse collision models and lattice Boltzmann formulations, including those incorporating external force terms. This
+generality, combined with its conservation properties, positions the CNEBB
+method as a robust boundary treatment scheme for high-fidelity viscoelastic
+flow simulations.
+4. Results and discussions
+4.1. The simplified four-roll mill problem
+The simplified four-roll mill problem without initial disturbances is a classic benchmark problem for validating the accuracy of numerical models in
+simulating steady-state Oldroyd-B fluid flows [50, 23, 51, 52, 53, 54, 55, 25].
+As demonstrated by Renardy et al. [56], this configuration exhibits a viscoelastic stress singularity that is fundamentally different from boundary
+layer singularities. This singularity emerges even in the absence of geometric discontinuities in the flow domain, which explains why simulating this
+problem at high Weissenberg numbers remains particularly challenging. The
+rotation of four cylinders, illustrated in Figure 1, induces a stretching flow
+along both horizontal and vertical symmetry axes while establishing a stagnation point at the domain center.
+To establish a consistent unit system, we adopt the convention that physical quantities marked with a tilde (˜) are expressed in physical units, while
+17
+
+ʌ
+
+ʌ
+
+x
+O
+
+y
+
+Figure 1: Schematic diagram of the four-roll mill problem. The computational domain is
+within a space of [0, 2π]2 .
+
+all other quantities are given in lattice units [57] unless otherwise specified.
+Rather than explicitly modeling four rotating cylinders, the fluid motion is
+driven by an equivalent external force Fα , expressed as
+(Fx , Fy ) = F0 (sin x̃ cos ỹ, − cos x̃ sin ỹ) ,
+(41)
+h
+i
+where x̃, ỹ ∈ 0, L̃d represent the spatial coordinates in a square domain
+with side length L̃d = 2π. The corresponding lattice domain side length is
+Ld = N ∆x, where N denotes the number of grid points in each direction
+and ∆x is the lattice grid spacing. The characteristic length is defined as
+L̃c = 1 in physical units, or equivalently Lc = Ld L̃c /L̃d in lattice units. The
+characteristic time is defined by Tc = Lc /Uc . The force amplitude in Eq. (41)
+is then given by
+ 2
+2π
+.
+F0 = 2µs Uc
+N
+This forcing generates a steady-state velocity field in Newtonian fluids:
+(ux , uy ) = Uc (sin x̃ cos ỹ, − cos x̃ sin ỹ) .
+
+(42)
+
+When implementing the wet-node bi-periodic boundary scheme [57],the
+spatial coordinates are discretized as x̃ = 2π
+x and ỹ = 2π
+y , where xi = i − 1
+N i
+N i
+and yj = j − 1 represent the lattice coordinates of the i-th and j-th nodes
+in the horizontal and vertical directions, respectively, with i, j = 1, 2, ..., N +
+1. The simulation procedure begins by applying the continuous force field,
+18
+
+as given by Eq. (41), to a Newtonian fluid. Once the flow field reaches
+the steady-state solution as Eq. (42) according to the convergence criterion
+defined in Eq. (43), viscoelastic effects are introduced. The convergence
+criterion is specified as
+max(
+
+uα (xα , tn + Tc ) − uα (xα , tn )
+) < 10−8 .
+Uc
+
+(43)
+
+where tn = n∆t with n denoting the number of iterations.
+For the Oldroyd-B fluids with viscosity ratio β = 2/3 in the Stokes limit,
+Thomases and Shelley [50] demonstrated analytically that when the flow
+reaches steady state, the components of the conformation tensor can be approximated as
+(1−2W ieff )
+1
++ C|ỹ − π| W ieff ,
+Axx (π, ỹ) =
+1 − 2W ieff
+(1+2W ieff )
+1
+W ieff
++
+|ỹ
+−
+π|
+,
+Ayy (π, ỹ) =
+1 + 2W ieff
+Axy (π, ỹ) = 0.
+
+(44a)
+(44b)
+(44c)
+
+where C is a constant, and Wieff is the effective Weissenberg number at the
+stagnation point (domain center), defined by
+W ieff = ε̇W i,
+
+(45)
+
+where ε̇ is the dimensionless local elongational rate given by
+ε̇ =
+
+Lc
+Lc
+∂x ux (π, π) = − ∂y uy (π, π).
+Uc
+Uc
+
+(46)
+
+To ensure the accuracy of ε̇ in practical numerical computations, an averaged
+form is adopted as follows:
+ε̇num =
+
+Lc ∂x ux (π, π) − ∂y uy (π, π)
+.
+Uc
+2
+
+(47)
+
+In our simulations, the Reynolds number is set to 1 to ensure low Reynolds
+number conditions while maintaining reasonable computational efficiency.
+Unless otherwise specified, we employ the following default parameters: grid
+resolution N = 256 grid points in each direction, providing sufficient accuracy for capturing the stress singularities while keeping computational costs
+19
+
+manageable; viscosity ratio β = 2/3 to match the analytical solution derived
+by Thomases and Shelley [50]; Schmidt number Sc = 105 representing typical polymer solution conditions while minimizing artificial diffusion effects;
+Mach number M a = 0.01 to satisfy the weak compressibility constraint;
+magic parameters Λs = 1/4 for the hydrodynamic field and Λp = 1.0 × 10−6
+for the polymer field, where the small value of Λp enhances stability for the
+convection-dominated constitutive equations at high Weissenberg numbers.
+These default values may be adjusted for specific test cases as detailed in
+the respective subsections, particularly when investigating grid convergence
+effects or exploring different flow regimes.
+4.1.1. Grid convergence tests
+ʌ
+
+ߨ
+16
+
+ʌ
+
+x
+O
+
+y
+ߨ
+16
+
+Figure 2: Distribution of monitoring points for grid convergence analysis. The points are
+uniformly spaced at intervals of π/16 throughout the computational domain.
+
+We first assessed the grid convergence characteristics of the proposed
+model using seven different mesh resolutions: N = 32, 64, 128, 256, 512, 1024,
+and 2048. After reaching steady state, we recorded the velocity components
+uα and conformation tensor components Aαβ at the monitoring points illustrated in Figure 2. Our preliminary tests revealed that increasing the
+number of monitoring points significantly improves the reliability of convergence rate estimates. Therefore, we selected m = (32+1)2 = 1089 monitoring
+points xk (where k = 1, ..., m), uniformly distributed with a spacing of π/16.
+This configuration provides sufficient spatial sampling while enabling consistent comparisons across all grid resolutions, including the coarsest mesh
+(N = 32).
+20
+
+Using the finest grid (N = 2048) as the reference solution, we computed
+the relative errors for each mesh resolution according to:
+v
+u
+2
+m 
+u1 X
+uα (xk ) − uα,ref (xk )
+t
+Euα =
+(48)
+m k=1
+Uc
+v
+u
+m
+u1 X
+EAαβ = t
+(Aαβ (xk ) − Aαβ,ref (xk ))2
+m k=1
+
+Slope=2.327
+
+5
+
+Slope=2.489
+
+5
+
+Slope=2
+
+Slope=2.306
+
+0
+
+0
+
+Slope=2.755
+
+Slope=2.987
+-5
+
+Slope=2.342
+Ux
+Fitting line of Ux
+Uy
+Fitting line of Uy
+Axx
+Fitting line of Axx
+Ayy
+Fitting line of Ayy
+Axy
+Fitting line of Axy
+
+-10
+
+Slope=2
+-15
+
+-20
+
+-7
+
+-6.5
+
+-6
+
+ln(Error)
+
+ln(Error)
+
+-5
+
+-5.5
+
+(49)
+
+-5
+
+-4.5
+
+-4
+
+Slope=2.245
+Ux
+Fitting line of Ux
+Uy
+Fitting line of Uy
+Axx
+Fitting line of Axx
+Ayy
+Fitting line of Ayy
+Axy
+Fitting line of Axy
+
+-10
+
+Slope=2.177
+-15
+
+-20
+
+-3.5
+
+-7
+
+-6.5
+
+-6
+
+-5.5
+
+-5
+
+ln(1/N)
+
+ln(1/N)
+
+(a) Wi=5
+
+(b) Wi=10
+
+-4.5
+
+-4
+
+-3.5
+
+Figure 3: Grid convergence analysis showing relative errors versus mesh resolution on loglog scale. (a) Wi = 5; (b) Wi = 10. The solid lines represent linear regression fits with
+indicated slopes.
+
+Figure 3 presents the relationship between relative error and grid resolution. We performed linear regression analysis on the data from N =
+128, 256, 512, 1024, and 2048, excluding the coarser meshes (N = 32 and 64)
+which exhibited pre-asymptotic behavior. The regression analysis reveals
+convergence rates exceeding 2.17 for uα , at least 2.30 for Axx and Ayy , and
+above 2.75 for Axy . The coefficient of determination (R2 ) for these regressions exceeds 0.9991, 0.9974, and 0.9938, respectively, indicating excellent
+goodness of fit and confirming the reliability of the computed convergence
+rates.
+While conventional numerical methods, including standard lattice Boltzmann schemes, typically achieve second-order accuracy, our coupled method
+21
+
+demonstrates super-convergence behavior for all macroscopic quantities examined. The convergence rate for Axy reaches 2.75, which is particularly
+noteworthy. We attribute this enhanced convergence to the strong coupling
+strategy employed in our model, which manifests in two key aspects. First,
+the hydrodynamic force term in Eq. (32) strengthens the coupling between
+the Navier-Stokes and constitutive equations, thereby avoiding discretization errors inherent in traditional auxiliary source term methods that require
+explicit spatial derivative calculations. Second, the direct incorporation of
+viscoelastic stress without spatial discretization, as shown in Eq. (22), not
+only improves numerical accuracy but also enhances the overall convergence
+order of the method. These features collectively contribute to the superior
+accuracy and robust numerical stability observed in our simulations.
+4.1.2. Validation
+To validate the accuracy of the proposed method, a series of assessments
+were conducted on the simulation results. Firstly, the spatial distributions
+of the trace of the conformation tensor tr(A), the off-diagonal component
+of the conformation tensor Axy , and the vorticity magnitude ω at dimensionless time t∗ = 10 under W i = 5.0 were plotted, and these are presented
+in Figure 4. (Note that quantities marked with an asterisk (*) throughout
+this work denote dimensionless variables.) The results demonstrate excellent agreement between the current results and those obtained by Zhang et
+al. [25].
+Previous studies by Thomases et al. [50], Osmanlic et al. [52], and Zhang
+et al. [25] have investigated not only the case of W i = 5 but also lower Weissenberg numbers such as W i = 0.3 and W i = 0.6. Since the low Weissenberg
+number cases closely resemble Newtonian fluid behavior and pose minimal
+methodic challenges, only the W i = 5 case is presented here for brevity.
+A comprehensive quantitative analysis was subsequently performed to
+rigorously validate the accuracy of the proposed method. Simulations were
+conducted for Weissenberg numbers ranging from W i = 0.1 to 5.0 (fourteen
+values in total) while maintaining the parameter settings described previously. For each simulation, the conformation tensor component Axx was
+extracted along the vertical centerline at the dimensionless time t∗ = 6.
+These numerical results were systematically compared against the benchmark solutions of the Stokes-Oldroyd-B equation system obtained by Thomases
+and Shelley [50] using a pseudospectral method. The comparison revealed excellent agreement between the present lattice Boltzmann results and the ref22
+
+(a)
+
+(b)
+
+(c)
+
+(d)
+
+(e)
+
+(f)
+
+Figure 4: Comparison of distribution contours for tr(A), Axy , and ω at W i = 5 and
+t∗ = 10: (a-c) results from the present model; (d-f) results from Zhang et al. [25].
+
+erence pseudospectral solutions across the entire range of Weissenberg numbers investigated. This strong correspondence validates both the accuracy
+and reliability of the proposed method for simulating viscoelastic flows over
+a broad parameter space.
+4.1.3. Numerical Performance at High Weissenberg Numbers
+This section evaluates the performance of the proposed method at high
+Weissenberg numbers and provides a comprehensive comparison with existing methods within the LBM framework. All computational parameters
+remain consistent with those specified in the previous section. The simulations continue until reaching t∗ = 1000 or satisfying the convergence criterion
+defined in Eq. (43). Subsequently, the dimensionless local elongation rate ε̇ is
+calculated using Eq. (47), and the effective Weissenberg number Wieff at the
+stagnation point is determined through Eq. (45). The obtained results are
+compared with data reported by Thomases et al. [50] and Zhang et al. [25].
+For comprehensive evaluation, we also implemented two well-established vis23
+
+3
+
+10
+
+2.5
+
+8
+
+2
+
+6
+
+1.5
+
+4
+
+1
+
+2
+
+300
+
+250
+
+200
+
+150
+
+100
+
+50
+
+0.5
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+(a)
+
+0.8
+
+1
+
+0
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+(b)
+
+0.8
+
+1
+
+0
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+(c)
+
+Figure 5: Comparison of the conformation tensor component Axx along the vertical centerline at dimensionless time t∗ = 6 for various Weissenberg numbers: (a) 0.1-0.5; (b) 0.6-0.9;
+(c) 1.0-5.0. The present lattice Boltzmann results are compared with the pseudospectral
+solutions of Thomases and Shelley [50] for the Stokes-Oldroyd-B system.
+
+coelastic fluid LBM formulations: the methods proposed by Malaspinas et
+al. [23] and Su et al. [58]. A comparison of all results is shown in Figure 6.
+It should be noted that the numerical results from Thomases et al. are
+considered highly accurate reference solutions for the range Wi ≤ 5. This is
+because they employ a pseudospectral method to solve the Stokes–Oldroyd-B
+equation system, where the stress field evolution uses a second-order AdamsBashforth method, the velocity field is obtained through Fourier space inversion of the Stokes equation, and a smoothing filter is introduced to enhance
+stability and improve accuracy beyond standard dealiasing rules. As the
+singular structure of the stress field intensifies, spatial discretization is correspondingly doubled, reaching a maximum resolution of 4096, and simulations
+are terminated before exceeding thresholds in high wavenumber regions, ensuring resolution in critical areas. The time step is verified to have secondorder accuracy, and positive definiteness of the stress tensor is maintained
+throughout all simulations. More importantly, local analytical solutions are
+in excellent agreement with numerical results, such as the exponential form
+of stress singular structures and evolution rates, which are consistent with
+theoretical predictions, further confirming the reliability of the numerical
+results.
+Our results demonstrate that within the conventionally tested range of
+Wi = 0.1–5 (studied by Thomases et al. [50], Malaspinas et al. [23], and
+Zhang et al. [25]), our method’s numerical predictions are closest to the
+pseudospectral results of Thomases et al. These findings indicate that our
+method exhibits higher accuracy in the moderate Weissenberg number range
+
+24
+
+compared to other representative LBM methods.
+0.8
+
+1
+
+0.8
+
+0.9
+
+0.6
+0.88
+
+0.86
+
+0.6
+
+0.3
+
+0.84
+
+0.4
+
+0.82
+
+0.25
+0.8
+
+3
+
+3.5
+
+4
+
+4.5
+
+5
+
+Wi
+
+0.4
+0.2
+
+0.2
+0.15
+
+0
+
+0
+
+5
+
+3
+
+10
+
+3.5
+
+4
+
+15
+
+4.5
+
+20
+
+0.2
+
+5
+
+25
+
+0
+
+30
+
+(a)
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+(b)
+
+Figure 6: Comparison of (a) local elongation rate ε̇ and (b) effective Weissenberg number
+Wieff versus nominal Weissenberg number Wi for different methods. Present method uses
+Sc = 105 and Sc = 104 ; Malaspinas et al. [23] and Su et al. [58] methods use Sc = 104 (the
+latter two methods encounter numerical breakdown at Wi < 1 when Sc = 105 ). Reference
+data from Thomases et al. [50] (pseudospectral method) and Zhang et al. [25] are included
+for comparison.
+
+For higher Weissenberg numbers with W i > 5, to the authors’ knowledge, no previous studies have reported successful computations. We further
+present results for high Wi up to 30 and reproduce the methods of Malaspinas
+et al.[23] and Su et al. [58] for comparison, as shown in Figure 6. Our method
+demonstrates results for both Sc = 104 and 105 , while the reference methods
+were tested at Sc = 104 . When we attempted to set Sc = 105 to achieve
+higher accuracy with these reference methods, both approaches encountered
+numerical breakdown at W i < 1, preventing any meaningful high-W i computations and thus are not shown in the figure.
+The results reveal that when artificial dissipation is relatively high (smaller
+Sc values), all three methods exhibit a decreasing trend in effective Weissenberg number (W ief f ) at high W i. However, when Sc = 105 , our method
+maintains numerical stability and shows that W ief f stabilizes around approximately 0.907 for W i ≥ 20, with only a very gradual decay rate. This
+demonstrates that our method can achieve excellent numerical stability at
+high Weissenberg numbers without requiring excessive artificial dissipation,
+representing a significant advancement in computational capability for viscoelastic flow simulation.
+To provide further quantitative comparison, we employ the present model,
+25
+
+Su’s model, and Malaspinas’s model to compute this problem and record the
+effective Weissenberg number at the center position. The magic parameter
+is set to Λp = 10−6 for all calculations. Two Schmidt numbers (Sc = 104 and
+105 ) are considered for comparison, with results presented in Table 2. The
+results demonstrate that when Sc = 104 , all three methods can avoid numerical breakdown within the considered Weissenberg number range (W i ≤ 30).
+However, when artificial dissipation is reduced to Sc = 105 , both Su’s and
+Malaspinas’s methods experience premature breakdown, while the present
+method maintains stability without breakdown across all tested Weissenberg
+numbers.
+4.1.4. Optimal Selection of the Magic Parameter Λp for Bulk Flow Regions
+Our previous work has demonstrated that for TRT-RLB models solving
+ADE, the selection of the magic parameter is crucial for model stability [30].
+Currently, existing literature cannot analytically specify the optimal free relaxation parameter τp,2 or magic parameter Λp . Therefore, in this subsection,
+we employ numerical methods to select the optimal free relaxation parameter for fine-tuning algorithm stability. We consider three different Schmidt
+numbers (Sc = 104 , 105 , 106 ), with Weissenberg numbers ranging from 20
+to 30 in increments of 1. Simulations are run until convergence, or remain
+unconverged at t∗ = 1000, or experience numerical breakdown, which are categorized as ”steady”, ”unsteady”, and ”blowup”, respectively. The results
+are shown in Figure 7.
+The results indicate that when Sc = 104 , the maximum Weissenberg
+number achieving convergence is approximately 26, with stable unsteady solutions obtainable at higher values. Similar behavior occurs when Sc = 105 ,
+where the maximum Weissenberg number for convergent solutions reaches
+approximately 28. For both Schmidt number cases mentioned above, unsteady solutions can still be obtained when Wi is further increased to 30.
+When further increased to Sc = 106 , the significantly reduced artificial viscosity poses greater challenges to the numerical model. Therefore, when
+artificial viscosity is moderately high, Λp can be selected from a wide range
+with minimal impact on the model, whereas when artificial viscosity is very
+low, model stability becomes closely related to the choice of Λp .
+At Sc = 106 , if an inappropriate Λp is selected, the program fails prematurely as the Weissenberg number increases. However, when Λp approaches
+the optimal range of 1.6 × 10−6 to 3.2 × 10−6 , the maximum Wi producing
+stable solutions reaches 27, and stable computations can be maintained even
+26
+
+Table 2: Stability comparison of different LBM approaches for the four-roll mill problem
+showing effective Weissenberg numbers (W ief f ) at the domain center. Grid resolution:
+Lx = Ly = 257, Reynolds number: Re = 1, magic parameter: Λp = 10−6 . ”NaN”
+indicates numerical breakdown/divergence; ”unsteady” denotes time-oscillatory solutions
+when steady state is not achieved by t∗ = 1000.
+
+Wi
+
+W ief f (Sc = 104 )
+Present
+
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1.0
+5.0
+10.0
+15.0
+20.0
+25.0
+26.0
+27.0
+28.0
+29.0
+30.0
+
+Su
+
+0.067
+0.067
+0.132
+0.132
+0.197
+0.197
+0.258
+0.258
+0.316
+0.316
+0.370
+0.370
+0.419
+0.419
+0.463
+0.463
+0.503
+0.503
+0.538
+0.538
+0.882
+0.881
+0.908
+0.902
+0.894
+0.879
+0.867
+0.847
+0.841
+0.819
+0.836
+0.815
+unsteady
+0.810
+unsteady unsteady
+unsteady unsteady
+unsteady unsteady
+
+W ief f (Sc = 105 )
+
+Malaspinas
+
+Present
+
+Su
+
+Malaspinas
+
+0.067
+0.132
+0.197
+0.258
+0.316
+0.370
+0.419
+0.463
+0.502
+0.537
+0.879
+0.898
+0.875
+0.843
+0.816
+0.811
+unsteady
+unsteady
+unsteady
+unsteady
+
+0.067
+0.132
+0.197
+0.258
+0.316
+0.370
+0.419
+0.463
+0.503
+0.538
+0.883
+0.916
+0.917
+0.911
+0.905
+0.904
+0.903
+0.902
+unsteady
+unsteady
+
+0.067
+0.132
+0.197
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+
+0.067
+0.132
+0.197
+0.258
+0.316
+0.370
+0.419
+0.463
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+NaN
+
+27
+
+when Wi is further increased to 30. Based on our understanding of TRT
+collision models and TRT-RLB models [30], different boundary conditions
+also affect the optimal magic parameter. Considering this, for problems with
+periodic boundary conditions, we recommend an optimal magic parameter
+value of approximately 10−6 , while the selection for problems involving solid
+wall boundaries will be discussed further in subsequent sections.
+
+30
+
+30
+
+30
+
+28
+
+28
+
+28
+
+26
+
+26
+
+26
+
+24
+
+24
+
+24
+
+22
+
+22
+
+22
+
+20
+
+20
+10-8
+
+10-7
+
+10-6
+
+10-5
+
+20
+10-8
+
+10-7
+
+10-6
+
+10-5
+
+10-8
+
+10-7
+
+10-6
+
+Λ
+
+Λ
+
+Λ
+
+(a) Sc = 104
+
+(b) Sc = 105
+
+(c) Sc = 106
+
+10-5
+
+Figure 7: Phase diagrams showing computational stability regions in the Λp -Wi parameter
+space for the four-roll mill problem (bulk flow without solid boundaries) under different
+Schmidt numbers: (a) Sc = 104 , (b) Sc = 105 , and (c) Sc = 106 . Three computational
+states are distinguished: steady-state solutions, unsteady solutions, and numerical breakdown. Lower artificial viscosity (higher Sc) requires more careful selection of the magic
+parameter Λp to maintain stability.
+
+4.2. Force-driven Poiseuille flow
+Force-driven Poiseuille flow represents one of the few viscoelastic fluid
+simulation problems with available time-dependent analytical solutions. The
+presence of solid walls makes this benchmark crucial for validating algorithmic accuracy, particularly regarding temporal precision and the implementation of boundary condition schemes. As the Weissenberg number increases,
+viscoelastic stress tensors and their gradients near boundaries become increasingly large, presenting significant computational challenges. Therefore,
+this benchmark serves as an effective test for algorithm stability under highWi conditions.
+Numerous numerical methods have been applied to simulate this problem, with several studies explicitly reporting numerical stability limitations
+at high Weissenberg numbers. For instance, Ellero and Tanner [59] employed
+the SPH method to achieve stable UCM model simulations up to W i = 1.0,
+noting that while calculations remained stable at W i = 0.1, small spatial os28
+
+cillations began to appear at higher Wi, explicitly acknowledging the numerical challenges associated with elevated Weissenberg number regimes. Fiétier
+and Deville [60] developed a time-dependent viscoelastic algorithm based on
+the spectral element method, systematically demonstrating progressive capability improvements: from unstabilized approaches achieving W i ≈ 0.6 − 2.7,
+to pure DEVSS techniques reaching W i ≈ 5.0, and finally to DEVSS combined with filtering techniques extending to W i = 10.0. They clearly stated
+that pure Galerkin methods face significant numerical instability limitations,
+while pure DEVSS techniques require excessively high artificial viscosity to
+maintain stability at W i = 5.0. Jafari et al. [61] made notable contributions
+to high-Wi viscoelastic flow simulation using a filter-based stabilized spectral element method. They systematically analyzed spurious mode growth
+in Poiseuille flow, investigating factors including time evolution, mesh refinement, boundary conditions, Wi, and extensibility parameters. Their proposed mesh-transfer technique enhanced filter effectiveness in multi-element
+configurations, improving stability for both Oldroyd-B and FENE-P models. For Poiseuille flow, they achieved simulations up to W i = 100 using the
+more stable FENE-P model, though simulations encountered severe instability due to spurious mode amplification and the conformation tensor trace
+approaching critical values, limiting further Wi increases.
+However, many studies primarily focus on low-Wi analytical solutions as
+references for time-dependent problems and do not actively report performance at high Wi numbers. Without reproducing their work, it remains
+difficult to definitively conclude whether their methods encounter numerical
+challenges when solving Poiseuille flow problems beyond certain Wi thresholds. Nevertheless, we can enumerate the highest Wi numbers reported in
+their studies, though these may not necessarily represent their maximum
+computational capabilities. For example, Xu and Yu [62] developed a multiscale SPH method that achieved stable numerical simulations of transient
+viscoelastic flows, successfully computing cases up to W i = 5.0. Zou et
+al. [63] proposed an integrated lattice Boltzmann-finite volume framework
+(ILFVE), employing a hybrid strategy where LBM solves the Navier-Stokes
+equations while FVM handles the constitutive equations, achieving approximately 5-fold computational efficiency improvement while maintaining accuracy, with maximum Weissenberg numbers reaching W i = 1.0 in Poiseuille
+flow. Lee et al. [64] systematically applied the advection-diffusion lattice
+Boltzmann method to study time-dependent viscoelastic characteristics of
+Oldroyd-B fluids, validating the method’s accuracy through realistic rheo29
+
+logical tests including step-shear and oscillatory shear, with maximum Weissenberg numbers of Wi = 0.1 in Poiseuille flow. Su et al. [24] extended the
+computational range to Wi = 15.0 through an asynchronous coupling strategy between solvent and polymer phases. Notably, in the literature surveyed,
+we have not observed reported results for the Oldroyd-B model in Poiseuille
+flow simulations exceeding W i = 20.
+It is important to note that although stress tensor magnitudes and their
+gradients continuously increase with rising Wi numbers, no stress singularities or their evolution occur in the Poiseuille flow problem. This absence of
+singularities means that for certain algorithms, particularly LBM methods,
+high-Wi conditions in this problem do not pose fundamental computational
+challenges. We successfully reproduced Malaspinas et al.’s LB algorithm and
+confirmed its capability to simulate Poiseuille flow at extremely high Wi
+numbers (up to 100,000) with stable and accurate results. While our improved algorithm demonstrates similar robustness for high-Wi simulations,
+this section will focus on demonstrating the performance of our own method.
+
+Figure 8: Configuration of plane Poiseuille flow with periodic boundary conditions in the
+streamwise direction and no-slip conditions at the walls.
+
+The computational domain for plane Poiseuille flow is illustrated in Figure 8, where the channel length and height are denoted as Nx and Ny , respectively. The flow is driven by a constant body force Fα , with periodic
+boundary conditions imposed at the inlet and outlet, and no-slip boundary
+conditions applied at the upper and lower walls. The body force components
+are defined as:
+
+
+8
+(νs + νp )Uc , 0 ,
+(50)
+(Fx , Fy ) =
+L2c
+where νs and νp represent the solvent and polymer viscosities, respectively,
+Uc is the characteristic velocity, and Lc = Ny is the characteristic length.
+For this configuration, Waters and King [65] derived the analytical solution
+30
+
+for transient plane Poiseuille flow of an Oldroyd-B fluid. The dimensionless
+velocity field is expressed as:
+
+
+∞
+X
+sin N y ∗
+Wi ∗
+∗ ∗ ∗
+∗ ∗
+,t ,
+(51)
+ux (y , t ) = −4y (y − 1) − 32
+GN
+3
+N
+Re
+n=1
+where u∗x , y ∗ , and t∗ represent the dimensionless velocity, coordinate, and
+time, respectively, normalized by the characteristic velocity Uc , characteristic
+length Lc , and characteristic time Tc . Here, N = (2n − 1)π, and the timedependent function GN is given by
+
+∗ n
+ γN
+o
+Nt
+βN t∗
+βN t∗
+
+ e− α2Wi
+2
+sinh
+cosh
++
+, βN
+≥ 0,
+2Wi
+βN
+2Wi
+Wi ∗
+n
+o
+GN
+,t =
+(52)
+∗
+∗
+∗
+Nt
+e− α2Wi
+Re
+cos βN t + γN sin βN t
+,
+β 2 < 0,
+2Wi
+
+βN
+
+2Wi
+
+N
+
+where the auxiliary parameters in the above expressions are defined as
+Wi 2
+Wi
+2
+2
+N , βN
+,
+= αN
+αN = 1 + β
+− 4N 2
+Re
+Re
+q
+Wi
+2
+βN = |βN
+|, γN = 1 + (β − 2)N 2
+,
+Re
+
+(53)
+(54)
+
+For the steady-state solution, as demonstrated by Zou et al. [63], when
+t∗ → ∞, the velocity profile reduces to the classical parabolic distribution
+u∗x (y ∗ ) = 4y ∗ (1 − y ∗ ),
+
+(55)
+
+and the corresponding steady-state viscoelastic stress components are given
+by
+ ∗ 2
+∂u
+∗
+τxx = 2Wi(1 − β)
+,
+(56)
+∂y ∗
+ ∗
+∂u
+∗
+τxy = (1 − β)
+,
+(57)
+∂y ∗
+∗
+τyy
+= 0,
+(58)
+∗
+where τc = (µ0 Uc )/Lc is the characteristic stress scale, and ταβ
+= ταβ /τc
+denotes the dimensionless stress tensor components.
+The convergence criterion employed in this study is defined as:
+
+
+uα (xα , tn + Tc ) − uα (xα , tn )
+max
+≤ 10−8 ,
+(59)
+Uc
+
+31
+
+where tn = n∆t and n represents the iteration number. This criterion ensures
+that the temporal variation of the velocity field is sufficiently small to consider
+the solution as steady-state.
+Unless otherwise specified, simulations are initialized with unit density,
+zero velocity and stress fields, identity conformation tensor, and equilibrium
+distribution functions. Default parameters are Re = 1, Ma = 0.1, and Sc =
+106 , ensuring negligible compressibility and adequate diffusion resolution.
+These settings may be modified for specific validation cases as detailed in
+the following subsections.
+4.2.1. Comparison with Analytical Solutions
+In this subsection, we conduct a comprehensive comparison between the
+numerical results and analytical solutions. We first examine the steady-state
+solutions under three representative Weissenberg numbers: W i = 1, 100, and
+10000, corresponding to moderate, high, and ultra-high Wi regimes, respectively. The viscosity ratio is fixed at β = 0.5 throughout these simulations.
+Three distinct Schmidt numbers (Sc = 106 , 107 , 108 ) are investigated to
+assess the influence of artificial diffusion on solution accuracy.
+Upon reaching steady state, we extract the y-directional profiles of the
+velocity component ux and conformation tensor components Aαβ for quantitative comparison with analytical solutions. To facilitate direct comparison,
+all quantities are normalized according to: ux,norm = max(uuxx,ana ) , Axx,norm =
+Axy
+Ayy
+Axx −1
+, Axy,norm = max(A
+, and Ayy,norm = max(A
+, where the
+max(Axx,ana −1)
+xy,ana )
+yy,ana )
+
+subscript norm indicates normalized quantities, and max(·) denotes the maximum value of the corresponding analytical solution along the y-direction.
+For the Axx component, we subtract unity to account for its equilibrium
+value before normalization, ensuring that the normalized range reflects the
+polymer-induced deformation. Both numerical and analytical solutions undergo identical normalization procedures, with the comparative results presented in Figure 9. The results demonstrate excellent agreement between
+numerical and analytical solutions across all cases, with one notable exception: at ultra-high Weissenberg number (W i = 10000), the conformation
+tensor components Axx and Axy exhibit noticeable deviations from the analytical solutions near the boundary nodes when Sc = 106 .
+This deviation arises from the extremely large absolute values of conformation tensor components at boundary nodes under ultra-high Wi conditions. When Sc = 106 , the prescribed artificial diffusion becomes sufficiently
+32
+
+1
+
+1
+
+1
+
+0.8
+
+0.8
+
+0.8
+
+0.6
+
+0.6
+
+0.6
+
+0.4
+
+0.4
+
+0.4
+
+0.2
+
+0.2
+
+0.2
+
+0
+
+0
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+0
+0
+
+(a) ux,norm , Sc = 106
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+0
+
+(b) ux,norm , Sc = 107
+
+1
+
+1
+
+1
+
+0.8
+
+0.8
+
+0.6
+
+0.6
+
+0.6
+
+0.4
+
+0.4
+
+0.4
+
+0.2
+
+0.2
+
+0.2
+
+0
+
+0
+
+0
+
+-0.2
+
+-0.2
+
+-0.2
+
+-0.4
+
+-0.4
+
+-0.4
+
+-0.6
+
+-0.6
+
+-0.6
+
+-0.8
+
+-0.8
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+(d) Aαβ,norm , Sc = 106
+
+0.6
+
+0.8
+
+1
+
+-0.8
+
+-1
+0
+
+0.4
+
+(c) ux,norm , Sc = 108
+
+0.8
+
+-1
+
+0.2
+
+-1
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+(e) Aαβ,norm , Sc = 107
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+(f) Aαβ,norm , Sc = 108
+
+Figure 9: Comparison of numerical results with analytical solutions for normalized velocity
+ux,norm (a-c) and conformation tensor components Aαβ,norm (d-f) under different Schmidt
+numbers. Panels (a,d): Sc = 106 ; panels (b,e): Sc = 107 ; panels (c,f): Sc = 108 . Three
+Weissenberg numbers (W i = 1, 100, 10000) are considered with Ny = 32, β = 0.5 and
+Re = 1.
+
+33
+
+significant to compromise the accurate resolution of the conformation tensor field. However, a systematic comparison across different Schmidt numbers reveals that as Sc is progressively increased (thereby reducing artificial
+diffusion), these boundary-region deviations observed under ultra-high Wi
+conditions are effectively suppressed. This behavior underscores the critical
+role of minimizing artificial diffusion for maintaining solution accuracy in the
+challenging ultra-high Wi regime.
+3
+
+β
+β
+β
+β
+β
+β
+β
+β
+β
+
+2.5
+
+2
+
+1.5
+
+10
+
+β
+β
+β
+β
+β
+β
+β
+β
+β
+
+8
+
+6
+
+4
+
+β
+β
+β
+β
+β
+β
+β
+β
+β
+
+8
+
+6
+
+4
+1
+2
+2
+
+0.5
+
+0
+
+0
+
+2
+
+4
+
+(a) W i = 1
+
+6
+
+0
+
+0
+
+50
+
+100
+
+150
+
+(b) W i = 100
+
+200
+
+0
+
+0
+
+5000
+
+10000
+
+15000
+
+(c) W i = 10000
+
+Figure 10: Time evolution of dimensionless velocity u∗x at channel center for different
+viscosity ratios (β = 0.1 to 0.9) under three Weissenberg numbers: (a) W i = 1, (b)
+W i = 100, and (c) W i = 10000. Schmidt number is fixed at Sc = 106 with Re = 1 and
+Ny = 32.
+
+Subsequently, we turn our attention to the time-dependent transient behavior. We compute the temporal evolution of the dimensionless velocity
+component u∗x at the channel center as a function of dimensionless time t∗ for
+the three aforementioned Weissenberg numbers across nine different viscosity ratios ranging from β = 0.1 to 0.9. The numerical results are compared
+against the corresponding analytical solutions and presented in Figure 10.
+The comparison demonstrates that the present method accurately captures
+the transient dynamics across the entire parameter space, encompassing various Weissenberg numbers and viscosity ratios investigated.
+4.2.2. Spatial Grid Convergence Study
+Although our previous analysis of the four-roll mill problem demonstrated
+super-second-order convergence in the bulk region, the implementation of
+solid boundary conditions significantly influences the overall convergence behavior for Poiseuille flow problems. Therefore, this section focuses on examining the spatial convergence characteristics of the proposed method.
+We compare four different boundary condition schemes for implementing
+the no-slip boundary condition of the conformation tensor at solid walls: (1)
+34
+
+our proposed Conservative Non-Equilibrium Bounce-Back (CNEBB) method,
+(2) the Non-Equilibrium Extrapolation (NEQE) method, (3) a method adapted
+from the multiphase wetting wall scheme proposed by Yu, Li, and Wen et
+al. [49], referred to as the YLW algorithm, and (4) the boundary algorithm
+from Malaspinas et al. It should be noted that the Navier-Stokes equations employ the non-equilibrium bounce-back scheme for all cases, with the
+sole difference among these methods being the boundary treatment for the
+advection-diffusion equation (ADE) system at solid walls.
+Grid convergence studies are conducted using various mesh resolutions
+with Ny = 16, 32, 64, 128, 256, 512, 1024. The dimensionless velocity and
+conformation tensor components are recorded at the channel center and
+compared against analytical solutions. The global relative error (GRE) is
+computed using the following formula:
+M
+P
+
+GRE(θ) =
+
+|θ(xk ) − θana (xk )|
+
+k=1
+M
+P
+
+,
+
+(60)
+
+|θana (xk )|
+
+k=1
+
+where θ represents ux , Axx , or Axy , k is the node index, M is the total number
+of computational nodes, and the subscript ”ana” denotes the corresponding
+analytical solution obtained from Eqs. (55), (56), (3), and (4).
+The comparative results are presented in Figure 11. At low to moderate
+resolutions (Ny ≤ 256), all schemes exhibit approximately second-order accuracy. The NEQE scheme demonstrates relatively higher errors compared to
+the other three methods, while the remaining three schemes yield comparable error levels. At high resolutions, the Malaspinas boundary scheme shows
+slightly lower errors for ux and Axy . These results confirm the reliability of
+the proposed CNEBB scheme.
+An important and intriguing observation emerges from this analysis: for
+all methods, the convergence order begins to deteriorate significantly at high
+resolutions, approaching zero in some cases, indicating that errors no longer
+decrease with grid refinement. This convergence order degradation with increasing resolution is a well-documented phenomenon in viscoelastic flow
+computations at high Weissenberg numbers. Previous studies have commonly
+attributed this behavior to excessive artificial viscosity, suggesting that artificial diffusion dominates the solution accuracy when numerical schemes attempt to resolve high-stress regions with insufficient stabilization, similar to
+35
+
+the phenomenon illustrated in Figure 12. However, our investigation reveals
+a surprising finding. To test whether artificial viscosity is indeed the cause
+of this convergence deterioration, we conducted additional simulations with
+higher Schmidt numbers (thereby significantly reducing artificial viscosity),
+as shown in Figure 9. Contrary to the conventional explanation, increasing
+the Schmidt number does not alleviate this convergence order degradation.
+This observation suggests that the convergence order deterioration with grid
+refinement is not primarily caused by artificial viscosity effects, representing a novel finding that challenges the commonly accepted interpretation in
+viscoelastic flow simulations.
+-4
+
+-2
+
+-2
+
+-4
+
+-6
+-4
+
+-6
+-8
+
+-6
+
+-8
+
+-10
+-10
+-12
+
+-8
+-12
+
+-14
+-7
+
+-6.5
+
+-6
+
+-5.5
+
+-5
+
+-4.5
+
+(a) u∗x
+
+-4
+
+-3.5
+
+-3
+
+-2.5
+
+-10
+
+-7
+
+-6.5
+
+-6
+
+-5.5
+
+-5
+
+-4.5
+
+(b) Axx
+
+-4
+
+-3.5
+
+-3
+
+-2.5
+
+-14
+
+-7
+
+-6.5
+
+-6
+
+-5.5
+
+-5
+
+-4.5
+
+-4
+
+-3.5
+
+-3
+
+-2.5
+
+(c) Axy
+
+Figure 11: Grid convergence analysis comparing different boundary schemes for dimensionless velocity u∗x and conformation tensor components Axx and Axy in Poiseuille flow. Grid
+resolution varies as Ny = 16, 32, 64, 128, 256, 512, 1024 with W i = 1, β = 0.5, Sc = 106 ,
+and Re = 1. CNEBB (red solid squares), NEQE (blue solid triangles), YLW (blue hollow
+triangles), and Malaspinas (orange hollow circles) methods are compared. The black line
+indicates second-order convergence slope for reference.
+
+4.3. Flow Past a Circular Cylinder
+Flow past a circular cylinder represents a canonical benchmark problem in
+computational fluid dynamics that poses significant challenges for viscoelastic fluid simulations. Unlike previous validation cases involving simple geometries with straight boundaries, this configuration introduces curved solid
+surfaces that test the robustness and accuracy of boundary condition implementations. The presence of flow separation, recirculation zones, and complex stress distributions around the cylinder makes this problem particularly
+demanding for numerical methods, especially at elevated Weissenberg numbers where elastic effects become prominent. For viscoelastic fluids, cylinder
+flow exhibits rich physics including stress boundary layers, elastic wake modifications, and potential flow instabilities that are absent in Newtonian cases.
+36
+
+-4
+
+-6
+
+-8
+
+-10
+
+-7
+
+-6.5
+
+-6
+
+-5.5
+
+-5
+
+-4.5
+
+-4
+
+-3.5
+
+-3
+
+-2.5
+
+Figure 12: Grid convergence analysis for conformation tensor component Axx under different Schmidt numbers ranging from Sc = 106 to Sc = 1010 . The convergence order
+deterioration at high resolutions persists despite reduced artificial viscosity, with W i = 1,
+β = 0.5, and Re = 1.
+
+The curved geometry necessitates careful treatment of conformation tensor
+evolution at the cylinder surface, where the proposed conservative boundary
+scheme faces its most rigorous test. The ability to maintain proper conservation properties along curved boundaries while accurately capturing complex
+stress distributions validates the method’s applicability to realistic engineering flows.
+The computational setup is illustrated in Figure 13, consisting of a rectangular domain with dimensions Lx ×Ly = 30R×4R. The cylinder is positioned
+at the domain center with coordinates (15R, 2R). The characteristic length
+is specified as Lc = R, and the characteristic velocity is Uc = 2Umax /3, where
+Umax is the maximum value of the parabolic velocity profile at the inlet. The
+characteristic velocity Uc is initialized through Mach number calculation with
+Ma = 0.01. Boundary conditions are implemented as follows: fully developed
+velocity and stress profiles at the inlet, zero-gradient (convective) conditions
+at the outlet, and no-slip conditions on the walls and cylinder surface.
+The fully developed inlet conditions are prescribed according to the analytical solution for plane Poiseuille flow:
+ux (y) = 1.5 × 4Uc y(Ny − y)/Ny2 , uy = 0,
+2
+ 2 
+∂ux
+λ ∂ux
+λ
+, Ayy = 1, Axy =
+Axx = 1 + 2
+Ny
+∂y
+Ny ∂y
+
+(61)
+(62)
+
+where Aij represents the components of the conformation tensor at the inlet.
+37
+
+Figure 13: Computational domain and boundary conditions for flow past a circular cylinder. The rectangular domain has dimensions 30R × 4R with the cylinder positioned at
+(15R, 2R). Inlet: fully developed velocity and stress profiles; Outlet: zero-gradient conditions; Walls and cylinder surface: no-slip boundary conditions.
+
+The convergence criterion follows the condition specified in Eq. (59).
+When this criterion is satisfied, the simulation is classified as ”steady”. If
+convergence is not achieved by dimensionless time t∗ > 1000, the case is
+marked as ”unsteady”. Simulations that experience numerical breakdown
+are indicated by ”NaN”. For the NSE system, the inlet and outlet boundaries employ the NEBB scheme, while the walls utilize the same scheme.
+The cylinder surface adopts the YLW scheme [49], which has been proven
+to possess second-order accuracy for curved boundary problems. However,
+when the cylinder surface uses the half-way bounce-back (HWBB) scheme, a
+link-wise type scheme, for the CDE system, the cylinder surface correspondingly adopts the HWBB scheme for the NSE system to maintain consistency,
+since the previous algorithms are all wet node type schemes.
+For the CDE system, the inlet and outlet boundaries use the NEQE
+scheme, the walls employ our proposed CNEBB scheme, and the cylinder surface implements several different boundary conditions for systematic comparison, including CNEBB, YLW, HWBB, the scheme proposed by Malaspinas
+et al. [23], and NEQE. The CNEBB, YLW, and HWBB schemes satisfy the
+local conservation properties of the stress tensor, which is crucial for maintaining physical consistency.
+The default parameter configuration is as follows: Re = 1, β = 0.59,
+Λp = 2.5 × 10−7 (the selection criterion for this parameter is discussed subse38
+
+quently), Λs = 1/4, and Sc = 106 . The choice of Re = 1 requires clarification:
+while most previous studies [66, 67, 68, 69] use Re = 0.01, our TRT regularized method, although stable and accurate for low Reynolds number cases,
+exhibits slow convergence rates. Moreover, for viscoelastic fluids at very low
+Reynolds numbers, the method becomes susceptible to numerical instabilities. Consequently, significant deviations are expected between Re = 1 and
+Re = 0.01 results, making direct quantitative comparison with previous studies challenging. However, the qualitative behavior and relative performance
+assessment among different boundary schemes remain valid.
+To quantitatively assess the accuracy and convergence behavior of different boundary schemes, the drag coefficient Cd is computed for all simulations.
+This parameter serves as a sensitive indicator of numerical solution quality
+and provides a basis for comparing the performance of various boundary
+implementations. The total drag force Fx acting on the cylinder surface is
+calculated using the momentum exchange method [70], which evaluates momentum transfer between fluid and solid through the distribution functions
+at boundary nodes:
+Fx =
+
+X X ∆x2
+xf ∈Γb i∈Iw
+
+∆t
+
+eix (fi† (xf , t) + fī (xf , t + ∆t))
+
+(63)
+
+where Γb represents the set of fluid nodes adjacent to the cylinder surface that
+interface with the solid boundary, Iw denotes the set of directions pointing
+toward the wall at boundary node xf , ī is the direction opposite to i, fi† is
+the post-collision distribution function, and eix is the x-component of discrete
+velocity ei . The drag coefficient is calculated as:
+Fx
+2 D
+ρUavg
+2
+
+Cd = 1
+
+(64)
+
+where ρ is the fluid density, Uavg is the average inlet velocity, and D = 2R is
+the cylinder diameter.
+4.3.1. Grid Independence Analysis of Different Conformation Tensor Boundary Implementation Schemes
+A grid independence study is conducted to evaluate the performance and
+stability characteristics of different boundary schemes. The analysis employs the aforementioned comparative algorithms for simulations with cylinder radii ranging from R = 5 to 40 (in increments of 5), three Weissenberg
+39
+
+numbers (Wi = 0.1, 0.5, 1.0), and systematic examination of Schmidt number
+effects (Sc = 104 , 105 , 106 ). The results are presented in Tables 3, 4, and 5,
+respectively.
+The results reveal that implementing cylinder surface CDE boundaries using the NEQE algorithm yields poor performance among all tested schemes.
+At Wi = 0.5 and 1.0, regardless of grid density, the method essentially fails
+to converge. At the lowest Weissenberg number (Wi = 0.1), convergence is
+achieved only when R ≤ 20, but further grid refinement leads to numerical
+breakdown. The HWBB and Malaspinas schemes demonstrate marginally
+better performance but show no substantial improvement, converging across
+all considered grid densities only at Wi = 0.1, while failing completely at
+higher Weissenberg numbers.
+Two schemes emerge as competitive methods: our newly proposed CNEBB
+method and the YLW algorithm extended to viscoelastic flows, both possessing identical local macroscopic quantity conservation strategies. The YLW
+scheme demonstrates stability improvements compared to the three aforementioned schemes. At Wi = 0.1, convergence is achieved across all three
+Schmidt numbers as the grid is refined (R increases). However, at Wi = 0.5,
+while convergence is maintained under high artificial viscosity conditions
+(Sc = 104 ), abrupt numerical breakdown occurs at R = 35 when artificial viscosity is reduced. The instability and breakdown phenomena become
+more pronounced at Wi = 1.0.
+In contrast, our newly proposed CNEBB method demonstrates good stability, achieving stable convergence across all tested conditions. This performance highlights the effectiveness of the specific conservative formulation
+employed in the CNEBB scheme for handling complex stress distributions at
+curved interfaces.
+Further examination of results computed with the CNEBB scheme reveals that at Wi = 0.1 and 0.5, drag coefficient values exhibit monotonic
+convergence to stable asymptotic values as the grid is refined. At Wi = 1.0,
+although steady-state solutions can be consistently obtained, grid convergence becomes less apparent. This phenomenon of reduced grid convergence
+at higher Weissenberg numbers is commonly observed in existing viscoelastic cylinder flow studies [67, 7]. The underlying causes are multifaceted
+and potentially related to the interplay between artificial viscosity, boundary scheme accuracy, and the inherently complex physics at high elasticity
+numbers. Complete resolution of this challenging issue extends beyond the
+scope of the present work and remains an active area of research.
+40
+
+Table 3: Steady-state drag coefficients for viscoelastic flow past a circular cylinder at
+different grid densities (cylinder radius R) and Weissenberg numbers, comparing five different boundary schemes for the conformation tensor at the cylinder surface (Sc = 104 ).
+”Unsteady” indicates no steady state achieved at t∗ = 1000; ”NaN” denotes numerical
+breakdown.
+CD (CNEBB)
+
+R
+
+CD (YLW)
+
+CD (HWBB)
+
+CD (Malaspinas)
+
+CD (NEQE)
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+5 105.42 100.28 121.11 107.19 101.11 114.87 97.63 91.41 95.60 107.66 99.81 105.55 99.93 unsteady NaN
+10 125.19 120.53 168.44 126.55 123.33 204.93 122.29 118.53 NaN 126.54 121.90 NaN 120.54 111.73
+NaN
+15 128.22 123.34 170.09 129.03 125.59 157.74 126.69 NaN NaN 129.17 NaN NaN 124.45 116.53 133.87
+20 129.42 125.17 164.26 129.96 128.00 148.30 128.43 NaN NaN 130.04 NaN NaN 126.37 118.08 136.18
+25 129.61 125.00 156.01 129.87 125.13 NaN 128.30 NaN NaN 129.95 NaN NaN NaN
+NaN
+NaN
+30 130.36 126.31 151.31 130.63 126.65 134.39 129.67 NaN NaN 130.68 NaN NaN NaN
+NaN
+NaN
+35 130.77 127.72 149.04 131.03 127.31 NaN 130.65 NaN NaN 131.16 NaN NaN NaN
+NaN
+NaN
+40 130.79 126.79 unsteady 130.96 125.57 132.05 130.54 NaN NaN 131.06 NaN NaN NaN
+NaN
+NaN
+
+Table 4: Steady-state drag coefficients for viscoelastic flow past a circular cylinder at
+different grid densities (cylinder radius R) and Weissenberg numbers, comparing five different boundary schemes for the conformation tensor at the cylinder surface (Sc = 105 ).
+”Unsteady” indicates no steady state achieved at t∗ = 1000; ”NaN” denotes numerical
+breakdown.
+CD (NEQE)
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=1.0
+
+CD (Malaspinas)
+
+Wi=0.5
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+CD (HWBB)
+
+Wi=0.1
+
+CD (YLW)
+
+Wi=0.1
+
+CD (CNEBB)
+
+R
+
+5 106.04 101.73 128.69 107.45 101.66 144.18 97.79 92.44 NaN 107.82 101.11 NaN 100.74
+NaN
+NaN
+10 125.45 120.38 165.21 126.62 123.50 188.91 122.31 118.65 NaN 126.57 unsteady NaN 120.96 111.71 NaN
+15 128.32 123.27 168.92 129.05 125.67 159.53 126.69 NaN NaN 129.14
+NaN
+NaN 124.64 unsteady NaN
+20 129.48 125.02 162.91 129.98 128.01 147.85 128.43 NaN NaN 130.02
+NaN
+NaN 126.49 118.56 NaN
+25 129.64 124.86 154.90 129.88 124.00 NaN 128.30 NaN NaN 129.94
+NaN
+NaN NaN
+NaN
+NaN
+30 130.38 126.20 149.74 130.66 126.50 133.83 129.67 NaN NaN 130.67
+NaN
+NaN NaN
+NaN
+NaN
+35 130.80 127.60 147.22 131.05 NaN NaN 130.65 NaN NaN 131.15
+NaN
+NaN NaN
+NaN
+NaN
+40 130.81 126.72 unsteady 130.96 125.49 131.38 130.55 NaN NaN 131.05
+NaN
+NaN NaN
+NaN
+NaN
+
+41
+
+Table 5: Steady-state drag coefficients for viscoelastic flow past a circular cylinder at
+different grid densities (cylinder radius R) and Weissenberg numbers, comparing five different boundary schemes for the conformation tensor at the cylinder surface (Sc = 106 ).
+”Unsteady” indicates no steady state achieved at t∗ = 1000; ”NaN” denotes numerical
+breakdown.
+CD (CNEBB)
+
+R
+
+CD (YLW)
+
+CD (HWBB)
+
+CD (Malaspinas)
+
+CD (NEQE)
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+Wi=1.0
+
+Wi=0.5
+
+Wi=0.1
+
+5 106.93 103.88 unsteady 107.83 102.95 unsteady 98.01
+93.36 NaN NaN NaN NaN 102.03 NaN NaN
+10 125.90 121.26 165.30 126.87 128.68 unsteady 122.37 unsteady NaN NaN NaN NaN 122.06 NaN NaN
+15 128.52 123.21 161.91 129.15 126.39 unsteady 126.71
+NaN
+NaN NaN NaN NaN 125.42 NaN NaN
+20 129.59 124.84 158.44 130.03 128.36 147.75 128.44
+NaN
+NaN 130.00 NaN NaN 127.07 NaN NaN
+25 129.69 124.60 152.98 129.89 124.28
+NaN
+128.30
+NaN
+NaN 129.93 NaN NaN NaN NaN NaN
+30 130.42 125.88 147.14 130.74 126.23 132.69 129.66
+NaN
+NaN 130.66 NaN NaN NaN NaN NaN
+35 130.83 127.30 143.66 131.07 NaN
+NaN
+130.65
+NaN
+NaN 131.12 NaN NaN NaN NaN NaN
+40 130.83 126.39 140.32 130.97 125.24 130.88 130.54
+NaN
+NaN 131.03 NaN NaN NaN NaN NaN
+
+4.3.2. Maximum Achievable Weissenberg Number and Optimal Λp Parameter
+Selection
+Having demonstrated the stability of the CNEBB method in the previous
+analysis, we now focus on determining the maximum Weissenberg numbers
+that can be achieved with this approach and identifying the optimal selection of the magic parameter Λp . The maximum achievable Weissenberg
+number serves as a performance metric that reflects the computational robustness of the method for highly elastic flows. To systematically explore the
+computational limits of our approach, we employ minimal artificial viscosity
+(Sc = 106 ), representing challenging conditions under which many existing
+algorithms fail prematurely.
+The magic parameter Λp is systematically varied by taking uniformly
+distributed sample points in the logarithmic space within the range 10−8 to
+10−6 to identify optimal values that maximize computational stability while
+maintaining physical accuracy. This parameter plays a critical role in the
+TRT regularization scheme and requires careful tuning to balance numerical
+stability and solution quality. Two representative cylinder radii (R = 20
+and 30) are considered with Weissenberg numbers ranging from 1.0 to 2.0 in
+increments of 0.1. The results are presented in Figure 14.
+The systematic analysis reveals distinct parameter regimes with varying
+stability characteristics. For Λp values in the range 10−8 to 3.162 × 10−7 , the
+maximum achievable Weissenberg number without numerical breakdown is
+42
+
+Wi = 1.2. However, when Λp is optimally tuned within the narrower range
+from 1.995 × 10−7 to 3.162 × 10−7 , stable computations can be extended to
+Wi = 1.5. This improvement in the stability limit approaches the benchmark
+result of Wi = 1.7 achieved by Ma et al. [66] using computationally expensive
+high-order spectral element discontinuous Galerkin (SRCR-DG) methods.
+The identification of this optimal parameter window demonstrates the
+importance of proper magic parameter selection in viscoelastic LBM simulations. Too small values of Λp lead to insufficient numerical stabilization,
+while excessively large values introduce spurious diffusion that can destabilize
+the solution. The discovered optimal range provides practical guidance for
+future applications of the method to challenging viscoelastic flow problems.
+This validation demonstrates the effectiveness of the proposed CNEBB
+method in handling complex curved geometries while maintaining numerical
+stability at elevated Weissenberg numbers. The method shows improved
+performance compared to existing boundary schemes for viscoelastic flow
+simulations using the lattice Boltzmann framework.
+
+2
+
+2
+
+1.8
+
+1.8
+
+1.6
+
+1.6
+
+1.4
+
+1.4
+
+1.2
+
+1.2
+
+1
+
+1
+10-8
+
+10-7
+
+10-6
+
+10-8
+
+10-7
+
+Λ
+
+Λ
+
+(a) Phase diagram for R = 20
+
+(b) Phase diagram for R = 30
+
+10-6
+
+Figure 14: Phase diagrams showing computational stability regions in the Λp -Wi parameter space at Sc = 106 , a stringent condition that causes premature failure in many
+algorithms. Red hollow circles: steady-state solutions achieved; green solid triangles: unsteady solutions obtained; blue hollow squares: numerical breakdown occurred.
+
+5. Conclusion
+In this paper, we have proposed an improved lattice Boltzmann method
+for solving Oldroyd-B fluid flow problems. The hydrodynamic field evolution
+43
+
+is solved using an improved two-relaxation-time regularized lattice Boltzmann model, in which we employ a first-order Hermite expansion form for
+the force term to enhance the accuracy of introducing body forces in the NSE
+equations. Additionally, a novel discrete velocity source term for direct stress
+tensor incorporation is proposed, eliminating the need for spatial derivative
+calculations of the stress tensor required by traditional methods. It should
+be noted that while this model utilizes the two-relaxation-time regularization operator we previously proposed, this is not mandatory. Any other
+high-stability collision operator, such as central moment models or cumulant
+moment models, can be substituted without affecting the core innovation of
+the present model.
+For solving the evolution equation of the conformation tensor, we employ
+a set of improved convection-diffusion LB solvers. In this model, a novel
+auxiliary source term (Eq. 32) coupled with the NSE through force terms is
+proposed to avoid spatial or temporal derivative calculations required in traditional methods, achieving tighter NSE-CDE coupling. The two-relaxationtime collision operator we previously developed is also adopted to enhance
+model stability, where the magic parameter Λp controlling the free relaxation
+parameter significantly influences program stability.
+Comprehensive numerical studies of the simplified four-roll mill problem
+demonstrate that our newly proposed method achieves super-second-order
+convergence for this doubly periodic boundary problem containing stress singularities in the bulk region without solid boundaries. The numerical results
+not only agree well with reference solutions in the commonly reported parameter range of W i ≤ 5, but also exhibit superior performance compared to
+existing LBM methods at high Weissenberg numbers. Under extremely low
+artificial viscosity conditions (Sc = 106 ), unlike other LBM approaches that
+fail prematurely, our method can obtain steady-state solutions at W i = 27
+and unsteady solutions at even higher Weissenberg numbers. It should be
+noted that when artificial viscosity is sufficient (e.g., Sc = 104 and 105 ), the
+selection of the magic parameter Λp has minimal impact on algorithm stability. However, when artificial viscosity is very low (Sc = 106 ), the magic
+parameter Λp becomes highly sensitive to algorithm stability. Our numerical
+studies suggest that for problems without solid boundaries, optimal numerical stability is achieved by selecting Λp in the range of [specific range to be
+filled]. Lower values of Λp can also provide non-divergent solutions at moderate Weissenberg numbers (W i ≤ 20), representing an alternative viable
+range.
+44
+
+To the authors’ knowledge, neither traditional methods nor LBM approaches have previously addressed the conservation properties of solid wall
+boundary schemes for conformation tensor or stress tensor fields. Based on
+the LBM framework, this paper proposes a novel conservative non-equilibrium
+bounce-back (CNEBB) scheme for solving conformation tensor fields. Numerical results for Poiseuille flow demonstrate that this method can obtain
+accurate steady-state velocity and conformation tensor field distributions up
+to W i = 10000 within our tested range. In our actual computations, higher
+Weissenberg numbers are also achievable, requiring only extended computational time. Numerical results further show that the algorithm agrees
+well with transient analytical solutions at arbitrary viscosity ratios up to
+W i = 10000. Additionally, we observed that convergence order gradually
+decreases from second-order with grid refinement, with global relative error even stabilizing at a constant value (approximately O(10−4 )). Through
+extreme reduction of artificial viscosity, we found that the convergence order degradation phenomenon is not significantly alleviated, unlike in the
+four-roll mill problem where reducing artificial viscosity effectively reduces
+error. Therefore, we believe this represents a novel systematic error related
+to boundary schemes.
+We also investigated another representative benchmark problem: viscoelastic flow past a circular cylinder. Numerical results demonstrate that
+three schemes—non-equilibrium extrapolation (NEQE), halfway bounce-back
+(HWBB), and Malaspinas—exhibit poor stability when handling cylinder
+flow problems, even with artificial viscosity as low as Sc = 104 . In contrast,
+the YLW algorithm introduced from multiphase flow and our newly proposed
+CNEBB scheme inspired by the YLW algorithm show significantly better stability. Among all tested algorithms, our CNEBB algorithm achieves optimal
+numerical stability performance. Under the most stringent artificial viscosity conditions (Sc = 106 ), we can compute maximum Weissenberg numbers
+up to approximately 1.5, which closely approaches the W i = 1.7 achievable
+by SRCR-DG methods at lower Reynolds numbers (Re = 0.01). Furthermore, we conducted systematic parameter sweeps for the magic parameter
+Λp , recommending a selection range of 2.0 × 10−6 to 3.0 × 10−6 for problems
+involving solid boundaries.
+In summary, we have developed an improved lattice Boltzmann method
+and proposed a conservative non-equilibrium bounce-back boundary scheme
+for computing viscoelastic fluid flow problems. The algorithm demonstrates
+good numerical stability and accuracy, providing a valuable numerical tool for
+45
+
+related research fields. In the future, we plan to improve the computational
+efficiency of this algorithm at low Reynolds numbers while maintaining its
+stability, and extend it to three-dimensional applications.
+Acknowledgments
+This work was financially supported by the National Natural Science
+Foundation of China (Grant Nos. 12101527, 12271464, and 12371373), the
+Natural Science Foundation for Distinguished Young Scholars of Hunan Province
+(Grant No. 2023JJ10038), the Science and Technology Innovation Program
+of Hunan Province (Program No. 2021RC2096), and the Scientific Research
+Fund of Hunan Provincial Science and Technology Department (Grant No.
+21B0159). Computational resources were provided by the High Performance
+Computing Platform of Xiangtan University.
+References
+[1] A. I. Leonov, A. Prokunin, Nonlinear phenomena in flows of viscoelastic
+polymer fluids, Springer Science & Business Media, 2012.
+[2] F. D. C. Siacor, Q. Chen, J. Y. Zhao, L. Han, A. D. Valino, E. B.
+Taboada, E. B. Caldona, R. C. Advincula, On the additive manufacturing (3d printing) of viscoelastic materials and flow behavior: From
+composites to food manufacturing, Additive Manufacturing 45 (2021)
+102043.
+[3] I. Pajic-Lijakovic, M. Milivojevic, P. V. McClintock, Friction in soft biological systems and surface self-organization: the role of viscoelasticity,
+Biophysical Reviews 16 (6) (2024) 813–829.
+[4] C. Xie, K. Xu, K. Mohanty, M. Wang, M. T. Balhoff, Nonwetting droplet
+oscillation and displacement by viscoelastic fluids, Physical Review Fluids 5 (6) (2020) 063301.
+[5] C. Xie, P. Qi, K. Xu, J. Xu, M. T. Balhoff, Oscillative trapping of a
+droplet in a converging channel induced by elastic instability, Physical
+Review Letters 128 (5) (2022) 054502.
+[6] D. Cheneler, Viscoelasticity of polymers: theory and numerical algorithms, Applied Rheology 26 (4) (2016) 10–52.
+46
+
+[7] M. Alves, P. Oliveira, F. Pinho, Numerical methods for viscoelastic fluid
+flows, Annual Review of Fluid Mechanics 53 (2021) 509–541.
+[8] R. Keunings, On the high weissenberg number problem, Journal of NonNewtonian Fluid Mechanics 20 (1986) 209–226.
+[9] H. Giesekus, A simple constitutive equation for polymer fluids based
+on the concept of deformation-dependent tensorial mobility, Journal of
+Non-Newtonian Fluid Mechanics 11 (1-2) (1982) 69–109.
+[10] R. B. Bird, P. J. Dotson, N. Johnson, Polymer solution rheology based
+on a finitely extensible bead—spring chain model, Journal of NonNewtonian Fluid Mechanics 7 (2-3) (1980) 213–235.
+[11] M. Chilcott, J. M. Rallison, Creeping flow of dilute polymer solutions
+past cylinders and spheres, Journal of Non-Newtonian Fluid Mechanics
+29 (1988) 381–432.
+[12] J. G. Oldroyd, On the formulation of rheological equations of state,
+Proceedings of the Royal Society of London. Series A. Mathematical
+and Physical Sciences 200 (1063) (1950) 523–541.
+[13] D. Rajagopalan, R. C. Armstrong, R. A. Brown, Finite element methdos
+for calculation of steady, viscoelastic flow using constitutive equations
+with a newtonian viscosity, Journal of Non-Newtonian Fluid Mechanics
+36 (1990) 159–192.
+[14] J. Sun, N. Phan-Thien, R. I. Tanner, An adaptive viscoelastic stress
+splitting scheme and its applications: Avss/si and avss/supg, Journal of
+non-newtonian fluid mechanics 65 (1) (1996) 75–91.
+[15] A. Fortin, R. Guénette, R. Pierre, On the discrete evss method, Computer methods in applied mechanics and engineering 189 (1) (2000) 121–
+139.
+[16] J. M. Marchal, M. J. Crochet, A new mixed finite element for calculating viscoelastic flow, Journal of Non-Newtonian Fluid Mechanics 26 (1)
+(1987) 77–114.
+[17] T. J. Hughes, M. Mallet, M. Akira, A new finite element formulation
+for computational fluid dynamics: Ii. beyond supg, Computer methods
+in applied mechanics and engineering 54 (3) (1986) 341–355.
+47
+
+[18] R. Fattal, R. Kupferman, Time-dependent simulation of viscoelastic
+flows at high weissenberg number using the log-conformation representation, Journal of Non-Newtonian Fluid Mechanics 126 (1) (2005) 23–37.
+[19] C. K. Aidun, J. R. Clausen, Lattice-boltzmann method for complex
+flows, Annual review of fluid mechanics 42 (1) (2010) 439–472.
+[20] S. Marié, D. Ricot, P. Sagaut, Comparison between lattice boltzmann
+method and navier–stokes high order schemes for computational aeroacoustics, Journal of Computational Physics 228 (4) (2009) 1056–1070.
+[21] T. Bellotti, Numerical analysis of lattice boltzmann schemes: from fundamental issues to efficient and accurate adaptive methods, Ph.D. thesis,
+Institut Polytechnique de Paris (2023).
+[22] T. Bellotti, Initialisation from lattice boltzmann to multi-step finite difference methods: modified equations and discrete observability, Journal
+of Computational Physics 504 (2024) 112871.
+[23] O. Malaspinas, N. Fiétier, M. Deville, Lattice boltzmann method for the
+simulation of viscoelastic fluid flows, Journal of Non-Newtonian Fluid
+Mechanics 165 (23-24) (2010) 1637–1653.
+[24] J. Su, J. Ouyang, J. Lu, A lattice boltzmann method and asynchronous
+model coupling for viscoelastic fluids, Applied Sciences 8 (3) (2018) 352.
+[25] H. Zhang, C. Shu, L.-P. Wang, Y. Liu, L. Zhu, A lattice Boltzmann
+flux solver for numerical simulation of flows with the viscoelastic fluid,
+Computers & Fluids 292 (2025) 106593. doi:10.1016/j.compfluid.
+2025.106593.
+[26] T. N. Phillips, G. W. Roberts, Lattice Boltzmann models for nonNewtonian flows, IMA Journal of Applied Mathematics 76 (5) (2011)
+790–816. doi:10.1093/imamat/hxr003.
+[27] S. Singh, G. Subramanian, S. Ansumali, Lattice Fokker Planck for dilute
+polymer dynamics, Physical Review E 88 (1) (2013) 013301. doi:10.
+1103/PhysRevE.88.013301.
+[28] S. Zou, X. Xu, J. Chen, X. Guo, Q. Wang, Benchmark Numerical Simulations of Viscoelastic Fluid Flows with an Efficient Integrated Lattice
+48
+
+Boltzmann and Finite Volume Scheme, Advances in Mechanical Engineering 7 (2) (2015) 805484. doi:10.1155/2014/805484.
+[29] A. Gupta, M. Sbragaglia, A. Scagliarini, Hybrid Lattice Boltzmann/Finite Difference simulations of viscoelastic multicomponent flows
+in confined geometries, Journal of Computational Physics 291 (2015)
+177–197. doi:10.1016/j.jcp.2015.03.006.
+[30] Y. Yu, Z. Qin, H. Yuan, S. Shu, Two-relaxation-time regularized lattice
+Boltzmann model for convection-diffusion equation with spatially dependent coefficients, Applied Mathematics and Computation 488 (2025)
+129135. doi:10.1016/j.amc.2024.129135.
+[31] Y. Yu, Z. Qin, H. Yuan, S. Shu, Two-relaxation-time regularized lattice
+Boltzmann model for convection-diffusion equation with spatially dependent coefficients, Applied Mathematics and Computation 488 (2025)
+129135. doi:10.1016/j.amc.2024.129135.
+[32] H. R. Warner Jr, Kinetic theory and rheology of dilute suspensions of
+finitely extendible dumbbells, Industrial & Engineering Chemistry Fundamentals 11 (3) (1972) 379–387.
+[33] N. P. Thien, R. I. Tanner, A new constitutive equation derived from
+network theory, Journal of Non-Newtonian Fluid Mechanics 2 (4) (1977)
+353–365.
+[34] G. L. Lukacs, P. Haggie, O. Seksek, D. Lechardeur, N. Freedman,
+A. Verkman, Size-dependent dna mobility in cytoplasm and nucleus,
+Journal of biological chemistry 275 (3) (2000) 1625–1629.
+[35] N. Agmon, The grotthuss mechanism, Chemical Physics Letters 244 (56) (1995) 456–462.
+[36] S. Vogel, Life’s devices: the physical world of animals and plants, Princeton University Press, 1988.
+[37] P. Dobitchin, S. Kirillov, V. Noskin, N. Peshin, Correlation between biological activity of 30 s subunits of escherichia coli ribosomes and their
+conformation changes revealed by optical mixing spectroscopy, Biophysical Chemistry 17 (2) (1983) 165–169.
+
+49
+
+[38] X. Yan, T. A. Hoek, R. D. Vale, M. E. Tanenbaum, Dynamics of translation of single mrna molecules in vivo, Cell 165 (4) (2016) 976–989.
+[39] S. Gsell, U. d’Ortona, J. Favier, Lattice-boltzmann simulation of creeping generalized newtonian flows: theory and guidelines, Journal of Computational Physics 429 (2021) 109943.
+[40] Z. Guo, C. Zheng, B. Shi, Discrete lattice effects on the forcing term in
+the lattice boltzmann method, Physical review E 65 (4) (2002) 046308.
+[41] X. Nie, X. Shan, H. Chen, Galilean invariance of lattice boltzmann
+models, Europhysics Letters 81 (3) (2008) 34005.
+[42] X. Shan, The mathematical structure of the lattices of the lattice boltzmann method, Journal of Computational Science 17 (2016) 475–481.
+[43] Y. Feng, P. Boivin, J. Jacob, P. Sagaut, Hybrid recursive regularized
+thermal lattice boltzmann model for high subsonic compressible flows,
+Journal of Computational Physics 394 (2019) 82–99.
+[44] B. Postma, G. Silva, Force methods for the two-relaxation-times lattice
+Boltzmann, Physical Review E 102 (6) (2020) 063307. doi:10.1103/
+PhysRevE.102.063307.
+[45] S. A. Bawazeer, S. S. Baakeem, A. A. Mohamad, A Critical Review of
+Forcing Schemes in Lattice Boltzmann Method: 1993–2019, Archives of
+Computational Methods in Engineering 28 (7) (2021) 4405–4423. doi:
+10.1007/s11831-021-09535-4.
+[46] L. Li, R. Mei, J. F. Klausner, Lattice boltzmann models for the
+convection-diffusion equation: D2q5 vs d2q9, International Journal of
+Heat and Mass Transfer 108 (2017) 41–62.
+[47] B. Shi, B. Deng, R. Du, X. Chen, A new scheme for source term in
+LBGK model for convection–diffusion equation, Computers & Mathematics with Applications 55 (7) (2008) 1568–1575. doi:10.1016/j.
+camwa.2007.08.016.
+[48] I. Ginzburg, Truncation Errors, Exact And Heuristic Stability Analysis
+Of Two-Relaxation-Times Lattice Boltzmann Schemes For Anisotropic
+Advection-Diffusion Equation, Communications in Computational
+Physics 11 (5) (2012) 1439–1502. doi:10.4208/cicp.211210.280611a.
+50
+
+[49] Y. Yu, Q. Li, Z. Wen, Modified curved boundary scheme for two-phase
+lattice Boltzmann simulations, Computers & Fluids 208 (2020) 104638.
+doi:10.1016/j.compfluid.2020.104638.
+[50] B. Thomases, M. Shelley, Emergence of singular structures in oldroyd-b
+fluids, Physics of fluids 19 (10) (2007).
+[51] B. Thomases, An analysis of the effect of stress diffusion on the dynamics
+of creeping viscoelastic flow, Journal of Non-Newtonian Fluid Mechanics
+166 (21-22) (2011) 1221–1228.
+[52] F. Osmanlic, C. Körner, Lattice boltzmann method for oldroyd-b fluids,
+Computers & Fluids 124 (2016) 190–196.
+[53] P. Gutierrez-Castillo, B. Thomases, Proper orthogonal decomposition
+(pod) of the flow dynamics for a viscoelastic fluid in a four-roll mill
+geometry at the stokes limit, Journal of Non-Newtonian Fluid Mechanics
+264 (2019) 48–61.
+[54] M. Sedaghat, A. Bagheri, M. Shahmardan, M. Norouzi, B. Khoo, P. Jayathilake, A hybrid immersed boundary-lattice boltzmann method for
+simulation of viscoelastic fluid flows interaction with complex boundaries, Commun Comput Phys 29 (5) (2021) 1411–1445.
+[55] V. Dzanic, C. From, E. Sauret, A hybrid lattice boltzmann model for
+simulating viscoelastic instabilities, Computers & Fluids 235 (2022)
+105280.
+[56] M. Renardy, A comment on smoothness of viscoelastic stresses, Journal
+of non-newtonian fluid mechanics 138 (2-3) (2006) 204–205.
+[57] T. Krüger, H. Kusumaatmaja, A. Kuzmin, O. Shardt, G. Silva, E. M.
+Viggen, The lattice Boltzmann method, Vol. 10, Springer, 2017.
+[58] J. Su, J. Ouyang, X. Wang, B. Yang, W. Zhou, Lattice Boltzmann
+method for the simulation of viscoelastic fluid flows over a large range
+of Weissenberg numbers, Journal of Non-Newtonian Fluid Mechanics
+194 (2013) 42–59. doi:10.1016/j.jnnfm.2012.11.006.
+[59] M. Ellero, R. Tanner, Sph simulations of transient viscoelastic flows
+at low reynolds number, Journal of Non-Newtonian Fluid Mechanics
+132 (1-3) (2005) 61–72.
+51
+
+[60] N. Fiétier, M. O. Deville, Time-dependent algorithms for the simulation
+of viscoelastic flows with spectral element methods: applications and
+stability, Journal of Computational Physics 186 (1) (2003) 93–121.
+[61] A. Jafari, N. Fiétier, M. O. Deville, Simulation of flows of viscoelastic
+fluids at high weissenberg number using a filter-based stabilization of
+the spectral element method, Computers & fluids 53 (2012) 15–39.
+[62] X. Xu, P. Yu, A multiscale sph method for simulating transient viscoelastic flows using bead-spring chain model, Journal of Non-Newtonian Fluid
+Mechanics 229 (2016) 27–42.
+[63] S. Zou, X.-F. Yuan, X. Yang, W. Yi, X. Xu, An integrated lattice boltzmann and finite volume method for the simulation of viscoelastic fluid
+flows, Journal of Non-Newtonian Fluid Mechanics 211 (2014) 99–113.
+[64] Y. K. Lee, K. H. Ahn, S. J. Lee, Time-dependent viscoelastic properties of oldroyd-b fluid studied by advection-diffusion lattice boltzmann
+method, Korea-Australia Rheology Journal 29 (2017) 137–146.
+[65] N. Waters, M. King, Unsteady flow of an elastico-viscous liquid, Rheologica Acta 9 (1970) 345–355.
+[66] M. Ma, J. Ouyang, X. Wang, A high-order srcr-dg method for simulating viscoelastic flows at high weissenberg numbers, Engineering with
+Computers 39 (5) (2023) 3041–3059.
+[67] M. A. Hulsen, R. Fattal, R. Kupferman, Flow of viscoelastic fluids past a
+cylinder at high weissenberg number: stabilized simulations using matrix
+logarithms, Journal of Non-Newtonian Fluid Mechanics 127 (1) (2005)
+27–39.
+[68] Y. Chai, J. Ouyang, X. Wang, An efficient stabilized finite element
+scheme for simulating viscoelastic flows, International Journal for Numerical Methods in Fluids 93 (6) (2021) 1947–1968.
+[69] E. Castillo, R. Codina, First, second and third order fractional step
+methods for the three-field viscoelastic flow problem, Journal of Computational Physics 296 (2015) 113–137.
+
+52
+
+[70] A. J. Ladd, Numerical simulations of particulate suspensions via a discretized boltzmann equation. part 1. theoretical foundation, Journal of
+fluid mechanics 271 (1994) 285–309.
+
+53
+
+

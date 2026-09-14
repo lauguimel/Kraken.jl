@@ -1,0 +1,65 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  https://openfoam.org                  |
+|   \\  /    A nd           | Version:  9                                     |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      ascii;
+    class       volVectorField;
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform (0 0 0);
+
+boundaryField
+{
+    inlet
+    {
+        type            codedFixedValue;
+        value           uniform (1 0 0);
+        name            parabolicMeanU1;
+        code
+        #{
+            const vectorField& Cf = patch().Cf();
+            vectorField Uin(patch().size(), vector::zero);
+
+            const scalar Umean = 1.0;
+            const scalar halfHeight = 2.0;
+
+            forAll(Uin, faceI)
+            {
+                const scalar y = Cf[faceI].y();
+                const scalar profile = 1.5*Umean*(1.0 - sqr(y/halfHeight));
+                Uin[faceI] = vector(max(profile, scalar(0)), 0, 0);
+            }
+
+            operator==(Uin);
+        #};
+    }
+
+    outlet
+    {
+        type            zeroGradient;
+    }
+
+    "(walls|cylinder)"
+    {
+        type            fixedValue;
+        value           uniform ( 0 0 0 );
+     
+    }
+    
+    frontAndBack
+    {
+        type           empty;
+    }
+    
+}
+
+// ************************************************************************* //

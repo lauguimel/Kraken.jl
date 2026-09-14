@@ -1,0 +1,54 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  https://openfoam.org                  |
+|   \\  /    A nd           | Version:  9                                     |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    object      constitutiveProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+parameters
+{ 
+
+                type             Oldroyd-B;
+
+                etaS             etaS [1 -1 -1 0 0 0 0] 0.5;
+		etaP             etaP [1 -1 -1 0 0 0 0] 0.5;
+                lambda           lambda [0 0 1 0 0 0 0] 1;
+                
+	    //  Place-holder variables in rheoTestFoam
+                stabilization    none;
+                rho              rho [1 -3 0 0 0 0 0] 0.; 
+          
+}
+
+rheoTestFoamParameters
+{
+              // Ramp mode (true) or transient mode (false)
+                ramp 		 true; 
+
+              // This tensor multiplied by gammaEpsilonDot gives nabla(U).
+              // Simple shear u_x = gamma * y -> (grad U)_{i,j} = du_j/dx_i has
+              // (row=2,col=1) = gamma; all other entries zero.
+                gradU            ( 0.    0.    0.
+                                   1.    0.    0.
+                                   0.    0.    0.);
+
+              // Strain-rate sweep: covers cavity-bulk (~0.01) to corner lid
+              // shear (~100) using log-spaced decades.
+                gammaEpsilonDotL
+                  (
+                        0.01
+                        0.1
+                        1.0
+                        10.0
+                        100.0
+                  );
+}
+// ************************************************************************* //

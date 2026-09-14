@@ -1,0 +1,19 @@
+job_name: kraken_wi_sweep
+ncpus: 8
+ngpus: 1
+gpu_id: H100
+mem: 32GB
+walltime: "12:00:00"
+julia:
+  project: "."
+  cuda_compat: false
+  cuda_check: true
+variables:
+  JULIA_NUM_THREADS: "1"
+  KRAKEN_BACKEND: cuda
+  RESULTS_DIR: results
+pre_commands:
+  - "mkdir -p $RESULTS_DIR"
+command: >
+  julia --project=. hpc/sweep_wi_cylinder.jl 2>&1 |
+  tee "$RESULTS_DIR/sweep_wi_cylinder_$(date +%Y%m%d_%H%M).txt"

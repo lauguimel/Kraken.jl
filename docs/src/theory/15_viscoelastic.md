@@ -43,7 +43,7 @@ derivative**:
 ```math
 \overset{\nabla}{\boldsymbol{\tau}_p}
     = \frac{\partial \boldsymbol{\tau}_p}{\partial t}
-    + \mathbf{u} \cdot \nabla \boldsymbol{\tau}_p}
+    + \mathbf{u} \cdot \nabla \boldsymbol{\tau}_p
     - \boldsymbol{\tau}_p \cdot \nabla\mathbf{u}
     - (\nabla\mathbf{u})^T \cdot \boldsymbol{\tau}_p
 ```
@@ -183,4 +183,3 @@ kernel launch per time step for all three tensor components.
 ```julia
 nothing  # suppress REPL output
 ```
-

@@ -1,0 +1,6 @@
+# dynamicCode:
+# SHA1 = a25f6bf266688079c452d1d88fd3dc60f3f12bf6
+
+SOURCE += codedFixedValueFvPatchFieldTemplate.C
+
+LIB = $(PWD)/../platforms/$(WM_OPTIONS)/lib/libparabolicMeanU1_a25f6bf266688079c452d1d88fd3dc60f3f12bf6

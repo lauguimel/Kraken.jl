@@ -1,0 +1,6 @@
+# dynamicCode:
+# SHA1 = ccad21d6668d9fa381cb7399be99f52b531ad32f
+
+SOURCE += codedFunctionObjectTemplate.C
+
+LIB = $(PWD)/../platforms/$(WM_OPTIONS)/lib/libXrTop_ccad21d6668d9fa381cb7399be99f52b531ad32f

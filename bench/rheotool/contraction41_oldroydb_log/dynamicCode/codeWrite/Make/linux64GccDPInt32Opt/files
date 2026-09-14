@@ -1,0 +1,6 @@
+# dynamicCode:
+# SHA1 = b90088fdf4a718dc84b608e9d00fa903ee9c02bf
+
+SOURCE += codedFunctionObjectTemplate.C
+
+LIB = $(PWD)/../platforms/$(WM_OPTIONS)/lib/libcodeWrite_b90088fdf4a718dc84b608e9d00fa903ee9c02bf

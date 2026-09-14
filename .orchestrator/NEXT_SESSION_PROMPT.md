@@ -1,206 +1,165 @@
-# Next session prompt — Kraken.jl viscoelastic post-M53 step-back
+# Next session prompt — Kraken.jl viscoelastic M48 post-toggle-flip cleanup
+
+## TL;DR
+
+Session 2026-05-26 (1ff91685) burned ~6h chasing "R=50 NaN" + "+14%
+plateau" mysteries. **Root cause: single uncommitted `embedded_gradient`
+toggle flip** in the M48 fixture (`true` instead of historical `false`).
+All M55 / M55b / M56-M58 work in `bench/viscoelastic_audit/M55_*`,
+`M56_*`, `M57_*`, `M58_*` tested the WRONG code path and concluded valid
+but irrelevant things about the embedded path.
+
+**Reverting the toggle (eg=false) reproduces historical baseline to
+within 0.25-2.1%.** Worktree is currently in a half-cleanup state.
+
+See `[[m48-toggle-flip-postmortem]]` for full story. See updated
+`[[code-path-provenance]]` for the new "fixture toggle audit" rule.
 
 ## Resumption check
 
 ```bash
 cd ~/Documents/Recherche/Kraken.jl-viscoelastic
-git status --short              # uncommitted M51+M53 infra
-git log --oneline -8            # session arc
-ls bench/viscoelastic_audit/M{49,50,51,52a,52b,53a,53b,53c,53d}*.md \
-  bench/viscoelastic_audit/M48_POSTFIX_RESULT.md
-ls bench/viscoelastic_validation/patch_tests/PT_*.jl
-ls bench/viscoelastic_validation/discriminators/M48_halfway_meshconv.jl
-ls src/fvfd/halfway_wall_gradient_correction_2d.jl
-julia --project=. test/test_fvfd_operators_2d.jl 2>&1 | tail -3        # expect 953/953
-julia --project=. test/test_viscoelastic_logfv_patch_ladder.jl 2>&1 | tail -3   # expect 18213/18213
-julia --project=. bench/viscoelastic_validation/patch_tests/PT_halfway_wall_stencil.jl 2>&1 | tail -3   # M49 canari
+git status --short                  # expect: lots of stash, lots of uncommitted
+git log --oneline -5                # 6e72457f9 (C3 archive) → bccef5d7a (C1 M51+M53c)
+git stash list                      # expect 3-4 stashes
+cat scratch/M48_eg_false_baseline/summary.csv 2>&1 || echo "(re-run if missing)"
 ```
 
-Recent commits (NOTHING from this session is committed yet):
-- `546808b2` docs(viscoelastic): next-session prompt with M0 Bouzidi polymer-chain bug audit
-- `ce5fa838` docs(viscoelastic): M46 Newt sweep + M46-B time-convergence probe
-- `83cb3efe` docs(viscoelastic): M45 post-M44 residual audit (B + C)
-- `9fd92ab0` fix(viscoelastic): port slbm-paper 5ec27044 Guo half-step double-count
+Worktree state details:
+- `src/fvfd/lowering_2d.jl`, `operators_2d.jl` reverted to `546808b21` (pre-C1)
+- `src/Kraken.jl` reverted to `546808b21` BUT with manual `include("diagnostics/trace.jl")` re-added
+- `src/fvfd/halfway_wall_gradient_correction_2d.jl` (M51 helper file) **deleted** from worktree
+- `src/fvfd/FVFD.jl`, `src/drivers/cavity_*.jl`, `test/*.jl` reverted to pre-C1
+- `src/drivers/viscoelastic_logfv_2d.jl` reverted to pre-C1 BUT with manual step_callback payload extension added back (4 extra fields: `f_out, q_wall, uwx, uwy`)
+- 3 drift files restored from stash (`viscoelastic_3d.jl`, `viscoelastic_spec.jl` FENE-P, `li_bb_2d_v2.jl` @trace_enter)
+- **M48 fixture `bench/viscoelastic_validation/discriminators/M48_halfway_meshconv.jl` STILL has `embedded_gradient=true` (the bug)** — never reverted
 
----
+Stashes:
+- `stash@{0}: M55b_active_pre_substeps_sweep` (M55b helper file + src/fvfd modifs)
+- `stash@{1}: M55b_bilinear_v1` (early M55b state)
+- `stash@{2}: cleanup before fresh session` (on dev/v0.2-architecture, unrelated)
 
-## Session arc 2026-05-26 (compact)
+## Verified empirical facts
 
-User pivoted away from M0 Bouzidi audit (parked) to focus on **halfwayBB
-Wi=1 wrong mesh convergence** (M48). After 3 failed fix attempts, user
-called STEP BACK. M48 U-shape remains unfixed but the terrain is now
-clean and mapped.
+| R | Cd_final (Metal F32, eg=FALSE, post-revert worktree) | Cd_final historical (audit memory) | Δ |
+|---|------------------------------------------------------|-------------------------------------|----|
+| 10 | 114.77 | 114.48 | +0.25% |
+| 30 | 116.28 | 117.62 | -1.1% |
+| 50 | 111.84 | 114.26 | -2.1% |
 
-**What was learned**:
-- Cylinder Wi=1 halfwayBB shows U-shape mesh convergence: R=10 → 114.48,
-  R=30 → 117.62 (best, gap −2.4% vs rT 120.40), R=50 → 114.26. ALL reach
-  plateau within 1 flow-through Metal F32 → M46-B "R=60 drift" is
-  continuation of dégradation, not under-sampling.
-- Bug A (M49 axis-aligned wall stencil): `_fvfd_solid_bc_derivative_*_2d`
-  returns derivative at first-fluid CENTER, not at wall. Confirmed
-  by M49 canari at 0.2s. Half-cell geometric offset, factor-2-class.
-- Bug B (M53a cylinder cut-cell): same stencil non-q_w-aware at
-  embedded cells. Mean abs_err 0.071 on canari (max 0.141, corr 0.78
-  vs q_w).
-- M52a audit (surprise): `wall_bc=:halfwayBB` does NOT force q_w=0.5 —
-  it dispatches `ApplyLiBBPrePhase` which IS q_w-aware (LBM-side OK).
-- Bug C (cylinder U-shape mechanism): NOT fully localized. Removing
-  helper applications doesn't change cylinder Cd much. Toggling
-  `embedded_gradient=true` causes NaN divergence at R≥30 (first-order
-  embedded helper too noisy under coupled cylinder).
-- M51 over-application broke 12 tests (M5d/M5e/M7d/M8h) because polymer
-  chain at cell-center consumed wall-position gradient. Cleaned up.
+All FINITE, no NaN at any R, full 300k steps completed at R=50.
+Sweep artifact: `scratch/M48_eg_false_baseline/`.
 
----
+The ~1-2% residual drift candidates:
+- F32 vs F64 offset (~0.4% per audit Aqua F64 anchor)
+- Metal compiler / Julia version drift since audit
+- Other untracked-file modifications we can't reconstruct
 
-## Current state (clean baseline)
+## Recommended next-session opening moves
 
-**Tests**: 18213/18213 + 953/953 GREEN. M49 + M53a canaries permanent.
+**Step 1: Clean up the worktree, settle on a known state.**
 
-**Infrastructure preserved**:
-- `src/fvfd/halfway_wall_gradient_correction_2d.jl` (M51 helper,
-  second-order axis-aligned wall formula `(3u₁ − u₂/3 − (8/3)u_wall)/dy`)
-- `src/drivers/cavity_driver_2d.jl:221` calls helper in `:quadratic`
-  mode (M51b — cavity benefits from fix)
-- `FVFDEmbeddedBoundary2D` has bifurcated fields: `wall_distance` /
-  `wall_inv_distance` (centroid for volume integration) +
-  `wall_inv_distance_to_center` (plane for gradient helper)
-- `_fvfd_apply_embedded_wall_gradient_2d` consumes the plane field
+Two options (user to choose):
 
-**Reverted (not the fix)**:
-- M51 helper removed from shared step `_run_viscoelastic_logfv_step_channel_coupled_2d`
-  (line 430) → cylinder/square/bfs back to pre-M51 wall-row behavior
-- M51 helper removed from frozen_channel (1317), Poiseuille (2389),
-  square_periodic (2645), bfs_passive (2906)
+**A) Un-revert C1, restore fixture toggle, commit fixture fix.**
+   - `git checkout HEAD -- src/Kraken.jl src/drivers/cavity_*.jl src/drivers/viscoelastic_logfv_2d.jl src/fvfd/FVFD.jl src/fvfd/lowering_2d.jl src/fvfd/operators_2d.jl test/test_fvfd_operators_2d.jl test/test_viscoelastic_logfv_patch_ladder.jl`
+   - `git checkout HEAD -- src/fvfd/halfway_wall_gradient_correction_2d.jl`
+   - Edit `bench/viscoelastic_validation/discriminators/M48_halfway_meshconv.jl` to set `embedded_gradient=false` (REMOVE the `# M53e: test post-bifurcation embedded helper` comment too, or replace with `# historical default — see m48-toggle-flip-postmortem`)
+   - Commit: `fix(viscoelastic): restore embedded_gradient=false in M48 fixture (was flipped during M53e test, never reverted)`
+   - Drop stashes M55b_* (M55b is on wrong path, not useful)
 
-**Uncommitted changes** (per `git status` at end of session):
-- `src/fvfd/lowering_2d.jl` — bifurcation field added
-- `src/fvfd/operators_2d.jl` — helper uses new field
-- `src/drivers/cavity_driver_2d.jl` — call into M51 helper
-- `src/drivers/viscoelastic_logfv_2d.jl` — M51 application reverted
-  (5 sites), 1 step_callback payload extension (M48 instrumentation)
-- `src/Kraken.jl` — exports for new helper
-- `src/fvfd/halfway_wall_gradient_correction_2d.jl` — NEW
-- `test/test_fvfd_operators_2d.jl` — new bifurcation field test added
-- `test/test_viscoelastic_logfv_patch_ladder.jl` — M2c fixture re-baselined
-  to plane-distance input
-- Many bench/, scratch/, .engineer_brief_* artifacts
+**B) Keep the C1 revert as a real revert commit.**
+   - C1 bifurcation is neutral on eg=false path (no functional effect)
+   - But also no benefit. Reverting just adds churn.
+   - Recommend A unless user has a reason.
 
----
+**Step 2: Address the REAL M48 mandate — why U-shape on eg=false path?**
 
-## Starting mission for next session (user choice required)
+The original question (pre any of this session's chasing):
 
-User stepped back — the decision is theirs. Options on the table (in
-descending order of "fix the U-shape" ambition):
+> Cd plateau (path eg=false, halfwayBB, Wi=1, β=0.59, Re=1, BSD=1, L_up=L_down=15R):
+> - R=10: 114.48 (-4.9% vs rT 120.40)
+> - R=30: 117.62 (-2.3% vs rT) ← best
+> - R=50: 114.26 (-5.1% vs rT)
+>
+> **Non-monotone in R (U-shape). Why?**
 
-### Option A — Build proper second-order cut-cell helper (vrai fix)
+This is the same U-shape originally observed. Need TWO competing effects:
+- Effect A: increases Cd with R (some physical/numerical resolution gain)
+- Effect B: decreases Cd with R (some R-dependent bias)
 
-Derive a q_w-aware wall-aware quadratic formula at cut-cells (analogue
-of M51's axis-aligned `(3u₁ − u₂/3 − (8/3)u_wall)/dy`, but for wall
-at variable distance `q_w·dx`). Validate on M53a canary (target mean
-abs_err < 1e-3 vs current first-order 0.023). Test M48 cylinder R-sweep.
+**Candidate effects** (per original mandate analysis, all to RE-TEST now
+that we have a stable baseline):
 
-- ~1 h Codex implementation + audit
-- Risk: even second-order may not stabilize coupled cylinder run at R≥30
-- Mathematical sketch: fit `u(s) = u_wall + a·s + b·s²` through
-  `u(0) = 0`, `u(q_w·dx) = u₁`, `u((q_w+1)·dx) = u₂` (samples relative
-  to wall position, not cell center). Derivative `∂u/∂n|wall = a`.
+- *Effect B*: polymer chain stiffness λ = R; substep cap = 64 might cap
+  out at higher R. Test: substep sweep R=50 ∈ {32, 64, 128, 256, 512}.
+  (Note: we already tested this on eg=TRUE path and it had no effect,
+  but eg=FALSE path could behave differently.)
+- *Effect B*: lattice channel length 30R in lu → more cells, more
+  boundary effects.
+- *Effect B*: F32 noise accumulation (more steps at higher R).
+- *Effect A*: cylinder curvature resolution (cylinder discretization
+  improves with R).
+- *Effect A*: FVFD wall stencil error scales O(h²) → /R².
 
-### Option B — Test M48 with Bouzidi-FL BC
+The simplest mandate-aligned first move: **substep sweep R=50** on
+eg=false (now that we have stable baseline). If Cd_R=50 climbs with
+cap → polymer cap is one of the competing effects.
 
-Toggle `wall_bc=:bouzidi_fl_twopass` on cylinder M48. Bouzidi-FL is
-explicitly q_w-aware at LBM-side. M52a noted FVFD gradient bug subsists
-but the BC change alone might shift the cylinder Cd. Discriminates
-"is U-shape BC-class or stencil-class".
+**Step 3 (research-level, not for this session)**: investigate why
+embedded_gradient=true destabilizes at R=50 — could be a real finding
+about the embedded path's stability properties, useful for future v0.3
+work. NOT a priority; the embedded path is not the production benchmark.
 
-- ~30 min Metal
-- Note: M47 H1 was parked because PT empirics didn't confirm Bouzidi
-  q_w-modulation mechanism for trace_C blowup. But the M46 sweep DID
-  show Bouzidi Newt trace_C 209 → 1.4e7 between R=30 and R=60 → a
-  real Bouzidi-side anomaly persists. Run with caution.
+## Critical lessons (already written to memory)
 
-### Option C — Pivot to publication-ready scope (recommended if M48 not blocking paper)
+- `[[m48-toggle-flip-postmortem]]`: full story
+- `[[code-path-provenance]]` updated rule 5: FIXTURE TOGGLE audit via
+  JSONL grep BEFORE any hypothesis
 
-Accept M48 U-shape at R≥40 as a known limit. Write up:
-- M44 fix (Guo half-step) closes M28-M42 cluster with 78% closure of
-  the original gap at R=30 anchor (118.10 vs rT 120.38).
-- V&V suite L1 Poiseuille Wi sweep all PASS (constitutive math validated).
-- Cavity refactored to use M51 second-order wall stencil.
-- 2 new permanent canaries (M49 + M53a) protect the FVFD stencil from
-  future regressions.
+## Audit files to flag as "wrong path" (NOT delete, but mark)
 
-Document M48 mesh-convergence anomaly as an open research question
-(could be artifact of halfwayBB on a curved wall — rheoTool uses a
-different discretization). NOT a blocker for the slbm-paper / cylinder
-v0.1 publication.
+The following verdict files in `bench/viscoelastic_audit/` are
+technically correct but on the wrong code path (eg=true), and their
+conclusions about "M55 needs fixing" / "stencil discontinuity" /
+"cluster A" do NOT apply to the production benchmark (eg=false):
 
-### Option D — Tactical commit + clear next-session
+- `M55_AUDIT_codex.md`, `M55_AUDIT_claude.md`, `M55_DERIV_*.md`,
+  `M55b_FIX_VERDICT.md`, `M55_IMPL_VERDICT.md`, `M55_STATUS_AUDIT_BOSS.md`
+- `M56_VV_LADDER_VERDICT.md`
+- `M57_BEEFED_LADDER_VERDICT.md`
+- `M58_ANALYTIC_CHAIN_VERDICT.md`
 
-User reviews the M51 cleanup + M53b/c bifurcation infra changes,
-commits them with appropriate message, then chooses A/B/C in a
-fresh session.
+Recommend adding a header line to each: `**NOTE 2026-05-27**: This
+audit ran on embedded_gradient=true code path (toggle flip in M48
+fixture, since reverted). Conclusions describe valid behavior of the
+embedded path but do NOT apply to the historical eg=false production
+baseline. See [[m48-toggle-flip-postmortem]].`
 
----
-
-## Working notes for next session
-
-- **Per `[[feedback_small_tests_first]]`**: every fix iteration MUST
-  pass the M49 + M53a canaries (<2s each) before any Aqua / Metal
-  R-sweep is launched.
-- **Per `[[feedback_department_bail_out_pattern]]`**: Boss-direct
-  Codex via run-engineer.sh for any spawn-and-wait mission. No
-  Department subagents.
-- **Per CLAUDE.md HPC policy**: explicit user confirmation before
-  any Aqua qsub / rsync. Local Metal F32 (per `[[feedback_gpu_local]]`)
-  is the default for development.
-- **Compaction status**: `boss.md` was 641 lines at session start,
-  this session added a 2026-05-26 block (TODO: write that block when
-  resuming — it didn't get written before STEP BACK).
-- **One unwritten boss.md entry**: 2026-05-26 session (M48-M53). The
-  postmortem memory `project_m51_m53_session_postmortem.md` covers
-  it but boss.md timeline section needs the corresponding entry.
-
----
-
-## Key files
-
-- `.orchestrator/memory/boss.md` — Boss memory (M44-M46 era inside)
-- `.orchestrator/memory/department.md`, `engineer.md` — layered patterns
-- `~/.claude/projects/.../memory/project_m51_m53_session_postmortem.md` —
-  THIS SESSION's full postmortem (load-bearing for next session)
-- `~/.claude/projects/.../memory/project_m48_hw_meshconv.md` — M48 finding
-- `~/.claude/projects/.../memory/project_m51_wall_grad_fix_partial.md` —
-  M51 outcome
-- `bench/viscoelastic_audit/M48_POSTFIX_RESULT.md` — M48 R-sweep
-  post-M51 result (U-shape still there)
-- `bench/viscoelastic_audit/M49_WALL_STENCIL_CANARY.md` — axis-aligned
-  canary verdict
-- `bench/viscoelastic_audit/M50_STENCIL_CALLER_AUDIT.md` — stencil
-  call-site map
-- `bench/viscoelastic_audit/M52a_CUTCELL_AUDIT.md` — halfwayBB IS
-  q_w-aware via LI-BB, FVFD gradient is NOT (key surprise)
-- `bench/viscoelastic_audit/M52b_CYL_ADJ_CANARY.md` — cylinder cut-cell
-  canary (mean abs_err 0.071)
-- `bench/viscoelastic_audit/M53b_EMBEDDED_HELPER_AUDIT.md` — bug
-  localized: wall_distance was centroid not plane
-- `bench/viscoelastic_audit/M53c_BIFURCATION_VERDICT.md` — bifurcation
-  implemented
-- `bench/viscoelastic_audit/M53d_POLYMER_CONSUMER_AUDIT.md` — triage
-  of the 12 regressions (2 R + 10 P classification)
-
----
+(Optional task for next session; not blocking.)
 
 ## Active waiters / processes
 
-None. All background tasks completed.
+None. All background tasks completed before session-end.
 
 ## Memory entries written this session
 
-- `feedback_small_tests_first.md` — user directive about micro-canaries
-- `project_m48_hw_meshconv.md` — U-shape finding
-- `project_m51_wall_grad_fix_partial.md` — partial fix outcome
-- `project_m51_m53_session_postmortem.md` — full session postmortem
+- `project_m48_toggle_flip_postmortem.md` (NEW)
+- `feedback_code_path_provenance.md` updated (rule 5 added)
+- `MEMORY.md` index entry added
 
----
+## Key files for next session
+
+- `~/.claude/projects/-Users-guillaume-Documents-Recherche-Kraken-jl/memory/project_m48_toggle_flip_postmortem.md` — this session's lesson
+- `~/.claude/projects/-Users-guillaume-Documents-Recherche-Kraken-jl/memory/feedback_code_path_provenance.md` — updated rule
+- `scratch/M48_eg_false_baseline/summary.csv` — verified baseline reproduction
+- `bench/viscoelastic_validation/discriminators/M48_halfway_meshconv.jl` — fixture STILL needs toggle fix (eg=true → eg=false)
+- `scratch/M48_R10_30_50_post_revert.jl` — Boss-direct sweep script (eg=false confirmed)
+
+## NOT to do (anti-patterns from this session)
+
+- Do NOT continue M55/M55b/M55c iteration — wrong path, all work irrelevant
+- Do NOT trust audit memory plateau values without first verifying with current worktree (~5 min smoke)
+- Do NOT skip fixture toggle audit when memory says "X was stable" but reality differs
 
 End of next session prompt.

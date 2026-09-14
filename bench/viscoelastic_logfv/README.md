@@ -88,11 +88,16 @@ the first observed non-finite field, and records `completed_steps` plus
 `first_nonfinite_step/field/i/j` in the CSV. Leave it at the default `0` for
 production timing runs.
 
-`KRAKEN_FORCE_BOUNDARY_FILL=nearest` is the default for the open-x log-FV
-coupled driver. It copies the Guo force field on domain boundary cells from the
-nearest interior cell before adding any constant body force, matching the
-Poiseuille coupled path and avoiding stale corner force values. Use `none` only
-for defect-isolation audits.
+`KRAKEN_FORCE_BOUNDARY_FILL=bc_aware` is the default for the open-x log-FV
+coupled driver. It applies the domain boundary conditions directly when forming
+the polymer force chain. The older `nearest` fill remains available only for
+defect-isolation audits.
+
+`KRAKEN_LOGFV_EMBEDDED_GRADIENT=0` is the production default while the FVFD
+cut-cell migration is incomplete. Setting it to `1` injects the lowered
+`q_wall` geometry into the velocity-gradient source term only. That mode is
+diagnostic, because advection, stress divergence, BSD correction, volume
+weighting, and drag are not yet using the same embedded FV geometry.
 
 `KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT` controls the `:auto`
 `polymer_substeps` memory-time criterion:
@@ -139,4 +144,103 @@ KRAKEN_R_LIST=35 KRAKEN_WI_LIST=0.5 KRAKEN_RUN_NEWTONIAN=0 \
   KRAKEN_SCALE_STEPS_WITH_R=0 KRAKEN_STEPS=272222 \
   KRAKEN_MAX_MEMORY_DEFORMATION_INCREMENT=0.07 \
   qsub bench/viscoelastic_logfv/run_cylinder_cd_convergence_a100.pbs
+```
+
+Field dumps produced by `KRAKEN_SAVE_FIELDS=1` can be inspected with:
+
+```bash
+julia --project=. bench/viscoelastic_logfv/analyze_logfv_field_dump.jl \
+  results/viscoelastic_logfv/<run>/fields/<case>/fields.jls
+
+julia --project=. bench/viscoelastic_logfv/analyze_logfv_gradient_dump.jl \
+  results/viscoelastic_logfv/<run>/fields/<case>/fields.jls
+```
+
+The first script reports non-finite counts, extrema, and distance to the
+cylinder wall. The second recomputes regular vs embedded velocity-gradient
+statistics on a saved dump.
+
+## Simple Log-FV Validation Outputs
+
+`run_simple_validation_outputs.jl` is the gate before RheoTool macro-flow
+comparisons. It runs four short controlled cases and writes ParaView-ready
+snapshots plus a summary CSV:
+
+- coupled Poiseuille channel;
+- periodic square obstacle;
+- open-x square-obstacle channel;
+- open-x backward-facing-step coupled flow.
+
+Each case saves `rho`, `ux`, `uy`, `speed`, `Psi`, reconstructed `C`,
+reconstructed or native `tau`, polymer/total forces, and `is_solid` to VTK.
+
+Local CPU:
+
+```bash
+julia --project=. bench/viscoelastic_logfv/run_simple_validation_outputs.jl
+```
+
+Local Metal:
+
+```bash
+KRAKEN_BACKEND=metal julia --project=. \
+  bench/viscoelastic_logfv/run_simple_validation_outputs.jl
+```
+
+Override output location with `KRAKEN_OUTPUT_DIR=/path/to/output`. RheoTool
+cylinder convergence should only be interpreted after these simple cases pass.
+
+Build the static HTML dashboard for the latest or a selected output directory:
+
+```bash
+python3 bench/viscoelastic_logfv/make_simple_validation_dashboard.py \
+  tmp/logfv_simple_validation_outputs/<run-id>
+```
+
+The dashboard shows `|u|`, `rho`, the grid/solid mask, and the Poiseuille
+centerline profile against the analytical channel solution. If an OpenFOAM
+case is available, an additional mesh/velocity panel can be added through
+`fluidfoam`:
+
+```bash
+python3 bench/viscoelastic_logfv/make_simple_validation_dashboard.py \
+  tmp/logfv_simple_validation_outputs/<run-id> \
+  --foam-case /path/to/openfoam/case --foam-time latestTime
+```
+
+After an Aqua run, sync the latest `simple_validation_*` directory and build
+the dashboard locally:
+
+```bash
+bash bench/viscoelastic_logfv/sync_simple_validation_from_aqua.sh
+```
+
+## Quantitative Frozen-Flow Ladder
+
+Before interpreting RheoTool cylinder convergence, run the quantitative
+frozen-channel CDE gate:
+
+```bash
+julia --project=. bench/viscoelastic_logfv/run_quantitative_simple_ladder.jl
+```
+
+It writes `summary.csv`, per-case profile CSVs, and `dashboard.html` under
+`tmp/logfv_quantitative_simple_ladder/<run-id>`. The cases replay analytical
+Couette and Poiseuille velocity fields through the production FVFD/log-FV
+operator path without LBM feedback:
+
+```text
+frozen u -> FVFD face velocities -> FVFD advection -> log-C source
+         -> tau_p -> div(tau_p) + BSD diagnostics
+```
+
+Useful overrides:
+
+```bash
+KRAKEN_BACKEND=metal julia --project=. \
+  bench/viscoelastic_logfv/run_quantitative_simple_ladder.jl
+
+KRAKEN_SIMPLE_LADDER_NY=16,32,64 \
+KRAKEN_SIMPLE_LADDER_SUBSTEPS=128 \
+julia --project=. bench/viscoelastic_logfv/run_quantitative_simple_ladder.jl
 ```

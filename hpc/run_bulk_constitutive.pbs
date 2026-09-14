@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -N krk_bulk_const
+#PBS -l select=1:ncpus=8:ngpus=1:mem=24GB:gpu_id=H100
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+export KRAKEN_BULK_CASES="${KRAKEN_BULK_CASES:-shear,elongation,poiseuille}"
+export KRAKEN_MODELS="${KRAKEN_MODELS:-direct,logconf}"
+export KRAKEN_WI_LIST="${KRAKEN_WI_LIST:-0.05,0.1,0.2}"
+export KRAKEN_NX="${KRAKEN_NX:-24}"
+export KRAKEN_NY="${KRAKEN_NY:-32}"
+export KRAKEN_LAMBDA="${KRAKEN_LAMBDA:-10.0}"
+export KRAKEN_TAU_PLUS="${KRAKEN_TAU_PLUS:-1.0}"
+export KRAKEN_MAGIC="${KRAKEN_MAGIC:-1e-6}"
+export KRAKEN_STEPS="${KRAKEN_STEPS:-2000}"
+export KRAKEN_BULK_SKIP="${KRAKEN_BULK_SKIP:-2}"
+export KRAKEN_BULK_RTOL="${KRAKEN_BULK_RTOL:-0.02}"
+export KRAKEN_RESULTS_DIR="${KRAKEN_RESULTS_DIR:-results/bulk_constitutive_${PBS_JOBID:-local}}"
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p results
+echo "=== Bulk constitutive checks at $(date) ==="
+julia --project=. hpc/bulk_constitutive.jl 2>&1 \
+    | tee "results/bulk_constitutive_${PBS_JOBID:-local}.txt"
+echo "=== Done at $(date) ==="

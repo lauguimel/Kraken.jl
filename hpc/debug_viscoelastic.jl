@@ -138,6 +138,7 @@ function test4_viscoelastic_cylinder()
                 polymer_model=model, polymer_bc=CNEBB(),
                 inlet=:parabolic, tau_plus=1.0,
                 max_steps=200_000, avg_window=40_000,
+                allow_diagnostic_log_wall_bc=uses_log_conformation(model),
                 backend=backend, FT=FT)
 
         # The driver reports Re = u_ref·D/ν_total (Re based on D).

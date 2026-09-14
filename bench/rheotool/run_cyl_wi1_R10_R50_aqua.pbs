@@ -1,0 +1,109 @@
+#!/bin/bash -l
+#PBS -N rT_cyl_R10R50
+#PBS -l select=12:ncpus=1:mpiprocs=1:mem=4GB
+#PBS -l place=pack:group=vnode
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -m ae
+#PBS -V
+
+# M60-rT — rheoTool cylinder Wi=1, beta=0.59, Oldroyd-B at TWO mesh resolutions
+# to compare against Kraken-R=10 and Kraken-R=50 (Aqua F64 CUDA). Resolves the
+# U-shape question (Cd(R=10)=114.53, Cd(R=30)=118.10, Cd(R=50)=115.75).
+#
+# Cases (relative to repo root, copied to $PBS_O_WORKDIR which IS that repo on Aqua):
+#   - cylinder_wi1.0_R10_shrunk15R  : 3342 cells post-mirror, 31 cyl-arc cells per 180deg, ~Kraken R=10
+#   - cylinder_wi1.0_R50_shrunk15R  : 21692 cells post-mirror, 200 cyl-arc cells per 180deg, ~Kraken R=64
+#
+# Physics (identical to cylinder_wi1.0_shrunk15R baseline that reached Cd=120.38 at t=20):
+#   rho=1, eta_s=0.59, eta_p=0.41, lambda=1.0, Oldroyd-BLog (log-conformation),
+#   deltaT=1e-2, endTime=20, blockage D/H=0.5, domain [-15R, 15R] x [-2, 2] mirrored.
+#
+# Aqua infrastructure: uses OF9_RT.sh wrapper (in PATH) -> Apptainer sandbox
+#   /scratch/$USER/openfoam9-sandbox (rheoTool v1.4 atop OpenFOAM-9 / DPInt32Opt).
+#
+# Job layout: 12 MPI ranks via select=12:ncpus=1:mpiprocs=1 packed on one vnode group
+#   (matches existing thermalBC_*/run.pbs pattern, scaled from 6 -> 12 procs).
+#
+# Expected wall: per user heuristic "rT on Aqua 12 cores = mins":
+#   R10  : 5-15 min (small mesh)
+#   R50  : 30-90 min (large mesh, dominant)
+# Total: well under 6h walltime, comfortable margin for the log-conformation
+# convergence transient (endTime=20 s flow time).
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+# Sanity checks
+which OF9_RT.sh
+which apptainer || which singularity
+ls /scratch/$USER/openfoam9-sandbox/opt/openfoam9 > /dev/null
+
+NCORES=12
+CASES_ROOT="bench/rheotool"
+RESULTS_ROOT="${KRAKEN_RHEOTOOL_RESULTS:-results/rheotool/cyl_R10_R50_${PBS_JOBID:-manual}}"
+mkdir -p "$RESULTS_ROOT"
+echo "=== rheoTool R10/R50 cylinder Wi=1 start $(date) ==="
+echo "Results dir: $RESULTS_ROOT  |  Cores: $NCORES"
+
+run_one() {
+    local case_name="$1"
+    local src_dir="$CASES_ROOT/$case_name"
+    [ -d "$src_dir" ] || { echo "ERROR: $src_dir not found"; return 1; }
+
+    local dest="$RESULTS_ROOT/$case_name"
+    echo "---"
+    echo "$(date) | Starting $case_name -> $dest"
+    rm -rf "$dest"
+    cp -r "$src_dir" "$dest"
+
+    local abs_dest
+    abs_dest=$(cd "$dest" && pwd)
+
+    # Clean stale time/log/processor artifacts (keep 0/, system/, constant/)
+    (
+        cd "$abs_dest"
+        rm -rf 0.* 1.* 2.* 3.* 4.* 5.* 6.* 7.* 8.* 9.* 10 15 20 processor* dynamicCode Cd.txt
+        rm -f log.* constant/polyMesh/* 2>/dev/null || true
+    )
+
+    # Drive everything inside the Apptainer container via OF9_RT.sh.
+    # The wrapper sources OpenFOAM-9 + rheoTool bashrc and runs the quoted command.
+    #
+    # IMPORTANT (M60b fix): OF9_RT.sh's -d flag is misleading — it sets MOUNT_DIR
+    # but the underlying `apptainer exec` is invoked WITHOUT any `-B` flag, so no
+    # bind mount actually happens; the container's /data is a read-only stub.
+    # Working reference jobs (~/rheotool/thermalBC_*/run.pbs) instead `cd` to
+    # the absolute $HOME path, which Apptainer auto-mounts read-write. We do the
+    # same here, using "$abs_dest" (under $HOME via /mnt/hpccs01/home/...).
+    OF9_RT.sh -- "
+        cd '$abs_dest' && \
+        blockMesh > log.blockMesh 2>&1 && \
+        mirrorMesh -noFunctionObjects -overwrite > log.mirrorMesh 2>&1 && \
+        checkMesh -allTopology > log.checkMesh 2>&1 && \
+        decomposePar -force > log.decomposePar 2>&1 && \
+        mpirun -np $NCORES rheoFoam -parallel > log.rheoFoam 2>&1 && \
+        reconstructPar -latestTime > log.reconstructPar 2>&1 && \
+        touch valid_run \
+    "
+
+    # Cache Cd.txt summary back into RESULTS_ROOT for easy retrieval
+    if [ -f "$abs_dest/Cd.txt" ]; then
+        echo "Cd.txt tail for $case_name:"
+        tail -10 "$abs_dest/Cd.txt"
+        cp "$abs_dest/Cd.txt" "$RESULTS_ROOT/${case_name}_Cd.txt"
+    fi
+    if [ -f "$abs_dest/log.checkMesh" ]; then
+        grep -E "(cells:|cylinder |Mesh non-ortho|Max skewness|Mesh OK)" "$abs_dest/log.checkMesh" \
+            | tee "$RESULTS_ROOT/${case_name}_mesh.txt"
+    fi
+
+    echo "$(date) | $case_name done"
+}
+
+run_one "cylinder_wi1.0_R10_shrunk15R"
+run_one "cylinder_wi1.0_R50_shrunk15R"
+
+echo "=== rheoTool R10/R50 DONE $(date) ==="
+ls -la "$RESULTS_ROOT" | head -20

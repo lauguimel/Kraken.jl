@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -N krk_step_newt
+#PBS -l select=1:ncpus=8:ngpus=1:mem=48GB:gpu_id=H100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+export KRAKEN_NEWTONIAN=1
+export KRAKEN_GEOMETRIES="${KRAKEN_GEOMETRIES:-contraction,bfs}"
+export KRAKEN_HOUT="${KRAKEN_HOUT:-20}"
+export KRAKEN_CONTRACTION_RATIO="${KRAKEN_CONTRACTION_RATIO:-4}"
+export KRAKEN_L_UP="${KRAKEN_L_UP:-8}"
+export KRAKEN_L_DOWN="${KRAKEN_L_DOWN:-24}"
+export KRAKEN_BFS_HIN="${KRAKEN_BFS_HIN:-${KRAKEN_HOUT}}"
+export KRAKEN_BFS_EXPANSION_RATIO="${KRAKEN_BFS_EXPANSION_RATIO:-2}"
+export KRAKEN_BFS_L_UP="${KRAKEN_BFS_L_UP:-${KRAKEN_L_UP}}"
+export KRAKEN_BFS_L_DOWN="${KRAKEN_BFS_L_DOWN:-${KRAKEN_L_DOWN}}"
+export KRAKEN_U_REF_MEAN="${KRAKEN_U_REF_MEAN:-0.005}"
+export KRAKEN_RE="${KRAKEN_RE:-1.0}"
+export KRAKEN_STEPS_PER_H="${KRAKEN_STEPS_PER_H:-1000}"
+export KRAKEN_AVG_DIVISOR="${KRAKEN_AVG_DIVISOR:-5}"
+export KRAKEN_RESULTS_DIR="${KRAKEN_RESULTS_DIR:-results/step_newtonian_${PBS_JOBID:-local}}"
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p results
+echo "=== Newtonian step-channel isolation at $(date) ==="
+julia --project=. hpc/contraction_step_isolation.jl 2>&1 \
+    | tee "results/step_newtonian_${PBS_JOBID:-local}.txt"
+echo "=== Done at $(date) ==="

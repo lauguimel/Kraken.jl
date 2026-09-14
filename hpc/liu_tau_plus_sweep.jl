@@ -52,6 +52,7 @@ for τp in [0.6, 1.0, 2.0, 5.0]
                 polymer_model=model, polymer_bc=CNEBB(),
                 inlet=:parabolic, ρ_out=1.0, tau_plus=τp,
                 max_steps=max_steps, avg_window=avg_window,
+                allow_diagnostic_conformation_collision=true,
                 backend=backend, FT=FT)
         catch e
             (Cd = NaN, Wi = Wi)

@@ -5,6 +5,8 @@
 #PBS -j oe
 #PBS -m ae
 
+set -euo pipefail
+
 cd $PBS_O_WORKDIR
 
 export PATH="$HOME/.juliaup/bin:$PATH"
@@ -18,6 +20,7 @@ julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompil
 echo "=== Liu cylinder benchmark at $(date) ==="
 mkdir -p results
 
-julia --project=. hpc/liu_cylinder_benchmark.jl 2>&1 | tee results/liu_cylinder_benchmark.txt
+result_log="results/liu_cylinder_benchmark_${PBS_JOBID:-manual}.txt"
+julia --project=. hpc/liu_cylinder_benchmark.jl 2>&1 | tee "$result_log"
 
 echo "=== Done at $(date) ==="

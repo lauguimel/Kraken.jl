@@ -1,0 +1,40 @@
+#!/bin/bash -l
+#PBS -N krk_low_mach_visco
+#PBS -l select=1:ncpus=8:ngpus=1:mem=48GB:gpu_id=H100
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="${KRAKEN_BACKEND:-cuda}"
+export KRAKEN_R_LIST="${KRAKEN_R_LIST:-20,30,40}"
+export KRAKEN_FORMULATIONS="${KRAKEN_FORMULATIONS:-newtonian,direct}"
+export KRAKEN_U_MEAN="${KRAKEN_U_MEAN:-0.005}"
+export KRAKEN_BETA="${KRAKEN_BETA:-0.59}"
+export KRAKEN_WI="${KRAKEN_WI:-0.1}"
+export KRAKEN_STEPS_PER_R="${KRAKEN_STEPS_PER_R:-4000}"
+export KRAKEN_AVG_DIVISOR="${KRAKEN_AVG_DIVISOR:-10}"
+export KRAKEN_DRAG_STRIDE="${KRAKEN_DRAG_STRIDE:-200}"
+export KRAKEN_DRAG_MODE="${KRAKEN_DRAG_MODE:-post_source_mea}"
+export KRAKEN_HERMITE_SOURCE_MODE="${KRAKEN_HERMITE_SOURCE_MODE:-liu_direct}"
+export KRAKEN_SOLVENT_SOURCE_MODE="${KRAKEN_SOLVENT_SOURCE_MODE:-post_collision}"
+export KRAKEN_CONFORMATION_MAGIC="${KRAKEN_CONFORMATION_MAGIC:-1e-6}"
+export KRAKEN_MOMENTUM_EXCHANGE_MODE="${KRAKEN_MOMENTUM_EXCHANGE_MODE:-mei_reconstruct}"
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p results
+echo "=== Low-Mach visco validation at $(date) ==="
+julia --project=. hpc/low_mach_visco_validation.jl 2>&1 \
+    | tee results/low_mach_visco_validation.txt
+echo "=== Done at $(date) ==="

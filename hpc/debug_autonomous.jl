@@ -148,6 +148,7 @@ for (label, model) in [("direct", OldroydB(G=ν_p/λ, λ=λ)),
             polymer_model=model, polymer_bc=CNEBB(),
             inlet=:parabolic, tau_plus=1.0,
             max_steps=steps, avg_window=steps÷5,
+            allow_diagnostic_log_wall_bc=uses_log_conformation(model),
             backend=backend, FT=FT)
     @printf("%-10s Cd_VE=%.3f  ratio=%.4f\n", label, r.Cd, r.Cd/cN)
 end

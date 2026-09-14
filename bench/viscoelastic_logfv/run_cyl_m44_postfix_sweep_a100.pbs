@@ -1,0 +1,95 @@
+#!/bin/bash -l
+#PBS -N M44_POSTFIX_SWEEP
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -m ae
+
+# M44 post-fix validation sweep across (R, Wi, beta).
+#
+# Goal: confirm the Guo half-step fix (commit 9fd92ab0, src/kernels/
+# logconformation_fv_2d.jl:1047-1048 + src/kernels/macroscopic.jl:71-72)
+# transfers cleanly across the cylinder benchmark design envelope.
+# The M44 confirmation (job 21825614) anchored one point (R=30 Wi=1.0
+# beta=0.59, Cd=118.10, 78% closure of M28-M42 gap). This sweep extends
+# to 48 cases.
+#
+# Matrix (4 R × 4 Wi × 3 beta = 48 cases):
+#   R    ∈ {30, 40, 50, 60}            (mesh convergence)
+#   Wi   ∈ {0.1, 0.3, 0.5, 1.0}        (elastic stress range)
+#   beta ∈ {0.59, 0.80, 0.90}          (polymer fraction)
+#
+# Fixed: Re=1, bsd=1.0, muscl_superbee, halfwayBB, qwall,
+#        L_up=L_down=15R, max_steps=100000, F64 A100. Setup matches
+#        M29b production + M44 sanity.
+#
+# Cost: ~2.5h compute estimate (R=30 90s, R=40 150s, R=50 210s,
+#       R=60 300s, × 12 cases each = 9120 s) + Julia precompile.
+#       Walltime ceiling 4h with margin.
+#
+# Acceptance gates (Boss-side post-rsync):
+#   - Sanity: R=30 Wi=1.0 beta=0.59 reproduces Cd ≈ 118.10 (M44 anchor).
+#     Tolerance ±0.5. Deviation > 0.5 → environment regression, abort.
+#   - Mesh convergence at Wi=0.1: |Cd(R) − Cd(R+10)| / Cd(R) monotone
+#     decrease (M22+M23 anti-convergence should disappear post-fix).
+#   - R=60 Wi=0.1 beta=0.59: NaN-free (M42 G5 v3 was NaN pre-fix).
+#   - R=60 Wi=1.0 beta=0.59: NaN-free or YELLOW; pre-fix all-NaN, but
+#     velocity bias was likely the trigger. Stability post-fix = strong
+#     confirmation.
+#   - beta scaling: Cd(beta=0.9, Wi=0.1) should be closer to Newtonian
+#     limit Cd ≈ 132 than Cd(beta=0.59, Wi=0.1).
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+export KRAKEN_FT="float64"
+
+# Sweep matrix.
+export KRAKEN_BETA_LIST="0.59,0.80,0.90"
+export KRAKEN_WI_LIST="0.1,0.3,0.5,1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_R_LIST="30,40,50,60"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+
+# M29b production scheme + halfwayBB.
+export KRAKEN_ADVECTION_SCHEME="muscl_superbee"
+export KRAKEN_WALL_BC="halfwayBB"
+
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_MAX_STEPS_BASE="100000"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+export KRAKEN_OUTPUT_DIR="${KRAKEN_OUTPUT_DIR:-tmp/m44_postfix_sweep/${PBS_JOBID:-manual}}"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+echo "=== M44 post-fix sweep starting at $(date) ==="
+echo "Matrix: R ∈ {30, 40, 50, 60} × Wi ∈ {0.1, 0.3, 0.5, 1.0} × beta ∈ {0.59, 0.80, 0.90} = 48 cases"
+echo "Fixed: Re=1, bsd=1.0, muscl_superbee, halfwayBB, qwall, L_up=L_down=15R, 100k steps F64"
+echo "Anchor expected: R=30 Wi=1.0 beta=0.59 → Cd ≈ 118.10"
+echo "Output dir: $KRAKEN_OUTPUT_DIR"
+
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== M44 post-fix sweep done at $(date) ==="
+ls -la "$KRAKEN_OUTPUT_DIR"

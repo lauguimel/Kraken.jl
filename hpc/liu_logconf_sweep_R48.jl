@@ -51,7 +51,9 @@ for Wi in [0.1, 0.5, 1.0]
     t0 = time()
     r_d = try run_conformation_cylinder_libb_2d(; common..., polymer_model=m_direct)
           catch; (; Cd=NaN) end
-    r_l = try run_conformation_cylinder_libb_2d(; common..., polymer_model=m_logc)
+    r_l = try run_conformation_cylinder_libb_2d(;
+              common..., polymer_model=m_logc,
+              allow_diagnostic_log_wall_bc=true)
           catch; (; Cd=NaN) end
     dt = time() - t0
 

@@ -1,0 +1,1132 @@
+Computers and Fluids 208 (2020) 104638
+
+Contents lists available at ScienceDirect
+
+Computers and Fluids
+journal homepage: www.elsevier.com/locate/compfluid
+
+Modiﬁed curved boundary scheme for two-phase lattice Boltzmann
+simulations
+Y. Yu, Q. Li∗, Z.X. Wen
+School of Energy Science and Engineering, Central South University, Changsha 410083, China
+
+a r t i c l e
+
+i n f o
+
+Article history:
+Received 7 December 2019
+Revised 19 June 2020
+Accepted 22 June 2020
+Available online 24 June 2020
+Keywords:
+Lattice Boltzmann model
+Curved boundary
+Mass leakage
+Two-phase
+
+a b s t r a c t
+The lattice Boltzmann (LB) method has gained much success in a variety of ﬁelds involving ﬂuid ﬂow
+and/or heat transfer. In this method, the bounce-back scheme is a popular technique for the treatment of
+nonslip boundaries. However, this scheme leads to a staircase representation of curved walls. Therefore
+many curved boundary schemes have been proposed, but mostly have detrimental effects such as mass
+leakage. Several correction schemes have been suggested for simulating single-phase ﬂows, but very few
+discussions or studies have been made for two-phase LB simulations with curved boundaries. In this paper, the performances of three well-known schemes for dealing with curved boundaries in two-phase
+LB simulations are investigated through modeling a droplet resting on a circular cylinder. For all of the
+investigated schemes, the results show that the simulated droplet rapidly “evaporates” under the nonslip
+and isothermal condition, owing to the imbalance between the mass streamed out of the system by outgoing distribution functions and the mass streamed into the system by incoming distribution functions at
+each boundary node. Based on the numerical investigation, we formulate two modiﬁed mass-conservative
+curved boundary schemes for two-phase LB simulations. The accuracy of the modiﬁed curved boundary
+schemes and their capability of conserving mass in two-phase LB simulations are numerically demonstrated.
+© 2020 Elsevier Ltd. All rights reserved.
+
+1. Introduction
+In the past three decades, the lattice Boltzmann (LB) method
+[1-5] has been developed into an eﬃcient and powerful numerical approach for simulating ﬂuid ﬂow and heat transfer. Compared
+with conventional numerical methods, the LB method has some
+major advantages [6]. For example, in the LB equation the convective operator (the streaming process) is linear, while the convective terms of the Navier-Stokes equations are nonlinear. Moreover,
+the ﬂuid pressure and the strain tensor are available locally in the
+LB method, while in conventional numerical methods the pressure
+ﬁeld is usually obtained by solving the Poisson equation and the
+strain tensor is evaluated non-locally. Furthermore, the LB method
+is easy to parallelize because of its explicit algorithm and local interactions .
+Unlike conventional numerical methods, which usually specify
+the macroscopic variables such as ρ and u at the boundaries, the
+LB method applies the boundary condition to the particle distribution function, giving more degrees of freedom [7] than the set of
+macroscopic variables. The oldest and simplest boundary scheme
+∗
+
+Corresponding author.
+E-mail address: qingli@csu.edu.cn (Q. Li).
+
+https://doi.org/10.1016/j.compﬂuid.2020.104638
+0045-7930/© 2020 Elsevier Ltd. All rights reserved.
+
+in the LB community is the bounce-back scheme [8], whose concept was adopted from lattice gas models [9]. The bounce-back
+scheme can be classiﬁed into two strategies. In the ﬁrst strategy,
+which is called the fullway or standard bounce-back scheme, particles are considered to travel the complete link path from a ﬂuid
+node to a solid node, where the particle velocity is inverted at the
+collision step [7], while in the second strategy, called the halfway
+bounce-back scheme [8], the particles are considered to travel only
+half of the link distance before hitting the solid wall.
+The bounce-back scheme is usually applicable to straight walls
+and it leads to a staircase representation of curved walls. Using a
+staircase approximation, the ﬁdelity of real geometry is lost and
+additional errors may be introduced [10]. To improve the accuracy of LB simulations involving curved boundaries, various curved
+boundary schemes have been developed. The ﬁrst attempt which
+considers the accurate shape of a curved solid wall was made by
+Filippova and Hanel [11]. The basic idea of their scheme is to create ghost nodes inside the solid and then apply a linear interpolation to determine the unknown distribution functions of a boundary node. However, this scheme suffers from numerical instability when the boundary node is close to the solid wall and the relaxation time is close to 1. Later, Mei et al. [12] proposed an improved curved boundary scheme based on the work of Filippova
+
+2
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+and Hanel, which considerably enhances the numerical stability.
+These two schemes have been demonstrated to be of second-order
+accuracy.
+Subsequently, Bouzidi et al. [13] devised a curved boundary
+scheme that does not require an interpolation from a ghost node
+inside the solid. The motivation of their scheme is to interpolate
+the distribution functions in the interior ﬂuid region and to include additional information about the wall location during the
+bounce-back process. Nevertheless, they employed separate treatments for different regions. In order to avoid discontinuity in the
+boundary treatment, Yu et al. [14] developed a uniﬁed scheme of
+Bouzidi et al.’s algorithm. These boundary treatments are known
+as the interpolated bounce-back scheme and maintain the secondorder accuracy of the LB method. However, it introduces viscosity dependent slip at the boundary. To address this issue, Ginzburg
+and d’Humières [15] proposed a multi-reﬂection boundary scheme,
+which can be viewed as an enhanced interpolated bounce-back
+scheme. The main feature of their scheme is that it determines
+the coeﬃcients of interpolation through a second-order ChapmanEnskog expansion of the interpolated distribution functions [7].
+Another type of curved boundary scheme involves only a single lattice node and is free of interpolation, which is often called
+“one-point” or “single-node” boundary scheme. The advantage of
+this type of boundary scheme is its local computations. The ﬁrst
+one-point curved boundary scheme was proposed by Junk and
+Yang [16]. Nevertheless, their scheme needs to compute the inverse of a matrix at each boundary node. Recently, Zhao and Yong
+[17] devised an alternative single-node boundary scheme. They
+considered a linear combination of the pre-collision and equilibrium distribution functions at the ﬂuid boundary node and introduced ﬁve parameters, which were determined by the Maxwell iteration. Moreover, Tao et al. [18] recently developed a single-node
+curved boundary scheme for LB simulations of suspended particles.
+Some other developments of the boundary schemes for LB simulations involving curved walls can be found in a recent book written
+by Krüger et al. [7].
+Although various curved boundary schemes have been developed, they mostly suffer from the violation of mass conservation [7], i.e., there exists mass leakage at every time step during the LB simulations. To enhance mass conservation, several improved curved boundary schemes have been proposed. Kao and
+Yang [19] presented an interpolation-free boundary scheme to improve the mass conservation of the boundary condition. Bao et al.
+[20] devised an improved version of Mei et al.’s [12] boundary
+scheme by redeﬁning the density term in the equilibrium distribution function of ghost nodes in solid. In addition, Le Coupanec and
+Verschaeve [21] developed a mass-conservative boundary scheme
+for LB simulations with tangentially moving walls. Recently, Sanjeevi et al. [10] found that the interpolation-free boundary scheme
+proposed by Kao and Yang [19] still causes mass leakage.
+The aforementioned studies are devoted to single-phase ﬂows.
+In fact, since the emergence of the LB method, its application to
+multiphase ﬂows has always been a very important theme. Many
+multiphase LB models have been proposed in the literature, such
+as the pseudopotential model [22-25], the color-gradient model
+[26-29], the free-energy model [30-33], and the phase-ﬁeld model
+[34-37]. Among these models, the pseudopotential model is the
+simplest one, in which the phase separation between different
+phases emerges automatically as a result of particle interactions
+[22,23], without resorting to any technique to track or capture the
+phase interface. The color-gradient model employs two distribution
+functions to represent two different ﬂuids and a color-gradientbased perturbation operator is used to generate surface tension as
+well as a recoloring step for separating different phases. The freeenergy model was originally proposed by Swift et al. [30,31] based
+on thermodynamics considerations. In this model, the phase sep-
+
+aration is described by a non-ideal equation of state in thermodynamic theory. The phase-ﬁeld model is devised on the phaseﬁeld theory, in which the interface dynamics is described by an
+order parameter that obeys the Cahn-Hilliard equation or a CahnHilliard-like equation.
+Although some curved schemes have been utilized in the LB
+studies of multiphase ﬂows [38], very few studies or discussions
+have been made regarding the mass conservation of multiphase
+LB simulations when applying the curved boundary schemes. Recently, Fakhari and Bolster [37] performed an LB study of threephase contact line dynamics on curved boundaries using a phaseﬁeld LB model. They proposed a new algorithm to specify the
+three-phase contact angle on curved boundaries. As mentioned in
+their work, the halfway bounce-back scheme was adopted so as
+to eliminate mass leakage at the wall boundaries. Deﬁnitely, the
+halfway bounce-back scheme is capable of conserving mass in twophase LB simulations, but it is inappropriate for certain two-phase
+ﬂows, such as two-phase ﬂows with phase change [39-41], e.g.,
+boiling on curved surfaces [42]. The staircase approximation of the
+bounce-back scheme may introduce “artiﬁcial” nucleation sites and
+cause signiﬁcant errors for boiling simulations.
+The present work is therefore devoted to investigating the performances of some well-known curved boundary schemes in twophase LB simulations. Based on the numerical investigation, two
+modiﬁed mass-conservative boundary schemes are formulated for
+two-phase LB simulations involving curved boundaries. The rest
+of the present paper is organized as follows. In Section 2 we introduce the LB method and three well-known types of curved
+boundary schemes. In Section 3 we investigate the performances
+of three types of curved boundary schemes in two-phase LB simulations through modeling a droplet resting on a circular cylinder.
+The modiﬁed mass-conservative curved boundary schemes are presented in Section 4. Numerical validation and discussion are also
+given there. Finally, a brief summary is given in Section 5.
+2. Lattice Boltzmann method and curved boundary schemes
+2.1. The lattice Boltzmann method
+The LB equation using the Bhatnagar-Gross-Krook (BGK) collision operator can be written as [43]
+fα (x + eα δt , t + δt ) − fα (x, t ) = −
+
+1
+
+τ
+
+
+
+fα (x, t ) − fαeq (x, t ) + δt Fα (x, t ),
+
+(1)
+eq
+
+where fα is the density distribution function, fα is the equilibrium density distribution function, x is the spatial position, eα is
+the discrete velocity in the α th direction, t is the time, δ t is the
+time step, τ is the non-dimensional relaxation time, and Fα is the
+forcing term. The space is usually discretized in such a way that
+eα δ t is the distance between two neighboring nodes. Therefore, after one time step fα (x, t) will arrive at its neighboring node along
+the lattice velocity direction eα . Hence the LB equation can be split
+into two processes: the “collision” process
+
+fα∗ (x, t ) = fα (x, t ) −
+
+1
+
+τ
+
+
+
+fα (x, t ) − fαeq (x, t ) + δt Fα (x, t ),
+
+(2)
+
+and the “streaming” process
+
+fα (x + eα δt , t + δt ) = fα∗ (x, t ),
+
+(3)
+
+where f ∗ (x, t ) is the post-collision state of the density distribution
+α
+
+function.
+From Eqs. (2) and (3) it can be found that the collision process
+is completely local and the streaming process is completely linear.
+Using the two-dimensional nine-velocity (D2Q9) lattice model [13, 43], the equilibrium density distribution function can be given
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+3
+
+where uw is the velocity at the point xw . In the present work,
+we only consider non-moving non-slip boundaries. Hence uw =
+0. Obviously, when q = 1/2 (χ = 0), the scheme of Filippova
+and Hanel reduces to the halfway bounce-back scheme [8], i.e.,
+fα (xb , t + δt ) = fα∗ (xb , t ).
+It can be found that the parameter χ becomes very large when
+τ is close to 1 as q < 1/2, and then the scheme of Filippova and
+Hanel will suffer from severe numerical instability [45]. To solve
+this problem, Mei et al. [12] proposed an improved scheme, which
+still uses Eq. (10) for q ≥ 1/2 but employs the following choice for
+q < 1/2:
+Fig. 1. Sketch of a curved wall and its neighboring lattice nodes.
+
+us = u f , χ =
+by
+
+
+
+fαeq = ωα ρ 1 +
+
+
+
+eα · u
+( e α · u )2 ( u · u )
++
+−
+,
+2
+cs
+2cs4
+2cs2
+
+(4)
+
+√
+where cs = 1/ 3 is the lattice sound speed and the weights ωα
+are deﬁned as ω0 = 4/9, ω1−4 = 1/9, and ω5−8 = 1/36. The kinematic viscosity is related to the non-dimensional relaxation time
+through ν = cs2 (τ − 0.5 )δt , and the macroscopic density and velocity are calculated by
+
+ρ=
+
+
+α
+
+fα , ρ u =
+
+
+α
+
+f α eα +
+
+δt
+2
+
+F,
+
+(5)
+
+respectively, where F is the total force of the system and is incorporated into the LB equation through the forcing term Fα (x, t) [44].
+2.2. Curved boundary schemes
+Fig. 1 illustrates a curved wall together with its neighboring lattice nodes. The link between a ﬂuid boundary node xb and a solid
+node xs is cut by the wall at point xw . The fraction of the intersected link in the ﬂuid region is deﬁned as [11]
+
+|x − xw |
+q= b
+,
+|xb − xs |
+
+(6)
+
+where 0 < q ≤ 1 and |xb − xs | depends on eα .
+The ﬁrst LB boundary scheme for curved solid walls is proposed by Filippova and Hanel [11]. In order to determine the unknown distribution functions fα (xb , t + δt ) at the ﬂuid boundary
+node (α denotes the opposite direction of α ), Filippova and Hanel
+[11] deﬁned a post-collision density distribution function at the
+solid node, i.e.,
+
+fα∗ (xs , t ) = (1 − χ ) fα∗ (xb , t ) + χ fαeq (xs , t ).
+
+(7)
+
+Then the unknown distribution functions at the boundary node
+can be obtained by fα (xb , t + δt ) = fα∗ (xs , t ) after the streaming
+process. The main feature of this type of boundary scheme lies in
+that it introduces a ﬁctitious equilibrium distribution function for
+the solid node, and Eq. (7) can be interpreted as a linear combination of the bounce-backed distribution function and the ﬁctitious
+equilibrium distribution function, which is deﬁned as
+
+
+
+eα · us
+( e α · u b )2 ( u b · u b )
+eq
+f α ( xs , t ) = ωα ρ ( xb , t ) 1 +
++
+−
+,
+2
+4
+2
+cs
+
+2 cs
+
+2 cs
+
+(8)
+where ub = u(xb , t ) and us is a ﬁctitious velocity. The parameter
+χ in Eq. (7) depends on the choice of the ﬁctitious velocity us .
+Filippova and Hanel [11] utilized the following choice:
+
+q < 1/2 :
+
+us = ub , χ =
+
+q ≥ 1/2 :
+
+us =
+
+2q − 1
+,
+τ −1
+
+q−1
+1
+2q − 1
+ub + uw , χ =
+,
+q
+q
+τ
+
+(9)
+(10)
+
+2q − 1
+,
+τ −2
+
+(11)
+
+where u f = u(x f , t ) and x f = xb − eα δt is the location of the ﬂuid
+node beyond the boundary node (cf. Fig. 1). Mei et al. [12] showed
+that the above modiﬁcation signiﬁcantly improves the numerical
+stability of the boundary scheme.
+The interpolated bounce-back scheme proposed by Bouzidi
+et al. [13] employs an interpolation of the distribution functions in
+the interior ﬂuid region. Using a linear interpolation, the boundary
+scheme of Bouzidi et al. is given by
+
+fα (xb , t + δt ) =
+
+⎧
+⎨2q fα∗ (xb , t ) + (1 − 2q) fα∗ x f , t , q < 1
+⎩ 1 f ∗ ( x b , t ) + 2 q − 1 f ∗ ( x b , t ),
+2q α
+
+2q
+
+α
+
+q≥
+
+2
+1 . (12)
+2
+
+As q = 1/2, Eq. (12) reduces to the halfway bounce-back
+scheme. Alternatively, when a quadratic interpolation is used, the
+scheme takes the following form [13]:
+
+fα (xb , t + δt ) =
+
+⎧
+q(1 + 2q ) fα∗ (xb , t ) + 1 − 4q2 fα∗ x f , t
+⎪
+⎪
+⎪
+∗
+⎪
+⎪
+⎨ −q(1 − 2q) fα x f f , t ,
+1
+
+f ∗ (x , t ) +
+⎪
+⎪
+q ( 2q + 1 ) α b
+⎪
+⎪
+⎪
+⎩ − 2q − 1 f ∗ x , t ,
+2q + 1 α
+
+q < 12
+
+2q − 1 ∗
+f α ( xb , t )
+q
+
+f
+
+,
+q ≥ 12
+
+(13)
+where x f f = xb − 2eα δt . Some other versions of the interpolated
+bounce-back boundary scheme can be found in the book written
+by Krüger et al. [7].
+Another type of boundary scheme is the one-point or singlenode boundary scheme. In comparison with the original singlenode boundary scheme [16], Zhao and Yong [17] recently devised
+a simpler single-node boundary scheme. They suggested a nonconvex combination of fα∗ (xb , t ) and fα (xb , t) at the ﬂuid boundary
+node, which is deﬁned as follows:
+
+fα (xb , t + δt ) =
+
+2q
+1
+f ∗ (x , t ) +
+f α ( x b , t ).
+1 + 2q α b
+1 + 2q
+
+(14)
+
+In this scheme, the parameters/coeﬃcients are determined
+based on an analysis using the Maxwell iteration. Obviously, Eq.
+(14) only involves local computations. In addition, it can be found
+that Eq. (14) does not reduce to the halfway bounce-back scheme
+when q = 1/2.
+The scheme of Mei et al. [12], the scheme of Bouzidi et al. [13],
+and the scheme proposed by Zhao and Yong [17] can be regarded,
+respectively, as the representative schemes of the aforementioned
+three types of boundary schemes. For convenience, these boundary
+schemes are referred to as the MLS scheme, the Bouzidi scheme,
+and the Zhao-Yong scheme, respectively. In addition, we use “LBouzidi” and “Q-Bouzidi” to represent the Bouzidi scheme that utilizes a linear interpolation and a quadratic interpolation, respectively.
+
+4
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+Fig. 2. Sketch of the distribution functions that propagate across a curved wall through a boundary node. The blue arrows represent the outgoing distribution functions,
+which propagate towards the ghost nodes in solid, while the red arrows represent the incoming distribution functions that propagate from the ghost nodes to the boundary
+node. (For interpretation of the references to color in this ﬁgure legend, the reader is referred to the web version of this article.).
+
+Fig. 3. Conﬁguration of static ﬂow under gravity with an arbitrary q.
+
+3. Numerical investigation
+3.1. Formulation of mass leakage
+Fig. 2 illustrates the distribution functions that will propagate
+across a curved wall through a boundary node (denoted by a solid
+black circle) during the streaming step. In the ﬁgure the blue arrows represent the outgoing distribution functions, which propagate from the boundary node to the ghost nodes in solid, while
+the red arrows represent the incoming distribution functions that
+propagate from the ghost nodes to the boundary node.
+According to Fig. 2, we can formulate the mass leakage at the
+boundary node as follows:
+
+m(xb , t + δt ) =
+
+
+outgoing
+
+fα∗ (xb , t ) −
+
+
+
+fα (xb , t + δt ),
+
+(15)
+
+incoming
+
+in which the ﬁrst term on the right-hand side of Eq. (15) is the
+amount of mass streamed out of the system by the post-collision
+outgoing distribution functions, while the second term on the
+right-hand side of Eq. (15) is the amount of mass streamed into
+the system by the incoming distribution functions. For the halfway
+bounce-back scheme [8], which gives fα (xb , t + δt ) = fα∗ (xb , t ), the
+mass leakage is zero. However, as previously mentioned, the
+halfway bounce-back scheme may cause considerable numerical
+errors for certain two-phase ﬂows. For example, the staircase approximation of the bounce-back scheme may introduce “artiﬁcial”
+nucleation sites for boiling or condensation on curved surfaces.
+To illustrate the mass leakage caused by different boundary
+schemes, we ﬁrstly consider a test of single-phase ﬂows, i.e., a
+static ﬂow under gravity, which is illustrated in Fig. 3. The grid system is taken as Nx × Ny = 100 × 50 and the non-dimensional relaxation time τ is set to 1. The aforementioned three types of bound-
+
+ary schemes are employed at the upper and lower solid walls and
+the periodic boundary condition is applied in the x direction. The
+gravity force is given by Fg = (0, −ρ g), in which the gravitational
+acceleration is chosen as g = 0.001.
+In our simulations, the fraction q deﬁned by Eq. (6) is taken
+as q = n/10 with n = 1, 2, · · · , 9. The variations of the normalized
+mass of the system are plotted in Fig. 4(a), (b), (c), and (d) for the
+MLS scheme, the L-Bouzidi scheme, the Q-Bouzidi scheme, and the
+Zhao-Yong scheme, respectively. As can be seen in these ﬁgures,
+the investigated boundary schemes exhibit different performances
+when different values of q are applied. More speciﬁcally, for the
+MLS scheme, the L-Bouzidi scheme, and the Q-Bouzidi scheme,
+the mass of the system is conserved in the case of q = 0.5, but
+decreases in other cases, which is attributed to the fact that the
+MLS scheme and the Bouzidi scheme (regardless of using the linear or quadratic interpolation) reduce to the halfway bounce-back
+scheme in the case of q = 0.5.
+To quantify the numerical results, an averaged mass change rate
+is evaluated at t = 60 0 0 0δt , which is deﬁned as ε = |m − m0 |/m0 ×
+100%. Here m is the mass of the system at t = 60 0 0 0δt . The results
+are displayed in Fig. 5. From the ﬁgure we can clearly see that
+the mass change rate caused by the Zhao-Yong scheme is much
+larger than those produced by other schemes. Such a ﬁnding indicates the single-node type of boundary schemes may perform
+worse than other types of curved boundary schemes in terms of
+mass conservation although it has the advantage of local computations. Moreover, Fig. 5 also shows that there are no signiﬁcant
+differences between the results of the MLS and Bouzidi schemes
+when q < 0.5, but the MLS scheme performs better as q > 0.5.
+In other words, the overall mass loss caused by the MLS scheme
+will be smaller than that caused by the Bouzidi scheme when the
+fraction q in the LB simulations varies from 0 to 1.
+
+3.2. Simulations of droplet resting on a circular cylinder
+In this section, numerical simulations are carried out to investigate the performances of the MLS scheme, the Bouzidi scheme,
+and the Zhao-Yong scheme in two-phase LB simulations. The test
+of a droplet resting on a circular cylinder is employed. Under the
+non-slip and isothermal condition, no evaporation will occur when
+a droplet is placed on a circular cylinder. However, if there exists mass leakage such as mass loss in the LB simulations, the
+droplet will gradually become smaller, like an evaporating droplet.
+In our simulations, the isothermal pseudopotential multiphase LB
+method [3,6,22,23,25,46] is adopted, in which the ﬂuid-ﬂuid inter-
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+5
+
+Fig. 4. Simulations of static ﬂow under gravity using different boundary schemes. Variations of the normalized mass of the system against time.
+
+Fig. 6. Initial setting of a droplet resting on a circular cylinder.
+
+Fig. 5. Simulations of static ﬂow under gravity using different boundary schemes.
+Variations of the averaged mass change rate against the fraction q deﬁned by
+Eq. (6).
+
+action force is deﬁned as follows:
+
+F = −G ψ (x )
+
+
+α
+
+wα ψ (x + eα δt )eα ,
+
+(16)
+
+where ψ is the pseudopotential, G is the interaction strength, and
+wα are the weights. For the nearest-neighbor interactions on the
+
+D2Q9 lattice, the weights are given by wα = 1/3 for |eα |2 = 1 and
+wα = 1/12 for |eα |2 = 2.
+The pseudopotential is chosen as ψ (ρ ) = ψ0 exp(−ρ0 /ρ ),
+where ψ 0 and ρ 0 are both set to 1.0, which leads to the liquid density ρ L ≈ 2.783 and the vapor density ρ V ≈ 0.3675 when
+the interaction strength is taken as G = 10/3 [47]. For this type of
+pseudopotential, the forcing scheme proposed by Guo et al. [44] is
+employed to incorporate the ﬂuid-ﬂuid interaction force into the
+LB equation. The contact angle is implemented via a constant virtual wall density [48-50], which does not affect the conclusions
+in the present work. However, it should be noted that the contact
+
+6
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+Fig. 7. Snapshots of density contours obtained by different boundary schemes. (a) MLS scheme, (b) L-Bouzidi scheme, (c) Q-Bouzidi scheme, and (d) Zhao-Yong scheme.
+
+angle scheme with a constant virtual wall density usually leads to
+an unphysical mass-transfer layer near the solid boundary. An improved contact angle scheme, which overcomes this drawback, has
+been recently proposed by Li et al. [51]. In the present simulations,
+the computational domain is divided into Nx × Ny = 300 × 350 lattices. A circular cylinder of radius R = 70 is located at (150, 130)
+and a droplet is initially placed on the circular cylinder, as shown
+in Fig. 6. The periodic boundary condition is utilized in the x and y
+directions and the kinematic viscosity is taken as ν = 0.15 for both
+the liquid and vapor phases.
+Some snapshots of the density contours obtained by the MLS
+scheme, the L-Bouzidi scheme, the Q-Bouzidi scheme, and the
+
+Zhao-Yong scheme are displayed in Fig. 7(a), (b), (c), and (d), respectively. From these ﬁgures it can be seen that, for all the investigated schemes, the simulated doplet gradually becomes smaller
+as time goes by, behaving like an evaporating droplet. However,
+the present simulations are performed using an isothermal pseudopotential LB model and the periodic boundary condition is applied in both the x and y directions, from which it can be concluded that there exists mass leakage at the surface of the cylinder, resulting from the employed curved boundary scheme. Among
+the investigated boundary schemes, the Zhao-Yong scheme has the
+advantage of local computations since it is a single-node scheme,
+while the other schemes usually require the information of two
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+7
+
+halfway bounce-back scheme for moving boundaries. Similar treatments can also be found in Refs. [10,53]. If the mass leakage is averagely added to the known distribution functions, the momentum
+at the boundary node may be changed. Hence the mass leakage
+formulated by Eq. (15) can be added to the rest distribution function and we obtain the following equation:
+
+
+
+f0 (xb , t + δt ) = f0∗ (xb , t ) +
+
+fα∗ (xb , t ) −
+
+outgoing
+
+
+
+fα (xb , t + δt ),
+
+incoming
+
+(18)
+
+Fig. 8. Simulations of droplet on a circular cylinder using different boundary
+schemes. Variations of the normalized mass of the system against time.
+
+or more neighboring nodes. Similar to Figs. 4(d), 7(d) also shows
+that the Zhao-Yong scheme suffers from the violation of mass conservation although it does not involve any interpolation or extrapolation. Particularly, the mass loss rate caused by the Zhao-Yong
+scheme is much larger than those caused by the other schemes,
+as shown in Fig. 8, which plots the variations of the normalized
+mass of the system against time. The normalized mass is deﬁned
+as m = m/m0 , where m is the transient mass of the system and
+m0 is the initial mass of the system at t = 0. From Fig. 8 we can
+also observe that the MLS scheme performs best among the investigated schemes, i.e., the mass of the system decreases relatively
+slowly in the test using the MLS scheme. Besides, it can be found
+that the performance of the Bouzidi scheme is better than that of
+the Zhao-Yong scheme, but worse than that of the MLS scheme.
+By comparing the numerical results of two-phase LB simulations in this section with the results of single-phase LB simulations
+displayed in Section 3.1, we can ﬁnd that the mass in two-phase
+LB simulations decreases signiﬁcantly faster than that in singlephase LB simulations. Taking the Zhao-Yong scheme as an example, in the present test it yields 40% mass loss after just 1500 time
+steps, as shown in Fig. 8. Such a rapid decrease of mass in twophase LB simulations is probably due to the contact between the
+liquid-vapor interface and the curved solid boundary, which speeds
+up the mass leakage of the system. When the curved boundary is
+completely immersed in the liquid or vapor phase, the situation
+may be similar to that in single-phase LB simulations.
+4. Modiﬁed mass-conservative schemes
+4.1. Formulations of modiﬁed curved boundary schemes
+In this section, two modiﬁed mass-conservative curved boundary schemes are presented. On the basis of the observation that
+the MLS scheme yields the smallest mass loss among the investigated curved boundary schemes, the modiﬁed boundary schemes
+are given based on the MLS scheme. According to the MLS scheme,
+the unknown distribution functions at boundary nodes are determined by
+
+fα (xb , t + δt ) = (1 − χ ) fα∗ (xb , t ) + χ fαeq (xs , t ),
+
+(17)
+
+where fα (xs , t ) is deﬁned by Eq. (8) and the parameter χ is given
+by Eqs. (11) and (10) for q < 0.5 and q ≥ 0.5, respectively. A simple treatment to conserve the mass of a system is to add the
+mass leakage back to the system. Such an idea was ﬁrstly used
+by Aidun and Lu [52] for suspension ﬂows when employing the
+eq
+
+where fα (xb , t + δt ) are calculated by Eq. (17). In the remaining of
+the present paper, this modiﬁed MLS scheme is referred to as the
+modiﬁed scheme A. Such a modiﬁcation is simple, but a possible
+limitation should also be pointed out here, i.e., the rest distribution
+function f0 (xb , t + δt ) may become negative in certain cases.
+On the other hand, the mass of a system can also be conserved
+by guaranteeing the balance between the amount of mass carried by the outgoing and incoming distribution functions at each
+boundary node. When m(xb , t + δt ) in Eq. (15) is set to zero, we
+can obtain
+
+
+
+
+
+fα (xb , t + δt ) =
+
+incoming
+
+fα∗ (xb , t ).
+
+(19)
+
+outgoing
+
+To satisfy the above requirement, an additional parameter is
+needed. Inspired by the work of Bao et al. [20], we can redeﬁne the
+density in the ﬁctitious equilibrium distribution function of ghost
+nodes
+
+
+
+
+
+eα · us
+(eα · ub )2 (ub · ub )
+f α ( xs , t ) = ωα ρ ( xs , t ) 1 +
++
+−
+,
+cs2
+2cs4
+2cs2
+eq
+
+(20)
+where the density has been changed to a ﬁctitious density ρ (xs ,
+t). Substituting Eq. (17) into Eq. (19), the requirement given by
+Eq. (19) can be transformed to
+
+
+
+χ fα∗ (xb , t ) =
+
+outgoing
+
+
+
+χ fαeq (xs , t ).
+
+(21)
+
+outgoing
+
+Combining Eq. (21) with Eq. (20), the ﬁctitious density in
+Eq. (20) can be obtained
+outgoing
+
+ρ ( xs , t ) =
+outgoing
+
+χ fα∗ (xb , t )
+
+
+.
+2
+(ub ·ub )
+b)
+s
+χ ωα 1 + eαc·u
++ (eα2·u
+−
+2
+4
+2
+cs
+2c s
+s
+
+(22)
+
+Since the parameter χ depends on eα through the fraction q,
+it cannot be moved out from the summation sign in Eqs. (21) and
+(22).
+There is an important difference between the above formulation
+and that of Bao et al. [20]. To obtain the ﬁctitious density, Bao et al.
+assumed that the outing distribution functions, which are known
+at each boundary node, satisfy Eq. (20) (such an assumption was
+illustrated above Eq. (12) in Ref. [20]). Then they obtained
+
+
+
+outgoing
+
+fα∗ (xb , t ) =
+
+
+
+fαeq (xs , t ).
+
+(23)
+
+outgoing
+
+The above equation is just Eq. (12) in Ref. [20]. Contrarily, our
+formulation given by Eq. (21) is derived from the requirement of
+Eq. (19), and it has been emphasized that the parameter χ in
+Eq. (21) is dependent on eα through the fraction q. Hence χ in
+Eqs. (21) and (22) cannot be moved out from the summation over
+α . In the following part, we will show that Eq. (23) still leads to
+mass leakage in two-phase LB simulations, although this equation
+seemingly works well for single-phase LB simulations in the study
+of Bao et al. [20]. The modiﬁed MLS scheme based on Eqs. (20) and
+(22) is referred to as the modiﬁed scheme B.
+
+8
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+Fig. 9. Comparison of local velocity vectors around the bottom of the circular cylinder at Re = 40 between the modiﬁed curved boundary schemes and the halfway bounceback scheme.
+
+Table 1
+Comparisons of the wake length, the separation angle, and the drag coeﬃcient.
+References
+
+Scheme A
+Scheme B
+MLS scheme
+Ref. [57]
+Ref. [58]
+Ref. [59]
+
+Re = 20
+
+Re = 40
+
+2L/D
+
+θs
+
+Cd
+
+2L/D
+
+θs
+
+Cd
+
+1.90
+1.91
+1.89
+1.88
+1.90
+1.89
+
+41.35
+41.56
+41.15
+43.7
+40.78
+42.95
+
+2.130
+2.133
+2.130
+2.045
+2.104
+2.144
+
+4.61
+4.64
+4.60
+4.69
+4.64
+4.52
+
+53.93
+53.93
+53.85
+53.8
+50.38
+53.86
+
+1.590
+1.593
+1.589
+1.522
+1.568
+1.589
+
+4.2. Numerical validation
+In this section, numerical simulations are performed to validate the modiﬁed curved boundary schemes. Firstly, we employ
+a single-phase test, i.e., the test of steady ﬂow past a circular cylinder, to examine the numerical accuracy of the modiﬁed
+schemes. The computational domain is chosen as Nx × Ny = 40D ×
+25D, where D = 40 is the diameter of the circular cylinder located
+at (15D, 12.5D). The free-stream velocity is taken as U0 = 0.1 and
+the Reynolds number is deﬁned as Re = U0 D/ν . The inlet boundary
+is given by a uniform velocity proﬁle, which is implemented by the
+Zou-He boundary scheme [54], while the fully developed boundary
+condition is employed at the outlet boundary. The periodic boundary condition is applied to the upper and lower boundaries and the
+modiﬁed curved boundary schemes are used at the surface of the
+circular cylinder.
+The non-dimensional length of the recirculation region, the separation angle, and the drag coeﬃcient obtained by the modiﬁed
+schemes A and B are compared with some published results in
+Table 1. The non-dimensional length of the recirculation region is
+deﬁned as 2L/D, where L is measured from the rearmost point of
+the cylinder. The drag coeﬃcient is deﬁned as Cd = F x /0.5ρU02 D,
+where F x is the x-component of the force F exerted on the cylinder, which is calculated using the momentum-exchange method
+[55,56]. From the table we can see that the numerical results obtained by the modiﬁed schemes A and B are both in good agreement with those reported in the previous studies.
+Moreover, to illustrate the differences between the modiﬁed
+MLS schemes and the halfway bounce-back scheme, Fig. 9 presents
+a comparison of the local velocity vectors around the bottom of the
+circular cylinder at Re = 40 between the results of the modiﬁed
+schemes and those of the halfway bounce-back scheme. As shown
+in the ﬁgure, the halfway bounce-back scheme leads to unphysical results below the circular cylinder as the velocity obtained by
+
+the staircase approximation penetrates the real cylindrical surface,
+which there is no such a phenomenon in the numerical results of
+the modiﬁed schemes A and B.
+Now we turn our attention to the capability of the modiﬁed
+curved boundary schemes in conserving mass in two-phase LB
+simulations. The test of a droplet placed on a circular cylinder is
+employed and the initial setting can be found in Fig. 6. Three cases
+with different contact angles are considered, i.e., θ = 30°, 90°,
+and 120°. The grid system and the simulation parameters are the
+same as those used in Section 3.2. Some snapshots of the density
+contours obtained by the modiﬁed scheme A for the three cases
+are displayed in Fig. 10. By comparing the numerical results in
+Fig. 10 and those in Fig. 7, we can see that the droplet can achieve
+a stable state when the modiﬁed scheme A is employed, rather
+than behaving like an evaporating droplet when the original MLS
+scheme is used, which indicates that the modiﬁcation formulated
+by Eq. (18) has eliminated the mass leakage at the surface of the
+circular cylinder.
+Fig. 11 displays the variations of the normalized mass of the
+system during the simulations using the modiﬁed schemes A and
+B, respectively. For both modiﬁed schemes, the maximum variation
+of the normalized mass of the system is very small (about 0.01%)
+and it appears at the early stage of simulation, which is expected
+because the liquid-vapor interface is initially a sharp interface and
+it develops into a diffuse interface with a ﬁnite thickness during
+the early stage of simulation. Such a change causes a small ﬂuctuation of the mass of the system. After the early stage, the variations
+of the normalized mass of the system are much smaller, as can be
+seen in Fig. 11. In addition, we can also observe some slight differences between the results of different cases (θ = 30°, 90°, and
+120°), which are attributed to the fact that the perimeter/length
+of the liquid-vapor interface is slightly different in these cases. To
+sum up, it is numerically demonstrated that both the modiﬁed
+scheme A and scheme B are capable of conserving mass in twophase LB simulations, although they are devised based on the MLS
+boundary scheme from different points of view.
+A comparison of the modiﬁed scheme B and the scheme of Bao
+et al. [20] is made in Fig. 12 by taking the case of θ = 90° as an
+example. From the ﬁgure it can be seen that the scheme of Bao
+et al. still results in mass leakage in two-phase LB simulations although it performs much better than the original MLS scheme (cf.
+Fig. 7a). The reason for such a phenomenon has been previously
+mentioned, i.e., the ﬁctitious density in the scheme of Bao et al.
+[20] was obtained by assuming that the outgoing distribution functions satisfy Eq. (20). Such an assumption leads to the aforementioned Eq. (23), which is equivalent to moving the parameter χ
+(dependant on eα ) in Eq. (21) out from the summation over α . Ac-
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+9
+
+Fig. 10. Simulations of droplet on a circular cylinder using the modiﬁed curved boundary scheme A. Snapshots of density contours under the static contact angles θ = 30°,
+90°, and 120°, respectively. From left to right: t = 10 0 0δt , 50 0 0δ t , 20 0 0 0δ t .
+
+Fig. 11. Variations of the normalized mass of the system under the static contact angles θ = 30°, 90°, and 120°, respectively.
+
+10
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+Fig. 12. A comparison of the results obtained by the modiﬁed curved boundary scheme B and the scheme of Bao et al. [20]. From left to right: t = 10 0 0 0δt , 5 × 104 δ t , 105 δ t .
+The static contact angle is θ = 90°.
+
+cordingly, it still suffers from the violation of mass conservation,
+although such a defect was not detected by the single-phase LB
+simulations in Ref. [20].
+
+5. Summary
+In this paper, we have investigated the performances of three
+well-known types of curved boundary schemes in two-phase LB
+simulations. Through modeling a droplet resting on a circular
+cylinder, it has been found that, for all the investigated schemes,
+the simulated droplet rapidly “evaporates” under the non-slip and
+isothermal condition, revealing that there exists serious mass leakage at the cylindrical surface due to the curved boundary schemes.
+The numerical results showed that the MLS boundary scheme
+yields the smallest mass loss among the investigated curved
+boundary schemes, while the mass loss caused by the Zhao-Yong
+scheme, which is a single-node boundary scheme and has the advantage of local computations, is much larger than those of other
+schemes.
+On the basis of the numerical investigation, we have formulated
+two modiﬁed mass-conservative boundary schemes for curved
+boundaries based on the MLS boundary scheme. The modiﬁed
+scheme A employs a modiﬁcation to the rest distribution function
+of the boundary node so as to add the mass leakage back to the
+system, while the modiﬁed scheme B is devised by guaranteeing
+the balance between the amount of mass carried by the outgoing
+and incoming distribution functions at each boundary node. Numerical simulations have been carried out to validate the modiﬁed
+curved boundary schemes. It has been shown that the two modiﬁed schemes exhibit better performance than the halfway bounceback scheme according to the modeling of steady ﬂow past a circular cylinder. Moreover, the simulations of a droplet resting on a
+circular cylinder demonstrate that the two modiﬁed schemes are
+capable of conserving mass in two-phase LB simulations.
+
+Declaration of Competing Interest
+The authors declare that they have no known competing ﬁnancial interests or personal relationships that could have appeared to
+inﬂuence the work reported in this paper.
+CRediT authorship contribution statement
+Y. Yu: Methodology, Software, Writing - original draft. Q. Li:
+Conceptualization, Supervision, Writing - review & editing. Z.X.
+Wen: Writing - review & editing.
+Acknowledgments
+This work was supported by the National Natural Science Foundation of China (No. 51822606).
+Appendix
+In this appendix, we present some results of combining the
+Bouzidi curved boundary scheme with the modiﬁcation given by
+Eq. (18). The simulation setup and parameters are the same as
+those described in Fig. 6. The L-Bouzidi scheme [Eq. (12)] is combined with the modiﬁcation Eq. (18) and the case of contact angle
+θ = 90° is studied as an example. Fig. 13 displays the snapshots
+of density contours obtained by the modiﬁed L-Bouzidi scheme
+at t = 10 0 0δt , 50 0 0δ t , and 20 0 0 0δ t , respectively. It can be seen
+that the droplet can achieve a stable state when the modiﬁcation
+Eq. (18) is applied to the L-Bouzidi scheme. Quantitatively, the variation of the normalized mass of the system against time is plotted
+in Fig. 14, which shows that during the simulation the maximum
+variation of the normalized mass of the system is about 0.01% and
+demonstrates that the modiﬁed L-Bouzidi scheme is also able to
+conserve mass in two-phase LB simulations.
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+11
+
+Fig. 13. Simulation of droplet on a circular cylinder using the L-Bouzidi scheme with the modiﬁcation Eq. (18) under the static contact angles θ = 90°. From left to right:
+t = 10 0 0δt , 50 0 0δ t , 20 0 0 0δ t .
+
+Fig. 14. Variation of the normalized mass of the system under the static contact
+angles θ = 90°. The L-Bouzidi scheme with the modiﬁcation Eq. (18) is applied.
+
+References
+[1] Chen S, Doolen GD. Lattice Boltzmann method for ﬂuid ﬂows. Ann Rev Fluid
+Mech 1998;30:329–64.
+[2] Aidun CK, Clausen JR. Lattice-Boltzmann method for complex ﬂows. Ann Rev
+Fluid Mech 2010;42:439–72.
+[3] Li Q, Luo KH, Kang QJ, He YL, Chen Q, Liu Q. Lattice Boltzmann methods
+for multiphase ﬂow and phase-change heat transfer. Prog Energy Combust Sci
+2016;52:62–105.
+[4] He Y-L, Liu Q, Li Q, Tao W-Q. Lattice Boltzmann methods for single-phase and
+solid-liquid phase-change heat transfer in porous media: A review. Int J Heat
+Mass Transf 2019;129:160–97.
+[5] Xu A, Shyy W, Zhao T. Lattice Boltzmann modeling of transport phenomena in
+fuel cells and ﬂow batteries. Acta Mech Sin 2017;33:555–74.
+[6] Li Q, Du DH, Fei LL, Luo KH. Three-dimensional non-orthogonal MRT pseudopotential lattice Boltzmann model for multiphase ﬂows. Comput Fluids
+2019;186:128–40.
+[7] Krüger T, Kusumaatmaja H, Kuzmin A, Shardt O, Silva G, Viggen EM. The Lattice Boltzmann Method - Principles and Practice. Springer Nature; 2017.
+[8] Ladd AJC. Numerical simulations of particulate suspensions via a discretized Boltzmann equation. Part 1. Theoretical foundation. J Fluid Mech
+1994;271:285–309.
+[9] Frisch U, Hasslacher B, Pomeau Y. Lattice-gas automata for the Navier-Stokes
+equation. Phys Rev Lett 1986;56:1505–8.
+[10] Sanjeevi S KP, Zarghami A, Padding J. Choice of no-slip curved boundary condition for lattice Boltzmann simulations of high-Reynolds-number ﬂows. Phys
+Rev E 2018;97:043305.
+[11] Filippova O, Hänel D. Grid Reﬁnement for Lattice-BGK Models. J Comput Phys
+1998;147:219–28.
+[12] Mei R, Luo L-S, Shyy W. An accurate curved boundary treatment in the lattice
+Boltzmann method. J Comput Phys 1999;155:307–30.
+[13] Bouzidi MH, Firdaouss M, Lallemand P. Momentum transfer of a Boltzmann-lattice ﬂuid with boundaries. Phys Fluids 2001;13:3452–9.
+[14] Yu D, Mei R, Luo L-S, Shyy W. Viscous ﬂow computations with the method of
+lattice Boltzmann equation. Prog Aerosp Sci 2003;39:329–67.
+[15] Ginzburg I, d’Humières D. Multireﬂection boundary conditions for lattice
+Boltzmann models. Phys Rev E 2003;68:066614.
+[16] Junk M, Yang Z. One-point boundary condition for the lattice Boltzmann
+method. Phys Rev E 2005;72:066701.
+[17] Zhao W, Yong W-A. Single-node second-order boundary schemes for the lattice Boltzmann method. J Comput Phys 2017;329:1–15.
+
+[18] Tao S, He Q, Chen B, Yang X, Huang S. One-point second-order curved boundary condition for lattice Boltzmann simulation of suspended particles. Comput
+Math Appl 2018;76:1593–607.
+[19] Kao PH, Yang RJ. An investigation into curved and moving boundary treatments in the lattice Boltzmann method. J Comput Phys 2008;227:5671–90.
+[20] Bao J, Yuan P, Schaefer L. A mass conserving boundary condition for the lattice
+Boltzmann equation method. J Comput Phys 2008;227:8472–87.
+[21] Le Coupanec E, Verschaeve JCG. A mass conserving boundary condition for the
+lattice Boltzmann method for tangentially moving walls. Math Comput Simul
+2011;81:2632–45.
+[22] Shan X, Chen H. Lattice Boltzmann model for simulating ﬂows with multiple
+phases and components. Phys Rev E 1993;47:1815–20.
+[23] Shan X, Chen H. Simulation of nonideal gases and liquid-gas phase transitions
+by the lattice Boltzmann equation. Phys Rev E 1994;49:2941–8.
+[24] Shan X. Pressure tensor calculation in a class of nonideal gas lattice Boltzmann
+models. Phys Rev E 2008;77:066702.
+[25] Li Q, Luo KH, Li XJ. Lattice Boltzmann modeling of multiphase ﬂows at
+large density ratio with an improved pseudopotential model. Phys Rev E
+2013;87:053301.
+[26] Gunstensen AK, Rothman DH, Zaleski S, Zanetti G. Lattice Boltzmann model of
+immiscible ﬂuids. Phys Rev A 1991;43:4320–7.
+[27] Grunau D, Chen S, Eggert K. A lattice Boltzmann model for multiphase ﬂuid
+ﬂows. Phys Fluids A 1993;5:2557–62.
+[28] Latva-Kokko M, Rothman DH. Diffusion properties of gradient-based lattice
+Boltzmann models of immiscible ﬂuids. Phys Rev E 2005;71:056702.
+[29] Wen ZX, Li Q, Yu Y, Luo KH. Improved three-dimensional color-gradient lattice Boltzmann model for immiscible multiphase ﬂows. Phys Rev E
+2019;100:023301.
+[30] Swift MR, Osborn WR, Yeomans JM. Lattice Boltzmann simulation of nonideal
+ﬂuids. Phys Rev Lett 1995;75:830–3.
+[31] Swift MR, Orlandini E, Osborn WR, Yeomans JM. Lattice Boltzmann simulations
+of liquid-gas and binary ﬂuid systems. Phys Rev E 1996;54:5041–52.
+[32] Inamuro T, Konishi N, Ogino F. A Galilean invariant model of the lattice Boltzmann method for multiphase ﬂuid ﬂows using free-energy approach. Comput
+Phys Commun 20 0 0;129:32–45.
+[33] Pooley CM, Furtado K. Eliminating spurious velocities in the free-energy lattice
+Boltzmann method. Phys Rev E 2008;77:046702.
+[34] Lee T, Liu L. Lattice Boltzmann simulations of micron-scale drop impact on dry
+surfaces. J Comput Phys 2010;229:8045–63.
+[35] Fakhari A, Rahimian MH. Phase-ﬁeld modeling by the method of lattice Boltzmann equations. Phys Rev E 2010;81:036707.
+[36] Li Q, Luo KH, Gao YJ, He YL. Additional interfacial force in lattice Boltzmann
+models for incompressible multiphase ﬂows. Phys Rev E 2012;85:026704.
+[37] Fakhari A., Bolster D. Diffuse interface modeling of three-phase contact line
+dynamics on curved boundaries: a lattice Boltzmann model for large density
+and viscosity ratios2017.
+[38] Shi Y, Tang GH. Relative permeability of two-phase ﬂow in three-dimensional
+porous media using the lattice Boltzmann method. Int J Heat Fluid Flow
+2018;73:101–13.
+[39] Li Q, Kang QJ, Francois MM, He YL, Luo KH. Lattice Boltzmann modeling of
+boiling heat transfer: The boiling curve and the effects of wettability. Int J Heat
+Mass Transf 2015;85:787–96.
+[40] Li Q, Yu Y, Zhou P, Yan HJ. Enhancement of boiling heat transfer using hydrophilic-hydrophobic mixed surfaces: A lattice Boltzmann study. Appl Therm
+Eng 2018;132:490–9.
+[41] Yu Y, Wen ZX, Li Q, Zhou P, Yan HJ. Boiling heat transfer on hydrophilic-hydrophobic mixed surfaces: A 3D lattice Boltzmann study. Appl Therm Eng
+2018;142:846–54.
+[42] Kang M-G. Pool boiling heat transfer from an inclined tube bundle. Int J Heat
+Mass Transf 2016;101:445–51.
+[43] Qian YH, d’Humières D, Lallemand P. Lattice BGK models for Navier-Stokes
+equation. Europhys Lett 1992;17:479–84.
+[44] Guo Z, Zheng C, Shi B. Discrete lattice effects on the forcing term in the lattice
+Boltzmann method. Phys Rev E 2002;65:046308.
+[45] Guo Z, Shu C. Lattice Boltzmann Method and its Applications in Engineering.
+World Scientiﬁc; 2013.
+
+12
+
+Y. Yu, Q. Li and Z.X. Wen / Computers and Fluids 208 (2020) 104638
+
+[46] Xu A, Zhao TS, An L, Shi L. A three-dimensional pseudo-potential-based lattice
+Boltzmann model for multiphase ﬂows with large density ratio and variable
+surface tension. Int J Heat Fluid Flow 2015;56:261–71.
+[47] Li Q, Zhou P, Yan HJ. Revised Chapman-Enskog analysis for a class of forcing
+schemes in the lattice Boltzmann method. Phys Rev E 2016;94:043313.
+[48] Li Q, Luo KH, Kang QJ, Chen Q. Contact angles in the pseudopotential lattice
+Boltzmann modeling of wetting. Phys Rev E 2014;90:053301.
+[49] Huang H, Sukop M C, Lu X-Y. Multiphase Lattice Boltzmann Methods: Theory
+and Application. John Wiley & Sons; 2015.
+[50] Benzi R, Biferale L, Sbragaglia M, Succi S, Toschi F. Mesoscopic modeling of a
+two-phase ﬂow in the presence of boundaries: the contact angle. Phys Rev E
+2006;74:021509.
+[51] Li Q, Yu Y, Luo KH. Implementation of contact angles in pseudopotential lattice
+Boltzmann simulations with curved boundaries. Phys Rev E 2019;100:053313.
+[52] Aidun CK, Lu Y. Lattice Boltzmann simulation of solid particles suspended in
+ﬂuid. J Stat Phys 1995;81:49–61.
+
+[53] Liu H, Zhang Y, Valocchi AJ. Modeling and simulation of thermocapillary ﬂows
+using lattice Boltzmann method. J Comput Phys 2012;231:4433–53.
+[54] Zou Q, He X. On pressure and velocity boundary conditions for the lattice
+Boltzmann BGK model. Phys Fluids 1997;9:1591–8.
+[55] Renwei M, Dazhi Y, Wei S, Li-Shi L. Force evaluation in the lattice Boltzmann
+method involving curved geometry. Phys Rev E 2002;65:041203.
+[56] Liao Q, Yang YX, Zhu X, Wang H, Ding YD. Lattice Boltzmann simulation on liquid ﬂow and mass transport in a bioreactor with cylinder bundle for hydrogen
+production. Heat Mass Transf 2015;51:859–73.
+[57] Dennis SCR, Chang G-Z. Numerical solutions for steady ﬂow past a circular
+cylinder at Reynolds numbers up to 100. J Fluid Mech 1970;42:471–89.
+[58] Takeshi S, Roberto R, Kosuke H, Akio T. Implicit-correction-based immersed
+boundary-lattice Boltzmann method with two relaxation times. Phys Rev E
+2014;89:023307.
+[59] Niu XD, Shu C, Chew YT, Peng Y. A momentum exchange-based immersed
+boundary-lattice Boltzmann method for simulating incompressible viscous
+ﬂows. Phys Lett A 2006;354:173–82.
+
+

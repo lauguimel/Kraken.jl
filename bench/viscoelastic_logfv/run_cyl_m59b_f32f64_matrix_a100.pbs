@@ -1,0 +1,123 @@
+#!/bin/bash -l
+#PBS -N M59B_F32F64
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=A100
+#PBS -l walltime=01:30:00
+#PBS -j oe
+#PBS -m ae
+
+# M59-B — F32 vs F64 control matrix at R={10,30,50} Wi=1 beta=0.59 eg=false.
+#
+# Context: M59 tconv probe (job 21977509.aqua) revealed F64 R=50 Cd = 115.75
+# vs F32 Metal local Cd = 111.84 -> +3.91 Cd / +3.5% F32 noise at R=50.
+# Hypothesis: the U-shape (F32 Metal: 114.77 / 116.28 / 111.84) may be a
+# F32 artifact rather than a real polymer/numerical effect.
+#
+# This run completes the F32 x F64 x R matrix on Aqua CUDA. F64 R=50 already
+# acquired in 21977509.aqua so 5 new cases here.
+#
+# Comparison axis:
+#   - F32 CUDA vs F32 Metal: cross-backend F32 quirks (denormal flush, etc.)
+#   - F32 CUDA vs F64 CUDA: pure precision effect at fixed backend
+#   - F64 R-trend: is the U-shape real in F64?
+#
+# Setup: matches M48 fixture (eg=ea=ef=ed=0, qwall, halfwayBB,
+# muscl_superbee, bsd=1.0, beta=0.59, Wi=1, Re=1, L=15R, cap=64).
+#
+# Cost estimate per case (A100 300k):
+#   R=10 F64 ~2 min, R=30 F64 ~5 min
+#   R=10 F32 ~1 min, R=30 F32 ~2.5 min, R=50 F32 ~4 min
+# Total ~15 min compute + precompile. Walltime ceiling 1.5h.
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+export JULIA_PKG_PRECOMPILE_AUTO=0
+export JULIA_DEPOT_PATH="${PBS_O_WORKDIR}/../julia_depot:$HOME/.julia"
+mkdir -p "${PBS_O_WORKDIR}/../julia_depot"
+
+export KRAKEN_BACKEND="cuda"
+
+# Common setup (M48 fixture).
+export KRAKEN_BETA_LIST="0.59"
+export KRAKEN_WI_LIST="1.0"
+export KRAKEN_RE_LIST="1.0"
+export KRAKEN_BSD_LIST="1.0"
+export KRAKEN_L_UP_LIST="15.0"
+export KRAKEN_L_DOWN_LIST="15.0"
+export KRAKEN_EMBEDDED_GRADIENT="0"
+export KRAKEN_EMBEDDED_ADVECTION="0"
+export KRAKEN_EMBEDDED_FORCE="0"
+export KRAKEN_EMBEDDED_DRAG="0"
+export KRAKEN_EMBEDDED_GEOMETRY="qwall"
+export KRAKEN_ADVECTION_SCHEME="muscl_superbee"
+export KRAKEN_WALL_BC="halfwayBB"
+export KRAKEN_U_MEAN="0.005"
+export KRAKEN_AVG_WINDOW_FRAC="0.2"
+export KRAKEN_SAVE_FIELDS="1"
+export KRAKEN_MAX_STEPS_BASE="300000"
+
+nvidia-smi || true
+
+if [ "${KRAKEN_SKIP_PKG:-0}" != "1" ]; then
+    julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()'
+fi
+
+ROOT_OUT="tmp/m59b_f32f64_matrix/${PBS_JOBID:-manual}"
+mkdir -p "$ROOT_OUT"
+
+echo "=== M59-B F32 vs F64 matrix starting at $(date) ==="
+
+# --- F64 R=10 ---
+echo ""
+echo "--- F64 R=10 (new, expected ~118 if F32->F64 shift uniform) ---"
+export KRAKEN_FT="float64"
+export KRAKEN_R_LIST="10"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/F64_R10"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# --- F64 R=30 ---
+echo ""
+echo "--- F64 R=30 (new at 300k; M44 100k anchor = 118.10) ---"
+export KRAKEN_R_LIST="30"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/F64_R30"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# --- F32 R=10 ---
+echo ""
+echo "--- F32 R=10 CUDA (compare to Metal F32 local 114.77) ---"
+export KRAKEN_FT="float32"
+export KRAKEN_R_LIST="10"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/F32_R10"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# --- F32 R=30 ---
+echo ""
+echo "--- F32 R=30 CUDA (compare to Metal F32 local 116.28) ---"
+export KRAKEN_R_LIST="30"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/F32_R30"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+# --- F32 R=50 ---
+echo ""
+echo "--- F32 R=50 CUDA (compare to Metal F32 local 111.84 + F64 CUDA 115.75) ---"
+export KRAKEN_R_LIST="50"
+export KRAKEN_OUTPUT_DIR="${ROOT_OUT}/F32_R50"
+mkdir -p "$KRAKEN_OUTPUT_DIR"
+julia --project=. bench/viscoelastic_logfv/run_cyl_bigsweep_v2_2d.jl
+
+echo "=== M59-B done at $(date) ==="
+echo "Cd matrix (col 26):"
+for d in F64_R10 F64_R30 F32_R10 F32_R30 F32_R50; do
+    f=$(ls "${ROOT_OUT}/${d}"/cyl_bigsweep_v2_*.csv 2>/dev/null | head -1)
+    if [ -n "$f" ]; then
+        cd_val=$(awk -F, 'NR==2 {print $26}' "$f")
+        echo "  $d : Cd_kraken=$cd_val"
+    fi
+done

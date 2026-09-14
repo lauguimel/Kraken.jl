@@ -1,0 +1,27 @@
+🔹 Updating permissions for /home/rheotool...
+🚀 Launching Jupyter Notebook directly...
+Cleaning /data case
+Running blockMesh on /data
+Running rheoTestFoam on /data
+[W 2026-05-15 04:42:25.356 ServerApp] ServerApp.token config is deprecated in 2.0. Use IdentityProvider.token.
+[I 2026-05-15 04:42:25.641 ServerApp] jupyter_lsp | extension was successfully linked.
+[I 2026-05-15 04:42:25.657 ServerApp] jupyter_server_terminals | extension was successfully linked.
+[I 2026-05-15 04:42:25.676 ServerApp] jupyterlab | extension was successfully linked.
+[I 2026-05-15 04:42:25.693 ServerApp] notebook | extension was successfully linked.
+[I 2026-05-15 04:42:25.696 ServerApp] Writing Jupyter server cookie secret to /home/rheotool/.local/share/jupyter/runtime/jupyter_cookie_secret
+[I 2026-05-15 04:42:26.361 ServerApp] notebook_shim | extension was successfully linked.
+[W 2026-05-15 04:42:26.446 ServerApp] All authentication is disabled.  Anyone who can connect to this server will be able to run code.
+[I 2026-05-15 04:42:26.447 ServerApp] notebook_shim | extension was successfully loaded.
+[I 2026-05-15 04:42:26.455 ServerApp] jupyter_lsp | extension was successfully loaded.
+[I 2026-05-15 04:42:26.458 ServerApp] jupyter_server_terminals | extension was successfully loaded.
+[I 2026-05-15 04:42:26.464 LabApp] JupyterLab extension loaded from /usr/local/lib/python3.8/dist-packages/jupyterlab
+[I 2026-05-15 04:42:26.464 LabApp] JupyterLab application directory is /usr/local/share/jupyter/lab
+[I 2026-05-15 04:42:26.465 LabApp] Extension Manager is 'pypi'.
+[I 2026-05-15 04:42:26.568 ServerApp] jupyterlab | extension was successfully loaded.
+[I 2026-05-15 04:42:26.581 ServerApp] notebook | extension was successfully loaded.
+[I 2026-05-15 04:42:26.584 ServerApp] Serving notebooks from local directory: /data
+[I 2026-05-15 04:42:26.584 ServerApp] Jupyter Server 2.14.2 is running at:
+[I 2026-05-15 04:42:26.584 ServerApp] http://53fbe17c4077:8888/tree
+[I 2026-05-15 04:42:26.584 ServerApp]     http://127.0.0.1:8888/tree
+[I 2026-05-15 04:42:26.584 ServerApp] Use Control-C to stop this server and shut down all kernels (twice to skip confirmation).
+[I 2026-05-15 04:42:26.649 ServerApp] Skipped non-installed server(s): bash-language-server, dockerfile-language-server-nodejs, javascript-typescript-langserver, jedi-language-server, julia-language-server, pyright, python-language-server, python-lsp-server, r-languageserver, sql-language-server, texlab, typescript-language-server, unified-language-server, vscode-css-languageserver-bin, vscode-html-languageserver-bin, vscode-json-languageserver-bin, yaml-language-server
