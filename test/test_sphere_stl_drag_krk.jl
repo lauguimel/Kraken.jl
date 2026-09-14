@@ -50,12 +50,16 @@ _pick_drag_backend() =
 
     if !on_gpu
         # CPU: parse + voxelize smoke only (no flow — 120³/10k is GPU-class).
-        setup = load_kraken(krk)
-        dom = setup.domain
-        mask = falses(dom.Nx, dom.Ny, dom.Nz)
-        Kraken._apply_geometry_3d!(mask, setup, dom.Lx / dom.Nx)
-        @test count(mask) > 0
-        @test count(mask) < length(mask)
+        # cd(root): the .krk references the STL fixture by a path relative to
+        # the repo root, so resolve it from there regardless of the test cwd.
+        cd(root) do
+            setup = load_kraken(krk)
+            dom = setup.domain
+            mask = falses(dom.Nx, dom.Ny, dom.Nz)
+            Kraken._apply_geometry_3d!(mask, setup, dom.Lx / dom.Nx)
+            @test count(mask) > 0
+            @test count(mask) < length(mask)
+        end
     else
         cd(root) do
             res = run_simulation(load_kraken(krk); backend=backend, T=FT)

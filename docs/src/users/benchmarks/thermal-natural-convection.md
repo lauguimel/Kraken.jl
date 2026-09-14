@@ -27,7 +27,7 @@ Both mid-plane velocity extrema (`u_max*`, `v_max*`, normalised by `α/L`) are u
 1 % at every Ra. OpenFOAM independently corroborates de Vahl Davis at Ra = 10³
 (−0.56 %) and Ra = 10⁵ (−0.60 %) — two CFD codes (FVM SIMPLE and LBM) bracketing the
 benchmark from opposite signs. Full data:
-`bench/thermal_rheotool/kraken_natconv_results.csv`.
+`benchmarks/results/repro/thermal/kraken_natconv_results.csv`.
 
 **Per-Ra precision recipe (a real finding).** The thermal boundary layer thins as
 Ra^(1/4), so the resolution needed to clear the 1 % gate grows with Ra: at Ra = 10⁵
@@ -57,13 +57,20 @@ Nu = 1.117 / 2.238 / 4.509 at Ra = 10³ / 10⁴ / 10⁵.
 
 The same double-distribution thermal LBM extends to a **cubic** cavity (D3Q19 flow +
 D3Q19 temperature, driver `run_natural_convection_3d`), referenced to Tric et al. (2000)
-and cross-checked against Fusegi et al. (1991). As in 2D the boundary layer thins as
-Ra^(1/4), so at 96³ the Nu error grows with Ra (**+1.45 % / +3.36 % / +6.29 %** at
-Ra = 10³ / 10⁴ / 10⁵) but descends monotonically with mesh — at Ra = 10⁵,
-**+13.8 % (N=48) → +9.9 % (64) → +6.3 % (96)**. Reaching < 2 % at Ra = 10⁵ needs
-**N ≥ 128** (an HPC-class run); the residual at N = 96 is a resolution limit, not a
-defect. **Float32 ≡ Float64 to 0.04 %** in 3D. Data:
-`bench/thermal_rheotool/kraken_natconv_3d_results.csv`. References: Tric, E., Labrosse,
+and cross-checked against Fusegi et al. (1991). A single-mesh exploratory run at 96³
+(Metal F32) gives Nu errors of **+1.45 % / +3.36 % / +6.29 %** at Ra = 10³ / 10⁴ / 10⁵
+vs Tric — the boundary layer thins as Ra^(1/4), so the residual grows with Ra as
+expected. These three points are tabulated in
+`benchmarks/results/repro/thermal/kraken_natconv_3d_results.csv`.
+
+> **Status: preliminary, not yet a quantitative benchmark.** Only the 96³ point above is
+> bundled. A full mesh-convergence ladder (N = 48 / 64 / 96 / 128) and a Float32-vs-Float64
+> cross-check are not yet reproducible from this repo; reaching the < 2 % gate at Ra = 10⁵
+> is expected to require N ≥ 128 (an HPC-class run). Consistent with the
+> [validation matrix](validation-matrix.md), the quantitative 3D thermal benchmark is a
+> **future item**; the 3D driver is wired and smoke-validated today.
+
+References: Tric, E., Labrosse,
 G. & Betrouni, M. (2000), Int. J. Heat Mass Transfer 43, 4043–4056; Fusegi, T., Hyun,
 J.M., Kuwahara, K. & Farouk, B. (1991), Int. J. Heat Mass Transfer 34, 1543–1557.
 

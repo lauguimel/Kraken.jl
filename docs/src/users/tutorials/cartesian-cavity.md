@@ -25,6 +25,8 @@ lid speed and `L` the cavity side. We run `Re = 100`, `400`, `1000`. In lattice
 units we fix the lid speed at `u_lid = 0.1` (diffusive scaling) and choose the
 viscosity from `ν = u_lid · N / Re`.
 
+![Lid-driven cavity boundary conditions.  The north wall is a moving lid imposed via a Zou–He velocity BC (grey dashed baseline with red velocity arrows); the south, east and west walls are no-slip half-way bounce-back walls (hatched).](cartesian-cavity-bc.svg)
+
 ## The `.krk` file
 
 The `Re = 100` case (`examples/cavity.krk`) is as compact as it gets:

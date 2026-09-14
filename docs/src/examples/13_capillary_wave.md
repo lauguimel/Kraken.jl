@@ -78,7 +78,7 @@ A sinusoidally perturbed interface separates a heavy fluid (bottom,
 
 Download: [`capillary_wave.krk`](../assets/krk/capillary_wave.krk)
 
-```
+```krk
 Simulation capillary_wave D2Q9
 Define Nx = 128
 Define Ny = 256

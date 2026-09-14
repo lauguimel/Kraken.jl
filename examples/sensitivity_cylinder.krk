@@ -1,0 +1,26 @@
+# Steady AD shape sensitivity for a confined cylinder.
+
+Simulation sensitivity_cylinder D2Q9
+Domain L = 48 x 16  N = 48 x 16
+
+Define U = 0.05
+Define H = 16
+Define cx = 12
+Define cy = 8
+Define R = 3.75
+Define tol = 1e-9
+Define gmres_tol = 1e-9
+Define adjoint_tol = 1e-8
+
+Physics nu = 0.05
+
+Obstacle cylinder wall(radius = R) { (x - cx)^2 + (y - cy)^2 <= R^2 }
+
+Boundary west  velocity(ux = 4*U*y*(H - y)/H^2, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 60000 steps
+
+Sensitivity { qoi = drag, wrt = radius }

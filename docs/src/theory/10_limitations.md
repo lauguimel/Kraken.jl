@@ -163,7 +163,9 @@ finite element methods, there is no straightforward way to locally refine the
 mesh near walls or features of interest. Multi-block and adaptive approaches
 exist but break the simplicity that makes LBM attractive.
 
-Kraken.jl currently uses uniform grids only (AMR is planned for V2).
+Solution-adaptive mesh refinement (AMR) is not implemented. Kraken.jl does,
+however, ship static patch-based grid refinement (Filippova--Hänel rescaling,
+2D full / 3D partial) --- see [Grid refinement](18_grid_refinement.md).
 
 ## Limited to low-Mach flows
 

@@ -1,5 +1,8 @@
 # # Species Diffusion
 #
+# ```@raw html
+# <DownloadMenu :files="[{label:'species_diffusion.csv',href:'/downloads/species_diffusion/species_diffusion.csv'},{label:'species_diffusion.py',href:'/downloads/species_diffusion/species_diffusion.py'}]" />
+# ```
 #
 # ## Problem Statement
 #

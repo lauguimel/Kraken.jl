@@ -1,0 +1,27 @@
+# Fast 24x24 VE shape-adjoint dispatch fixture for the default test suite.
+# Mirrors examples/sensitivity_cylinder_polymer.krk on a smaller off-lattice grid.
+
+Simulation sensitivity_cylinder_polymer_fast D2Q9
+Domain L = 24 x 24  N = 24 x 24
+
+Define R = 5.13
+Define cx = 12.35
+Define cy = 11.65
+Define Wi = 0.5
+Define beta = 0.5
+Define Fx_body = 2e-4
+Define samples = 16
+
+Physics R = R Wi = Wi beta = beta cx = cx cy = cy Fx_body = Fx_body samples = samples
+Rheology oldroyd_b { nu_s = 0.08 nu_p = 0.02 lambda = Wi }
+Module viscoelastic
+
+Obstacle cylinder wall(radius = R) { (x - cx)^2 + (y - cy)^2 <= R^2 }
+Boundary west  velocity(ux = Fx_body, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 60000 steps
+
+Sensitivity { qoi = polymer_drag, wrt = radius }

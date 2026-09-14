@@ -36,6 +36,11 @@ using KernelAbstractions
         # j=1 → bounce-back; pulling from j+1 (for -y pops) invalid at j=Ny.
         at_lo = j == 1
         at_hi = j == Ny
+        # Wall-normal neighbour indices clamped in range: `ifelse` is a plain
+        # function, so BOTH branches are evaluated and the unselected one must
+        # never index at j = 0 or j = Ny + 1 (out of bounds under @inbounds).
+        jm1 = ifelse(j > 1,  j - 1, j)
+        jp1 = ifelse(j < Ny, j + 1, j)
 
         f_out[i,j,k,1] = f_in[i, j, k, 1]   # rest
 
@@ -43,17 +48,17 @@ using KernelAbstractions
         f_out[i,j,k,2] = f_in[im, j, k, 2]
         f_out[i,j,k,3] = f_in[ip, j, k, 3]
         # Axis y (wall bounce-back)
-        f_out[i,j,k,4] = ifelse(at_lo, f_in[i, j, k, 5], f_in[i, j-1, k, 4])
-        f_out[i,j,k,5] = ifelse(at_hi, f_in[i, j, k, 4], f_in[i, j+1, k, 5])
+        f_out[i,j,k,4] = ifelse(at_lo, f_in[i, j, k, 5], f_in[i, jm1, k, 4])
+        f_out[i,j,k,5] = ifelse(at_hi, f_in[i, j, k, 4], f_in[i, jp1, k, 5])
         # Axis z (periodic)
         f_out[i,j,k,6] = f_in[i, j, km, 6]
         f_out[i,j,k,7] = f_in[i, j, kp, 7]
 
         # xy edges
-        f_out[i,j,k,8]  = ifelse(at_lo, f_in[i, j, k, 11], f_in[im, j-1, k, 8])
-        f_out[i,j,k,9]  = ifelse(at_lo, f_in[i, j, k, 10], f_in[ip, j-1, k, 9])
-        f_out[i,j,k,10] = ifelse(at_hi, f_in[i, j, k, 9],  f_in[im, j+1, k, 10])
-        f_out[i,j,k,11] = ifelse(at_hi, f_in[i, j, k, 8],  f_in[ip, j+1, k, 11])
+        f_out[i,j,k,8]  = ifelse(at_lo, f_in[i, j, k, 11], f_in[im, jm1, k, 8])
+        f_out[i,j,k,9]  = ifelse(at_lo, f_in[i, j, k, 10], f_in[ip, jm1, k, 9])
+        f_out[i,j,k,10] = ifelse(at_hi, f_in[i, j, k, 9],  f_in[im, jp1, k, 10])
+        f_out[i,j,k,11] = ifelse(at_hi, f_in[i, j, k, 8],  f_in[ip, jp1, k, 11])
 
         # xz edges (both periodic — no wall crossing)
         f_out[i,j,k,12] = f_in[im, j, km, 12]
@@ -62,10 +67,10 @@ using KernelAbstractions
         f_out[i,j,k,15] = f_in[ip, j, kp, 15]
 
         # yz edges (z periodic, y wall)
-        f_out[i,j,k,16] = ifelse(at_lo, f_in[i, j, k, 19], f_in[i, j-1, km, 16])
-        f_out[i,j,k,17] = ifelse(at_hi, f_in[i, j, k, 18], f_in[i, j+1, km, 17])
-        f_out[i,j,k,18] = ifelse(at_lo, f_in[i, j, k, 17], f_in[i, j-1, kp, 18])
-        f_out[i,j,k,19] = ifelse(at_hi, f_in[i, j, k, 16], f_in[i, j+1, kp, 19])
+        f_out[i,j,k,16] = ifelse(at_lo, f_in[i, j, k, 19], f_in[i, jm1, km, 16])
+        f_out[i,j,k,17] = ifelse(at_hi, f_in[i, j, k, 18], f_in[i, jp1, km, 17])
+        f_out[i,j,k,18] = ifelse(at_lo, f_in[i, j, k, 17], f_in[i, jm1, kp, 18])
+        f_out[i,j,k,19] = ifelse(at_hi, f_in[i, j, k, 16], f_in[i, jp1, kp, 19])
     end
 end
 
@@ -112,6 +117,11 @@ end
 
         at_lo = j == 1
         at_hi = j == Ny
+        # Wall-normal neighbour indices clamped in range: `ifelse` is a plain
+        # function, so BOTH branches are evaluated and the unselected one must
+        # never index at j = 0 or j = Ny + 1 (out of bounds under @inbounds).
+        jm1 = ifelse(j > 1,  j - 1, j)
+        jp1 = ifelse(j < Ny, j + 1, j)
 
         # Ladd correction magnitude for an edge population (w_e = 1/36):
         #   2 w_e / cs² · ρ_w · u_w = 6 w_e ρ_w u_w = (1/6) ρ_w u_w.
@@ -124,8 +134,8 @@ end
         f_out[i,j,k,2] = f_in[im, j, k, 2]
         f_out[i,j,k,3] = f_in[ip, j, k, 3]
         # Axis y (wall bounce-back; axial pops have c_qx=0 → no Ladd term)
-        f_out[i,j,k,4] = ifelse(at_lo, f_in[i, j, k, 5], f_in[i, j-1, k, 4])
-        f_out[i,j,k,5] = ifelse(at_hi, f_in[i, j, k, 4], f_in[i, j+1, k, 5])
+        f_out[i,j,k,4] = ifelse(at_lo, f_in[i, j, k, 5], f_in[i, jm1, k, 4])
+        f_out[i,j,k,5] = ifelse(at_hi, f_in[i, j, k, 4], f_in[i, jp1, k, 5])
         # Axis z (periodic)
         f_out[i,j,k,6] = f_in[i, j, km, 6]
         f_out[i,j,k,7] = f_in[i, j, kp, 7]
@@ -135,11 +145,11 @@ end
         #   The reflected population gains +2 w_q ρ_w (c_q·u_w)/cs²; with the
         #   half-way reflection the sign that yields a co-moving fluid is:
         #   q8 (c_qx=+1): + ; q9 (c_qx=−1): − .
-        f_out[i,j,k,8]  = ifelse(at_lo, f_in[i, j, k, 11] + cbot, f_in[im, j-1, k, 8])
-        f_out[i,j,k,9]  = ifelse(at_lo, f_in[i, j, k, 10] - cbot, f_in[ip, j-1, k, 9])
+        f_out[i,j,k,8]  = ifelse(at_lo, f_in[i, j, k, 11] + cbot, f_in[im, jm1, k, 8])
+        f_out[i,j,k,9]  = ifelse(at_lo, f_in[i, j, k, 10] - cbot, f_in[ip, jm1, k, 9])
         # Top wall (j=Ny): reflect −y unknowns 10 (+x,−y) and 11 (−x,−y).
-        f_out[i,j,k,10] = ifelse(at_hi, f_in[i, j, k, 9]  + ctop, f_in[im, j+1, k, 10])
-        f_out[i,j,k,11] = ifelse(at_hi, f_in[i, j, k, 8]  - ctop, f_in[ip, j+1, k, 11])
+        f_out[i,j,k,10] = ifelse(at_hi, f_in[i, j, k, 9]  + ctop, f_in[im, jp1, k, 10])
+        f_out[i,j,k,11] = ifelse(at_hi, f_in[i, j, k, 8]  - ctop, f_in[ip, jp1, k, 11])
 
         # xz edges (both periodic — no wall crossing)
         f_out[i,j,k,12] = f_in[im, j, km, 12]
@@ -148,10 +158,10 @@ end
         f_out[i,j,k,15] = f_in[ip, j, kp, 15]
 
         # yz edges (z periodic, y wall; c_qx=0 → no tangential-x Ladd term)
-        f_out[i,j,k,16] = ifelse(at_lo, f_in[i, j, k, 19], f_in[i, j-1, km, 16])
-        f_out[i,j,k,17] = ifelse(at_hi, f_in[i, j, k, 18], f_in[i, j+1, km, 17])
-        f_out[i,j,k,18] = ifelse(at_lo, f_in[i, j, k, 17], f_in[i, j-1, kp, 18])
-        f_out[i,j,k,19] = ifelse(at_hi, f_in[i, j, k, 16], f_in[i, j+1, kp, 19])
+        f_out[i,j,k,16] = ifelse(at_lo, f_in[i, j, k, 19], f_in[i, jm1, km, 16])
+        f_out[i,j,k,17] = ifelse(at_hi, f_in[i, j, k, 18], f_in[i, jp1, km, 17])
+        f_out[i,j,k,18] = ifelse(at_lo, f_in[i, j, k, 17], f_in[i, jm1, kp, 18])
+        f_out[i,j,k,19] = ifelse(at_hi, f_in[i, j, k, 16], f_in[i, jp1, kp, 19])
     end
 end
 

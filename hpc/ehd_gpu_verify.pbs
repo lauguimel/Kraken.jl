@@ -1,0 +1,33 @@
+#!/bin/bash -l
+# GPU verification for the EHD :direct Poisson GPU path (M-EHD-2d):
+# 1) CUDSS-vs-CPU phi parity test  2) ms/step timing at T=170, 50k cycles.
+
+#PBS -N ehd_gpuv
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m n
+
+cd $PBS_O_WORKDIR
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false
+# Dedicated env: develops ~/kraken_ehd + CUDA/CUDSS/LinearSolve/Enzyme in ONE
+# resolution (Julia 1.12 weakdep landmine). CUDSS only loads with a GPU present,
+# so precompile happens HERE on the compute node, not on login.
+PROJ="$HOME/ehd_cudss_env"
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+julia --project="$PROJ" -e 'using Pkg; Pkg.precompile()' \
+    || { echo "ERROR: precompile failed on GPU node"; exit 1; }
+julia --project="$PROJ" -e 'using CUDA; CUDA.functional() || error("CUDA not functional")' \
+    || { echo "ERROR: CUDA.jl not functional"; exit 1; }
+
+echo "==> PHASE 1: GPU phi parity test"
+julia --project="$PROJ" -e 'using CUDA, CUDSS, Kraken; include("test/analytical/ehd_phi_gpu_parity_2d.jl")' \
+    || { echo "ERROR: GPU parity test failed"; exit 1; }
+
+echo "==> PHASE 2: timing sweep T=170, 50k cycles, phi=direct GPU"
+julia --project="$PROJ" benchmarks/ehd/tc_sweep.jl --gpu --phi-scheme=direct --force-projection=xy --T=170 --cycles=50000
+
+echo "==> VERIFY DONE"

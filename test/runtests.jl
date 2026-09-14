@@ -1,15 +1,102 @@
 using Test
 using Kraken
 
+if get(ENV, "KRAKEN_AD_ONLY", "false") == "true"
+    include("ad/test_ad_sensitivity.jl")
+    exit()
+end
+
+# IncNS + solve-services tier (platform contract, linear-solve seam, Poisson
+# services, IncNS drivers, scalar transport). Runs after the LBM tier by
+# default; KRAKEN_INCNS_ONLY=true runs it alone (mirrors KRAKEN_AD_ONLY).
+# Heavy validations (Ghia cavities, MG MMS up to 512²) additionally gate on
+# KRAKEN_TEST_HEAVY=true.
+function run_incns_testset()
+    @testset "IncNS + solve services" begin
+        # Platform-contract parity (IncNS wrapper vs direct driver call).
+        include("platform/incns_contract_test.jl")
+
+        # Solve services: linear-solve seam + elliptic (Poisson) MMS receipts.
+        include("analytical/linear_solve_nonsym.jl")
+        include("analytical/poisson_mms.jl")
+        include("analytical/poisson_embedded_mms.jl")
+        include("analytical/poisson_embedded_fvfd_mms.jl")
+
+        # LinearSolve.jl front-end (weakdep ext). Guard the LOAD, not the
+        # tests (Enzyme-guard pattern), so real ext failures still surface
+        # when LinearSolve IS present in the environment.
+        let ls_ok = try
+                @eval Main using LinearSolve
+                true
+            catch
+                false
+            end
+            if ls_ok
+                include("analytical/poisson_linearsolve_mms.jl")
+            else
+                @info "Skipping LinearSolve front-end tests (LinearSolve not loadable in this environment)"
+            end
+        end
+
+        # cuDSS GPU direct path (weakdep ext) — self-gated on CUDA.functional()
+        # inside the file; skips cleanly on CPU-only boxes.
+        include("analytical/poisson_cudss_gpu.jl")
+
+        # FVFD velocity-operator trio (grad/div/laplacian + embedded variants).
+        include("analytical/incns_grad_div_laplacian_mms.jl")
+
+        # IncNS drivers + scalar transport, analytical validation.
+        include("analytical/incns_poiseuille.jl")
+        include("analytical/incns_unsteady_taylor_green.jl")
+        include("analytical/incns_unsteady_startup_channel.jl")
+        include("analytical/incns_manifold.jl")   # fast (~4 s CPU): stays non-heavy
+        include("analytical/incns_momentum_advection_order.jl")
+        include("analytical/scalar_transport_heated_channel.jl")
+
+        # Heavy validations (long CPU runs: Ghia cavities, MG MMS up to 512²) —
+        # opt in via KRAKEN_TEST_HEAVY=true.
+        if get(ENV, "KRAKEN_TEST_HEAVY", "false") == "true"
+            include("analytical/incns_cavity_ghia.jl")
+            include("analytical/incns_cavity_mg_ghia.jl")
+            include("analytical/poisson_mg_mms.jl")
+        else
+            @info "Skipping heavy IncNS validations (set KRAKEN_TEST_HEAVY=true to run)"
+        end
+    end
+end
+
+if get(ENV, "KRAKEN_INCNS_ONLY", "false") == "true"
+    run_incns_testset()
+    exit()
+end
+
 @testset "Kraken.jl LBM" begin
+    include("platform/contract_parity_test.jl")
+    include("platform/residual_vjp_test.jl")
+    include("platform/calibration_test.jl")
+    include("platform/calibration_nufield_test.jl")
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
+    include("test_guo_convention_pairs.jl")
+    # Issue #18: west/east pressure channel through the public .krk runner.
+    include("analytical/H2-004-route.jl")
     include("test_poiseuille_3d.jl")
     include("test_couette.jl")
     include("test_taylor_green.jl")
     include("test_thermal.jl")
+    # Issue #19: conduction .krk fallback honours nu, alpha and thermal faces.
+    include("analytical/TH-002-route.jl")
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
+    include("analytical/ehd_hydrostatic_2d.jl")
+    include("analytical/ehd_krk_2d.jl")
+    include("analytical/ehd_mapping_parity_2d.jl")
+    include("analytical/ehd_mrt_smoke_2d.jl")
+    # ~40 s: two 50k-cycle canaries bracketing the electroconvection onset.
+    include("analytical/ehd_onset_2d.jl")
+    include("analytical/ehd_phi_direct_2d.jl")
+    include("analytical/ehd_twin_parity_2d.jl")
+    include("analytical/ehd_phi_gpu_parity_2d.jl")
     include("test_species.jl")
     include("test_multiphase.jl")
     include("test_vof.jl")
@@ -46,7 +133,22 @@ using Kraken
     include("test_sphere_libb.jl")
     include("test_sphere_stl_drag_krk.jl")
     include("test_slbm_libb_3d.jl")
-    include("test_gmsh_loader.jl")
+    # Gmsh is an optional mesh-import dependency, not a Kraken dep. Guard the LOAD
+    # (same pattern as the Enzyme block below) so its absence skips cleanly instead
+    # of erroring the whole suite, while real loader failures still surface when it
+    # IS installed.
+    let gmsh_ok = try
+            @eval Main using Gmsh
+            true
+        catch
+            false
+        end
+        if gmsh_ok
+            include("test_gmsh_loader.jl")
+        else
+            @info "Skipping gmsh loader tests (Gmsh not installed in this environment)"
+        end
+    end
     include("test_multiblock_topology.jl")
     include("test_multiblock_exchange.jl")
     include("test_multiblock_canal.jl")
@@ -61,6 +163,9 @@ using Kraken
     include("test_rheology.jl")
     include("test_viscoelastic.jl")
     include("test_viscoelastic_krk.jl")
+    # --- 3D viscoelastic tier (FVFD/FD transport + log-conformation, four
+    #     constitutive models, RheoTool cross-validation). This capability
+    #     lives only on this line; keep it registered here. ---
     include("test_viscoelastic_sphere_3d.jl")
     include("test_viscoelastic_couette_3d.jl")
     include("test_viscoelastic_poiseuille_3d.jl")
@@ -78,6 +183,22 @@ using Kraken
     include("test_fvfd_extensional_3d.jl")
     include("test_fvfd_fenep_extensional_3d.jl")
     include("test_viscoelastic_extensional_krk.jl")
+    # AD steady-sensitivity tests need the Enzyme extension (weakdep). Run only when Enzyme
+    # is loadable in this environment; skip cleanly otherwise (guard the LOAD, not the tests,
+    # so real AD test failures still surface when Enzyme IS present).
+    let enzyme_ok = try
+            @eval Main using Enzyme
+            true
+        catch
+            false
+        end
+        if enzyme_ok
+            include("ad/test_ad_sensitivity.jl")
+            include("ad/test_ad_ve_sensitivity.jl")
+        else
+            @info "Skipping AD steady-sensitivity tests (Enzyme extension not loadable in this environment)"
+        end
+    end
 
     @testset "Kraken.Units" begin
         include("test_units.jl")
@@ -86,5 +207,8 @@ using Kraken
         include("test_units_audit.jl")
         include("test_units_krk.jl")
         include("test_units_thermal.jl")
+        include("test_units_ehd.jl")
     end
 end
+
+run_incns_testset()

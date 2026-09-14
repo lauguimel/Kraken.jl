@@ -1,0 +1,19 @@
+=== WP-MESH-6 — Cylinder cross-flow Re=100 (CUDA H100, FP64) ===
+Reference (Williamson 1996, Park 1998): Cd≈1.4  Cl_RMS≈0.33  St≈0.165
+Domain 1.0 × 0.5  cylinder (0.5, 0.245) R=0.025  blockage = 10.0%
+Bump coef = 0.1
+
+--- D_lu=20  steps=80000  sample_every=10  window=40000 ---
+[A D=20 cells=80601] Cd=1.672 (err 19.46%)  Cl_RMS=0.271 (err 18.0%)  St=0.2 (err 21.21%)  | 583.0 MLUPS  11.1s
+[B D=20 cells=80601] Cd=1.643 (err 17.39%)  Cl_RMS=0.256 (err 22.35%)  St=0.2 (err 21.21%)  | 1628.0 MLUPS  4.0s
+[C D=20 cells=80601] Cd=NaN (err NaN%)  Cl_RMS=NaN (err NaN%)  St=0.012 (err 92.42%)  | 948.0 MLUPS  6.8s
+--- D_lu=40  steps=160000  sample_every=10  window=80000 ---
+[A D=40 cells=321201] Cd=1.652 (err 18.03%)  Cl_RMS=0.282 (err 14.64%)  St=0.2 (err 21.21%)  | 4252.0 MLUPS  12.1s
+[B D=40 cells=321201] Cd=1.649 (err 17.79%)  Cl_RMS=0.283 (err 14.31%)  St=0.2 (err 21.21%)  | 4220.0 MLUPS  12.2s
+[C D=40 cells=321201] Cd=0.732 (err 47.69%)  Cl_RMS=0.255 (err 22.77%)  St=0.375 (err 127.27%)  | 1723.0 MLUPS  29.8s
+--- D_lu=80  steps=320000  sample_every=20  window=160000 ---
+[A D=80 cells=1282401] Cd=1.648 (err 17.71%)  Cl_RMS=0.283 (err 14.38%)  St=0.2 (err 21.21%)  | 7015.0 MLUPS  58.5s
+[B D=80 cells=1282401] Cd=1.65 (err 17.88%)  Cl_RMS=0.286 (err 13.43%)  St=0.2 (err 21.21%)  | 7007.0 MLUPS  58.6s
+[C D=80 cells=1282401] Cd=NaN (err NaN%)  Cl_RMS=NaN (err NaN%)  St=0.012 (err 92.42%)  | 2221.0 MLUPS  184.7s
+
+=== Done ===

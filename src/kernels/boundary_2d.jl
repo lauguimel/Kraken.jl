@@ -240,6 +240,64 @@ function apply_zou_he_pressure_east_2d!(f, Nx, Ny; ρ_out=1.0)
     kernel!(f, Nx, eltype(f)(ρ_out); ndrange=(Ny,))
 end
 
+# --- Zou-He pressure inlet on west wall (i=1) ---
+#
+# D2Q9 direction convention used throughout this file (1-based index → (cx, cy)):
+#   1:(0,0) 2:(+1,0) 3:(0,+1) 4:(-1,0) 5:(0,-1)
+#   6:(+1,+1) 7:(-1,+1) 8:(-1,-1) 9:(+1,-1)
+#
+# At i = 1 the populations with cx = +1 (q = 2, 6, 9) have no upstream
+# neighbour, so they are the unknowns; the mirror image of the east outlet,
+# where the unknowns are the cx = -1 set (q = 4, 7, 8).
+#
+# With ρ prescribed and u_y = 0 the Zou-He closure gives, from
+#   ρ      = (f1+f3+f5) + (f4+f7+f8) + (f2+f6+f9)
+#   ρ·u_x  = (f2+f6+f9) - (f4+f7+f8)
+# the normal velocity
+#   u_x = 1 - (f1+f3+f5 + 2(f4+f7+f8)) / ρ_in
+# (sign opposite to the east face, where the known set streams in from -x),
+# then bounce-back of the non-equilibrium normal part, f2 - f2^eq = f4 - f4^eq
+# with f2^eq - f4^eq = 2·w2·ρ·c_x·u_x/c_s² = (2/3)·ρ·u_x, and the two diagonal
+# closures fixed by the transverse momentum balance f3+f6+f7 = f5+f8+f9
+# (u_y = 0).
+
+@kernel function zou_he_pressure_west_2d_kernel!(f, ρ_in)
+    j = @index(Global)
+
+    @inbounds begin
+        T = eltype(f)
+        # Known: f1, f3(+y), f5(-y) parallel; f4(-x), f7(-x,+y), f8(-x,-y) from interior
+        f1 = f[1,j,1]; f3 = f[1,j,3]; f4 = f[1,j,4]
+        f5 = f[1,j,5]; f7 = f[1,j,7]; f8 = f[1,j,8]
+
+        # Compute ux from fixed ρ_in
+        ux = one(T) - (f1 + f3 + f5 + T(2) * (f4 + f7 + f8)) / ρ_in
+
+        # Unknown: f2(+x), f6(+x,+y), f9(+x,-y)
+        f[1,j,2] = f4 + T(2.0/3.0) * ρ_in * ux
+        f[1,j,6] = f8 - T(0.5) * (f3 - f5) + T(1.0/6.0) * ρ_in * ux
+        f[1,j,9] = f7 + T(0.5) * (f3 - f5) + T(1.0/6.0) * ρ_in * ux
+    end
+end
+
+"""
+    apply_zou_he_pressure_west_2d!(f, Nx, Ny; ρ_in=1.0)
+
+Public function in the kernel-level LBM operation.
+See the method definition below for argument requirements, array layout, and backend expectations. The bang suffix indicates that one or more array arguments are updated in-place.
+
+```julia
+using Kraken
+
+methods(Kraken.apply_zou_he_pressure_west_2d!)
+```
+"""
+function apply_zou_he_pressure_west_2d!(f, Nx, Ny; ρ_in=1.0)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = zou_he_pressure_west_2d_kernel!(backend)
+    kernel!(f, eltype(f)(ρ_in); ndrange=(Ny,))
+end
+
 # --- Zero-gradient (Neumann) outflow on east wall ---
 
 @kernel function extrapolate_east_2d_kernel!(f, Nx)

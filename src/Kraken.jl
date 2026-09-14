@@ -12,6 +12,23 @@ module Kraken
 const _png_saver = Ref{Any}(nothing)
 const _gif_saver = Ref{Any}(nothing)
 
+# --- Platform contract (method-agnostic) ---
+# Phase 0: types + capabilities. Phase 0b: LBMSolution + solve + sample (thin,
+# behaviour-preserving wrappers around run_simulation; function bodies resolve
+# run_simulation lazily at call time, so include order before the runner is fine).
+include("platform/contract.jl")
+include("platform/solution.jl")   # LBM, LBMSolution, solve
+include("platform/sample.jl")     # sample
+include("platform/observe.jl")    # observe, predict, Prediction, observables
+export AbstractProblem, AbstractMethod, AbstractSolution, AbstractObservable, AbstractClosure
+export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure, SteadyResidual
+export capabilities
+export LBM, LBMSolution, solve, sample
+export observe, predict, Prediction, FieldProbe, LineProfile, FieldReduction
+export residual, adjoint_vjp
+export LBMGeomParams, LBMThermalParams, LBMVEParams, LBMScalarParams, LBMFieldParams
+export ParameterSpace, loss, fit, CalibResult
+
 # --- Lattice definitions ---
 include("lattice/lattice.jl")
 include("lattice/d2q9.jl")
@@ -41,6 +58,9 @@ include("kernels/thermal_3d.jl")
 include("kernels/fused_thermal_2d.jl")
 include("kernels/collide_mrt_2d.jl")
 include("kernels/species_2d.jl")
+include("kernels/ehd_2d.jl")
+include("kernels/ehd_bc_2d.jl")
+include("kernels/ehd_mrt_2d.jl")
 include("kernels/multiphase_2d.jl")
 include("kernels/vof_2d.jl")
 include("kernels/dualgrid_2d.jl")
@@ -71,6 +91,50 @@ include("kernels/li_bb_3d_v2.jl")
 include("fvfd/FVFD.jl")
 include("kernels/logconformation_fv_2d.jl")
 
+# --- IncNS solver stack: linear-solve seam, elliptic services, drivers ---
+# poisson.jl MUST come first: it tail-includes solve/linear_solve.jl (the
+# factorize-once seam), which has NO self-guard — never include linear_solve.jl
+# directly here or it would double-define the seam.
+include("solve/poisson.jl")
+include("solve/poisson_embedded.jl")
+include("solve/poisson_embedded_fvfd.jl")
+include("solve/poisson_mg.jl")
+# LinearSolve.jl / cuDSS front-end tags + assembled-direct driver; the backend
+# methods live in ext/KrakenLinearSolveExt.jl and ext/KrakenCUDSSExt.jl
+# ([weakdeps] — `using Kraken` stays backend-free).
+include("solve/linear_solve_frontend.jl")
+# NOT included: solve/linear_solve_cuda.jl and methods/inc_ns/cavity_mg_cuda.jl
+# (CUDSS is not a package dependency; they stay manual-load inside GPU jobs.
+#  Package users get the same cuDSS seam via ext/KrakenCUDSSExt.jl instead).
+include("methods/inc_ns/simple.jl")
+include("methods/inc_ns/cavity.jl")
+include("methods/inc_ns/cavity_mg.jl")
+include("methods/inc_ns/projection.jl")
+include("methods/inc_ns/manifold_flow.jl")
+include("methods/scalar_transport/thermal_transport.jl")
+include("methods/inc_ns/method.jl")   # platform-contract wrapper (IncNS <: AbstractMethod)
+
+# IncNS platform contract
+export IncNS, IncNSSolution
+# IncNS / scalar-transport drivers
+export solve_incns_simple, solve_incns_cavity, solve_incns_cavity_mg,
+       solve_incns_projection, solve_incns_manifold, manifold_full_cell_mask,
+       solve_scalar_transport
+# Linear-solve seam (factorize-once)
+export lin_factorize, lin_solve!, LinearSolveCache, LinearSolveBackend,
+       CPUBackendTag, CUDABackendTag
+# LinearSolve.jl / cuDSS front-ends (ext-backed; see [weakdeps])
+export PoissonLinearSolve, solve_poisson_direct
+# Elliptic (Poisson) services
+export solve_poisson_dirichlet, solve_poisson_neumann, pin_reference_dof,
+       assemble_poisson_embedded, solve_poisson_embedded,
+       assemble_poisson_embedded_from_fvfd, fractions_from_fvfd,
+       solve_poisson_mg, solve_poisson_mgcg
+# FVFD grad/div/laplacian velocity operators (+ embedded variants)
+export gdl_divergence_2d!, gdl_pressure_gradient_2d!, gdl_laplacian_apply_2d!,
+       gdl_divergence_embedded_2d!, gdl_pressure_gradient_embedded_2d!,
+       gdl_laplacian_apply_embedded_2d!
+
 # --- Modular BC system (uses TRT rates + feq helpers; compiles face
 #     kernels per BC type via Julia dispatch).
 include("bc/specs.jl")
@@ -88,6 +152,9 @@ include("kernels/enzyme_rules.jl")
 include("drivers/basic.jl")
 include("drivers/cylinder_libb.jl")
 include("drivers/thermal.jl")
+include("drivers/ehd_poisson.jl")
+include("drivers/ehd.jl")
+include("drivers/ehd_ec.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
 include("drivers/rheology.jl")
@@ -107,6 +174,23 @@ include("drivers/viscoelastic_fvfd_3d.jl")
 include("drivers/viscoelastic_fvfd_extensional_3d.jl")
 include("drivers/step_geometry_2d.jl")
 include("drivers/viscoelastic_logfv_2d.jl")
+
+# --- Steady shape-adjoint AD (core is Enzyme-free; reverse seams live in ext/) ---
+include("ad/ad_step.jl")
+include("ad/ad_thermal_step.jl")
+include("ad/ad_ve_ops.jl")
+include("ad/ad_ve_step.jl")
+include("ad/ad_ve_forward.jl")
+include("ad/ad_forward.jl")
+include("ad/ad_qoi.jl")
+include("ad/ad_adjoint.jl")
+include("ad/ad_geometry.jl")
+include("ad/ad_api.jl")
+include("ad/ad_ve_geometry.jl")
+
+# Phase 2a platform residual/VJP seam depends on AD param types and step maps.
+include("platform/residual.jl")
+include("platform/calibration.jl")
 
 # --- Curvilinear (body-fitted) mesh — v0.2 SLBM path ---
 include("curvilinear/mesh.jl")
@@ -128,6 +212,7 @@ include("io/krk/rheology.jl")
 include("io/krk/units_bridge.jl")
 include("io/krk/setup_lbm.jl")
 include("io/krk/diagnostics.jl")
+include("ad/ad_krk.jl")
 
 # --- Grid refinement ---
 include("refinement/refinement.jl")
@@ -191,6 +276,7 @@ include("drivers/run_d3q19.jl")
 include("drivers/run_refined.jl")
 include("drivers/run_refined_3d.jl")
 include("drivers/run_thermal.jl")
+include("drivers/run_ehd.jl")
 
 # --- Generic simulation runner ---
 include("simulation_runner.jl")
@@ -217,7 +303,7 @@ export collide_guo_3d!, collide_guo_field_3d!
 export compute_macroscopic_2d!, compute_macroscopic_3d!, compute_macroscopic_forced_2d!
 export compute_macroscopic_forced_3d!, compute_macroscopic_forced_field_3d!, compute_macroscopic_pressure_2d!
 export apply_zou_he_north_2d!, apply_zou_he_south_2d!
-export apply_zou_he_west_2d!, apply_zou_he_pressure_east_2d!, apply_extrapolate_east_2d!
+export apply_zou_he_west_2d!, apply_zou_he_pressure_east_2d!, apply_zou_he_pressure_west_2d!, apply_extrapolate_east_2d!
 export apply_zou_he_top_3d!
 export apply_zou_he_bottom_3d!, apply_zou_he_west_3d!, apply_zou_he_east_3d!
 export apply_zou_he_south_3d!, apply_zou_he_north_3d!
@@ -243,6 +329,7 @@ export apply_fixed_temp_south_2d!, apply_fixed_temp_north_2d!
 export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
 export run_rayleigh_benard_2d, run_natural_convection_2d, run_natural_convection_refined_2d
 export run_natural_convection_3d
+export run_electroconvection_2d
 export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_step!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!
@@ -254,6 +341,7 @@ export fused_bgk_step!, aa_even_step!, aa_odd_step!
 export fused_trt_step!, trt_rates
 export fused_trt_libb_step!, fused_trt_libb_v2_step!, fused_trt_libb_v2_hermite_step!, fused_trt_libb_v2_guo_field_step!, fused_trt_libb_v2_step_3d!, precompute_q_wall_cylinder
 export dq_wall_dR_cylinder
+export steady_shape_sensitivity
 export precompute_q_wall_sphere_3d, compute_drag_libb_3d, run_sphere_libb_3d
 export precompute_q_wall_annulus
 export wall_velocity_rotating_cylinder, wall_velocity_rotating_inner
@@ -262,6 +350,7 @@ export collide_axisymmetric_2d!, collide_li_axisym_2d!, run_hagen_poiseuille_2d
 
 # MRT
 export collide_mrt_2d!, collide_twophase_mrt_2d!
+export ehd_collide_mrt_2d!
 
 # Species transport
 export collide_species_2d!, compute_concentration_2d!

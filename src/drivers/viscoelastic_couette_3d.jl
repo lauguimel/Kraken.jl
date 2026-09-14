@@ -49,10 +49,10 @@ function run_conformation_couette_libb_3d(;
     if polymer_model === nothing
         isnothing(ν_p) && error("supply either `polymer_model` or (`ν_p`, `lambda`).")
         G_ = FT(ν_p / lambda)
-        polymer_model = OldroydB(G=G_, λ=FT(lambda))
+        polymer_model = OldroydBSpec(G=G_, λ=FT(lambda))
     end
     if uses_log_conformation(polymer_model)
-        error("3D log-conformation is not yet wired into the Couette driver; pass an OldroydB model.")
+        error("3D log-conformation is not yet wired into the Couette driver; pass an OldroydBSpec model.")
     end
     λ_p     = polymer_relaxation_time(polymer_model)
     ν_p_eff = polymer_modulus(polymer_model) * λ_p

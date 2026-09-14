@@ -218,14 +218,14 @@ end
                                 C_xx, C_xy, C_xz, C_yy, C_yz, C_zz, model)
 
 Compute the 3D polymeric stress from the conformation tensor and an
-`AbstractPolymerModel`. Currently implemented for `OldroydB` (and
+`AbstractPolymerModel`. Currently implemented for `OldroydBSpec` (and
 `LogConfOldroydB` after `psi_to_C` reconstruction). Mirrors the 2D
 dispatch in `viscoelastic_spec.jl::update_polymer_stress!`.
 """
 function update_polymer_stress_3d!(tau_xx, tau_xy, tau_xz,
                                      tau_yy, tau_yz, tau_zz,
                                      C_xx, C_xy, C_xz, C_yy, C_yz, C_zz,
-                                     model::OldroydB)
+                                     model::OldroydBSpec)
     backend = KernelAbstractions.get_backend(tau_xx)
     Nx, Ny, Nz = size(tau_xx)
     FT = eltype(tau_xx)

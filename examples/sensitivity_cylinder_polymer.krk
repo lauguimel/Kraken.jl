@@ -1,0 +1,28 @@
+# Steady VE shape-adjoint: d(polymeric x-drag)/dR for a confined Oldroyd-B cylinder.
+# Wi/nu_p/nu_s/Fx_body are the AD-convention values (lambda = Wi, prefactor = nu_p/Wi);
+# the forward reconverges to fwd_tol=1e-13 (the net gradient is a ~20x cancellation).
+
+Simulation sensitivity_cylinder_polymer D2Q9
+Domain L = 32 x 32  N = 32 x 32
+
+Define R = 8.130
+Define cx = 16.350
+Define cy = 15.650
+Define Wi = 0.5
+Define beta = 0.5
+Define Fx_body = 2e-4
+Define samples = 16
+
+Physics R = R Wi = Wi beta = beta cx = cx cy = cy Fx_body = Fx_body samples = samples
+Rheology oldroyd_b { nu_s = 0.08 nu_p = 0.02 lambda = Wi }
+Module viscoelastic
+
+Obstacle cylinder wall(radius = R) { (x - cx)^2 + (y - cy)^2 <= R^2 }
+Boundary west  velocity(ux = Fx_body, uy = 0)
+Boundary east  pressure(rho = 1.0)
+Boundary south wall
+Boundary north wall
+
+Run 60000 steps
+
+Sensitivity { qoi = polymer_drag, wrt = radius }

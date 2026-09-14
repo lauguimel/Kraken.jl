@@ -20,7 +20,7 @@
 #
 # Log-conformation 3D has low-level Ψ kernels, but this sphere driver has
 # not yet wired the log-field inlet/outlet/wall treatment. For now
-# `polymer_model` must be `OldroydB`. The driver refuses to silently run
+# `polymer_model` must be `OldroydBSpec`. The driver refuses to silently run
 # with `LogConfOldroydB` in 3D.
 
 """
@@ -69,10 +69,10 @@ function run_conformation_sphere_libb_3d(;
     if polymer_model === nothing
         isnothing(ν_p) && error("supply either `polymer_model` or (`ν_p`, `lambda`).")
         G_ = FT(ν_p / lambda)
-        polymer_model = OldroydB(G=G_, λ=FT(lambda))
+        polymer_model = OldroydBSpec(G=G_, λ=FT(lambda))
     end
     if uses_log_conformation(polymer_model)
-        error("3D log-conformation is not yet wired into the sphere driver; pass an OldroydB model.")
+        error("3D log-conformation is not yet wired into the sphere driver; pass an OldroydBSpec model.")
     end
     λ_p     = polymer_relaxation_time(polymer_model)
     ν_p_eff = polymer_modulus(polymer_model) * λ_p

@@ -35,7 +35,7 @@ node, so the lid-axis domain height is `H = (N − 0.5) Δ`. Profiles are mapped
 `axis_node_coords(N; lo=:bb, hi=:onnode)`; hand-coding `yc = (j − 0.5)/N` mislocated
 the lid by half a cell and injected the spurious first-order error.
 
-Full machine-readable data: `bench/cartesian_rheotool/cavity_comparison_table.csv`
+Full machine-readable data: `benchmarks/results/rheotool_compare/newtonian/error_norms.csv`
 (both `L2_rel` and `L2_absRMS` columns for every entry).
 
 ## Methodology

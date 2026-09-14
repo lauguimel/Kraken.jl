@@ -195,7 +195,7 @@ function run_poiseuille_2d(; Nx=4, Ny=32, nu=nothing, ν=0.1, Fx=1e-5, max_steps
     for step in 1:max_steps
         stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
         collide_guo_2d!(f_out, is_solid, ω, T(Fx), T(0))
-        compute_macroscopic_forced_2d!(ρ, ux, uy, f_out, T(Fx), T(0))
+        compute_macroscopic_2d!(ρ, ux, uy, f_out)
         f_in, f_out = f_out, f_in
     end
 
@@ -434,4 +434,3 @@ function run_cylinder_2d(; Nx=200, Ny=50, cx=nothing, cy=nothing, radius=10,
     return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), config=config,
             Cd=Cd, Fx=Fx_avg, Fy=Fy_avg)
 end
-

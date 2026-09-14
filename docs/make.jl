@@ -146,7 +146,7 @@ makedocs(;
     format = DocumenterVitepress.MarkdownVitepress(
         repo = "github.com/lauguimel/Kraken.jl",
         devurl = "dev",
-        devbranch = "release/v0.2",
+        devbranch = "release/v0.3",
         build_vitepress = false,
         keep = :patch,
     ),
@@ -157,27 +157,34 @@ makedocs(;
             "Installation" => "installation.md",
             "Concepts" => "concepts_index.md",
             "Capabilities" => "capabilities.md",
+            "Architecture" => "architecture.md",
             "KRK reference" => "users/krk-reference.md",
+            "Incompressible Navier–Stokes (FVFD/SIMPLE)" => "users/incompressible-navier-stokes.md",
         ],
-        "Tutorials" => [
-            "Case tutorials" => [
-                "Cartesian cavity" => "users/tutorials/cartesian-cavity.md",
-                "Thermal natural convection" => "users/tutorials/thermal-natural-convection.md",
-                "Sphere drag 3D" => "users/tutorials/sphere-drag-3d.md",
+        "Examples" => [
+            "Newtonian" => [
+                "Poiseuille (2D)" => "examples/01_poiseuille_2d.md",
+                "Couette (2D)" => "examples/02_couette_2d.md",
+                "Taylor–Green (2D)" => "examples/03_taylor_green_2d.md",
+                "Lid-driven cavity (2D & 3D)" => "examples/04_cavity_2d.md",
+                "Cylinder (2D)" => "examples/06_cylinder_2d.md",
+                "Hagen–Poiseuille" => "examples/09_hagen_poiseuille.md",
+            ],
+            "Thermal" => [
+                "Heat conduction" => "examples/07_heat_conduction.md",
+                "Rayleigh–Bénard" => "examples/08_rayleigh_benard.md",
+            ],
+            "Non-Newtonian" => [
                 "Viscoelastic cylinder" => "users/tutorials/viscoelastic-cylinder.md",
             ],
-            "Examples" => [
-                "examples/01_poiseuille_2d.md",
-                "examples/02_couette_2d.md",
-                "examples/03_taylor_green_2d.md",
-                "examples/04_cavity_2d.md",
-                "examples/05_cavity_3d.md",
-                "examples/06_cylinder_2d.md",
-                "examples/07_heat_conduction.md",
-                "examples/08_rayleigh_benard.md",
-                "examples/09_hagen_poiseuille.md",
-                "examples/10_krk_config.md",
-                "examples/20_grid_refinement_cavity.md",
+            "Geometry / STL" => [
+                "Sphere drag 3D" => "users/tutorials/sphere-drag-3d.md",
+            ],
+            "Grid refinement" => [
+                "Refined cavity" => "examples/20_grid_refinement_cavity.md",
+            ],
+            "Configuration (.krk)" => [
+                "KRK config" => "examples/10_krk_config.md",
             ],
         ],
         "Benchmarks" => [
@@ -188,7 +195,10 @@ makedocs(;
             "Viscoelastic cylinder (Oldroyd-B)" => "users/benchmarks/viscoelastic-cylinder.md",
             "Viscoelastic constitutive models" => "users/benchmarks/ve-constitutive-models.md",
             "Viscoelastic Poiseuille (FVFD 3D)" => "users/benchmarks/ve3d-poiseuille-convergence.md",
+            "Steady shape sensitivity (AD)" => "users/benchmarks/ad-shape-sensitivity.md",
+            "Steady shape sensitivity — viscoelastic (AD)" => "users/benchmarks/ad-shape-sensitivity-viscoelastic.md",
             "GPU certification" => "users/benchmarks/gpu-certification.md",
+            "Electroconvection (EHD)" => "users/benchmarks/electroconvection.md",
             "Performance" => "benchmarks/performance.md",
             "Accuracy" => "benchmarks/accuracy.md",
             "External comparisons" => "benchmarks/external.md",
@@ -393,7 +403,7 @@ if startswith(get(ENV, "GITHUB_REF", ""), "refs/tags/v")
     DocumenterVitepress.deploydocs(;
         repo = "github.com/lauguimel/Kraken.jl.git",
         target = joinpath(@__DIR__, "build"),
-        devbranch = "release/v0.2",
+        devbranch = "release/v0.3",
         branch = "gh-pages",
         push_preview = true,
     )

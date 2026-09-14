@@ -3,6 +3,7 @@ import { tabsMarkdownPlugin } from 'vitepress-plugin-tabs'
 import mathjax3 from "markdown-it-mathjax3";
 import footnote from "markdown-it-footnote";
 import path from 'path'
+import krkGrammar from './krk.tmLanguage.json'
 
 function getBaseRepository(base: string): string {
   if (!base || base === '/') return '/';
@@ -41,10 +42,12 @@ const sectionedSidebar: Record<string, any[]> = {
   '/getting_started': section('Guide'),
   '/concepts_index': section('Guide'),
   '/capabilities': section('Guide'),
+  '/architecture': section('Guide'),
   '/users/krk-reference': section('Guide'),
-  // Tutorials (case tutorials + Literate examples)
-  '/users/tutorials/': section('Tutorials'),
-  '/examples/': section('Tutorials'),
+  '/users/incompressible-navier-stokes': section('Guide'),
+  // Examples (grouped by physics; two pages re-homed from users/tutorials/)
+  '/users/tutorials/': section('Examples'),
+  '/examples/': section('Examples'),
   // Benchmarks (validation cases + performance)
   '/users/benchmarks/': section('Benchmarks'),
   '/benchmarks/': section('Benchmarks'),
@@ -112,6 +115,12 @@ export default defineConfig({
       md.use(mathjax3),
       md.use(footnote)
     },
+    // Register the .krk TextMate grammar so ```krk fenced blocks are highlighted.
+    // Kept inside the `markdown` object so DocumenterVitepress's REPLACE_ME
+    // substitution preserves it.
+    languages: [
+      { ...(krkGrammar as any), name: 'krk', scopeName: 'source.krk' }
+    ],
     theme: {
       light: "github-light",
       dark: "github-dark"}

@@ -1,0 +1,45 @@
+=== 1024-only start: mer. 22 juil. 2026 18:42:58 CEST ===
+Wed Jul 22 18:42:58 2026       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.309.01             Driver Version: 535.309.01   CUDA Version: 12.2     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  NVIDIA RTX A6000               Off | 00000000:73:00.0 Off |                  Off |
+| 30%   37C    P8              20W / 300W |   2921MiB / 49140MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|    0   N/A  N/A      5075      C   /usr/bin/python3                           2836MiB |
+|    0   N/A  N/A    302061      G   /usr/lib/xorg/Xorg                           64MiB |
+|    0   N/A  N/A    302664      G   /usr/bin/gnome-shell                          7MiB |
++---------------------------------------------------------------------------------------+
+=== SIMPLE cavity GPU ABLATION bench (per-change contribution) ===
+    MODE: HEAVY — 512^2 Re=1000 ablation C0->C4 on GPU + one CPU reference
+    case: N=512 Re=1000 relax=(u=0.50,p=0.20) tol=1e-07 vel_tol=1e-06 maxiter=60000
+    parity = max-rel over u/v/p fields vs CPU reference, target < 0.001
+    GPU available: true, graph wrapper loaded: true
+
+    MODE: 1024-ONLY — configs C3, C4, maxiter=200000, no CPU ref
+[C3] N=1024 Re=1000 +CUDA graph (GPU+graph) ...
+     done: 771.30s, iters=100400, converged=true, parity=-, Ghia=2.047%, path=gpu+graph(launches=96381)
+[C4] N=1024 Re=1000 +mixed precision (p+mom) (GPU+graph) ...
+     done: 491.93s, iters=100400, converged=true, parity=-, Ghia=2.047%, path=gpu+graph(launches=96381)
+
+## ABLATION SUMMARY (markdown)
+
+| config | delta | N | wall_s | iters | converged | speedup_vs_cpu | parity_maxrel | ghia_err_pct | gpu_util_mean_pct | gpu_util_peak_pct | path |
+|--------|-------|---|--------|-------|-----------|----------------|---------------|--------------|-------------------|-------------------|------|
+| C3 | +CUDA graph | 1024 | 771.3 | 100400 | true | - | - | 2.047 | 97.4 | 100.0 | gpu+graph(launches=96381) |
+| C4 | +mixed precision (p+mom) | 1024 | 491.93 | 100400 | true | - | - | 2.047 | 95.6 | 99.0 | gpu+graph(launches=96381) |
+
+STATUS: GREEN — all 1024^2 configs converged, Ghia-err < 8%.
+=== bench exit: 0 — mer. 22 juil. 2026 19:04:41 CEST ===
+RUN1024_DONE

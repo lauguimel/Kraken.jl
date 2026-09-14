@@ -1,0 +1,29 @@
+=== WP-MESH-4 — Schäfer-Turek 2D-1, Re=20, ref Cd=5.58 ===
+
+Setup: 441 × 83 (D_lu=20, ν=0.0267, u_max=0.04), 30000 steps,
+       avg over last 5000, Mei drag for LI-BB.
+
+Approach                                Cells    Cd      err     MLUPS  walltime
+(A) Cartesian + halfway-BB              36603    5.778   3.55%   37     29.5s
+(B) Cartesian + LI-BB                   36603    5.698   2.12%   29     37.5s
+(C) gmsh Cartesian + SLBM + LI-BB       36603    5.712   2.37%   11     100.6s
+
+Notes:
+  - (A) vs (B): LI-BB sub-cell q_w improves Cd by 1.4 percentage points
+    on the same mesh.
+  - (B) vs (C): SLBM with trilinear interpolation reproduces the same
+    physics as the standard LBM stencil to 0.25 %, validating the
+    gmsh → load_gmsh_mesh_2d → CurvilinearMesh → slbm_trt_libb_step!
+    pipeline as physically equivalent to the native Cartesian path on a
+    uniform mesh.
+  - (C) is ÷3 slower than (B) because of the trilinear interpolation
+    (8-neighbour read per direction × 9 directions). On a uniform mesh
+    this is pure overhead; the win comes when the mesh is body-fitted
+    (curvilinear / O-grid), where SLBM saves N× cells over the equivalent
+    uniform Cartesian — a comparison that requires multi-block Transfinite
+    O-grids (Phase B + multi-block stitching, deferred).
+  - Drag formula: compute_drag_libb_mei_2d for (B) and (C) (LI-BB-aware
+    Mei integration); compute_drag_libb_2d for (A) (halfway-BB MEA simple).
+    Using the simple formula on the LI-BB runs returns Cd ≈ 8.5 (50 %
+    over) — confirms the viscoelastic-branch finding "use Mei drag for
+    LI-BB cylinders" applies here too.

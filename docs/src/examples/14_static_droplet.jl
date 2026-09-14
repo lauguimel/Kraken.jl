@@ -75,7 +75,7 @@
 #
 # Download: [`static_droplet.krk`](../assets/krk/static_droplet.krk)
 #
-# ```
+# ```krk
 # Simulation static_droplet D2Q9
 # Define N = 128
 # Define R = 32

@@ -246,9 +246,22 @@ function _apply_velocity_spatial!(f, h::BoundaryHandler, Nx, Ny)
     end
 end
 
-"""Apply pressure BC."""
+"""Apply pressure BC.
+
+Supported faces on the generic 2D route: `:west` (inlet) and `:east` (outlet),
+both via Zou-He with a prescribed density and zero transverse velocity. Any
+other face raises: a pressure condition that is silently dropped produces a
+plausible-looking field for a problem the user did not ask for.
+"""
 function _apply_pressure_bc!(f, face::Symbol, rho_val, Nx, Ny)
     if face == :east
         apply_zou_he_pressure_east_2d!(f, Nx, Ny; ρ_out=rho_val)
+    elseif face == :west
+        apply_zou_he_pressure_west_2d!(f, Nx, Ny; ρ_in=rho_val)
+    else
+        error("Pressure boundary condition on face ':$(face)' is not supported " *
+              "by the generic 2D runner. Supported pressure faces: :west, :east. " *
+              "For a pressure condition on :north or :south, either rotate the " *
+              "domain or use a driver that implements it.")
     end
 end

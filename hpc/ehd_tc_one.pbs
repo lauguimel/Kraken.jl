@@ -1,0 +1,26 @@
+#!/bin/bash -l
+# Per-T EHD Tc job (H100). Submit: qsub -v T_VAL=163.5,CYCLES=600000 hpc/ehd_tc_one.pbs
+
+#PBS -N ehd_tc1
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=H100
+#PBS -l walltime=08:00:00
+#PBS -j oe
+#PBS -m n
+
+cd $PBS_O_WORKDIR
+
+SCRIPT="hpc/ehd_tc_one.jl"
+# Dedicated env (develops ~/kraken_ehd + CUDA/CUDSS + all sibling weakdeps):
+# required for the KrakenCUDSSExt GPU phi solve (Julia 1.12 landmine).
+PROJECT="$HOME/ehd_cudss_env"
+
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_CUDA_USE_COMPAT=false   # mandatory on Aqua
+
+nvidia-smi || { echo "ERROR: GPU not available"; exit 1; }
+julia --project="$PROJECT" -e 'using Pkg; Pkg.instantiate()'
+julia --project="$PROJECT" -e 'using CUDA; CUDA.functional() || error("CUDA not functional")' \
+    || { echo "ERROR: CUDA.jl not functional"; exit 1; }
+
+echo "==> T_VAL=${T_VAL:-unset} CYCLES=${CYCLES:-unset} julia --project=$PROJECT $SCRIPT"
+julia --project="$PROJECT" "$SCRIPT"

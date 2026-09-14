@@ -1,0 +1,37 @@
+#!/bin/bash -l
+#PBS -N poisson_gpu_bench
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=A100
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -V
+
+# --- cuDSS vs CHOLMOD Poisson benchmark (issue #8 GPU rung) ---
+# Assembles the cut-cell pressure-Poisson at N=128..1024 and solves it with
+# CPU CHOLMOD and CUDA cuDSS (F64) via the factorize-once linear-solve seam.
+# Asserts GPU parity and reports factorize/solve ms, cells/s, scaling.
+
+WORKDIR=$HOME/kraken_poisson_gpu_bench
+cd $WORKDIR
+
+echo "========================================"
+echo "Job: $PBS_JOBID"
+echo "Node: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "Start: $(date)"
+echo "========================================"
+
+export PATH=$HOME/.juliaup/bin:$PATH
+export JULIA_CUDA_USE_COMPAT=false
+
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+
+julia --project=. -e 'using Pkg; Pkg.instantiate(); using CUDA; CUDA.versioninfo()' 2>&1
+
+echo "=== Poisson GPU bench (cuDSS vs CHOLMOD) ==="
+julia --project=. benchmarks/krk/inc_ns/poisson_gpu_bench.jl 2>&1
+EXIT_CODE=$?
+
+echo "========================================"
+echo "End: $(date)  exit=$EXIT_CODE"
+echo "========================================"
+exit $EXIT_CODE

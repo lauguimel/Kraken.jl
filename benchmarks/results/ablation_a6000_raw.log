@@ -1,0 +1,97 @@
+=== ablation start: jeu. 11 juin 2026 11:11:10 CEST ===
+Thu Jun 11 11:11:10 2026       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.309.01             Driver Version: 535.309.01   CUDA Version: 12.2     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  NVIDIA RTX A6000               Off | 00000000:73:00.0 Off |                  Off |
+| 30%   37C    P8              21W / 300W |     23MiB / 49140MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|    0   N/A  N/A   2018625      G   /usr/lib/xorg/Xorg                            9MiB |
+|    0   N/A  N/A   2018750      G   /usr/bin/gnome-shell                          5MiB |
++---------------------------------------------------------------------------------------+
+CUDA toolchain: 
+- runtime 12.2, artifact installation
+- driver 535.309.1 for 12.2
+- compiler 12.9, artifact installation
+
+CUDA libraries: 
+- cuBLAS: 12.2.5
+- cuSPARSE: 12.1.2
+- cuSOLVER: 11.5.2
+- cuFFT: 11.0.8
+- cuRAND: 10.3.3
+- CUPTI: 2023.2.2 (API 12.2.0)
+- NVML: 12.0.0+535.309.1
+
+Julia packages: 
+- CUDACore: 6.1.1
+- GPUArrays: 11.5.6
+- GPUCompiler: 1.17.1
+- KernelAbstractions: 0.9.41
+- CUDA_Driver_jll: 13.3.0+0
+- CUDA_Compiler_jll: 0.4.4+0
+- CUDA_Runtime_jll: 0.21.0+1
+
+Toolchain:
+- Julia: 1.12.6
+- LLVM: 18.1.7
+
+Environment:
+- JULIA_CUDA_USE_COMPAT: false
+
+Preferences:
+- CUDA_Runtime_jll.version: 12.2
+
+1 device:
+  0: NVIDIA RTX A6000 (sm_86, 47.503 GiB / 47.988 GiB available)
+=== cuda check exit: 0 ===
+=== SIMPLE cavity GPU ABLATION bench (per-change contribution) ===
+    MODE: HEAVY — 512^2 Re=1000 ablation C0->C4 on GPU + one CPU reference
+    1024^2 GPU-only runs ENABLED (best config)
+    case: N=512 Re=1000 relax=(u=0.50,p=0.20) tol=1e-07 vel_tol=1e-06 maxiter=60000
+    parity = max-rel over u/v/p fields vs CPU reference, target < 0.001
+    GPU available: true, graph wrapper loaded: true
+
+[CPUref] legacy CPU reference, N=512 Re=1000 ...
+     done: 2729.72s, iters=31218, converged=true, Ghia=2.308%
+[C0] N=512 Re=1000 legacy (norm_stride=1, mg_cycles=0) (GPU) ...
+     done: 454.99s, iters=31218, converged=true, parity=4.98e-16, Ghia=2.308%, path=gpu
+[C1] N=512 Re=1000 +norm_stride=25 (GPU) ...
+     done: 437.73s, iters=31225, converged=true, parity=1.03e-05, Ghia=2.307%, path=gpu
+[C2] N=512 Re=1000 +fixed MG cycles (3/1) (GPU) ...
+     done: 213.80s, iters=31225, converged=true, parity=1.03e-05, Ghia=2.307%, path=gpu
+[C3] N=512 Re=1000 +CUDA graph (GPU+graph) ...
+     done: 115.16s, iters=31225, converged=true, parity=1.03e-05, Ghia=2.307%, path=gpu+graph(launches=29973)
+[C4] N=512 Re=1000 +mixed precision (p+mom) (GPU+graph) ...
+     done: 75.21s, iters=31225, converged=true, parity=1.03e-05, Ghia=2.307%, path=gpu+graph(launches=29973)
+
+-- 1024^2 GPU-only (best config = C4; no CPU ref) --
+[C4] N=1024 Re=1000 +mixed precision (p+mom) (GPU+graph) ...
+     done: 389.38s, iters=80000, converged=false, parity=-, Ghia=5.520%, path=gpu+graph(launches=76797)
+
+## ABLATION SUMMARY (markdown)
+
+| config | delta | N | wall_s | iters | converged | speedup_vs_cpu | parity_maxrel | ghia_err_pct | gpu_util_mean_pct | gpu_util_peak_pct | path |
+|--------|-------|---|--------|-------|-----------|----------------|---------------|--------------|-------------------|-------------------|------|
+| CPUref | legacy CPU reference | 512 | 2729.72 | 31218 | true | 1.00x | 0.00e+00 | 2.308 | - | - | cpu |
+| C0 | legacy (norm_stride=1, mg_cycles=0) | 512 | 454.99 | 31218 | true | 6.00x | 4.98e-16 | 2.308 | 40.1 | 48.0 | gpu |
+| C1 | +norm_stride=25 | 512 | 437.73 | 31225 | true | 6.24x | 1.03e-05 | 2.307 | 40.7 | 47.0 | gpu |
+| C2 | +fixed MG cycles (3/1) | 512 | 213.8 | 31225 | true | 12.77x | 1.03e-05 | 2.307 | 58.6 | 63.0 | gpu |
+| C3 | +CUDA graph | 512 | 115.16 | 31225 | true | 23.70x | 1.03e-05 | 2.307 | 94.2 | 97.0 | gpu+graph(launches=29973) |
+| C4 | +mixed precision (p+mom) | 512 | 75.21 | 31225 | true | 36.29x | 1.03e-05 | 2.307 | 89.7 | 94.0 | gpu+graph(launches=29973) |
+| C4 | +mixed precision (p+mom) | 1024 | 389.38 | 80000 | false | - | - | 5.52 | 95.2 | 99.0 | gpu+graph(launches=76797) |
+
+STATUS: RED — non-converged config. Inspect the table above.
+=== bench exit: 0 — jeu. 11 juin 2026 12:25:44 CEST ===
+ABLATION_DONE

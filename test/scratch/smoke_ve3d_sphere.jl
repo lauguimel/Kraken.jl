@@ -31,7 +31,7 @@ u_in = 0.02
 
 Wi = 0.01
 λ  = Wi * R_s / u_in                  # = 2.0
-m_OB = OldroydB(G = ν_p / λ, λ = λ)
+m_OB = OldroydBSpec(G = ν_p / λ, λ = λ)
 
 max_steps = 300
 avg_window = 100

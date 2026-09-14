@@ -18,9 +18,10 @@ Three series per panel, distinguished by BOTH style and colour:
     icoFoam = dashed line
     Ghia    = open-ring markers (no line)
 
-Self-contained: bootstrap-finds ``krakendark`` (skill ``assets/`` or repo
-``viz/``), reads the three CSVs next to this script, and writes the three PNGs
-straight into ``docs/src/users/benchmarks/`` (overwriting the light versions).
+Self-contained: bootstrap-finds ``krakendark`` (repo ``viz/`` or ``assets/``,
+or ``$KRAKENDARK_DIR``), reads the three CSVs next to this script, and writes
+the three PNGs straight into ``docs/src/users/benchmarks/`` (overwriting the
+light versions).
 
     conda run -n kraken-v0-3-figures python plot_cavity_per_re.py
 """
@@ -32,13 +33,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-# --- locate krakendark (skill assets/ during testing, repo viz/ after install) -
+# --- locate krakendark (repo viz/ or assets/, or $KRAKENDARK_DIR) ------------
 import sys
 import pathlib
 _here = pathlib.Path(__file__).resolve()
+_extra = os.environ.get("KRAKENDARK_DIR")
+_extra_cands = (pathlib.Path(_extra),) if _extra else ()
 for _d in [_here.parent, *_here.parents]:
-    for _cand in (_d, _d / "viz", _d / "assets", _d.parent / "assets",
-                  pathlib.Path.home() / ".claude" / "skills" / "kraken-doc" / "assets"):
+    for _cand in (_d, _d / "viz", _d / "assets", _d.parent / "assets", *_extra_cands):
         if (_cand / "krakendark.py").exists():
             sys.path.insert(0, str(_cand))
             break

@@ -142,6 +142,28 @@ function _parse_numeric_or_symbolic_value(val_str::AbstractString,
     return Float64(evaluate(expr))
 end
 
+"""Parse: Sensitivity { qoi = drag wrt = radius }"""
+function _parse_sensitivity(line::String)
+    brace_m = match(r"\{(.+)\}", line)
+    brace_m === nothing && throw(ArgumentError(
+        "Missing { ... } in Sensitivity block: $line"))
+    content = strip(String(brace_m.captures[1]))
+
+    vals = Dict{Symbol, Symbol}()
+    for m in eachmatch(r"(\w+)\s*=\s*([A-Za-z_]\w*)", content)
+        key = Symbol(m.captures[1])
+        key in (:qoi, :wrt) || throw(ArgumentError(
+            "Unknown Sensitivity key '$key'. Supported keys: qoi, wrt."))
+        vals[key] = Symbol(m.captures[2])
+    end
+
+    for key in (:qoi, :wrt)
+        haskey(vals, key) || throw(ArgumentError(
+            "Sensitivity block missing required key '$key'"))
+    end
+    return (; qoi=vals[:qoi], wrt=vals[:wrt])
+end
+
 """Parse: Obstacle <name> [wall(...)] { <condition> } or stl(..., wall=libb)"""
 function _parse_obstacle(line::String, user_vars::Dict{Symbol,Any})
     return _parse_geometry_region(line, :obstacle, user_vars)
