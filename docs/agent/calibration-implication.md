@@ -13,6 +13,21 @@ Implements the steady calibration stack: `ParameterSpace` / `loss` / `fit` / `Ca
 Enzyme-free except for the adjoint gradient, which delegates to `_ad_pvjp_nu`,
 `_ad_vjp_GtT`, `_ad_dJdf`, and `_ad_dqwall_terms` stubs.
 
+## Public surface
+
+Defined in `src/platform/calibration.jl`, re-exported by `Kraken`:
+
+- `ParameterSpace(free, lb, ub; scale)` — declares the free parameter names, box
+  bounds, and per-parameter scale (`:natural` or `:log`); `to_flat`/`from_flat`/`project!`
+  are internal companions.
+- `loss(preds, data) -> Float64` — weighted sum-of-squares mismatch between
+  `Prediction`s and observations.
+- `fit(problem, ::LBM, data, p0, pspace; observables, reg_weight=0.0, method=:pgd, kwargs...)`
+  — projected BB+Armijo gradient descent (`:pgd`, default, dep-free) or
+  `method=:lbfgs` via `ext/KrakenOptimExt.jl` (`Optim.Fminbox(LBFGS())`).
+- `CalibResult` — `p_opt`, `loss_final`, `loss_trace`, `grad_trace`, `n_iter`,
+  `converged`, `message`.
+
 ## Call graph: `fit`
 
 ```
@@ -84,3 +99,32 @@ box bounds in the optimizer's native (log-scale or natural) space. Cache-last-fo
 ## Writes to
 
 Nothing persistent. `fit` allocates intermediate arrays per iteration and keeps no global state.
+
+## Backend constraints
+
+The whole calibration stack is CPU-Float64 by construction: every iteration calls
+`ad_forward_solve`/`ad_forward_solve_nufield` and the Enzyme adjoint chain, which are
+CPU-only AD paths (see `ad-implication.md`). No kernels are launched from this file;
+GPU arrays are never accepted — bundles are rebuilt host-side each iteration.
+`_reg_loss`/`_reg_grad` are plain-Julia dense loops, backend-irrelevant.
+
+## Failure modes
+
+- `method=:lbfgs` without Optim loaded raises the documented "load Optim.jl" error
+  (weak-dep extension not triggered) — by design, not swallowed.
+- Armijo backtracking can stall on a non-descent BB step: `fit` returns
+  `converged=false` with the reason in `message` rather than erroring.
+- A `pspace` whose free names match neither a known scalar/geometry name nor the
+  `ν_\d+` field pattern routes to the scalar path and fails downstream in
+  `from_flat` — check `_is_nufield_pspace` first when adding parameter natures.
+- Enzyme adjoint stubs (`_ad_pvjp_nu` etc.) propagate their own "extension not
+  loaded" errors when Enzyme is absent.
+
+## Touch order
+
+1. `src/platform/calibration.jl` — `ParameterSpace`/`loss`/`fit`/`CalibResult`,
+   `_reg_loss`/`_reg_grad`, ν-field routing helpers.
+2. `ext/KrakenOptimExt.jl` — `_fit_lbfgs` (only when the optimizer path changes).
+3. `src/Kraken.jl` — export block (choke file; edits serialized on `dev/platform`).
+4. `test/platform/calibration_test.jl` — twin experiments (scalar ν, sine ν(y) field)
+   and Gate 4c geometry parity pin.

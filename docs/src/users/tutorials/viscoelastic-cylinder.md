@@ -5,14 +5,17 @@ a confined cylinder, the standard benchmark for non-Newtonian LBM solvers. It
 reports the validated drag results honestly, including where the solver is proven
 and where it is not.
 
-!!! warning "Solver location and merge status"
-    The log-conformation finite-volume viscoelastic solver (`_logfv`) used for
-    these results currently lives on the **`dev-viscoelastic`** branch. Its merge
-    onto the release branch is **pending**. The case described here therefore
-    **does not run on this branch today** — the `.krk` reproducer and the driver
-    are on `dev-viscoelastic`. This page documents the validated results so they
-    are not lost ahead of the merge; treat it as a status-and-results record, not
-    a runnable tutorial on the current branch.
+The log-conformation finite-volume viscoelastic solver (`_logfv`) **runs on this
+branch**: the driver `run_viscoelastic_logfv_cylinder_coupled_2d` is shipped and
+dispatched through the `viscoelastic` module, and a coarse smoke `.krk` is included
+so you can run the case end-to-end (see [Reproduce](@ref) below). The production
+`R = 50` tables were re-validated against rheoTool to **≤ 1 % on `C_d`** (Wi ≤ 1).
+
+!!! note "Coarse smoke vs the production sweep"
+    The shipped `.krk` is a *quick smoke* (240×32, R = 8, 20 steps) confirming the
+    solver dispatches and returns a `C_d`. It is **not** the converged `R = 50`
+    table value; reproducing the validated drag requires the A100-class production
+    sweep described under [Reproduce](@ref).
 
 ```@contents
 Pages = ["users/tutorials/viscoelastic-cylinder.md"]
@@ -35,6 +38,8 @@ The dimensionless drivers are:
 
 The reported quantity is the **drag coefficient** `C_d` on the cylinder, compared to
 fine-mesh **rheoTool** (OpenFOAM-based, Oldroyd-B log-conformation) reference runs.
+
+![Confined-cylinder boundary conditions.  The west boundary is a parabolic channel-flow inlet (cool arrows in) and the east boundary an outflow (cool arrows out); the top and bottom channel walls are no-slip half-way bounce-back (hatched); the cylinder of radius R sits on the channel axis as an immersed obstacle.](viscoelastic-cylinder-bc.svg)
 
 ## Validated results
 
@@ -88,22 +93,30 @@ rheoTool `N1` reference value was extracted**, so a quantitative `N1` comparison
 not available. The `N1` leg of the validation is therefore **open**: trends agree,
 but the absolute `N1` match is unverified and is not claimed as a pass.
 
-## The `.krk` reproducer (on `dev-viscoelastic`)
+## Reproduce
 
-The case is `benchmarks/krk/viscoelastic/cylinder_oldroyd_b.krk`, **on the
-`dev-viscoelastic` branch**. Conceptually it combines a cylinder `Obstacle` with an
-`oldroyd_b` `Rheology` block; the polymer parameters follow the diffusive scaling
-`ν_s = β·ν_total`, `ν_p = (1−β)·ν_total`, `λ = Wi · R / U`. See the
+The case is `benchmarks/krk/viscoelastic/cylinder_oldroyd_b.krk` (a copy also ships
+under `benchmarks/results/rheotool_compare/viscoelastic/`). It combines a cylinder
+`Obstacle` with an `oldroyd_b` `Rheology` block; the polymer parameters follow the
+diffusive scaling `ν_s = β·ν_total`, `ν_p = (1−β)·ν_total`, `λ = Wi · R / U`. See the
 [KRK reference `Rheology` block](../krk-reference.md) for the grammar:
 
 ```
-Rheology oldroyd_b { nu_s = ...  nu_p = ...  lambda = ... }
+Rheology oldroyd_b { nu_s = ...  lambda = Wi*R/u_mean }
 ```
 
-Because the solver is not on this branch, the file is referenced rather than run
-here. After the `dev-viscoelastic` merge this tutorial should be promoted to a
-runnable walkthrough with the exact `.krk` contents and a `run_simulation(...)`
-invocation.
+Run the shipped smoke directly on this branch:
+
+```julia
+using Kraken
+result = run_simulation("benchmarks/results/rheotool_compare/viscoelastic/cylinder_oldroyd_b.krk")
+@show result.Cd   # coarse smoke (240×32, R = 8, 20 steps) — NOT the R = 50 table value
+```
+
+This is a quick dispatch check (it returns a non-converged `C_d`). The validated
+`R = 50` tables (300 000 steps, CUDA Float64) were produced on **Aqua (A100)** via
+`bench/viscoelastic_logfv/run_ve_revalidate_r50_halfwaybb.pbs` and are **not**
+CI-reproducible — they require an A100-class run.
 
 ## Summary
 
@@ -115,13 +128,14 @@ invocation.
   reproduced).
 - **`N1` gap:** Kraken logs `N1_max` and the trend agrees with rheoTool, but no
   rheoTool `N1` reference was extracted, so the absolute `N1` match is unverified.
-- **Solver lives on `dev-viscoelastic`; merge pending** — not runnable on this
-  branch today.
+- **Solver runs on this branch.** The `_logfv` cut-link driver is shipped and
+  dispatched via the `viscoelastic` module; the included `.krk` runs as a coarse
+  smoke. The ≤ 1 % `C_d` tables are the A100 production sweep, not the local smoke.
 
 ## Where to go next
 
 - The [KRK reference `Rheology` block](../krk-reference.md) — the
   viscoelastic and non-Newtonian constitutive grammar.
-- The Newtonian [Cartesian cavity tutorial](cartesian-cavity.md) and
-  [benchmark](../benchmarks/cartesian-cavity.md) — the validated baseline the
-  viscoelastic path builds on.
+- The Newtonian [lid-driven cavity example](../../examples/04_cavity_2d.md) and
+  [Cartesian cavity benchmark](../benchmarks/cartesian-cavity.md) — the validated
+  baseline the viscoelastic path builds on.

@@ -77,6 +77,7 @@ end
     include("platform/calibration_nufield_test.jl")
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
+    include("test_guo_convention_pairs.jl")
     # Issue #18: west/east pressure channel through the public .krk runner.
     include("analytical/H2-004-route.jl")
     include("test_poiseuille_3d.jl")
