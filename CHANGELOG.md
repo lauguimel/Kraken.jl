@@ -3,6 +3,53 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-09-14
+
+### Added
+- **Electrohydrodynamics / electroconvection** (`src/kernels/ehd_*`, `src/drivers/`):
+  charge-transport and electric-potential LBM sub-solvers, Coulomb body force,
+  free-slip sidewalls, MRT collision, GPU-ready kernels, a `.krk` user surface
+  (`benchmarks/krk/ehd/`) and a critical-threshold sweep script
+  (`benchmarks/ehd/tc_sweep.jl`). Hydrostatic base state matches the analytical
+  charge-density and field profiles below 1%; onset threshold `T_c ~ 166.5`
+  against 163.5 from Luo, Wu, Yi & Tan, Phys. Rev. E 93, 023309 (2016), a +1.8%
+  deviation — mesh-convergence study for `T_c` still pending, so read it as
+  consistent-with rather than converged.
+- **West pressure boundary in 2D** (`apply_zou_he_pressure_west_2d!`), completing
+  the east/west pair. Validated against analytic Poiseuille: max relative error
+  2.03e-3 at Ny=16 and 5.15e-4 at Ny=32 (2nd order).
+- **Thermal conduction driver** accepts `nu`, `alpha` and an `orientation`
+  (`:vertical` default, `:horizontal` for west/east).
+- Regression tests exercising the public `.krk` runner rather than the drivers
+  directly: `test/analytical/H2-004-route.jl`, `test/analytical/TH-002-route.jl`.
+- `AGENTS.md` and `.github/CODEOWNERS`: contributor working rules, ownership per
+  directory, bug-report-as-failing-test convention.
+
+### Fixed
+- **MRT Guo forcing injected only half the requested body force.** Any MRT run
+  with a body force before this release was forced at half the intended value.
+- `_D2Q9_CX` was defined twice in the module with different types, which made the
+  package fail to load on Julia 1.11 — the declared minimum (#17).
+- The generic `.krk` runner silently ignored west pressure boundaries; unsupported
+  faces now raise an explicit error instead of a no-op (#18).
+- The conduction `.krk` fallback dropped `nu`, `alpha` and the thermal face
+  settings, silently solving a different problem. `examples/heat_conduction.krk`
+  is itself a west/east case and had been running south/north defaults at nu=0.05
+  instead of its documented nu=0.1, alpha=0.01 (#19).
+- 3D cavity test ran at omega = 1.8868, above the measured BGK stability ceiling
+  of ~1.81, and produced NaN at step 194. Reconfigured at the same Re = 32 with
+  tightened assertions.
+
+### Changed
+- **Breaking:** driver spec `OldroydB` renamed `OldroydBSpec` (name clash with the
+  rheology model of the same name). Scripts naming the old type must be updated.
+- `main` reconciled with the development line; the two now carry the same content.
+
+### Known issues
+- 3 failures in multi-block ghost exchange (`test_multiblock_exchange.jl`).
+- `zou_he_pressure_3d_kernel!` still omits the wall-parallel diagonal populations
+  that the velocity BC now includes (#20).
+
 ## [0.3.0] — 2026-07-22
 
 ### Added
