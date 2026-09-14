@@ -206,7 +206,7 @@ function loss(predictions::AbstractVector{<:Prediction}, data; weights=nothing)
     return L
 end
 
-const _D2Q9_CX = (0.0, 1.0, 0.0, -1.0, 0.0, 1.0, -1.0, -1.0, 1.0)
+const _D2Q9_CX_CALIB = (0.0, 1.0, 0.0, -1.0, 0.0, 1.0, -1.0, -1.0, 1.0)
 
 function _extract_ux_from_f(f::Array{Float64,3})
     Nx, Ny, _ = size(f)
@@ -217,7 +217,7 @@ function _extract_ux_from_f(f::Array{Float64,3})
         for q in 1:9
             fq = f[i, j, q]
             rho += fq
-            momx += _D2Q9_CX[q] * fq
+            momx += _D2Q9_CX_CALIB[q] * fq
         end
         ux[i, j] = momx / rho
     end
@@ -254,7 +254,7 @@ function _dJ_df_lineprofile_ux(f_star::Array{Float64,3},
         ux_ij = Float64(pred_ux[k])
         res = ux_ij - Float64(data_ux[k])
         for q in 1:9
-            dLdf[i, j, q] = res * (_D2Q9_CX[q] - ux_ij) / rho_ij
+            dLdf[i, j, q] = res * (_D2Q9_CX_CALIB[q] - ux_ij) / rho_ij
         end
     end
     return dLdf

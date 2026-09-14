@@ -288,7 +288,7 @@ export collide_guo_3d!, collide_guo_field_3d!
 export compute_macroscopic_2d!, compute_macroscopic_3d!, compute_macroscopic_forced_2d!
 export compute_macroscopic_forced_3d!, compute_macroscopic_pressure_2d!
 export apply_zou_he_north_2d!, apply_zou_he_south_2d!
-export apply_zou_he_west_2d!, apply_zou_he_pressure_east_2d!, apply_extrapolate_east_2d!
+export apply_zou_he_west_2d!, apply_zou_he_pressure_east_2d!, apply_zou_he_pressure_west_2d!, apply_extrapolate_east_2d!
 export apply_zou_he_top_3d!
 export apply_zou_he_bottom_3d!, apply_zou_he_west_3d!, apply_zou_he_east_3d!
 export apply_zou_he_south_3d!, apply_zou_he_north_3d!

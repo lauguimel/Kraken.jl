@@ -2,20 +2,59 @@
 
 """
     run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000, Pr=1.0, T_hot=1.0, T_cold=0.0,
-                            max_steps=20000, backend, T)
+                            max_steps=20000, nu=nothing, alpha=nothing,
+                            orientation=:vertical, backend, FT)
 
 Rayleigh-Bénard convection: hot bottom wall, cold top wall, periodic x.
 Ra = β·g·ΔT·H³/(ν·α), Pr = ν/α.
+
+Material parameters:
+
+- `nu`: kinematic viscosity in lattice units. `nothing` keeps the historical
+  default `0.05`, chosen so that ω stays away from 2.
+- `alpha`: thermal diffusivity in lattice units. `nothing` keeps the historical
+  `ν / Pr`. When `alpha` is given it wins, and the returned `Pr` is the
+  effective `ν / α` rather than the requested one.
+
+Orientation:
+
+- `:vertical` (default): temperature is imposed on south (`T_hot`) and north
+  (`T_cold`), x is periodic. This is Rayleigh-Bénard proper and is the
+  historical behaviour.
+- `:horizontal`: temperature is imposed on west (`T_hot`) and east (`T_cold`),
+  all four faces are solid (bounce-back). Gravity still acts along y, so at
+  large Ra this is a differentially heated cavity; at Ra → 0 it is pure
+  conduction across x.
+
+Any other orientation is rejected rather than silently replaced.
 """
 function run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000.0, Pr=1.0,
                                  T_hot=1.0, T_cold=0.0, max_steps=20000,
+                                 nu=nothing, alpha=nothing,
+                                 orientation::Symbol=:vertical,
                                  backend=KernelAbstractions.CPU(), FT=Float64)
-    ΔT = T_hot - T_cold
-    H = Ny  # channel height in lattice units (half-way BB)
+    orientation in (:vertical, :horizontal) || throw(ArgumentError(
+        "run_rayleigh_benard_2d: orientation ':$(orientation)' is not supported. " *
+        "Use :vertical (hot south / cold north, periodic x) or " *
+        ":horizontal (hot west / cold east, solid walls)."))
 
-    # Choose ν for stability (ω not too close to 2)
-    ν = 0.05
-    α = ν / Pr               # thermal diffusivity
+    ΔT = T_hot - T_cold
+    iszero(ΔT) && throw(ArgumentError(
+        "run_rayleigh_benard_2d: T_hot and T_cold are both $(T_hot). " *
+        "A zero temperature difference leaves the buoyancy scaling undefined."))
+
+    # Gap traversed by the imposed temperature difference, in lattice units
+    # (half-way bounce-back), which is the length scale entering Ra.
+    H = orientation === :vertical ? Ny : Nx
+
+    # ν defaults to a value chosen for stability (ω not too close to 2);
+    # α defaults to ν / Pr. Supplied values are honoured as given.
+    ν = nu === nothing ? 0.05 : Float64(nu)
+    α = alpha === nothing ? ν / Pr : Float64(alpha)
+    ν > 0 || throw(ArgumentError("run_rayleigh_benard_2d: nu must be positive, got $ν."))
+    α > 0 || throw(ArgumentError("run_rayleigh_benard_2d: alpha must be positive, got $α."))
+    # When α is supplied the Prandtl number is no longer a free input.
+    Pr = alpha === nothing ? Pr : ν / α
     β_g = Ra * ν * α / (ΔT * H^3)  # β·g combined
 
     ω_f = FT(1.0 / (3.0 * ν + 0.5))     # flow relaxation
@@ -35,9 +74,17 @@ function run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000.0, Pr=1.0,
     w = weights(D2Q9())
     g_cpu = zeros(FT, Nx, Ny, 9)
     for j in 1:Ny, i in 1:Nx
-        # Linear profile from T_hot (j=1) to T_cold (j=Ny) + small perturbation
-        T_init = FT(T_hot - ΔT * (j - 1) / (Ny - 1))
-        T_init += FT(0.01 * ΔT) * sin(FT(2π * i / Nx)) * sin(FT(π * j / Ny))
+        if orientation === :vertical
+            # Linear profile from T_hot (j=1) to T_cold (j=Ny) + small perturbation
+            # (the perturbation seeds the convective instability).
+            T_init = FT(T_hot - ΔT * (j - 1) / (Ny - 1))
+            T_init += FT(0.01 * ΔT) * sin(FT(2π * i / Nx)) * sin(FT(π * j / Ny))
+        else
+            # Linear profile from T_hot (i=1) to T_cold (i=Nx). The differentially
+            # heated cavity needs no seed, so none is added: a conduction run
+            # then starts from the exact steady profile.
+            T_init = FT(T_hot - ΔT * (i - 1) / (Nx - 1))
+        end
         for q in 1:9
             g_cpu[i, j, q] = FT(w[q]) * T_init
         end
@@ -46,17 +93,25 @@ function run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000.0, Pr=1.0,
     copyto!(g_out, g_cpu)
 
     T_ref = FT((T_hot + T_cold) / 2)
+    # :vertical streams periodic in x with walls in y; :horizontal is a closed
+    # cavity, so bounce-back applies on all four faces.
+    stream! = orientation === :vertical ? stream_periodic_x_wall_y_2d! : stream_2d!
 
     for step in 1:max_steps
-        # 1. Stream flow (periodic x, wall y)
-        stream_periodic_x_wall_y_2d!(f_out, f_in, Nx, Ny)
+        # 1. Stream flow
+        stream!(f_out, f_in, Nx, Ny)
 
         # 2. Stream thermal (same kernel)
-        stream_periodic_x_wall_y_2d!(g_out, g_in, Nx, Ny)
+        stream!(g_out, g_in, Nx, Ny)
 
-        # 3. Thermal BCs: fixed temperature at walls
-        apply_fixed_temp_south_2d!(g_out, T_hot, Nx)
-        apply_fixed_temp_north_2d!(g_out, T_cold, Nx, Ny)
+        # 3. Thermal BCs: fixed temperature at the two heated faces
+        if orientation === :vertical
+            apply_fixed_temp_south_2d!(g_out, T_hot, Nx)
+            apply_fixed_temp_north_2d!(g_out, T_cold, Nx, Ny)
+        else
+            apply_fixed_temp_west_2d!(g_out, T_hot, Ny)
+            apply_fixed_temp_east_2d!(g_out, T_cold, Nx, Ny)
+        end
 
         # 4. Compute temperature for Boussinesq coupling
         compute_temperature_2d!(Temp, g_out)
@@ -77,7 +132,8 @@ function run_rayleigh_benard_2d(; Nx=128, Ny=32, Ra=2000.0, Pr=1.0,
     compute_temperature_2d!(Temp, g_in)
 
     return (ρ=Array(ρ), ux=Array(ux), uy=Array(uy), Temp=Array(Temp),
-            config=config, Ra=Ra, Pr=Pr, ν=ν, α=α)
+            config=config, Ra=Ra, Pr=Pr, ν=ν, α=α,
+            T_hot=T_hot, T_cold=T_cold, orientation=orientation)
 end
 
 # --- Natural convection in a differentially heated cavity ---

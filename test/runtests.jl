@@ -77,10 +77,14 @@ end
     include("platform/calibration_nufield_test.jl")
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
+    # Issue #18: west/east pressure channel through the public .krk runner.
+    include("analytical/H2-004-route.jl")
     include("test_poiseuille_3d.jl")
     include("test_couette.jl")
     include("test_taylor_green.jl")
     include("test_thermal.jl")
+    # Issue #19: conduction .krk fallback honours nu, alpha and thermal faces.
+    include("analytical/TH-002-route.jl")
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
     include("analytical/ehd_hydrostatic_2d.jl")
