@@ -1,15 +1,24 @@
 name: CI
 on:
+  # Integration branches only. Work branches are covered by pull_request,
+  # so listing them here too would run every suite twice.
   push:
-    branches: [main, lbm]
+    branches: [main, lbm, dev/platform]
   pull_request:
-    branches: [main]
+    branches: [main, dev/platform]
+  workflow_dispatch:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      # Never cancel a sibling job: we need the full result of every Julia
+      # version, otherwise one failure hides the state of the others.
+      fail-fast: false
       matrix:
-        julia-version: ['1.11', '1']
+        # Pin explicit versions instead of '1'. '1' tracks the latest 1.x
+        # (currently 1.13), which is outside the [compat] bounds declared in
+        # Project.toml and segfaults under Enzyme.
+        julia-version: ['1.11', '1.12']
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
