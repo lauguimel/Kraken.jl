@@ -1,7 +1,9 @@
 name: CI
 on:
+  # Integration branches only. Work branches are covered by pull_request,
+  # so listing them here too would run every suite twice.
   push:
-    branches: [main, lbm, dev/platform, "fix/**", "ci/**"]
+    branches: [main, lbm, dev/platform]
   pull_request:
     branches: [main, dev/platform]
   workflow_dispatch:
