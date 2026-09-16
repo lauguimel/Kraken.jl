@@ -6,18 +6,53 @@ on:
     branches: [main, lbm, dev/platform]
   pull_request:
     branches: [main, dev/platform]
+  schedule:
+    # Nightly full suite on the default branch, 02:00 UTC.
+    - cron: '0 2 * * *'
   workflow_dispatch:
+
+# A new push supersedes the run already in flight for the same PR or branch.
+# Without this, pushing four times in an hour queues four 2h45 suites and the
+# first three are already obsolete when they finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  # Pull-request stage. Drops the Enzyme-driven tiers (AD sensitivity +
+  # calibration twin experiments): measured 2026-09-15, they are 93 min of the
+  # suite's 165 min on Julia 1.11. They are covered by `full` after merge and
+  # nightly. Run them on a PR on demand with workflow_dispatch.
+  quick:
+    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
-      # Never cancel a sibling job: we need the full result of every Julia
-      # version, otherwise one failure hides the state of the others.
       fail-fast: false
       matrix:
         # Pin explicit versions instead of '1'. '1' tracks the latest 1.x
         # (currently 1.13), which is outside the [compat] bounds declared in
         # Project.toml and segfaults under Enzyme.
+        julia-version: ['1.11', '1.12']
+        os: [ubuntu-latest]
+    env:
+      KRAKEN_SKIP_AD: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+
+  # Everything else: pushes to integration branches, the nightly schedule, and
+  # manual dispatch. Full suite, AD included.
+  full:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
         julia-version: ['1.11', '1.12']
         os: [ubuntu-latest]
     steps:
