@@ -8,9 +8,52 @@ using Kraken
 # full suite on dev/platform and the nightly run do not.
 const SKIP_AD = get(ENV, "KRAKEN_SKIP_AD", "false") == "true"
 
+# KRAKEN_SKIP_VE3D=true drops the ten full 3D viscoelastic flow validations.
+# Measured 2026-09-16 on the non-AD suite, they are 52% of its wall-clock — and
+# unlike the cheap operator tests above them, their domain size IS the test:
+# shrinking them would mean loosening their analytical tolerances, which
+# AGENTS.md classes as a regression. So they move stage rather than shrink.
+const SKIP_VE3D = get(ENV, "KRAKEN_SKIP_VE3D", "false") == "true"
+
 if get(ENV, "KRAKEN_AD_ONLY", "false") == "true"
     include("ad/test_ad_sensitivity.jl")
     exit()
+end
+
+# KRAKEN_ONLY=<path relative to test/> runs a single test file and exits.
+#
+# Added because diagnosing the Enzyme segfault in ad/test_ad_ve_sensitivity.jl
+# had no cheap route: KRAKEN_AD_ONLY runs a different file, and reaching the
+# crashing one otherwise costs the whole suite — 2h45 on CI — per attempt.
+# The crash does not reproduce on macOS arm64 (verified 2026-09-16: 19/19 in
+# 22.5 s on Julia 1.11.9, with and without CUDA loaded), so it has to be
+# diagnosed on the CI platform itself.
+#
+#   KRAKEN_ONLY=ad/test_ad_ve_sensitivity.jl julia --project -e 'using Pkg; Pkg.test()'
+#
+# Or on CI: run the workflow manually and set the `only` input.
+let only = get(ENV, "KRAKEN_ONLY", "")
+    if !isempty(only)
+        isfile(only) || error("KRAKEN_ONLY: no such test file: $(only)")
+        @info "Running a single test file (KRAKEN_ONLY)" file=only
+        include(only)
+        exit()
+    end
+end
+
+# KRAKEN_ONLY=<relative path> runs a single test file and exits. Added because
+# diagnosing the Enzyme segfault in ad/test_ad_ve_sensitivity.jl had no cheap
+# route: KRAKEN_AD_ONLY runs a different file, and reaching the crashing one
+# otherwise means paying the whole suite (2h45 on CI) per attempt.
+#
+#   KRAKEN_ONLY=ad/test_ad_ve_sensitivity.jl julia --project -e 'using Pkg; Pkg.test()'
+let only = get(ENV, "KRAKEN_ONLY", "")
+    if !isempty(only)
+        isfile(only) || error("KRAKEN_ONLY: no such test file: $(only)")
+        @info "Running a single test file (KRAKEN_ONLY)" file=only
+        include(only)
+        exit()
+    end
 end
 
 # IncNS + solve-services tier (platform contract, linear-solve seam, Poisson
@@ -178,22 +221,33 @@ end
     # --- 3D viscoelastic tier (FVFD/FD transport + log-conformation, four
     #     constitutive models, RheoTool cross-validation). This capability
     #     lives only on this line; keep it registered here. ---
-    include("test_viscoelastic_sphere_3d.jl")
-    include("test_viscoelastic_couette_3d.jl")
-    include("test_viscoelastic_poiseuille_3d.jl")
+    # Operator- and model-level 3D tests: cheap, and they are what catches a
+    # broken kernel. These always run.
     include("test_fvfd_operators_3d.jl")
     include("test_fvfd_logconf_3d.jl")
     include("test_fvfd_fenep_3d.jl")
     include("test_fvfd_giesekus_3d.jl")
     include("test_fvfd_ptt_3d.jl")
     include("test_fvfd_velocity_gradient_3d.jl")
-    include("test_viscoelastic_fvfd_poiseuille_3d.jl")
-    include("test_fvfd_fenep_coupled_3d.jl")
-    include("test_fvfd_giesekus_coupled_3d.jl")
-    include("test_fvfd_ptt_coupled_3d.jl")
-    include("test_fvfd_poiseuille_payoff_3d.jl")
-    include("test_fvfd_extensional_3d.jl")
-    include("test_fvfd_fenep_extensional_3d.jl")
+    # Full 3D flow validations: these must reach a developed state for the
+    # analytical comparison to mean anything, so they cannot be shrunk without
+    # loosening their gates. Measured 2026-09-16, they are 52% of the non-AD
+    # suite. KRAKEN_SKIP_VE3D=true moves them off the pull-request path; they
+    # still run on pushes to integration branches and nightly.
+    if SKIP_VE3D
+        @info "Skipping 3D viscoelastic flow validations (KRAKEN_SKIP_VE3D=true)"
+    else
+        include("test_viscoelastic_sphere_3d.jl")
+        include("test_viscoelastic_couette_3d.jl")
+        include("test_viscoelastic_poiseuille_3d.jl")
+        include("test_viscoelastic_fvfd_poiseuille_3d.jl")
+        include("test_fvfd_fenep_coupled_3d.jl")
+        include("test_fvfd_giesekus_coupled_3d.jl")
+        include("test_fvfd_ptt_coupled_3d.jl")
+        include("test_fvfd_poiseuille_payoff_3d.jl")
+        include("test_fvfd_extensional_3d.jl")
+        include("test_fvfd_fenep_extensional_3d.jl")
+    end
     include("test_viscoelastic_extensional_krk.jl")
     # AD steady-sensitivity tests need the Enzyme extension (weakdep). Run only when Enzyme
     # is loadable in this environment; skip cleanly otherwise (guard the LOAD, not the tests,

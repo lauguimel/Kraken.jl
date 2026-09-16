@@ -10,6 +10,12 @@ on:
     # Nightly full suite on the default branch, 02:00 UTC.
     - cron: '0 2 * * *'
   workflow_dispatch:
+    inputs:
+      only:
+        description: 'Run a single test file (path relative to test/), e.g. ad/test_ad_ve_sensitivity.jl. Leave empty for the full suite.'
+        required: false
+        default: ''
+
 
 # A new push supersedes the run already in flight for the same PR or branch.
 # Without this, pushing four times in an hour queues four 2h45 suites and the
@@ -19,10 +25,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Pull-request stage. Drops the Enzyme-driven tiers (AD sensitivity +
-  # calibration twin experiments): measured 2026-09-15, they are 93 min of the
-  # suite's 165 min on Julia 1.11. They are covered by `full` after merge and
-  # nightly. Run them on a PR on demand with workflow_dispatch.
+  # Pull-request stage. Drops the two most expensive tiers, both covered by
+  # `full` after merge and nightly:
+  #   - Enzyme-driven (AD sensitivity + calibration twins): 93 of 165 min,
+  #     measured 2026-09-15 on Julia 1.11.
+  #   - 3D viscoelastic flow validations: 52% of what remains, measured
+  #     2026-09-16.
+  # Neither is shrunk — their size is what they validate. Run the full suite on
+  # a PR on demand with workflow_dispatch.
   quick:
     if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.os }}
@@ -36,6 +46,7 @@ jobs:
         os: [ubuntu-latest]
     env:
       KRAKEN_SKIP_AD: "true"
+      KRAKEN_SKIP_VE3D: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -50,6 +61,8 @@ jobs:
   full:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
+    env:
+      KRAKEN_ONLY: ${{ github.event.inputs.only }}
     strategy:
       fail-fast: false
       matrix:
