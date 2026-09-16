@@ -25,8 +25,15 @@ end
 Run a CPU-oriented coupled EHD electroconvection canary. The electric potential
 uses the pseudo-time DDF Poisson solve, charge uses drift equilibrium
 `u + K*E`, and Navier-Stokes uses BGK + Guo forcing with force density `q*E`.
-Sidewalls are EHD-local zero-gradient scalar NEE and post-stream free-slip flow
-mirroring ported from Jiachen's MATLAB driver.
+Scalar sidewalls retain EHD-local zero-gradient NEE. Flow sidewalls select
+`sidewall_bc=:free_slip` (the unchanged default) or `:no_slip` (stationary).
+No-slip reconstructs incoming populations with the Guo half-force correction
+at x=0 and x=Nx-1; these boundary nodes still undergo fluid collision. It does
+not merely overwrite reported velocities. Plate rows and corners retain their
+existing solid-node bounce-back treatment. The nominal aspect ratio remains
+`(Nx-1)/(Ny-1)`; this interface does not qualify the plate discretisation or
+paper-level onset thresholds. For compatibility, free-slip results retain the
+historical `sidewall_bc=:free_slip_ported` metadata value.
 """
 function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     Ma_E=1e-2, alpha=1e-4, delta_U=1.0,
@@ -37,6 +44,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     phi_scheme=:lbm,
                                     charge_scheme=:regularized,
                                     ns_scheme=:bgk,
+                                    sidewall_bc=:free_slip,
                                     perturb_amplitude=1e-4,
                                     perturb_mode=1,
                                     force_projection=:none,
@@ -46,6 +54,8 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     FT=Float64)
     Nx < 4 && throw(ArgumentError("Nx must be at least 4."))
     Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
+    sidewall_bc in (:free_slip, :no_slip) ||
+        throw(ArgumentError("sidewall_bc must be :free_slip or :no_slip."))
     charge_scheme in (:srt, :regularized) ||
         throw(ArgumentError("charge_scheme must be :srt or :regularized."))
     ns_scheme in (:bgk, :mrt) ||
@@ -197,7 +207,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         end
 
         compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx_prev, Fy_prev, Nx, Ny)
-        enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+        sidewall_bc === :free_slip && enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
 
         sample_cycle && copyto!(q_prev, qfield)
         if charge_scheme == :srt
@@ -225,12 +235,16 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
             ehd_collide_mrt_2d!(f_in, Fx, Fy, is_solid, p.nu)
         end
         stream_wall_x_wall_y_2d!(f_out, f_in, Nx, Ny)
-        apply_free_slip_sidewalls_2d!(f_out, Nx, Ny)
+        if sidewall_bc === :free_slip
+            apply_free_slip_sidewalls_2d!(f_out, Nx, Ny)
+        else
+            apply_no_slip_sidewalls_2d!(f_out, Fx, Fy, Nx, Ny)
+        end
         f_in, f_out = f_out, f_in
 
         if sample_cycle
             compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx, Fy, Nx, Ny)
-            enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+            sidewall_bc === :free_slip && enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
             ehd_maxspeed_2d!(diag, ux, uy, Nx, Ny)
             copyto!(diag_host, diag)
             umax = diag_host[1]
@@ -254,7 +268,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
     end
     compute_macroscopic_guo_field_2d!(rho, ux, uy, f_in, Fx, Fy, Nx, Ny)
-    enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+    sidewall_bc === :free_slip && enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
 
     return (ux=Array(ux), uy=Array(uy), rho=Array(rho), q=Array(qfield),
             phi=Array(phi), Ex=Array(Ex), Ey=Array(Ey), Fx=Array(Fx), Fy=Array(Fy),
@@ -268,6 +282,6 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
             phi_iters_last=phi_iters_last, phi_rel_last=phi_rel_last,
             q_rel_change=q_rel_last, params=p,
             ns_collision=(ns_scheme == :bgk ? :bgk_guo : :mrt_guo_moment),
-            sidewall_bc=:free_slip_ported,
+            sidewall_bc=(sidewall_bc === :free_slip ? :free_slip_ported : :no_slip),
             loop_ms_per_step=steps_done > 0 ? (t1 - t0) / 1e6 / steps_done : 0.0)
 end
