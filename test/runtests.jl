@@ -106,6 +106,7 @@ end
     # ~40 s: two 50k-cycle canaries bracketing the electroconvection onset.
     include("analytical/ehd_onset_2d.jl")
     include("analytical/ehd_phi_direct_2d.jl")
+    include("analytical/ES-002-STOP.jl") # Known field-stopping failure, Issue #23.
     include("analytical/ehd_twin_parity_2d.jl")
     include("analytical/ehd_phi_gpu_parity_2d.jl")
     include("test_species.jl")
