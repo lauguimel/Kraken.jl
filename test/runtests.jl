@@ -13,6 +13,42 @@ if get(ENV, "KRAKEN_AD_ONLY", "false") == "true"
     exit()
 end
 
+# KRAKEN_ONLY=<path relative to test/> runs a single test file and exits.
+#
+# Added because diagnosing the Enzyme segfault in ad/test_ad_ve_sensitivity.jl
+# had no cheap route: KRAKEN_AD_ONLY runs a different file, and reaching the
+# crashing one otherwise costs the whole suite — 2h45 on CI — per attempt.
+# The crash does not reproduce on macOS arm64 (verified 2026-09-16: 19/19 in
+# 22.5 s on Julia 1.11.9, with and without CUDA loaded), so it has to be
+# diagnosed on the CI platform itself.
+#
+#   KRAKEN_ONLY=ad/test_ad_ve_sensitivity.jl julia --project -e 'using Pkg; Pkg.test()'
+#
+# Or on CI: run the workflow manually and set the `only` input.
+let only = get(ENV, "KRAKEN_ONLY", "")
+    if !isempty(only)
+        isfile(only) || error("KRAKEN_ONLY: no such test file: $(only)")
+        @info "Running a single test file (KRAKEN_ONLY)" file=only
+        include(only)
+        exit()
+    end
+end
+
+# KRAKEN_ONLY=<relative path> runs a single test file and exits. Added because
+# diagnosing the Enzyme segfault in ad/test_ad_ve_sensitivity.jl had no cheap
+# route: KRAKEN_AD_ONLY runs a different file, and reaching the crashing one
+# otherwise means paying the whole suite (2h45 on CI) per attempt.
+#
+#   KRAKEN_ONLY=ad/test_ad_ve_sensitivity.jl julia --project -e 'using Pkg; Pkg.test()'
+let only = get(ENV, "KRAKEN_ONLY", "")
+    if !isempty(only)
+        isfile(only) || error("KRAKEN_ONLY: no such test file: $(only)")
+        @info "Running a single test file (KRAKEN_ONLY)" file=only
+        include(only)
+        exit()
+    end
+end
+
 # IncNS + solve-services tier (platform contract, linear-solve seam, Poisson
 # services, IncNS drivers, scalar transport). Runs after the LBM tier by
 # default; KRAKEN_INCNS_ONLY=true runs it alone (mirrors KRAKEN_AD_ONLY).

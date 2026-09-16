@@ -10,6 +10,12 @@ on:
     # Nightly full suite on the default branch, 02:00 UTC.
     - cron: '0 2 * * *'
   workflow_dispatch:
+    inputs:
+      only:
+        description: 'Run a single test file (path relative to test/), e.g. ad/test_ad_ve_sensitivity.jl. Leave empty for the full suite.'
+        required: false
+        default: ''
+
 
 # A new push supersedes the run already in flight for the same PR or branch.
 # Without this, pushing four times in an hour queues four 2h45 suites and the
@@ -50,6 +56,8 @@ jobs:
   full:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
+    env:
+      KRAKEN_ONLY: ${{ github.event.inputs.only }}
     strategy:
       fail-fast: false
       matrix:
