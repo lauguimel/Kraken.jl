@@ -1,6 +1,13 @@
 using Test
 using Kraken
 
+# KRAKEN_SKIP_AD=true drops every Enzyme-driven tier: the AD sensitivity tests
+# and the calibration twin experiments. Measured on 2026-09-15 (CI, Julia 1.11,
+# ubuntu-latest), those are 93 min of the suite's 165 min — 56% of wall-clock
+# for the seam that changes least often. The pull-request CI stage sets it; the
+# full suite on dev/platform and the nightly run do not.
+const SKIP_AD = get(ENV, "KRAKEN_SKIP_AD", "false") == "true"
+
 if get(ENV, "KRAKEN_AD_ONLY", "false") == "true"
     include("ad/test_ad_sensitivity.jl")
     exit()
@@ -73,8 +80,12 @@ end
 @testset "Kraken.jl LBM" begin
     include("platform/contract_parity_test.jl")
     include("platform/residual_vjp_test.jl")
-    include("platform/calibration_test.jl")
-    include("platform/calibration_nufield_test.jl")
+    if SKIP_AD
+        @info "Skipping calibration twin experiments (KRAKEN_SKIP_AD=true)"
+    else
+        include("platform/calibration_test.jl")
+        include("platform/calibration_nufield_test.jl")
+    end
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
     include("test_guo_convention_pairs.jl")
@@ -186,17 +197,21 @@ end
     # AD steady-sensitivity tests need the Enzyme extension (weakdep). Run only when Enzyme
     # is loadable in this environment; skip cleanly otherwise (guard the LOAD, not the tests,
     # so real AD test failures still surface when Enzyme IS present).
-    let enzyme_ok = try
-            @eval Main using Enzyme
-            true
-        catch
-            false
-        end
-        if enzyme_ok
-            include("ad/test_ad_sensitivity.jl")
-            include("ad/test_ad_ve_sensitivity.jl")
-        else
-            @info "Skipping AD steady-sensitivity tests (Enzyme extension not loadable in this environment)"
+    if SKIP_AD
+        @info "Skipping AD steady-sensitivity tests (KRAKEN_SKIP_AD=true)"
+    else
+        let enzyme_ok = try
+                @eval Main using Enzyme
+                true
+            catch
+                false
+            end
+            if enzyme_ok
+                include("ad/test_ad_sensitivity.jl")
+                include("ad/test_ad_ve_sensitivity.jl")
+            else
+                @info "Skipping AD steady-sensitivity tests (Enzyme extension not loadable in this environment)"
+            end
         end
     end
 
