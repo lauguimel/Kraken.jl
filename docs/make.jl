@@ -160,6 +160,7 @@ makedocs(;
             "Architecture" => "architecture.md",
             "KRK reference" => "users/krk-reference.md",
             "Incompressible Navier–Stokes (FVFD/SIMPLE)" => "users/incompressible-navier-stokes.md",
+            "Simulation state and checkpoints" => "users/simulation-state-checkpoints.md",
         ],
         "Examples" => [
             "Newtonian" => [
@@ -227,6 +228,7 @@ makedocs(;
                 "Boundary conditions" => "api/bc.md",
                 "Backend" => "api/backend.md",
                 "KRK I/O" => "api/io-krk.md",
+                "Platform state & checkpoints" => "api/platform.md",
             ],
             "Julia API" => [
                 "api/lattice.md",

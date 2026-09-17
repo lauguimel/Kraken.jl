@@ -20,28 +20,34 @@ Positioning: a state is the transient counterpart of the `u` of
 
 ## Public surface
 
-Defined in `src/platform/state.jl`, re-exported by `Kraken`:
+Defined in `src/platform/state.jl`; export status verified against
+`src/Kraken.jl` (drift found and fixed here on 2026-09-17: five client hooks
+are **unexported**, not re-exported as an earlier version of this map claimed):
 
-- `AbstractSimulationState` — supertype of every client state.
+- `AbstractSimulationState` — supertype of every client state. **Exported.**
 - `StateSnapshot(; solver, schema_version, cycle, fields, series, scalars, identity,
-  run_control, parameters, derived)` — plain host-side container. Scalars:
-  `String`/`Bool`/`Int`/`Float32`/`Float64` (+ `nothing` in `identity`,
+  run_control, parameters, derived)` — plain host-side container. **Exported.**
+  Scalars: `String`/`Bool`/`Int`/`Float32`/`Float64` (+ `nothing` in `identity`,
   `run_control`, `parameters` only). Array eltypes: `Float32`/`Float64`/`Int32`/
   `Int64`/`Bool`. Field and series names may contain `/`; scalar keys may not, and
   `keys` is reserved. The constructor rejects anything else.
-- `CheckpointError` — every refusal; the message names the key or object.
-- Client verbs (defaults throw, except where noted): `init_state(::Type{S}; kwargs...)`,
-  `advance!(state, n; sample_final=false)`, `solution(state)`, `snapshot(state)`,
-  `restore_state(::Type{S}, snap; backend, kwargs...)`, `validate_snapshot(::Type{S}, snap)`
-  (default: no check), `at_boundary(state)` (default: `true`),
+- `CheckpointError` — every refusal; the message names the key or object. **Exported.**
+- Client verbs, **exported**: `init_state(::Type{S}; kwargs...)`,
+  `advance!(state, n; sample_final=false)`, `solution(state)`,
+  `restore_state(::Type{S}, snap; backend, kwargs...)`,
   `update_parameter!(state, name, value)`, `updatable_parameters(::Type{S})`
-  (default: empty `ParameterSpace`), `migrate(::Type{S}, snap, from_version)`
-  (default: throws `CheckpointError`).
-- Platform-owned: `export_state(state)`, `check_compatible([S,] snap; solver,
-  schema_version, identity, identity_defaults)`, `check_updatable(S, name, value)`.
-  Internal companions: `validate_content`, `check_finite`.
+  (default: empty `ParameterSpace`).
+- Client verbs, **unexported** — call as `Kraken.<name>`: `snapshot(state)`,
+  `validate_snapshot(::Type{S}, snap)` (default: no check), `at_boundary(state)`
+  (default: `true`), `migrate(::Type{S}, snap, from_version)` (default: throws
+  `CheckpointError`).
+- Platform-owned, **exported**: `export_state(state)`, `check_compatible([S,] snap;
+  solver, schema_version, identity, identity_defaults)`.
+- Platform-owned, **unexported** — call as `Kraken.check_updatable`:
+  `check_updatable(S, name, value)`. Internal companions (unexported, not part of
+  the contract surface): `validate_content`, `check_finite`.
 
-Defined in `src/io/checkpoint_hdf5.jl`, re-exported by `Kraken`:
+Defined in `src/io/checkpoint_hdf5.jl`, exported by `Kraken`:
 
 - `CHECKPOINT_CONTAINER_VERSION` (= 1), `write_checkpoint(path, snap; keep_previous=true)`,
   `read_checkpoint(path)`, `checkpoint_info(path)`, `save_checkpoint(path, state)`,
