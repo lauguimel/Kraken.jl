@@ -14,6 +14,18 @@ Pages = [
 Order = [:constant, :type, :function]
 ```
 
+## Contract types the state verbs refer to
+
+`solution(state)` returns an `AbstractSolution`, and `solve` stays the one-shot
+verb (create, advance, produce the result).
+
+```@docs
+AbstractSolution
+LBMSolution
+IncNSSolution
+solve
+```
+
 ## Electroconvection state (worked example client)
 
 `ECState`/`ECSolution` are the first client of the contract above: the 2D
