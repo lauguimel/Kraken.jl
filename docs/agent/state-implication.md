@@ -2,7 +2,7 @@
 module: platform/state
 path: src/platform/state.jl
 owner_concern: resumable-simulation-state
-status: contract-and-disk-layer (no production client yet)
+status: contract-and-disk-layer (first client: drivers/ehd_ec_state.jl, in-memory verbs only)
 last_verified: 2026-09-17
 depends_on: [platform/contract.jl, platform/calibration.jl, io/checkpoint_hdf5.jl]
 ---
@@ -129,3 +129,17 @@ established on CPU; it has not been measured on CUDA.
    `test/platform/state_contract_test.jl` — toy client and disk-layer cases.
 6. A new client: its own state file under `src/drivers/`, its `schema_version`, and
    a test file that calls `run_state_contract_suite`.
+
+## Clients
+
+- `src/drivers/ehd_ec_state.jl` — `ECState` / `ECSolution` (2D electroconvection).
+  Implements `init_state`, `advance!`, `solution`, `at_boundary`;
+  `run_electroconvection_2d` (`src/drivers/ehd_ec.jl`) is the one-shot wrapper
+  (`advance!(s, max_cycles; sample_final=true)`). Not implemented yet: `snapshot`,
+  `restore_state`, `validate_snapshot`, `update_parameter!`, `updatable_parameters`,
+  so `export_state` / `save_checkpoint` still throw for this client.
+  `solution(::ECState)` recomputes derived buffers in place (`qfield`, `phi`, `Ex`,
+  `Ey` to the values they already hold; `rho`, `ux`, `uy` are rewritten by the next
+  cycle before being read). Bit-for-bit parity with the former monolithic driver and
+  segment independence: `test/analytical/ehd_ec_split_parity_2d.jl` (reference copy
+  in `test/reference/ehd_ec_legacy.jl`, test-only, never edited).
