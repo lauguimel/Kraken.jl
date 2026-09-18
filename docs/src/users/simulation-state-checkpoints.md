@@ -254,7 +254,9 @@ libhdf5 Stacktrace:
 **Non-finite value** — a `NaN` snuck into a field. The `StateSnapshot`
 constructor only checks types and names; the finiteness check runs at
 `write_checkpoint`/`export_state`, so that a diverged state never overwrites a
-good checkpoint:
+good checkpoint. Only arrays (`fields`, `series`) are checked: a carried scalar
+may legitimately be `Inf`, for example a convergence indicator before its first
+sample.
 
 ```
 CheckpointError: fields/a: non-finite value NaN at index (2,); snapshot refused
@@ -286,7 +288,12 @@ worked example of every one of them — read it alongside this checklist.
    interrupted mid-cycle (e.g. by a caught exception): return `true` exactly
    when `state` sits between two cycles. [`export_state`](@ref) refuses to
    checkpoint a state that is not at a boundary, so a checkpoint is never
-   written from a half-finished cycle. The default is `true`, which is
+   written from a half-finished cycle. Your `advance!` (even for `n == 0`)
+   and `solution` must refuse such a state too, by calling
+   `Kraken.require_boundary(state, "advance!")` / `Kraken.require_boundary(state, "solution")`
+   as their first statement: it throws an `ArgumentError` and leaves the
+   state untouched, so the only way forward is a fresh state or a restore
+   from a known-good checkpoint. The default is `true`, which is
    correct for a solver whose `advance!` cannot fail partway through a cycle.
 7. If your solver has parameters that may change between two segments of a
    run, declare them with **`updatable_parameters(::Type{YourState})`**

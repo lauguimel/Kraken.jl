@@ -210,9 +210,12 @@ global number is a multiple of `history_interval`, or when it is the last cycle 
 the call and `sample_final` is set. Sampling never feeds back into the dynamics, so
 any split of `n` leaves the same populations and force history.
 
-An exception raised in the middle of a cycle leaves `at_boundary(s) == false`.
+An exception raised in the middle of a cycle leaves `at_boundary(s) == false`; every
+later `advance!` (even with `n == 0`) or `solution` on that state throws an
+`ArgumentError` without touching it ([`require_boundary`](@ref)).
 """
 function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {FT}
+    require_boundary(s, "advance!")
     n < 0 && throw(ArgumentError("advance!: the number of cycles must be non-negative, got $n."))
     # Bindings that never change during a run. The population pairs and the carried
     # scalars are read and written through `s` because they do change.
@@ -337,9 +340,11 @@ The derived buffers `qfield`, `phi` (`:lbm` only), `Ex`, `Ey`, `rho`, `ux`, `uy`
 recomputed in place from the populations, as the one-shot driver did after its
 loop. `qfield`, `phi`, `Ex`, `Ey` get the values they already hold; `rho`, `ux`,
 `uy` are recomputed by the next cycle before anything reads them. A later
-`advance!` is therefore unaffected.
+`advance!` is therefore unaffected. Refused (`ArgumentError`) on a state left in the
+middle of a cycle.
 """
 function solution(s::ECState)
+    require_boundary(s, "solution")
     c = s.config
     p = s.p
     (; phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy) = s

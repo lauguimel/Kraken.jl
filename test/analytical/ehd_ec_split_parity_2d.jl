@@ -187,6 +187,40 @@ end
         @test_throws ArgumentError advance!(init_state(ECState; grid...), -1)
     end
 
+    @testset "advance! and solution refuse a state left mid-cycle" begin
+        # Review of #34: the velocity stop fires on a sampled cycle after the
+        # populations were advanced but before Fx_prev/Fy_prev and the counter
+        # moved. A second advance! must not run on that half-advanced state.
+        s = init_state(ECState; grid..., phi_substeps=1, history_interval=5, velocity_stop=1e-30)
+        @test_throws ErrorException advance!(s, 1; sample_final=true)
+        @test !Kraken.at_boundary(s)
+        @test s.cycle == 0
+        frozen = (f_in=Array(s.f_in), q_f_in=Array(s.q_f_in), phi_f_in=Array(s.phi_f_in),
+                  Fx_prev=Array(s.Fx_prev), Fy_prev=Array(s.Fy_prev),
+                  umax_history=copy(s.umax_history), cycle_history=copy(s.cycle_history))
+        for call in (() -> advance!(s, 1), () -> advance!(s, 0),
+                     () -> advance!(s, 4; sample_final=true), () -> solution(s))
+            err = ec_thrown(call)
+            @test err isa ArgumentError
+            @test occursin("not on a completed cycle boundary", err.msg)
+            @test !Kraken.at_boundary(s)
+            @test s.cycle == 0
+        end
+        @test isequal(Array(s.f_in), frozen.f_in)
+        @test isequal(Array(s.q_f_in), frozen.q_f_in)
+        @test isequal(Array(s.phi_f_in), frozen.phi_f_in)
+        @test isequal(Array(s.Fx_prev), frozen.Fx_prev)
+        @test isequal(Array(s.Fy_prev), frozen.Fy_prev)
+        @test s.umax_history == frozen.umax_history
+        @test s.cycle_history == frozen.cycle_history
+        # The refusal names the verb; a fresh state is the recovery path.
+        @test startswith(ec_thrown(() -> advance!(s, 1)).msg, "advance!:")
+        @test startswith(ec_thrown(() -> solution(s)).msg, "solution:")
+        fresh = init_state(ECState; grid..., phi_substeps=1, history_interval=5)
+        @test advance!(fresh, 1) === fresh && Kraken.at_boundary(fresh)
+        @test solution(fresh) isa ECSolution
+    end
+
     @testset "error-path parity" begin
         failing = ((; grid..., phi_max_iter=1, max_cycles=5),
                    (; grid..., phi_substeps=1, velocity_stop=1e-30, max_cycles=9, history_interval=4),

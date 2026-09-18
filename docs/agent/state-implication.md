@@ -3,7 +3,7 @@ module: platform/state
 path: src/platform/state.jl
 owner_concern: resumable-simulation-state
 status: contract-and-disk-layer (first client: drivers/ehd_ec_state.jl, in-memory verbs only)
-last_verified: 2026-09-17
+last_verified: 2026-09-18
 depends_on: [platform/contract.jl, platform/calibration.jl, io/checkpoint_hdf5.jl]
 ---
 
@@ -43,9 +43,17 @@ are **unexported**, not re-exported as an earlier version of this map claimed):
   `CheckpointError`).
 - Platform-owned, **exported**: `export_state(state)`, `check_compatible([S,] snap;
   solver, schema_version, identity, identity_defaults)`.
-- Platform-owned, **unexported** — call as `Kraken.check_updatable`:
-  `check_updatable(S, name, value)`. Internal companions (unexported, not part of
-  the contract surface): `validate_content`, `check_finite`.
+- Platform-owned, **unexported** — call as `Kraken.<name>`:
+  `check_updatable(S, name, value)`, `require_boundary(state, what)` (throws
+  `ArgumentError` when `!at_boundary(state)`). Internal companions (unexported, not
+  part of the contract surface): `validate_content`, `check_finite`.
+
+Invariant every client must hold (checked by the contract suite): once an
+`advance!` has thrown mid-cycle (`at_boundary(state) == false`), the client's
+`advance!` (any `n`, including 0) and `solution` refuse the state through
+`require_boundary` without mutating it, and `export_state` refuses it with a
+`CheckpointError`. There is no repair verb: recovery is a fresh `init_state` or a
+`restore_state` / `load_checkpoint` from a known-good snapshot.
 
 Defined in `src/io/checkpoint_hdf5.jl`, exported by `Kraken`:
 
@@ -60,7 +68,7 @@ save_checkpoint(path, state)
   ├─ export_state(state)                          [platform-owned]
   │   ├─ at_boundary(state) or CheckpointError    [client hook]
   │   ├─ snapshot(state) → StateSnapshot          [client hook, raw]
-  │   └─ validate_content + check_finite          [refuse NaN/Inf in fields/series/scalars]
+  │   └─ validate_content + check_finite          [refuse NaN/Inf in fields/series; scalars may carry Inf]
   └─ write_checkpoint(path, snap)
       ├─ validate_content + check_finite          [again: the dicts are mutable]
       ├─ h5open(path.tmp, "w"; libver_bounds=(v"1.10", v"1.10"))
@@ -139,7 +147,8 @@ established on CPU; it has not been measured on CUDA.
 ## Clients
 
 - `src/drivers/ehd_ec_state.jl` — `ECState` / `ECSolution` (2D electroconvection).
-  Implements `init_state`, `advance!`, `solution`, `at_boundary`;
+  Implements `init_state`, `advance!`, `solution`, `at_boundary`; `advance!` and
+  `solution` open with `require_boundary`.
   `run_electroconvection_2d` (`src/drivers/ehd_ec.jl`) is the one-shot wrapper
   (`advance!(s, max_cycles; sample_final=true)`). Not implemented yet: `snapshot`,
   `restore_state`, `validate_snapshot`, `update_parameter!`, `updatable_parameters`,
