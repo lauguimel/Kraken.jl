@@ -212,10 +212,12 @@ end
 """
     check_finite(snap::StateSnapshot) -> snap
 
-Refuse a snapshot whose `fields`, `series` or `scalars` hold a `NaN` or an `Inf`:
-a diverged state must never replace the last good restart point. Configuration
-values are not checked (`Inf` is a legitimate horizon). Throws a
-[`CheckpointError`](@ref) naming the key and the first offending index.
+Refuse a snapshot whose `fields` or `series` hold a `NaN` or an `Inf`: a diverged
+state must never replace the last good restart point. Carried `scalars` and
+configuration values are not checked: a convergence indicator legitimately reads
+`Inf` before its first sample, and `Inf` is a legitimate run horizon. Divergence
+shows in the arrays. Throws a [`CheckpointError`](@ref) naming the key and the
+first offending index.
 """
 function check_finite(snap::StateSnapshot)
     for (class, d) in (("fields", snap.fields), ("series", snap.series))
@@ -224,10 +226,6 @@ function check_finite(snap::StateSnapshot)
             i === nothing ||
                 throw(CheckpointError("$class/$name: non-finite value $(a[i]) at index $(Tuple(i)); snapshot refused"))
         end
-    end
-    for (key, v) in snap.scalars
-        v isa AbstractFloat && !isfinite(v) &&
-            throw(CheckpointError("scalars/$key: non-finite value $v; snapshot refused"))
     end
     return snap
 end
@@ -251,6 +249,12 @@ Apply `n` cycles of the solver step to `state`, in place. Sampling of histories 
 decided on the **global** cycle counter only, so that `advance!(s, a); advance!(s, b)`
 and `advance!(s, a + b)` leave bit-identical states. `sample_final=true` forces a
 sample on the last cycle of the call (what a one-shot driver does at its horizon).
+
+A client method MUST start with [`require_boundary`](@ref)`(state, "advance!")`,
+before touching anything and whatever `n` is (including `n == 0`): a state whose
+previous `advance!` threw mid-cycle holds populations and history at mismatched
+time levels, and advancing it again would silently raise [`at_boundary`](@ref)
+on garbage. The rejected call leaves `state` untouched.
 """
 advance!(state::AbstractSimulationState, n::Integer; sample_final::Bool=false) =
     _unimplemented("advance!", typeof(state))
@@ -260,7 +264,9 @@ advance!(state::AbstractSimulationState, n::Integer; sample_final::Bool=false) =
 
 The queryable result of `state` at its current cycle, as an
 [`AbstractSolution`](@ref): what [`solve`](@ref) would have returned had the run
-stopped here. Must not mutate `state`.
+stopped here. Must not mutate `state`. A client method MUST start with
+[`require_boundary`](@ref)`(state, "solution")`: there is no meaningful result
+for a state left in the middle of a cycle.
 """
 solution(state::AbstractSimulationState) = _unimplemented("solution", typeof(state))
 
@@ -301,9 +307,27 @@ validate_snapshot(::Type{S}, snap::StateSnapshot) where {S<:AbstractSimulationSt
 `true` when `state` sits exactly between two cycles. A client whose `advance!` can
 be interrupted mid-cycle (caught exception) lowers the flag on entry of a cycle and
 raises it on exit; [`export_state`](@ref) refuses a state that is not at a
-boundary. Default: `true`.
+boundary, and the client's [`advance!`](@ref) and [`solution`](@ref) refuse it
+through [`require_boundary`](@ref). Default: `true`.
 """
 at_boundary(state::AbstractSimulationState) = true
+
+"""
+    require_boundary(state, what::AbstractString) -> nothing
+
+Platform-owned guard for the client verbs that read or move a state: throw an
+`ArgumentError` when `!at_boundary(state)`, i.e. when a previous `advance!` threw in
+the middle of a cycle. `what` names the refusing verb in the message. There is no
+repair path: the caller starts from a fresh state or restores a checkpoint.
+Unexported; call as `Kraken.require_boundary`. [`export_state`](@ref) performs the
+same refusal with a [`CheckpointError`](@ref).
+"""
+function require_boundary(state::AbstractSimulationState, what::AbstractString)
+    at_boundary(state) ||
+        throw(ArgumentError("$what: $(nameof(typeof(state))) state is not on a completed cycle boundary " *
+                            "(a previous advance! failed mid-cycle); start from a fresh state or restore a checkpoint"))
+    return nothing
+end
 
 """
     update_parameter!(state, name::Symbol, value) -> state

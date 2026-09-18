@@ -51,6 +51,7 @@ function Kraken.init_state(::Type{ToyState{T}}; nx, ny, label="toy", limiter=not
 end
 
 function Kraken.advance!(s::ToyState{T}, n::Integer; sample_final::Bool=false) where {T}
+    Kraken.require_boundary(s, "advance!")
     nx, ny = size(s.a)
     for step in 1:n
         s.boundary = false
@@ -78,7 +79,10 @@ function Kraken.advance!(s::ToyState{T}, n::Integer; sample_final::Bool=false) w
     return s
 end
 
-Kraken.solution(s::ToyState) = ToySolution(copy(s.a))
+function Kraken.solution(s::ToyState)
+    Kraken.require_boundary(s, "solution")
+    return ToySolution(copy(s.a))
+end
 Kraken.at_boundary(s::ToyState) = s.boundary
 Kraken.updatable_parameters(::Type{<:ToyState}) = ParameterSpace([:gain], [0.0], [1.0])
 
@@ -368,14 +372,16 @@ end
             s.b[2, 3, 1] = NaN
             msg = _error_message(() -> save_checkpoint(keep, s))
             @test occursin("fields/aux/b", msg) && occursin("(2, 3, 1)", msg)
-            for (class, bad) in ("fields" => Dict("a" => [1.0, Inf]), "series" => Dict("s" => Float32[NaN]),
-                                 "scalars" => Dict("x" => -Inf))
+            for (class, bad) in ("fields" => Dict("a" => [1.0, Inf]), "series" => Dict("s" => Float32[NaN]))
                 poisoned = StateSnapshot(; solver="toy", schema_version=1, cycle=9, Symbol(class) => bad)
                 @test occursin("$class/$(first(keys(bad)))", _error_message(() -> write_checkpoint(keep, poisoned)))
             end
             @test read(keep) == before && read(keep * ".prev") == before_prev
             @test sort(readdir(dirname(keep))) == ["keep.h5", "keep.h5.prev"]
-            # Inf is legitimate in the configuration (an open horizon).
+            # Inf is legitimate in a carried scalar (an indicator before its first sample)...
+            unsampled = StateSnapshot(solver="toy", schema_version=1, cycle=0, scalars=Dict("rel_last" => Inf))
+            @test read_checkpoint(write_checkpoint(joinpath(dir, "unsampled.h5"), unsampled)).scalars["rel_last"] == Inf
+            # ...and in the configuration (an open horizon).
             open_horizon = StateSnapshot(solver="toy", schema_version=1, cycle=0, run_control=Dict("t_end" => Inf))
             @test read_checkpoint(write_checkpoint(joinpath(dir, "inf.h5"), open_horizon)).run_control["t_end"] == Inf
         end

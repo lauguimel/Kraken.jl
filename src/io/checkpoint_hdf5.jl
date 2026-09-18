@@ -87,7 +87,7 @@ _short(err) = first(sprint(showerror, err), 400)
 
 Write `snap` as one HDF5 file at `path`.
 
-The snapshot is validated first and refused if it holds a non-finite value
+The snapshot is validated first and refused if a field or series holds a non-finite value
 ([`check_finite`](@ref)): a diverged state never replaces a good restart point. The
 file is written to `path * ".tmp"` in the same directory, closed, then moved into
 place with an atomic `rename`. With `keep_previous=true` an existing `path` is
