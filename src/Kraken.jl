@@ -20,6 +20,7 @@ include("platform/contract.jl")
 include("platform/solution.jl")   # LBM, LBMSolution, solve
 include("platform/sample.jl")     # sample
 include("platform/observe.jl")    # observe, predict, Prediction, observables
+include("platform/state.jl")      # AbstractSimulationState, StateSnapshot, advance!
 export AbstractProblem, AbstractMethod, AbstractSolution, AbstractObservable, AbstractClosure
 export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure, SteadyResidual
 export capabilities
@@ -28,6 +29,13 @@ export observe, predict, Prediction, FieldProbe, LineProfile, FieldReduction
 export residual, adjoint_vjp
 export LBMGeomParams, LBMThermalParams, LBMVEParams, LBMScalarParams, LBMFieldParams
 export ParameterSpace, loss, fit, CalibResult
+export AbstractSimulationState, StateSnapshot, CheckpointError
+export init_state, advance!, solution, restore_state
+export update_parameter!, updatable_parameters, export_state, check_compatible
+# Client hooks stay unexported (extend as Kraken.snapshot, Kraken.validate_snapshot,
+# Kraken.at_boundary, Kraken.check_updatable, Kraken.migrate).
+export CHECKPOINT_CONTAINER_VERSION, write_checkpoint, read_checkpoint, checkpoint_info
+export save_checkpoint, load_checkpoint
 
 # --- Lattice definitions ---
 include("lattice/lattice.jl")
@@ -257,6 +265,7 @@ include("refinement/conservative_tree_krk_validation_2d.jl")
 # --- I/O ---
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
+include("io/checkpoint_hdf5.jl")  # write_checkpoint, read_checkpoint (only HDF5 user)
 
 # --- Spatial boundary kernels ---
 include("kernels/boundary_spatial_2d.jl")
