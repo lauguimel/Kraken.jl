@@ -300,3 +300,46 @@ function apply_free_slip_sidewalls_2d!(f, Nx, Ny)
     kernel! = apply_free_slip_sidewalls_2d_kernel!(backend)
     kernel!(f, Nx, Ny; ndrange=(max(Ny - 2, 1),))
 end
+
+@kernel function apply_no_slip_sidewalls_2d_kernel!(f, @Const(Fx), @Const(Fy), Nx, Ny)
+    k, = @index(Global, NTuple)
+    j = k + 1
+    @inbounds begin
+        if j <= Ny - 1
+            T = eltype(f)
+            # Guo velocity is (sum(c*f) + F/2)/rho. At a stationary wall
+            # the required RAW momentum is therefore J = -F/2, not zero.
+            # The axial non-equilibrium reflection closes the three unknowns;
+            # the remaining two equations impose both momentum components.
+            jx = -Fx[1, j] / T(2)
+            jy = -Fy[1, j] / T(2)
+            shear = (f[1, j, 5] - f[1, j, 3]) / T(2)
+            f[1, j, 2] = f[1, j, 4] + T(2) * jx / T(3)
+            f[1, j, 6] = f[1, j, 8] + shear + jx / T(6) + jy / T(2)
+            f[1, j, 9] = f[1, j, 7] - shear + jx / T(6) - jy / T(2)
+
+            jx = -Fx[Nx, j] / T(2)
+            jy = -Fy[Nx, j] / T(2)
+            shear = (f[Nx, j, 5] - f[Nx, j, 3]) / T(2)
+            f[Nx, j, 4] = f[Nx, j, 2] - T(2) * jx / T(3)
+            f[Nx, j, 7] = f[Nx, j, 9] + shear - jx / T(6) + jy / T(2)
+            f[Nx, j, 8] = f[Nx, j, 6] - shear - jx / T(6) - jy / T(2)
+        end
+    end
+end
+
+"""
+    apply_no_slip_sidewalls_2d!(f, Fx, Fy, Nx, Ny)
+
+Reconstruct the three incoming populations after streaming at each stationary
+lateral wall. The wall nodes are i=1 and i=Nx (separation Nx-1), collide as
+fluid, and satisfy sum(c*f)=-F/2 with the supplied force density. Only j=2:Ny-1
+is touched: plate rows, including corners, retain their existing treatment.
+Use the same force fields for reconstruction and subsequent Guo macroscopic
+evaluation. There are no neighbour reads or cross-thread write dependencies.
+"""
+function apply_no_slip_sidewalls_2d!(f, Fx, Fy, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    kernel! = apply_no_slip_sidewalls_2d_kernel!(backend)
+    kernel!(f, Fx, Fy, Nx, Ny; ndrange=(max(Ny - 2, 1),))
+end
