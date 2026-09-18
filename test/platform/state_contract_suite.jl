@@ -88,6 +88,19 @@ function _error_message(f)
     return "no error thrown"
 end
 
+# The exception `f()` throws, or `nothing`.
+function _thrown(f)
+    try
+        f()
+    catch err
+        return err
+    end
+    return nothing
+end
+
+# `f()` must throw an ArgumentError whose message names the boundary.
+_refused_off_boundary(f) = (err = _thrown(f); err isa ArgumentError && occursin("boundary", err.msg))
+
 """
     run_state_contract_suite(::Type{S}; make_state, restore_kwargs, interrupt!, tmpdir,
                              n_first=7, n_second=13, negative_controls=true)
@@ -179,6 +192,27 @@ function run_state_contract_suite(::Type{S}; make_state, restore_kwargs, interru
             @test_throws CheckpointError save_checkpoint(path, s)
             @test read(path) == good
             @test !ispath(path * ".tmp")
+        end
+
+        @testset "advance! and solution refused in the middle of a cycle" begin
+            s = advance!(make_state(), n_first)
+            interrupt!(s)
+            @test !at_boundary(s)
+            # Raw snapshot (export_state refuses): the image right after the failure.
+            broken = snapshot(s)
+            @test _refused_off_boundary(() -> advance!(s, 1))
+            @test _refused_off_boundary(() -> advance!(s, 0))
+            @test _refused_off_boundary(() -> advance!(s, n_second; sample_final=true))
+            @test _refused_off_boundary(() -> solution(s))
+            # The rejected calls changed nothing: flag, counter, arrays, histories.
+            @test !at_boundary(s)
+            @test snapshot(s).cycle == broken.cycle
+            @test isempty(snapshot_differences(snapshot(s), broken))
+            # Recovery is a fresh state or a restore, never the broken one.
+            fresh = make_state()
+            @test at_boundary(fresh) && advance!(fresh, 1) === fresh
+            restored = load_checkpoint(S, path; restore_kwargs...)
+            @test at_boundary(restored) && solution(restored) isa AbstractSolution
         end
 
         @testset "solver and schema mismatch rejected" begin

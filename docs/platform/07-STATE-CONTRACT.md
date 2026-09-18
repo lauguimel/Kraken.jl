@@ -45,8 +45,10 @@ génériques) et, séparément, une couche disque HDF5. `state.jl` ne connaît a
   fichier, la liste des clés est une seule chaîne scalaire jointe par `\n`.
 - **Écriture atomique :** `path.tmp` dans le même dossier, fermeture, puis `Base.rename` — jamais
   `mv(...; force=true)`, non atomique sous Julia 1.11 (la destination est supprimée avant le
-  renommage). Une génération `.prev` est conservée. Un snapshot contenant `NaN`/`Inf` est refusé
-  **avant** toute écriture : un état divergé ne remplace jamais le dernier bon point de reprise.
+  renommage). Une génération `.prev` est conservée. Un snapshot dont un tableau (`fields`, `series`) contient
+  `NaN`/`Inf` est refusé **avant** toute écriture : un état divergé ne remplace jamais le dernier
+  bon point de reprise. Les scalaires portés ne sont pas contrôlés : un indicateur de convergence
+  vaut légitimement `Inf` avant son premier échantillon.
 
 Les trois faits sont verrouillés par `test/platform/state_contract_test.jl` (le cas « attribute bit
 flip rejected » échoue si le mot-clé `libver_bounds` est retiré).
