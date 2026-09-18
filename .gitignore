@@ -19,3 +19,6 @@ output/
 # (see benchmarks/results/ehd/README.md); promote a new one with `git add -f`.
 benchmarks/results/ehd/tc_sweep_*.csv
 benchmarks/results/ehd/tc_sweep_*.md
+
+# Local planning notes — never tracked
+.orchestrator/
