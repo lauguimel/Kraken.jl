@@ -25,8 +25,10 @@ end
 Run a CPU-oriented coupled EHD electroconvection canary. The electric potential
 uses the pseudo-time DDF Poisson solve, charge uses drift equilibrium
 `u + K*E`, and Navier-Stokes uses BGK + Guo forcing with force density `q*E`.
-Sidewalls are EHD-local zero-gradient scalar NEE and post-stream free-slip flow
-mirroring ported from Jiachen's MATLAB driver.
+Electrical sidewalls retain EHD-local zero-gradient scalar NEE. Flow sidewalls
+select `sidewall_bc=:free_slip` (default, preserving the existing mirroring) or
+`:no_slip` (stationary on-node walls at i=1,Nx, separation Nx-1). Plate rows and
+corners retain their existing treatment in both modes.
 """
 function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     Ma_E=1e-2, alpha=1e-4, delta_U=1.0,
@@ -37,6 +39,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     phi_scheme=:lbm,
                                     charge_scheme=:regularized,
                                     ns_scheme=:bgk,
+                                    sidewall_bc=:free_slip,
                                     perturb_amplitude=1e-4,
                                     perturb_mode=1,
                                     force_projection=:none,
@@ -50,7 +53,8 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                    delta_U=delta_U, gamma=gamma, phi_tol=phi_tol,
                    phi_max_iter=phi_max_iter, phi_substeps=phi_substeps,
                    phi_scheme=phi_scheme, charge_scheme=charge_scheme,
-                   ns_scheme=ns_scheme, perturb_amplitude=perturb_amplitude,
+                   ns_scheme=ns_scheme, sidewall_bc=sidewall_bc,
+                   perturb_amplitude=perturb_amplitude,
                    perturb_mode=perturb_mode, force_projection=force_projection,
                    velocity_stop=velocity_stop, history_interval=history_interval,
                    backend=backend, FT=FT)
