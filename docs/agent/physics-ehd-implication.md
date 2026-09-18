@@ -3,10 +3,11 @@ module: physics-ehd
 path: src/kernels/ehd_2d.jl
 owner_concern: constitutive
 status: implemented
-last_verified: 2026-07-29
+last_verified: 2026-09-17
 depends_on:
   - lbm
   - bc
+  - platform/state
 ---
 
 # physics-ehd — module implication map
@@ -22,7 +23,8 @@ coarse electroconvection onset bracket.
 ## Public surface
 
 - `run_ehd_hydrostatic_2d(; Nx, Ny, C, M, Ma_E, alpha, charge_scheme, backend, FT)` — standalone hydrostatic EHD validation driver. Returns 2D fields, x-averaged profiles, analytic profiles, relative L2 errors, convergence metadata, and lattice parameters.
-- `run_electroconvection_2d(; Nx, Ny, C, M, T, Ma_E, alpha, max_cycles, phi_substeps, force_projection, backend, FT)` — coupled CPU/GPU canary. Returns flow, charge, potential, electric field, Coulomb force, velocity history, lattice mapping, and loop diagnostics including `loop_ms_per_step` measured over the coupled loop only.
+- `run_electroconvection_2d(; Nx, Ny, C, M, T, Ma_E, alpha, max_cycles, phi_substeps, force_projection, backend, FT)` — coupled CPU/GPU canary. Since issue #26 this is a **one-shot wrapper** over the platform state contract (`docs/agent/state-implication.md`): `init_state(ECState; ...)` then `advance!(s, max_cycles; sample_final=true)` then `solution(s).result`. Returns flow, charge, potential, electric field, Coulomb force, velocity history, lattice mapping, and loop diagnostics including `loop_ms_per_step` measured over the coupled loop only. Same keywords and same numbers as before the split (see Touch order below).
+- `ECState`/`ECSolution` (`src/drivers/ehd_ec_state.jl`) — the electroconvection cycle body as a client of the state contract: `init_state(ECState; ...)`, `advance!(s, n; sample_final=false)`, `solution(s)`. Not implemented for this client: `Kraken.snapshot`, `restore_state`, `Kraken.update_parameter!` — checkpointing electroconvection to disk is not available yet (verified against the source, not a placeholder omission).
 - `Kraken.Units.EHDSpec` plus `Kraken.Units.ehd_ec_lattice_params` own the electroconvection nondimensional-to-lattice mapping for `T`, `C`, `M`, `alpha`, and `Ma_E`. The coupled driver keeps its public `T` keyword but stores the spec field as `T_ehd` to avoid colliding with the units module's numeric type convention.
 - `.krk` runner surface: `Module ehd` dispatches `Simulation ehd_hydrostatic ...` to the hydrostatic driver and `Simulation electroconvection_2d ...` to the coupled driver. EHD nondimensional groups and scheme selectors live in `Physics` params; `Preset electroconvection_2d` emits the validated MRT/direct-potential configuration.
 - Kernel-level surface: `collide_electric_potential_2d!`, `compute_electric_field_2d!`, `collide_electric_charge_srt_2d!`, `collide_electric_charge_regularized_2d!`, `compute_ehd_scalar_2d!`, scalar NEE wall/box BC kernels, EHD-local non-periodic stream, free-slip sidewall port, Coulomb force helper, and Guo-corrected macro recovery.
@@ -75,6 +77,13 @@ coarse electroconvection onset bracket.
 
 1. `src/kernels/ehd_2d.jl` — collision formulas, E moment, and EHD-specific wall extrapolation.
 2. `src/kernels/ehd_bc_2d.jl` — EHD-local sidewall, force, Guo-macro, and free-slip canary helpers.
-3. `src/drivers/ehd.jl` / `src/drivers/ehd_ec.jl` — parameter mapping, analytic profiles, initialization, convergence criteria, coupled loop, and error/history metrics.
+3. `src/drivers/ehd.jl` / `src/drivers/ehd_ec_state.jl` (cycle body: `ECState`, `init_state`,
+   `advance!`, `solution`) / `src/drivers/ehd_ec.jl` (parameter mapping, analytic profiles, and the
+   thin one-shot wrapper `run_electroconvection_2d` over the three verbs above).
 4. `test/analytical/ehd_hydrostatic_2d.jl` and `test/analytical/ehd_onset_2d.jl` — CPU analytical validations.
-5. `src/Kraken.jl` — include/export registration only.
+5. `test/analytical/ehd_ec_split_parity_2d.jl` — behaviour-preservation test for the driver split
+   (issue #26): compares `run_electroconvection_2d` bit for bit against the frozen pre-split copy
+   `test/reference/ehd_ec_legacy.jl` (test-only, never edited, evaluated inside the `Kraken` module
+   because it uses unexported internals), then checks that any split of a run into segments matches
+   the continuous run bit for bit (exact `isequal`, not a tolerance).
+6. `src/Kraken.jl` — include/export registration only.

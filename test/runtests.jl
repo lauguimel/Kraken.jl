@@ -143,6 +143,7 @@ end
     include("analytical/TH-002-route.jl")
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
+    include("analytical/ehd_ec_split_parity_2d.jl")
     include("analytical/ehd_hydrostatic_2d.jl")
     include("analytical/ehd_krk_2d.jl")
     include("analytical/ehd_mapping_parity_2d.jl")

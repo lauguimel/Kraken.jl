@@ -2,8 +2,8 @@
 module: platform/state
 path: src/platform/state.jl
 owner_concern: resumable-simulation-state
-status: contract-and-disk-layer (no production client yet)
-last_verified: 2026-09-17
+status: contract-and-disk-layer (first client: drivers/ehd_ec_state.jl, in-memory verbs only)
+last_verified: 2026-09-18
 depends_on: [platform/contract.jl, platform/calibration.jl, io/checkpoint_hdf5.jl]
 ---
 
@@ -20,28 +20,42 @@ Positioning: a state is the transient counterpart of the `u` of
 
 ## Public surface
 
-Defined in `src/platform/state.jl`, re-exported by `Kraken`:
+Defined in `src/platform/state.jl`; export status verified against
+`src/Kraken.jl` (drift found and fixed here on 2026-09-17: five client hooks
+are **unexported**, not re-exported as an earlier version of this map claimed):
 
-- `AbstractSimulationState` — supertype of every client state.
+- `AbstractSimulationState` — supertype of every client state. **Exported.**
 - `StateSnapshot(; solver, schema_version, cycle, fields, series, scalars, identity,
-  run_control, parameters, derived)` — plain host-side container. Scalars:
-  `String`/`Bool`/`Int`/`Float32`/`Float64` (+ `nothing` in `identity`,
+  run_control, parameters, derived)` — plain host-side container. **Exported.**
+  Scalars: `String`/`Bool`/`Int`/`Float32`/`Float64` (+ `nothing` in `identity`,
   `run_control`, `parameters` only). Array eltypes: `Float32`/`Float64`/`Int32`/
   `Int64`/`Bool`. Field and series names may contain `/`; scalar keys may not, and
   `keys` is reserved. The constructor rejects anything else.
-- `CheckpointError` — every refusal; the message names the key or object.
-- Client verbs (defaults throw, except where noted): `init_state(::Type{S}; kwargs...)`,
-  `advance!(state, n; sample_final=false)`, `solution(state)`, `snapshot(state)`,
-  `restore_state(::Type{S}, snap; backend, kwargs...)`, `validate_snapshot(::Type{S}, snap)`
-  (default: no check), `at_boundary(state)` (default: `true`),
+- `CheckpointError` — every refusal; the message names the key or object. **Exported.**
+- Client verbs, **exported**: `init_state(::Type{S}; kwargs...)`,
+  `advance!(state, n; sample_final=false)`, `solution(state)`,
+  `restore_state(::Type{S}, snap; backend, kwargs...)`,
   `update_parameter!(state, name, value)`, `updatable_parameters(::Type{S})`
-  (default: empty `ParameterSpace`), `migrate(::Type{S}, snap, from_version)`
-  (default: throws `CheckpointError`).
-- Platform-owned: `export_state(state)`, `check_compatible([S,] snap; solver,
-  schema_version, identity, identity_defaults)`, `check_updatable(S, name, value)`.
-  Internal companions: `validate_content`, `check_finite`.
+  (default: empty `ParameterSpace`).
+- Client verbs, **unexported** — call as `Kraken.<name>`: `snapshot(state)`,
+  `validate_snapshot(::Type{S}, snap)` (default: no check), `at_boundary(state)`
+  (default: `true`), `migrate(::Type{S}, snap, from_version)` (default: throws
+  `CheckpointError`).
+- Platform-owned, **exported**: `export_state(state)`, `check_compatible([S,] snap;
+  solver, schema_version, identity, identity_defaults)`.
+- Platform-owned, **unexported** — call as `Kraken.<name>`:
+  `check_updatable(S, name, value)`, `require_boundary(state, what)` (throws
+  `ArgumentError` when `!at_boundary(state)`). Internal companions (unexported, not
+  part of the contract surface): `validate_content`, `check_finite`.
 
-Defined in `src/io/checkpoint_hdf5.jl`, re-exported by `Kraken`:
+Invariant every client must hold (checked by the contract suite): once an
+`advance!` has thrown mid-cycle (`at_boundary(state) == false`), the client's
+`advance!` (any `n`, including 0) and `solution` refuse the state through
+`require_boundary` without mutating it, and `export_state` refuses it with a
+`CheckpointError`. There is no repair verb: recovery is a fresh `init_state` or a
+`restore_state` / `load_checkpoint` from a known-good snapshot.
+
+Defined in `src/io/checkpoint_hdf5.jl`, exported by `Kraken`:
 
 - `CHECKPOINT_CONTAINER_VERSION` (= 1), `write_checkpoint(path, snap; keep_previous=true)`,
   `read_checkpoint(path)`, `checkpoint_info(path)`, `save_checkpoint(path, state)`,
@@ -54,7 +68,7 @@ save_checkpoint(path, state)
   ├─ export_state(state)                          [platform-owned]
   │   ├─ at_boundary(state) or CheckpointError    [client hook]
   │   ├─ snapshot(state) → StateSnapshot          [client hook, raw]
-  │   └─ validate_content + check_finite          [refuse NaN/Inf in fields/series/scalars]
+  │   └─ validate_content + check_finite          [refuse NaN/Inf in fields/series; scalars may carry Inf]
   └─ write_checkpoint(path, snap)
       ├─ validate_content + check_finite          [again: the dicts are mutable]
       ├─ h5open(path.tmp, "w"; libver_bounds=(v"1.10", v"1.10"))
@@ -129,3 +143,18 @@ established on CPU; it has not been measured on CUDA.
    `test/platform/state_contract_test.jl` — toy client and disk-layer cases.
 6. A new client: its own state file under `src/drivers/`, its `schema_version`, and
    a test file that calls `run_state_contract_suite`.
+
+## Clients
+
+- `src/drivers/ehd_ec_state.jl` — `ECState` / `ECSolution` (2D electroconvection).
+  Implements `init_state`, `advance!`, `solution`, `at_boundary`; `advance!` and
+  `solution` open with `require_boundary`.
+  `run_electroconvection_2d` (`src/drivers/ehd_ec.jl`) is the one-shot wrapper
+  (`advance!(s, max_cycles; sample_final=true)`). Not implemented yet: `snapshot`,
+  `restore_state`, `validate_snapshot`, `update_parameter!`, `updatable_parameters`,
+  so `export_state` / `save_checkpoint` still throw for this client.
+  `solution(::ECState)` recomputes derived buffers in place (`qfield`, `phi`, `Ex`,
+  `Ey` to the values they already hold; `rho`, `ux`, `uy` are rewritten by the next
+  cycle before being read). Bit-for-bit parity with the former monolithic driver and
+  segment independence: `test/analytical/ehd_ec_split_parity_2d.jl` (reference copy
+  in `test/reference/ehd_ec_legacy.jl`, test-only, never edited).
