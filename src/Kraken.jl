@@ -162,6 +162,7 @@ include("drivers/cylinder_libb.jl")
 include("drivers/thermal.jl")
 include("drivers/ehd_poisson.jl")
 include("drivers/ehd.jl")
+include("drivers/ehd_ec_state.jl")
 include("drivers/ehd_ec.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
@@ -339,6 +340,7 @@ export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
 export run_rayleigh_benard_2d, run_natural_convection_2d, run_natural_convection_refined_2d
 export run_natural_convection_3d
 export run_electroconvection_2d
+export ECState, ECSolution
 export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_step!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!
