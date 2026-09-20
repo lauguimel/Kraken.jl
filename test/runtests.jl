@@ -122,6 +122,7 @@ end
 
 @testset "Kraken.jl LBM" begin
     include("platform/contract_parity_test.jl")
+    include("platform/state_contract_test.jl")
     include("platform/residual_vjp_test.jl")
     if SKIP_AD
         @info "Skipping calibration twin experiments (KRAKEN_SKIP_AD=true)"
