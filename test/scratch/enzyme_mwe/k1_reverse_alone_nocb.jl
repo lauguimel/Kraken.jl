@@ -1,0 +1,15 @@
+# round 3: K1 (suite reverse call first) with --check-bounds=no, the production setting.
+println("check_bounds = ", Base.JLOptions().check_bounds)
+include(joinpath(@__DIR__, "lib_kraken.jl"))
+c = FAST
+p, geom = build_case(c)
+w_star = base_state(c, p, geom; converge=true)
+u, v = seeds(length(w_star))
+println("[k1_nocb] reverse: compile+run (_ad_ve_vjp_GtT)"); flush(stdout)
+Jtv = K._ad_ve_vjp_GtT(w_star, v, geom.g, geom.q_wall, geom.u_profile, p)
+println("[k1_nocb] REVERSE_OK"); flush(stdout)
+println("[k1_nocb] forward: compile+run (suite _jvp)"); flush(stdout)
+Ju = suite_jvp(w_star, u, geom, p)
+println("[k1_nocb] FORWARD_OK"); flush(stdout)
+rel = abs(dot(v, Ju) - dot(Jtv, u)) / max(abs(dot(v, Ju)), eps(Float64))
+println("[k1_nocb] transpose_rel = $rel ", rel < 1e-10 ? "IDENTITY_OK" : "IDENTITY_FAIL")
