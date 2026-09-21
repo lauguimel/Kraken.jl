@@ -381,3 +381,15 @@ function run_local_step_case(name, c, V::Val, E::Val; mask=identity, converge=fa
     flush(stdout)
     return rel
 end
+
+# ---- round 2 switches ---------------------------------------------------------
+@inline _advect(::Val{:split}, phi, ux_face, uy_face, is_solid, Nx, Ny, e) =
+    advect_split(phi, ux_face, uy_face, is_solid, Nx, Ny, e)
+# :none -> advection removed (psi_adv = psi_in); bisection only, changes numerics
+@inline function _advect(::Val{:none}, phi, ux_face, uy_face, is_solid, Nx, Ny, e)
+    adv = zeros(Nx, Ny)
+    @inbounds for j in 1:Ny, i in 1:Nx
+        adv[i, j] = phi[i, j]
+    end
+    return adv
+end
