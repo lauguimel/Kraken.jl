@@ -151,7 +151,10 @@ function run_simulation(setup::SimulationSetup;
     if setup.sensitivity !== nothing
         T === Float64 || throw(ArgumentError(
             ".krk Sensitivity dispatch supports T=Float64 only."))
-        return run_krk_sensitivity(setup)
+        # Function barrier (#39): once Enzyme is loaded, inferring any
+        # run_simulation call would otherwise expand every shape-sensitivity
+        # thunk, one of which crashes Enzyme's LLVM pipeline on x64 Linux.
+        return Base.invokelatest(run_krk_sensitivity, setup)
     elseif setup.mesh !== nothing
         if :slbm_drag in setup.modules
             return _run_gmsh_slbm_drag(setup; backend=backend, T=T,
