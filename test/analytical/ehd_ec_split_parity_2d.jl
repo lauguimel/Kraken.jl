@@ -153,17 +153,55 @@ end
         @test !isempty(ec_state_differences(s, continuous))
         @test !ec_results_identical(solution(s).result, solution(continuous).result)
 
-        # Charge populations of one node off by one ulp each. (One ulp on a single
-        # population is not enough on every path: the regularized collision only
-        # sees moments, and the rounding of their sums can absorb it.)
+        # Issue #26: distinguish comparator sensitivity from propagation.
+        # Upstream CI 35523915211 loses the nine one-ulp changes after 13
+        # cycles on direct/Float64. Finite-precision evolution is not injective:
+        # exact comparison must catch a stored change, but cannot guarantee that
+        # a one-ulp change survives subsequent moment sums/collision/rounding.
+        # Keep that injection and log its cycle-level fate without prescribing
+        # a hardware-dependent disappearance cycle.
+        pristine = advance!(init_state(ECState; kwargs...), 7)
         s = advance!(init_state(ECState; kwargs...), 7)
+        @test isempty(ec_state_differences(s, pristine))
         q_pop = Array(s.q_f_in)
         for qdir in 1:9
             q_pop[8, 12, qdir] = nextfloat(q_pop[8, 12, qdir])
         end
         copyto!(s.q_f_in, q_pop)
+        @test !isequal(Array(s.q_f_in), Array(pristine.q_f_in))
+        @test :q_f_in in ec_state_differences(s, pristine)
+        charge_difference_cycles = Int[]
+        state_difference_cycles = Int[]
+        for step in 1:13
+            advance!(pristine, 1; sample_final=(step == 13))
+            advance!(s, 1; sample_final=(step == 13))
+            differences = ec_state_differences(s, pristine)
+            :q_f_in in differences && push!(charge_difference_cycles, s.cycle)
+            !isempty(differences) && push!(state_difference_cycles, s.cycle)
+        end
+        @test isempty(ec_state_differences(pristine, continuous))
+        @info "EC one-ulp propagation diagnostic" path_name FT charge_difference_cycles state_difference_cycles
+
+        # The continuation negative control must change a retained moment by a
+        # finite amount, not only the last bit. Scale all populations of one
+        # interior node by 65/64: a positive 1.5625% local charge corruption.
+        # This binary-exact factor is fixed before testing, not fitted to a
+        # measured error or used as a numerical acceptance tolerance. Normal
+        # wrapper/segment comparisons elsewhere remain strictly isequal.
+        pristine = advance!(init_state(ECState; kwargs...), 7)
+        s = advance!(init_state(ECState; kwargs...), 7)
+        q_pop = Array(s.q_f_in)
+        charge_before = sum(@view q_pop[8, 12, :])
+        q_pop[8, 12, :] .*= FT(65) / FT(64)
+        charge_after = sum(@view q_pop[8, 12, :])
+        @test isfinite(charge_before) && charge_before > zero(FT)
+        @test isfinite(charge_after) && charge_after > charge_before
+        copyto!(s.q_f_in, q_pop)
+        @test :q_f_in in ec_state_differences(s, pristine)
         advance!(s, 13; sample_final=true)
+        @test all(isfinite, s.q_f_in) && all(isfinite, s.f_in)
         @test :q_f_in in ec_state_differences(s, continuous)
+        @test !ec_results_identical(solution(s).result, solution(continuous).result)
     end
 
     @testset "at_boundary after an interrupted advance!" begin
