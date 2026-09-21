@@ -16,19 +16,26 @@ const VARIANTS = [
     "h4_eastloop.jl", "h5_prealloc.jl",
 ]
 const TIMEOUT_S = 900
+# ENZYME_MWE_FILTER=<regex> restricts the variants (local reruns).
+const FILTER = Regex(get(ENV, "ENZYME_MWE_FILTER", ""))
+filter!(f -> occursin(FILTER, f), VARIANTS)
 
 function run_variant(file)
     script = joinpath(MWE_DIR, file)
     cmd = `$(Base.julia_cmd()) --project=$(Base.active_project()) $script`
     log = tempname()
     t0 = time()
-    proc = run(pipeline(ignorestatus(cmd); stdout=log, stderr=log); wait=false)
+    # one handle shared by stdout and stderr, so the two streams interleave
+    # instead of overwriting each other from offset 0
+    io = open(log, "w")
+    proc = run(pipeline(ignorestatus(cmd); stdout=io, stderr=io); wait=false)
     while process_running(proc) && time() - t0 < TIMEOUT_S
         sleep(2)
     end
     timed_out = process_running(proc)
     timed_out && kill(proc)
     wait(proc)
+    close(io)
     elapsed = round(time() - t0; digits=1)
     text = read(log, String)
     status = if timed_out
