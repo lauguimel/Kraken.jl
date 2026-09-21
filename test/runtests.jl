@@ -264,7 +264,17 @@ end
             end
             if enzyme_ok
                 include("ad/test_ad_sensitivity.jl")
-                include("ad/test_ad_ve_sensitivity.jl")
+                # Enzyme's reverse thunk of ad_ve_coupled_step! segfaults on
+                # Linux x64 (Julia 1.11 at run time, 1.12 at compile time),
+                # with Enzyme 0.13.138 and 0.13.204 alike; it passes on macOS
+                # arm64. Excluded on Linux so the full tier reports on
+                # everything else. Issue #41. Still runnable on CI with the
+                # `only` input for the investigation.
+                if Sys.islinux()
+                    @info "Skipping ad/test_ad_ve_sensitivity.jl on Linux (Enzyme segfault, issue #41)"
+                else
+                    include("ad/test_ad_ve_sensitivity.jl")
+                end
             else
                 @info "Skipping AD steady-sensitivity tests (Enzyme extension not loadable in this environment)"
             end
