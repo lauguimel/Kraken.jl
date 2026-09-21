@@ -92,6 +92,14 @@ Environment gates (all default to off):
 | `KRAKEN_INCNS_ONLY=true` | runs only the incompressible Navier–Stokes and solver-services tier |
 | `KRAKEN_AD_ONLY=true` | runs only the automatic-differentiation tier |
 
+On Linux x86_64, run the four Enzyme-driven files (`platform/calibration_test.jl`,
+`platform/calibration_nufield_test.jl`, `ad/test_ad_sensitivity.jl`,
+`ad/test_ad_ve_sensitivity.jl`) with production bounds checking,
+`Pkg.test(julia_args=["--check-bounds=auto"])`, one file at a time through
+`KRAKEN_ONLY`. Under the `Pkg.test` default `--check-bounds=yes`, Enzyme's
+reverse mode miscompiles them: segfault or LLVM crash on Linux, wrong gradient
+on macOS (#41). CI does exactly this in the `full` job.
+
 A pull request is not reviewable until `julia --project test/runtests.jl`
 passes on the branch. CI runs it on Julia 1.11 and 1.12 for every pull request
 into `main` or `dev/platform`; run it locally first anyway, because a CI round
