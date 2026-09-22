@@ -348,6 +348,10 @@ end
 Host-side result at the current cycle: the `NamedTuple` `run_electroconvection_2d`
 returns, wrapped in an [`ECSolution`](@ref).
 
+For legacy output parity, `result.sidewall_bc` reports `:free_slip_ported` for
+the input `:free_slip` (and `:no_slip` unchanged); checkpoint identity must use
+the canonical `config.sidewall_bc`, not this legacy result label.
+
 The derived buffers `qfield`, `phi` (`:lbm` only), `Ex`, `Ey`, `rho`, `ux`, `uy` are
 recomputed in place from the populations, as the one-shot driver did after its
 loop. `qfield`, `phi`, `Ex`, `Ey` get the values they already hold; `rho`, `ux`,

@@ -50,11 +50,15 @@ end
 """Lower existing lateral flow declarations; absent declarations keep free slip.
 
 Both `west` and `east` must be declared together, as either `wall` (stationary
-no slip) or `symmetry` (impermeable free slip), without parameters. Other faces
-remain outside this lateral selection. Asymmetric, repeated, parameterised or
+no slip) or `symmetry` (impermeable free slip), without parameters. Explicit
+declarations on other faces are rejected: EC electrode/plate conditions are
+built into the driver and cannot be selected through `Boundary` declarations.
+Asymmetric, repeated, parameterised or
 unsupported lateral declarations are rejected instead of being ignored.
 """
 function _ehd_ec_sidewall_bc(boundaries)
+    all(b -> b.face in (:west, :east), boundaries) ||
+        throw(ArgumentError("Electroconvection Boundary declarations support only west/east; electrode/plate conditions are built in."))
     sides = filter(b -> b.face in (:west, :east), boundaries)
     isempty(sides) && return :free_slip
     length(sides) == 2 && count(b -> b.face === :west, sides) == 1 &&

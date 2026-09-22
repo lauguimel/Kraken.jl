@@ -94,14 +94,14 @@ function operators(backend, FT)
     end
 end
 
-function poiseuille(FT, scheme, L)
+function poiseuille(FT, scheme, L, viscosity=1/6)
     # On-node sidewalls x=0,L; y=2:4 are periodic physical rows, y=1,5
     # are copied halos. The production sidewall kernel leaves those halos
     # alone, just as it leaves electrode rows alone in the EC driver.
     # Fully periodic pull is valid for the interior; lateral incoming values
     # are then reconstructed by the SAME kernel as the production driver.
     Nx, Ny = L+1, 5
-    nu, umax = FT(1/6), FT(0.005) # Peak Ma < 0.009.
+    nu, umax = FT(viscosity), FT(0.005) # Peak Ma < 0.009.
     g = FT(8)*nu*umax/FT(L^2)
     f = zeros(FT, Nx, Ny, 9)
     weights = (4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36)
@@ -137,7 +137,7 @@ function poiseuille(FT, scheme, L)
     profile = uy[:,3]
     err = norm(profile-reference)/norm(reference)
     residual = maximum(abs, profile-previous)/umax
-    @info "EC sidewall Poiseuille" FT scheme L nsteps err residual
+    @info "EC sidewall Poiseuille" FT scheme L nu nsteps err residual
     # Prospective relative error budget: 0.01% (Float64), 0.5% (Float32).
     # Residual must be 10x smaller; do not infer order from an exact parabola.
     gate = FT === Float64 ? 1e-4 : 5e-3
@@ -147,6 +147,72 @@ function poiseuille(FT, scheme, L)
     @test maximum(abs, profile[[1,Nx]]) <= 64eps(FT)
     @test maximum(abs, ux[:,3]) <= 64eps(FT)
     @test maximum(abs, rho[:,3] .- 1) <= gate
+end
+
+function hydrostatic_sidewalls(FT, scheme, force_sign)
+    # PR #37 review: independent physical check of the wall-NORMAL force.
+    # Constant force density, not acceleration: dp/dx=Fx, p=rho/3.
+    # Start uniform, allowing the pressure gradient to develop dynamically.
+    # No fitted slope/wall shift, force projection or velocity overwrite.
+    L, Ny = 16, 5
+    Nx = L + 1
+    nu, force = FT(0.1), FT(force_sign) * FT(1e-4)
+    f = zeros(FT, Nx, Ny, 9)
+    weights = (4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36)
+    for d in 1:9
+        f[:,:,d] .= FT(weights[d])
+    end
+    out = similar(f)
+    solid = zeros(Bool, Nx, Ny)
+    Fx, Fy = fill(force, Nx, Ny), zeros(FT, Nx, Ny)
+    rho, ux, uy = ones(FT, Nx, Ny), zeros(FT, Nx, Ny), zeros(FT, Nx, Ny)
+    previous_rho, previous_ux, previous_uy = (zeros(FT, Nx, 3) for _ in 1:3)
+    nsteps = ceil(Int, 4L^2/nu)
+    for step in 1:nsteps
+        if scheme === :bgk
+            Kraken.collide_guo_field_2d!(f, solid, Fx, Fy, inv(3nu+FT(0.5)))
+        else
+            Kraken.ehd_collide_mrt_2d!(f, Fx, Fy, solid, nu)
+        end
+        Kraken.stream_fully_periodic_2d!(out, f, Nx, Ny)
+        Kraken.apply_no_slip_sidewalls_2d!(out, Fx, Fy, Nx, Ny)
+        out[:,1,:] .= out[:,4,:]
+        out[:,5,:] .= out[:,2,:]
+        f, out = out, f
+        if step == nsteps-100
+            Kraken.compute_macroscopic_guo_field_2d!(rho, ux, uy, f, Fx, Fy, Nx, Ny)
+            previous_rho .= rho[:,2:4]
+            previous_ux .= ux[:,2:4]
+            previous_uy .= uy[:,2:4]
+        end
+    end
+    Kraken.compute_macroscopic_guo_field_2d!(rho, ux, uy, f, Fx, Fy, Nx, Ny)
+    # Assess in Float64 to avoid adding low-precision cancellation to the
+    # measured error. Solver populations and arithmetic still use FT.
+    actual = Float64.(rho[:,2:4])
+    mean_density = sum(actual)/length(actual)
+    reference = 3Float64(force) .* (collect(0:L) .- L/2)
+    expected = repeat(reshape(reference, Nx, 1), 1, 3)
+    profile_error = norm(actual .- mean_density .- expected)/norm(expected)
+    gradient_error = maximum(abs, diff(actual; dims=1) ./ (3Float64(force)) .- 1)
+    speed = maximum(hypot.(Float64.(ux[:,2:4]), Float64.(uy[:,2:4])))
+    density_change = maximum(abs, actual-Float64.(previous_rho))/(3abs(Float64(force))*L)
+    velocity_change = maximum(hypot.(Float64.(ux[:,2:4])-Float64.(previous_ux),
+                                     Float64.(uy[:,2:4])-Float64.(previous_uy)))
+    @info "EC sidewall hydrostatic" FT scheme force L nu nsteps profile_error gradient_error speed density_change velocity_change mean_density
+    # Prospective budgets, frozen 2026-09-22 before execution: 0.01%/0.5%
+    # profile and local-gradient error. Absolute speed in lattice units.
+    # This is NOT an electrostatic, corner, onset or GPU validation claim.
+    gate = FT === Float64 ? 1e-4 : 5e-3
+    speed_gate = FT === Float64 ? 1e-8 : 2e-6
+    @test all(isfinite, f)
+    @test all(isfinite, rho) && all(isfinite, ux) && all(isfinite, uy)
+    @test minimum(actual) > 0
+    @test profile_error <= gate
+    @test gradient_error <= gate
+    @test speed <= speed_gate
+    @test density_change <= gate/10
+    @test velocity_change <= speed_gate/10
 end
 
 function coupled(backend, FT)
@@ -199,7 +265,11 @@ function public_dispatch()
                 @test getproperty(actual, name) == getproperty(expected, name)
             end
         end
-        for decl in ("Boundary west wall\n",
+        for decl in ("Boundary north wall\n",
+                     "Boundary south wall\n",
+                     "Boundary west wall\nBoundary east wall\nBoundary north wall\n",
+                     "Boundary west symmetry\nBoundary east symmetry\nBoundary south wall\n",
+                     "Boundary west wall\n",
                      "Boundary west wall\nBoundary east symmetry\n",
                      "Boundary west wall\nBoundary east wall\nBoundary west wall\n",
                      "Boundary x periodic\n",
@@ -284,8 +354,11 @@ end
         @testset "population operators $FT" begin
             operators(CPU(), FT)
         end
-        @testset "Poiseuille $FT $scheme L=$L" for scheme in (:bgk, :mrt), L in (8, 16)
-            poiseuille(FT, scheme, L)
+        @testset "Poiseuille $FT $scheme L=$L nu=$nu" for scheme in (:bgk, :mrt), L in (8, 16), nu in (1/6, 0.1)
+            poiseuille(FT, scheme, L, nu)
+        end
+        @testset "hydrostatic $FT $scheme sign=$force_sign" for scheme in (:bgk, :mrt), force_sign in (-1, 1)
+            hydrostatic_sidewalls(FT, scheme, force_sign)
         end
         @testset "coupled $FT" begin
             coupled(CPU(), FT)
