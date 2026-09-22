@@ -10,10 +10,13 @@ using Test
 const MWE_DIR = @__DIR__
 const TIMEOUT_S = 900
 
-function run_variant(file)
+function run_variant(file; env=Pair{String,String}[])
     script = joinpath(MWE_DIR, file)
     flags = endswith(file, "_nocb.jl") ? `--check-bounds=no` : ``
     cmd = `$(Base.julia_cmd()) $flags --project=$(Base.active_project()) $script`
+    # extra environment for the child only (e.g. JULIA_LLVM_ARGS, which the
+    # child parses at startup; setting it in this process would be too late)
+    isempty(env) || (cmd = addenv(cmd, env...))
     log = tempname()
     t0 = time()
     # one handle shared by stdout and stderr, so the two streams interleave
@@ -42,16 +45,17 @@ function run_variant(file)
     return (; file, status, elapsed, markers, text)
 end
 
-function run_matrix(variants; label="enzyme_mwe")
+function run_matrix(variants; label="enzyme_mwe", env=Pair{String,String}[])
     filt = Regex(get(ENV, "ENZYME_MWE_FILTER", ""))
     variants = filter(f -> occursin(filt, f), variants)
     println("=== $label harness: julia $(VERSION) $(Sys.MACHINE) threads=$(Threads.nthreads())")
     println("=== julia_cmd = $(Base.julia_cmd())")
     println("=== project   = $(Base.active_project())")
+    isempty(env) || println("=== child env = $(env)")
     results = []
     for file in variants
         println("\n##### VARIANT $file"); flush(stdout)
-        r = run_variant(file)
+        r = run_variant(file; env)
         lines = split(r.text, '\n')
         keep = length(lines) > 400 ? vcat(lines[1:150], ["... ($(length(lines) - 300) lines dropped) ..."], lines[end-149:end]) : lines
         println(join(keep, '\n'))
