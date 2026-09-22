@@ -92,9 +92,9 @@ Environment gates (all default to off):
 | `KRAKEN_INCNS_ONLY=true` | runs only the incompressible Navier–Stokes and solver-services tier |
 | `KRAKEN_AD_ONLY=true` | runs only the automatic-differentiation tier |
 
-On Linux x86_64, run the four Enzyme-driven files (`platform/calibration_test.jl`,
+On Linux x86_64, run the five Enzyme-driven files (`platform/calibration_test.jl`,
 `platform/calibration_nufield_test.jl`, `ad/test_ad_sensitivity.jl`,
-`ad/test_ad_ve_sensitivity.jl`) with production bounds checking,
+`ad/test_ad_ve_sensitivity.jl`, `ad/test_ad_ve_fd_check.jl`) with production bounds checking,
 `Pkg.test(julia_args=["--check-bounds=auto"])`, one file at a time through
 `KRAKEN_ONLY`. Under the `Pkg.test` default `--check-bounds=yes`, Enzyme's
 reverse mode miscompiles them: segfault or LLVM crash on Linux, wrong gradient
