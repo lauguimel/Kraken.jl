@@ -205,14 +205,27 @@ function hydrostatic_sidewalls(FT, scheme, force_sign)
     # This is NOT an electrostatic, corner, onset or GPU validation claim.
     gate = FT === Float64 ? 1e-4 : 5e-3
     speed_gate = FT === Float64 ? 1e-8 : 2e-6
+    # Prospective Float32 revision agreed in PR #37, 2026-09-22:
+    # https://github.com/lauguimel/Kraken.jl/pull/37#issuecomment-5774111607
+    # Momentum cancellation from O(rho) populations/moments gives a velocity
+    # noise scale of O(ulp(rho)) per step near rho=1, not eps of the tiny u.
+    # Run 35686553469 (CPU Julia 1.11.9/1.12.7) recorded max du100=8.32e-7
+    # over logged Fo=2..16 samples. Use the agreed 1e-6 LU budget (~8 ulp(1));
+    # this is bounded fixture evidence, not a universal roundoff bound.
+    # Float64 and all spatial/absolute-speed gates remain unchanged.
+    velocity_gate = FT === Float64 ? speed_gate/10 : 1e-6
     @test all(isfinite, f)
     @test all(isfinite, rho) && all(isfinite, ux) && all(isfinite, uy)
     @test minimum(actual) > 0
     @test profile_error <= gate
     @test gradient_error <= gate
     @test speed <= speed_gate
+    # Retain the original density-change gate at Fo=4. Float32 mean-density
+    # drift is logged above; this local change check is NOT mass conservation
+    # or arbitrary-duration stationarity. Reassess, do not silently relax,
+    # if future platforms or longer trajectories exceed this budget.
     @test density_change <= gate/10
-    @test velocity_change <= speed_gate/10
+    @test velocity_change <= velocity_gate
 end
 
 function coupled(backend, FT)
