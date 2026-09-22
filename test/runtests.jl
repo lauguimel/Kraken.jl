@@ -265,6 +265,7 @@ end
             if enzyme_ok
                 include("ad/test_ad_sensitivity.jl")
                 include("ad/test_ad_ve_sensitivity.jl")
+                include("ad/test_ad_ve_fd_check.jl")
             else
                 @info "Skipping AD steady-sensitivity tests (Enzyme extension not loadable in this environment)"
             end
