@@ -146,7 +146,7 @@ makedocs(;
     format = DocumenterVitepress.MarkdownVitepress(
         repo = "github.com/lauguimel/Kraken.jl",
         devurl = "dev",
-        devbranch = "release/v0.3",
+        devbranch = "release/v0.5",
         build_vitepress = false,
         keep = :patch,
     ),
@@ -409,7 +409,7 @@ if startswith(get(ENV, "GITHUB_REF", ""), "refs/tags/v")
     DocumenterVitepress.deploydocs(;
         repo = "github.com/lauguimel/Kraken.jl.git",
         target = joinpath(@__DIR__, "build"),
-        devbranch = "release/v0.3",
+        devbranch = "release/v0.5",
         branch = "gh-pages",
         push_preview = true,
     )
