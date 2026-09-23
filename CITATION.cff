@@ -14,8 +14,8 @@ authors:
 repository-code: "https://github.com/lauguimel/Kraken.jl"
 url: "https://lauguimel.github.io/Kraken.jl/stable/"
 license: MIT
-version: 0.2.0
-date-released: "2026-06-03"
+version: 0.4.0
+date-released: "2026-09-14"
 keywords:
   - lattice Boltzmann
   - computational fluid dynamics
