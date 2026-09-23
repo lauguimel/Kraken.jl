@@ -260,6 +260,10 @@ makedocs(;
                 "theory/18_grid_refinement.md",
                 "theory/19_spatial_bcs.md",
             ],
+            # The one page carrying a @bibliography block. Without it every
+            # citation in the docs has no destination and DocumenterCitations
+            # degrades it to plain unlinked text (#46).
+            "References" => "references.md",
         ],
     ],
     remotes = nothing,
