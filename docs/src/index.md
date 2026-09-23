@@ -161,11 +161,16 @@ so GitHub's **"Cite this repository"** button (top-right of the
   author  = {Maitrejean, Guillaume and Sauret, Emilie},
   title   = {{Kraken.jl}},
   year    = {2026},
-  version = {0.2.0},
+  version = {0.4.0},
+  doi     = {10.5281/zenodo.22747126},
   url     = {https://github.com/lauguimel/Kraken.jl}
 }
 ```
 
-A citable **DOI** (Zenodo) will be added with the archived `v0.2.0` release —
-update the `doi` field in `CITATION.cff` and the `doi = {...}` line above once it
-is minted.
+Each release is archived on Zenodo under two DOIs. Use
+[`10.5281/zenodo.22747126`](https://doi.org/10.5281/zenodo.22747126) — the one
+above — to cite the software in general: it always resolves to the most recent
+archived release. Use the version-specific DOI instead when the exact code
+matters for reproducibility; for `v0.4.0` that is
+[`10.5281/zenodo.22747127`](https://doi.org/10.5281/zenodo.22747127), and each
+Zenodo record lists its own.
