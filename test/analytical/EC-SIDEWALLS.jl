@@ -149,7 +149,7 @@ function poiseuille(FT, scheme, L, viscosity=1/6)
     @test maximum(abs, rho[:,3] .- 1) <= gate
 end
 
-function hydrostatic_sidewalls(FT, scheme, force_sign)
+function hydrostatic_sidewalls(FT, scheme, force_sign; backend=CPU())
     # PR #37 review: independent physical check of the wall-NORMAL force.
     # Constant force density, not acceleration: dp/dx=Fx, p=rho/3.
     # Start uniform, allowing the pressure gradient to develop dynamically.
@@ -162,10 +162,20 @@ function hydrostatic_sidewalls(FT, scheme, force_sign)
     for d in 1:9
         f[:,:,d] .= FT(weights[d])
     end
+    # Transfer the identical initial populations once; every time-step kernel
+    # dispatches from these arrays, so a CUDA request cannot run on CPU arrays.
+    f = on_backend(backend, f)
     out = similar(f)
-    solid = zeros(Bool, Nx, Ny)
-    Fx, Fy = fill(force, Nx, Ny), zeros(FT, Nx, Ny)
-    rho, ux, uy = ones(FT, Nx, Ny), zeros(FT, Nx, Ny), zeros(FT, Nx, Ny)
+    solid = on_backend(backend, zeros(Bool, Nx, Ny))
+    Fx = on_backend(backend, fill(force, Nx, Ny))
+    Fy = on_backend(backend, zeros(FT, Nx, Ny))
+    rho = on_backend(backend, ones(FT, Nx, Ny))
+    ux = on_backend(backend, zeros(FT, Nx, Ny))
+    uy = similar(ux)
+    fill!(uy, zero(FT))
+    @test all(a -> typeof(KernelAbstractions.get_backend(a)) === typeof(backend),
+              (f, out, solid, Fx, Fy, rho, ux, uy))
+    @test eltype(f) === FT
     previous_rho, previous_ux, previous_uy = (zeros(FT, Nx, 3) for _ in 1:3)
     nsteps = ceil(Int, 4L^2/nu)
     for step in 1:nsteps
@@ -176,33 +186,38 @@ function hydrostatic_sidewalls(FT, scheme, force_sign)
         end
         Kraken.stream_fully_periodic_2d!(out, f, Nx, Ny)
         Kraken.apply_no_slip_sidewalls_2d!(out, Fx, Fy, Nx, Ny)
-        out[:,1,:] .= out[:,4,:]
-        out[:,5,:] .= out[:,2,:]
+        @views out[:,1,:] .= out[:,4,:]
+        @views out[:,5,:] .= out[:,2,:]
         f, out = out, f
         if step == nsteps-100
             Kraken.compute_macroscopic_guo_field_2d!(rho, ux, uy, f, Fx, Fy, Nx, Ny)
-            previous_rho .= rho[:,2:4]
-            previous_ux .= ux[:,2:4]
-            previous_uy .= uy[:,2:4]
+            KernelAbstractions.synchronize(backend)
+            previous_rho .= Array(rho)[:,2:4]
+            previous_ux .= Array(ux)[:,2:4]
+            previous_uy .= Array(uy)[:,2:4]
         end
     end
     Kraken.compute_macroscopic_guo_field_2d!(rho, ux, uy, f, Fx, Fy, Nx, Ny)
     # Assess in Float64 to avoid adding low-precision cancellation to the
     # measured error. Solver populations and arithmetic still use FT.
-    actual = Float64.(rho[:,2:4])
+    KernelAbstractions.synchronize(backend)
+    actual = Float64.(Array(rho)[:,2:4])
+    actual_ux = Float64.(Array(ux)[:,2:4])
+    actual_uy = Float64.(Array(uy)[:,2:4])
     mean_density = sum(actual)/length(actual)
     reference = 3Float64(force) .* (collect(0:L) .- L/2)
     expected = repeat(reshape(reference, Nx, 1), 1, 3)
     profile_error = norm(actual .- mean_density .- expected)/norm(expected)
     gradient_error = maximum(abs, diff(actual; dims=1) ./ (3Float64(force)) .- 1)
-    speed = maximum(hypot.(Float64.(ux[:,2:4]), Float64.(uy[:,2:4])))
+    speed = maximum(hypot.(actual_ux, actual_uy))
     density_change = maximum(abs, actual-Float64.(previous_rho))/(3abs(Float64(force))*L)
-    velocity_change = maximum(hypot.(Float64.(ux[:,2:4])-Float64.(previous_ux),
-                                     Float64.(uy[:,2:4])-Float64.(previous_uy)))
-    @info "EC sidewall hydrostatic" FT scheme force L nu nsteps profile_error gradient_error speed density_change velocity_change mean_density
+    velocity_change = maximum(hypot.(actual_ux-Float64.(previous_ux),
+                                     actual_uy-Float64.(previous_uy)))
+    @info "EC sidewall hydrostatic" backend population_type=typeof(f) FT scheme force L nu nsteps profile_error gradient_error speed density_change velocity_change mean_density
     # Prospective budgets, frozen 2026-09-22 before execution: 0.01%/0.5%
     # profile and local-gradient error. Absolute speed in lattice units.
-    # This is NOT an electrostatic, corner, onset or GPU validation claim.
+    # This is NOT an electrostatic, corner or onset validation claim.
+    # CUDA coverage exists only when the explicit opt-in below is executed.
     gate = FT === Float64 ? 1e-4 : 5e-3
     speed_gate = FT === Float64 ? 1e-8 : 2e-6
     # Prospective Float32 revision agreed in PR #37, 2026-09-22:
@@ -226,6 +241,9 @@ function hydrostatic_sidewalls(FT, scheme, force_sign)
     # if future platforms or longer trajectories exceed this budget.
     @test density_change <= gate/10
     @test velocity_change <= velocity_gate
+    return (; density=actual .- mean_density, ux=actual_ux, uy=actual_uy,
+            reference_norm=norm(expected), profile_gate=gate, speed_gate,
+            velocity_change, mean_density)
 end
 
 function coupled(backend, FT)
@@ -362,6 +380,8 @@ function state_segments(FT)
     @test_throws ArgumentError init_state(ECState; Nx=9, Ny=17, FT=FT, sidewall_bc=:invalid)
 end
 
+const HYDROSTATIC_CPU = Dict{Tuple{DataType,Symbol,Int},Any}()
+
 @testset "EC-SIDEWALLS CPU" begin
     for FT in (Float64, Float32)
         @testset "population operators $FT" begin
@@ -371,7 +391,8 @@ end
             poiseuille(FT, scheme, L, nu)
         end
         @testset "hydrostatic $FT $scheme sign=$force_sign" for scheme in (:bgk, :mrt), force_sign in (-1, 1)
-            hydrostatic_sidewalls(FT, scheme, force_sign)
+            HYDROSTATIC_CPU[(FT, scheme, force_sign)] =
+                hydrostatic_sidewalls(FT, scheme, force_sign)
         end
         @testset "coupled $FT" begin
             coupled(CPU(), FT)
@@ -390,9 +411,23 @@ if get(ENV, "KRAKEN_TEST_EHD_SIDEWALLS_CUDA", "false") == "true"
     @eval using CUDA
     CUDA.functional() || error("Requested EC sidewall CUDA tests, but CUDA is unavailable")
     CUDA.allowscalar(false)
+    @info "EC-SIDEWALLS CUDA identity" julia_version=VERSION kraken_path=pathof(Kraken) device=CUDA.device()
+    CUDA.versioninfo()
     @testset "EC-SIDEWALLS CUDA" for FT in (Float64, Float32)
         operators(CUDA.CUDABackend(), FT)
         coupled(CUDA.CUDABackend(), FT)
+        @testset "hydrostatic $FT $scheme sign=$force_sign" for scheme in (:bgk, :mrt), force_sign in (-1, 1)
+            gpu = hydrostatic_sidewalls(FT, scheme, force_sign; backend=CUDA.CUDABackend())
+            cpu = HYDROSTATIC_CPU[(FT, scheme, force_sign)]
+            # Both backends must independently satisfy the analytical gates.
+            # Triangle-inequality parity budgets are frozen before CUDA runs;
+            # no bitwise agreement or long-time mass-conservation claim.
+            density_parity = norm(gpu.density-cpu.density)/cpu.reference_norm
+            velocity_parity = maximum(hypot.(gpu.ux-cpu.ux, gpu.uy-cpu.uy))
+            @info "EC sidewall hydrostatic CPU/CUDA parity" FT scheme force_sign density_parity velocity_parity cpu_du100=cpu.velocity_change cuda_du100=gpu.velocity_change
+            @test density_parity <= 2cpu.profile_gate
+            @test velocity_parity <= 2cpu.speed_gate
+        end
     end
 end
 end # module
