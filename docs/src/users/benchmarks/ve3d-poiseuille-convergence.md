@@ -5,8 +5,8 @@ conformation profile: the shear rate `γ̇(y)` varies linearly across the channe
 shear conformation `C_xy = λ·γ̇(y)` is a steep, sharply-curved function near each wall.
 That curvature is exactly what an over-diffusive polymer-transport scheme smears — which
 makes this case the cleanest demonstration of the **#2B cure**: Kraken's **FVFD
-log-conformation** polymer transport reproduces the near-wall conformation **machine-exactly**,
-where the diffusive **LBM convection–diffusion (LBM-CDE)** path on the *same case* is
+log-conformation** polymer transport reproduces the near-wall conformation to round-off at
+`N_y = 32` and within 4 × 10⁻⁷ relative up to `N_y = 128`, where the diffusive **LBM convection–diffusion (LBM-CDE)** path on the *same case* is
 **25.9 % off near-wall**.
 
 ![FVFD-3D viscoelastic Poiseuille convergence](ve3d-poiseuille-convergence.png)
@@ -20,9 +20,10 @@ peak velocity ratio `u_peak / u_parabola` — FVFD recovers the analytic parabol
 
 ## Result
 
-The FVFD near-wall shear conformation is **machine-exact (≤ 1.9 × 10⁻⁷, ≤ 2 × 10⁻⁵ %)**
-at every resolution, with the velocity profile matching the analytic parabola to within
-0.01 % (GPU H100, CUDA Float64, `Wi_wall = 0.5`, `β = 0.5`):
+The FVFD near-wall shear conformation error is at most 1.9 × 10⁻⁷ in absolute value
+(3.9 × 10⁻⁷ relative) over the three resolutions, and at round-off level at `N_y = 32`.
+The peak velocity is within 0.086 %, 0.021 % and 0.0095 % of the analytic parabola at
+`N_y = 32, 64, 128` (GPU H100, CUDA Float64, `Wi_wall = 0.5`, `β = 0.5`):
 
 | `N_y` | near-wall `\|C_xy − C_xy^ref\|` | `u_peak / u_parabola` | NaN-free |
 |-------|--------------------------------|-----------------------|----------|

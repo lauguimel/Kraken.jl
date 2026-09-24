@@ -3,6 +3,23 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- **Corrected the 0.5.0 notes** (#52). The four log-conformation closures run on the
+  FVFD path only; the LBM-CDE drivers (sphere, Couette, Poiseuille) accept Oldroyd-B
+  only, in direct conformation form. Couette and LBM-CDE Poiseuille are not reachable
+  from `.krk`, the planar extension is reachable in imposed-velocity mode only, and the
+  Oldroyd-B sphere driver is not validated against a viscoelastic reference. Several
+  figures were misstated: the FVFD near-wall and velocity errors per resolution, the
+  planar-extension `C_yy` error and the cause of its 0.39 % `C_xx` gap, the number of
+  `@test_broken` (13, not 22) and of files over 700 lines (13, not 8), and `L² → ∞`
+  "byte-for-byte". The LBM-CDE Poiseuille error is now listed as a known issue of this
+  release rather than as a changed result. `docs/src/capabilities.md` §9 now lists the
+  3D viscoelastic models instead of reporting rheology as 2D-only, and
+  `docs/src/users/benchmarks/ve3d-poiseuille-convergence.md` states the velocity error
+  per resolution.
+
 ## [0.5.0] — 2026-09-24
 
 ### Added
@@ -10,17 +27,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `src/kernels/logconformation_lbm_3d.jl`, `src/fvfd/operators_3d*.jl`,
   `src/drivers/viscoelastic_*_3d.jl`, `src/rheology/linalg_3d.jl`): log-conformation
   constitutive step in 3D with Oldroyd-B, FENE-P, Giesekus and PTT (linear and
-  exponential), on either the LBM lattice or the FVFD finite-volume grid. Drivers for the
-  Oldroyd-B sphere, planar Couette, planar Poiseuille, FVFD Poiseuille and FVFD planar
-  extension, each reachable from `.krk`. Each closure matches its closed-form steady
-  simple-shear fixed point (Giesekus, PTT residual ≤ 1e-6; FENE-P and the Oldroyd-B limit
-  ≤ 1e-3), and setting `α = 0`, `ε = 0` or `L² → ∞` recovers the Oldroyd-B trajectory
-  byte-for-byte.
+  exponential), on the FVFD finite-volume grid (`run_viscoelastic_fvfd_poiseuille_3d`,
+  `run_viscoelastic_fvfd_extensional_3d`). The LBM-CDE drivers (Oldroyd-B sphere, planar
+  Couette, planar Poiseuille) evolve the conformation directly and accept Oldroyd-B only.
+  Reachable from `.krk`: the sphere, FVFD Poiseuille and FVFD planar extension (imposed
+  velocity only; the coupled mode is Julia-only); Couette and LBM-CDE Poiseuille are
+  Julia-only. The sphere driver is not validated against a viscoelastic reference: its
+  tests check the Newtonian limit against Kraken's Newtonian sphere driver and a NaN-free
+  run at `Wi = 0.01`. Each closure matches its closed-form steady simple-shear fixed point
+  (Giesekus, PTT residual ≤ 1e-6; FENE-P and the Oldroyd-B limit ≤ 1e-3); setting `α = 0`
+  or `ε = 0` recovers the Oldroyd-B trajectory byte for byte, and FENE-P approaches it as
+  `L²` grows (1.3e-8 on `C_xx` at `L² = 1e8` in planar extension).
+  *Corrected 2026-09-24 (#52). The entry as tagged said the four closures ran "on either
+  the LBM lattice or the FVFD finite-volume grid", that all five drivers were "reachable
+  from `.krk`", and that `L² → ∞` recovered Oldroyd-B "byte-for-byte"; none was true.*
 - **FVFD transport cures the near-wall conformation error of the LBM-CDE path.** On
-  identical `N_y = 32` viscoelastic Poiseuille, near-wall `C_xy` is machine-exact
-  (≤ 1.9e-7, i.e. ≤ 2e-5 %) against an anti-tautological reference built from the measured
-  shear, where the diffusive LBM-CDE path returns 25.9 % error and a peak velocity ratio
-  of ≈ 1.13. Velocity matches the analytic parabola to 0.01 % (H100, CUDA Float64).
+  identical `N_y = 32` viscoelastic Poiseuille, the near-wall `C_xy` error is 3.9e-15
+  against an anti-tautological reference built from the measured shear (at most 1.9e-7
+  absolute, 3.9e-7 relative, over `N_y = 32–128`), where the diffusive LBM-CDE path
+  returns 25.9 % error and a peak velocity ratio of ≈ 1.13. The FVFD peak velocity is
+  within 0.086 % of the analytic parabola at `N_y = 32` and 0.0095 % at `N_y = 128` (H100,
+  CUDA Float64). Both paths ship in this release; see Known issues for LBM-CDE.
+  *Corrected 2026-09-24 (#52). The entry as tagged said "machine-exact (≤ 1.9e-7, i.e.
+  ≤ 2e-5 %)" and "to 0.01 %" at `N_y = 32`: 1.9e-7 is the absolute `N_y = 128` value, and
+  the velocity is within 0.01 % only at `N_y = 128`.*
 - **Resumable simulation state and HDF5 checkpoints** (#26) (`src/platform/state.jl`,
   `src/io/checkpoint_hdf5.jl`, `src/drivers/ehd_ec_state.jl`): the `init_state` /
   `advance!` / `solution` contract, checkpoints written as HDF5, and the electroconvection
@@ -33,10 +63,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `benchmarks/results/rheotool_compare/`. On Poiseuille, Kraken's relative L2 error against
   the analytic profile is 1.2e-3 on velocity and 4.1e-9 on `N1`, where RheoTool gives 1.3e-3
   and 4.6e-3. On Oldroyd-B planar extension RheoTool reaches the analytic fixed point to
-  machine precision and Kraken's 1000-step canary sits 0.39 % below on `C_xx`, on the same
-  relaxation curve at a finite horizon. The 10.9 % FENE-P `C_xx` gap is a closure-variant
-  difference (Peterlin argument `tr C` vs `tr A`), not a defect. These are benchmarks, not
-  automated gates: no test reads the reference data.
+  machine precision and Kraken's 1000-step canary sits 0.39 % below on `C_xx` and 0.0015 %
+  off on `C_yy`; these gaps come from a first-order advection fallback in the periodic z
+  direction (#54), not from a slow relaxation as the tagged entry said. The 10.9 % FENE-P
+  `C_xx` gap is a closure-variant difference (Peterlin argument `tr C` vs `tr A`), not a
+  defect. These are benchmarks, not automated gates: no test reads the reference data.
 - **Steady-state time estimate and viscoelastic parameter-stability check**
   (`src/units/steady_state.jl`).
 - **Finite-difference cross-check of the viscoelastic polymer-drag adjoint** (#41)
@@ -55,7 +86,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   (`--check-bounds=auto`) (#39, #41, #43). Under the `Pkg.test` default Enzyme's reverse
   mode miscompiles them; reported upstream as EnzymeAD/Enzyme.jl#3614.
 - Known failures are carried as `@test_broken` rather than kept out of the suite (#29);
-  22 are carried at this release.
+  the full CI run of this release carries 13 (12 in the LBM tier, 1 in the IncNS tier;
+  the tagged entry said 22).
 - The contribution model replaces the `src/` edit ban with directory ownership and review
   (#25); `AGENTS.md` and `.github/CODEOWNERS` carry the rules.
 - `CITATION.cff`: G. Maitrejean's affiliation is now Grenoble INP, Université Grenoble Alpes.
@@ -82,7 +114,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   indices under `--check-bounds=yes`: segfault on x86_64 Linux, wrong gradient on aarch64
   macOS (#41, EnzymeAD/Enzyme.jl#3614). Production mode (`--check-bounds=auto`) is exact
   and is what CI and the documented workflow use.
-- 8 files exceed the 700-LOC budget (#15).
+- 13 files exceed the 700-LOC budget (#15; the tagged entry said 8).
+- The LBM-CDE 3D Poiseuille driver (`run_conformation_poiseuille_libb_3d`) over-smooths the
+  conformation near walls: 25.9 % near-wall `C_xy` error and a peak velocity ratio ≈ 1.13
+  at `N_y = 32` (4 `@test_broken`). Use `run_viscoelastic_fvfd_poiseuille_3d`.
 
 ## [0.4.0] — 2026-09-14
 
