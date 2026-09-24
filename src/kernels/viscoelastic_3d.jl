@@ -12,44 +12,50 @@ using KernelAbstractions
 #   Fy = ∂τ_xy/∂x + ∂τ_yy/∂y + ∂τ_yz/∂z
 #   Fz = ∂τ_xz/∂x + ∂τ_yz/∂y + ∂τ_zz/∂z
 #
-# Central differences. Per-axis periodicity: x and z wrap (channel /
-# duct topology) when `periodic_x` / `periodic_z` are true; otherwise their
-# boundary cells use the same second-order one-sided difference as the y
-# walls (y is never periodic). A clamped central difference there would
-# return (τ₂ − τ₁)/2, half the derivative. This is the VALIDATED 2D production
+# Central differences. Per-axis x / z treatment of the boundary cells:
+# `periodic_*` wraps (channel / duct topology); `wall_*` uses the same
+# second-order one-sided difference as the y walls (y is never periodic);
+# otherwise the stencil clamps, which returns (τ₂ − τ₁)/2 at the first cell.
+# The clamp is what an open face wants when the conformation there is
+# reset or copied (inflow C = I, zero-gradient outflow): a one-sided
+# difference would amplify that jump. This is the VALIDATED 2D production
 # coupling (cylinder cut-link, <1% vs RheoTool) ported to 3D: the polymer
 # enters the momentum equation EXACTLY ONCE as a Guo body force at the
 # solvent rate ω_s, with NO (1±ω/2) denominator and lattice viscosity = ν_s
 # (bsd = 0). It replaces the standalone re-relaxed `apply_hermite_source_3d!`.
 
-# ∂τ/∂x at (i, j, k): wrapped central difference when periodic, else central
-# in the interior and second-order one-sided at i = 1 and i = Nx.
-@inline function _polymer_force_dx_3d(tau, i, j, k, Nx, periodic, half, T)
+# ∂τ/∂x at (i, j, k): wrapped central difference when periodic; at a wall,
+# second-order one-sided at i = 1 and i = Nx; otherwise clamped.
+@inline function _polymer_force_dx_3d(tau, i, j, k, Nx, periodic, wall, half, T)
     if periodic
         ip = i < Nx ? i + 1 : 1
         im = i > 1 ? i - 1 : Nx
         return (tau[ip, j, k] - tau[im, j, k]) * half
-    elseif i == 1
+    elseif wall && i == 1
         return (-T(3) * tau[1, j, k] + T(4) * tau[2, j, k] - tau[3, j, k]) * half
-    elseif i == Nx
+    elseif wall && i == Nx
         return (T(3) * tau[Nx, j, k] - T(4) * tau[Nx - 1, j, k] + tau[Nx - 2, j, k]) * half
     else
-        return (tau[i + 1, j, k] - tau[i - 1, j, k]) * half
+        ip = i < Nx ? i + 1 : Nx
+        im = i > 1 ? i - 1 : 1
+        return (tau[ip, j, k] - tau[im, j, k]) * half
     end
 end
 
 # ∂τ/∂z, same rule as `_polymer_force_dx_3d`.
-@inline function _polymer_force_dz_3d(tau, i, j, k, Nz, periodic, half, T)
+@inline function _polymer_force_dz_3d(tau, i, j, k, Nz, periodic, wall, half, T)
     if periodic
         kp = k < Nz ? k + 1 : 1
         km = k > 1 ? k - 1 : Nz
         return (tau[i, j, kp] - tau[i, j, km]) * half
-    elseif k == 1
+    elseif wall && k == 1
         return (-T(3) * tau[i, j, 1] + T(4) * tau[i, j, 2] - tau[i, j, 3]) * half
-    elseif k == Nz
+    elseif wall && k == Nz
         return (T(3) * tau[i, j, Nz] - T(4) * tau[i, j, Nz - 1] + tau[i, j, Nz - 2]) * half
     else
-        return (tau[i, j, k + 1] - tau[i, j, k - 1]) * half
+        kp = k < Nz ? k + 1 : Nz
+        km = k > 1 ? k - 1 : 1
+        return (tau[i, j, kp] - tau[i, j, km]) * half
     end
 end
 
@@ -58,14 +64,15 @@ end
                                                       @Const(tau_xz), @Const(tau_yy),
                                                       @Const(tau_yz), @Const(tau_zz),
                                                       Nx, Ny, Nz,
-                                                      periodic_x, periodic_z)
+                                                      periodic_x, periodic_z,
+                                                      wall_x, wall_z)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         T = eltype(Fx_p)
 
-        # x/z: wrap when periodic, else 2nd-order ONE-SIDED at the boundary
-        # cells (`_polymer_force_dx_3d` / `_dz_3d`). y wall rows use the same
+        # x/z: wrap when periodic, 2nd-order ONE-SIDED at a wall, else clamp
+        # (`_polymer_force_dx_3d` / `_dz_3d`). y wall rows use the same
         # one-sided difference instead of a degenerate clamped central
         # difference (the wall-aware ∂/∂y the forensic recipe requires —
         # a raw central diff at j=1/Ny injects a spurious near-wall force that
@@ -85,44 +92,51 @@ end
                           (tau_yz[i,j+1,k] - tau_yz[i,j-1,k]) * half
 
         # Fx = ∂τ_xx/∂x + ∂τ_xy/∂y + ∂τ_xz/∂z
-        Fx_p[i,j,k] = _polymer_force_dx_3d(tau_xx, i, j, k, Nx, periodic_x, half, T) + dy_xy +
-                      _polymer_force_dz_3d(tau_xz, i, j, k, Nz, periodic_z, half, T)
+        Fx_p[i,j,k] = _polymer_force_dx_3d(tau_xx, i, j, k, Nx, periodic_x, wall_x, half, T) + dy_xy +
+                      _polymer_force_dz_3d(tau_xz, i, j, k, Nz, periodic_z, wall_z, half, T)
 
         # Fy = ∂τ_xy/∂x + ∂τ_yy/∂y + ∂τ_yz/∂z
-        Fy_p[i,j,k] = _polymer_force_dx_3d(tau_xy, i, j, k, Nx, periodic_x, half, T) + dy_yy +
-                      _polymer_force_dz_3d(tau_yz, i, j, k, Nz, periodic_z, half, T)
+        Fy_p[i,j,k] = _polymer_force_dx_3d(tau_xy, i, j, k, Nx, periodic_x, wall_x, half, T) + dy_yy +
+                      _polymer_force_dz_3d(tau_yz, i, j, k, Nz, periodic_z, wall_z, half, T)
 
         # Fz = ∂τ_xz/∂x + ∂τ_yz/∂y + ∂τ_zz/∂z
-        Fz_p[i,j,k] = _polymer_force_dx_3d(tau_xz, i, j, k, Nx, periodic_x, half, T) + dy_yz +
-                      _polymer_force_dz_3d(tau_zz, i, j, k, Nz, periodic_z, half, T)
+        Fz_p[i,j,k] = _polymer_force_dx_3d(tau_xz, i, j, k, Nx, periodic_x, wall_x, half, T) + dy_yz +
+                      _polymer_force_dz_3d(tau_zz, i, j, k, Nz, periodic_z, wall_z, half, T)
     end
 end
 
 """
     compute_polymeric_force_3d!(Fx_p, Fy_p, Fz_p,
                                  tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz;
-                                 periodic_x=true, periodic_z=true)
+                                 periodic_x=true, periodic_z=true,
+                                 wall_x=false, wall_z=false)
 
 Compute the 3D polymeric body force `F_poly = ∇·τ_p` (first moment) from the
-6-component symmetric polymer stress, for the Guo coupling. `periodic_x` /
-`periodic_z` wrap the x / z neighbour stencils (channel / duct); a
-non-periodic x or z face, and the y faces always, use a second-order
-one-sided difference in their boundary cells. 3D port of
-`compute_polymeric_force_2d!`.
+6-component symmetric polymer stress, for the Guo coupling. The y faces are
+walls: their boundary cells use a second-order one-sided difference. In x and
+z, `periodic_*` wraps the neighbour stencil (channel / duct); `wall_*` selects
+the same one-sided difference as the y walls, for a no-slip face in that
+direction; a face that is neither (an inflow or outflow) keeps a clamped
+central difference, which does not amplify the jump left by a conformation
+reset or copy there. 3D counterpart of `compute_polymeric_force_2d!`.
 """
 function compute_polymeric_force_3d!(Fx_p, Fy_p, Fz_p,
                                       tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz;
-                                      periodic_x::Bool=true, periodic_z::Bool=true)
+                                      periodic_x::Bool=true, periodic_z::Bool=true,
+                                      wall_x::Bool=false, wall_z::Bool=false)
     backend = KernelAbstractions.get_backend(Fx_p)
     Nx, Ny, Nz = size(Fx_p)
-    (periodic_x || Nx >= 3) ||
-        throw(ArgumentError("non-periodic x needs Nx ≥ 3 for the one-sided stencil (Nx = $Nx)"))
-    (periodic_z || Nz >= 3) ||
-        throw(ArgumentError("non-periodic z needs Nz ≥ 3 for the one-sided stencil (Nz = $Nz)"))
+    (periodic_x && wall_x) && throw(ArgumentError("x cannot be both periodic and a wall"))
+    (periodic_z && wall_z) && throw(ArgumentError("z cannot be both periodic and a wall"))
+    Ny >= 3 || throw(ArgumentError("the one-sided y-wall stencil needs Ny ≥ 3 (Ny = $Ny)"))
+    (wall_x && Nx < 3) &&
+        throw(ArgumentError("a wall in x needs Nx ≥ 3 for the one-sided stencil (Nx = $Nx)"))
+    (wall_z && Nz < 3) &&
+        throw(ArgumentError("a wall in z needs Nz ≥ 3 for the one-sided stencil (Nz = $Nz)"))
     kernel! = compute_polymeric_force_3d_kernel!(backend)
     kernel!(Fx_p, Fy_p, Fz_p,
             tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz,
-            Nx, Ny, Nz, periodic_x, periodic_z; ndrange=(Nx, Ny, Nz))
+            Nx, Ny, Nz, periodic_x, periodic_z, wall_x, wall_z; ndrange=(Nx, Ny, Nz))
     KernelAbstractions.synchronize(backend)
 end
 
