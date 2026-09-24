@@ -8,7 +8,7 @@
 #  RheoTool reference for the viscoelastic lid-driven cavity (#51).
 #
 #  Usage, from the directory holding this template on the Aqua login node:
-#    qsub -v N=128,RHO=1,MODEL=ve,TAG=ve_re1_n128 run_aqua.pbs
+#    qsub -v N=128,RHO=1,MODEL=ve,TAG=ve_re1_n128_repro run_aqua.pbs
 #
 #    N        cells per side (blockMeshDict entry `N`)
 #    RHO      density; with U = L = etaS + etaP = 1, Re = RHO
@@ -20,7 +20,10 @@
 #
 #  Serial run: the tutorial's (p|U) eigenSolver is used as shipped.
 #  OF9_RT.sh wraps the Apptainer sandbox /scratch/$USER/openfoam9-sandbox
-#  (rheoTool v1.4 on OpenFOAM 9); the container mounts only $HOME
+#  (built 2025-06-26 from guiguitcho/openfoam9-rheotool:v1.2 per the
+#  sandbox's .singularity.d/labels.json; image digest not recorded;
+#  rheoTool source tree at 81f3e8c, OpenFOAM 9; see the results README
+#  for what was checked); the container mounts $HOME
 #  read-write, so the run directory lives under $HOME.
 #  `run_done` is created only if every step of the chain succeeds, and the
 #  job exits non-zero without it.
@@ -35,7 +38,7 @@ DEST="$HOME/kraken-rheotool/cavity_ve_wi1/$TAG"
 rm -rf "$DEST"
 mkdir -p "$(dirname "$DEST")"
 cp -r "$PBS_O_WORKDIR" "$DEST"
-rm -f "$DEST"/*.pbs "$DEST"/*.py "$DEST"/rT_cavity.o*
+rm -f "$DEST"/*.pbs "$DEST"/*.py "$DEST"/rT_cav*.o*
 if [ "$MODEL" = newt ]; then
     cp "$DEST/constant/constitutiveProperties.newtonian" "$DEST/constant/constitutiveProperties"
 fi
