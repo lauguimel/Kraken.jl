@@ -19,6 +19,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   3D viscoelastic models instead of reporting rheology as 2D-only, and
   `docs/src/users/benchmarks/ve3d-poiseuille-convergence.md` states the velocity error
   per resolution.
+- **3D FVFD advection is second order next to a periodic z face** (#54). The
+  MUSCL-Superbee operator fell back to first-order upwind within two cells of the z
+  faces even when z is periodic, i.e. everywhere in a thin quasi-2D box. The 0.5.0
+  planar-extension canary moves from 0.39 % to 0.0023 % on `C_xx` (the 0.5.0 notes
+  attributed the 0.39 % to slow relaxation; it was this fallback), and the FENE-P
+  canary now matches its transcendental fixed point to 1e-5. The coupled
+  planar-extension test moves from 0.06 % to 0.83 % on `C_xx` against the nominal
+  strain rate (gate 1 %): the coupled flow runs 1.4 % above the nominal rate, which
+  the old fallback happened to offset; against the measured rate it is -0.59 %.
+- `compute_polymeric_force_3d!` takes `wall_x` / `wall_z`, giving x and z walls the
+  second-order one-sided difference the y walls use (a clamped stencil returned half
+  the derivative there). Faces that are neither periodic nor walls keep the clamp.
+- `logfv_max_grad_norm_3d` reduces on the arrays' device instead of copying nine
+  fields to the host every step.
 
 ## [0.5.0] — 2026-09-24
 

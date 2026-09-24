@@ -6,6 +6,6 @@
 #   with L = eps_dot*diag(1,-1,0): C = I + (lambda/etaP)*(tauTotal - etaS*2*eps_dot*diag(1,-1,0)).
 # RheoTool run to steady state (t=2000=40*lambda, transient mode). Kraken at its 1000-step canary horizon.
 component,analytic,rheotool_steady,rel_err_rt,kraken_1000steps,rel_err_kr
-C_xx,2.0000000,2.0000000,0.000e+00,1.9922628,3.869e-03
-C_yy,0.6666667,0.6666667,5.000e-08,0.6666768,1.508e-05
+C_xx,2.0000000,2.0000000,0.000e+00,1.9999546,2.270e-05
+C_yy,0.6666667,0.6666667,5.000e-08,0.6666667,4.696e-14
 C_zz,1.0000000,1.0000000,0.000e+00,1.0000000,0.000e+00
