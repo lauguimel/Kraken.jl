@@ -3,6 +3,134 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] — 2026-09-24
+
+### Added
+- **3D viscoelastic flow, four constitutive models** (`src/kernels/logconformation_fv_3d.jl`,
+  `src/kernels/logconformation_lbm_3d.jl`, `src/fvfd/operators_3d*.jl`,
+  `src/drivers/viscoelastic_*_3d.jl`, `src/rheology/linalg_3d.jl`): log-conformation
+  constitutive step in 3D with Oldroyd-B, FENE-P, Giesekus and PTT (linear and
+  exponential), on either the LBM lattice or the FVFD finite-volume grid. Drivers for the
+  Oldroyd-B sphere, planar Couette, planar Poiseuille, FVFD Poiseuille and FVFD planar
+  extension, each reachable from `.krk`. Each closure matches its closed-form steady
+  simple-shear fixed point (Giesekus, PTT residual ≤ 1e-6; FENE-P and the Oldroyd-B limit
+  ≤ 1e-3), and setting `α = 0`, `ε = 0` or `L² → ∞` recovers the Oldroyd-B trajectory
+  byte-for-byte.
+- **FVFD transport cures the near-wall conformation error of the LBM-CDE path.** On
+  identical `N_y = 32` viscoelastic Poiseuille, near-wall `C_xy` is machine-exact
+  (≤ 1.9e-7, i.e. ≤ 2e-5 %) against an anti-tautological reference built from the measured
+  shear, where the diffusive LBM-CDE path returns 25.9 % error and a peak velocity ratio
+  of ≈ 1.13. Velocity matches the analytic parabola to 0.01 % (H100, CUDA Float64).
+- **Resumable simulation state and HDF5 checkpoints** (#26) (`src/platform/state.jl`,
+  `src/io/checkpoint_hdf5.jl`, `src/drivers/ehd_ec_state.jl`): the `init_state` /
+  `advance!` / `solution` contract, checkpoints written as HDF5, and the electroconvection
+  driver running on the contract bit-identically to the frozen legacy driver. An
+  interrupted run resumes instead of restarting. New direct dependency: `HDF5`.
+  Documented in `docs/src/users/simulation-state-checkpoints.md` and `docs/src/api/platform.md`.
+- **RheoTool cross-validation** of FVFD-3D Poiseuille, Oldroyd-B planar extension and
+  FENE-P planar extension. Runs performed in a local `openfoam9-rheotool:v1.2` container;
+  OpenFOAM case templates under `bench/rheotool/`, raw output and comparison tables under
+  `benchmarks/results/rheotool_compare/`. On Poiseuille, Kraken's relative L2 error against
+  the analytic profile is 1.2e-3 on velocity and 4.1e-9 on `N1`, where RheoTool gives 1.3e-3
+  and 4.6e-3. On Oldroyd-B planar extension RheoTool reaches the analytic fixed point to
+  machine precision and Kraken's 1000-step canary sits 0.39 % below on `C_xx`, on the same
+  relaxation curve at a finite horizon. The 10.9 % FENE-P `C_xx` gap is a closure-variant
+  difference (Peterlin argument `tr C` vs `tr A`), not a defect. These are benchmarks, not
+  automated gates: no test reads the reference data.
+- **Steady-state time estimate and viscoelastic parameter-stability check**
+  (`src/units/steady_state.jl`).
+- **Finite-difference cross-check of the viscoelastic polymer-drag adjoint** (#41)
+  (`test/ad/test_ad_ve_fd_check.jl`): four design directions against central finite
+  differences of the reconverged primal, with a three-point Richardson error estimate. The
+  19 pre-existing adjoint assertions all pass under a known miscompile; this one does not.
+- **References page** in the documentation (#46). `DocumenterCitations` was loaded and
+  `docs/refs.bib` held 39 entries, but no page carried a `@bibliography` block, so all 37
+  cited keys rendered as unlinked text.
+
+### Changed
+- The test suite is a two-tier merge gate (#24, #27, #30, #31): a fast pull-request tier, a
+  full tier on the integration branch and nightly, superseded runs cancelled, and any
+  single test file runnable on its own locally or on CI.
+- The four Enzyme-driven test files run with production bounds checking
+  (`--check-bounds=auto`) (#39, #41, #43). Under the `Pkg.test` default Enzyme's reverse
+  mode miscompiles them; reported upstream as EnzymeAD/Enzyme.jl#3614.
+- Known failures are carried as `@test_broken` rather than kept out of the suite (#29);
+  22 are carried at this release.
+- The contribution model replaces the `src/` edit ban with directory ownership and review
+  (#25); `AGENTS.md` and `.github/CODEOWNERS` carry the rules.
+- `CITATION.cff`: G. Maitrejean's affiliation is now Grenoble INP, Université Grenoble Alpes.
+
+### Fixed
+- Type inference no longer expands the Enzyme shape-sensitivity thunks when
+  `run_simulation` is called without automatic differentiation (#39, #40), which crashed
+  the full test tier on Julia 1.12 / x86_64 Linux.
+- Two IncNS tests asserted round-off residues against macOS literals; they now assert
+  bounds (#36).
+- `docs/node_modules` is no longer tracked (#45). The committed copy held the macOS
+  `rollup` binary, so the documentation build failed on Linux with
+  `Cannot find module @rollup/rollup-linux-x64-gnu`.
+- The citation block on the documentation home page declared version 0.2.0 with no DOI and
+  announced a DOI that had already been minted (#48).
+
+### Known issues
+- Multiblock ghost exchange reads the wrong source block at `n_ghost = 2`, and a topology
+  guard is missing (#28).
+- `zou_he_pressure_3d_kernel!` still omits the wall-parallel diagonal populations that the
+  velocity BC includes (#20).
+- DDF potential stopping can accept an unconverged electric-field moment (#23).
+- Enzyme reverse mode miscompiles a loop branching on a `Const` Bool mask at neighbour
+  indices under `--check-bounds=yes`: segfault on x86_64 Linux, wrong gradient on aarch64
+  macOS (#41, EnzymeAD/Enzyme.jl#3614). Production mode (`--check-bounds=auto`) is exact
+  and is what CI and the documented workflow use.
+- 8 files exceed the 700-LOC budget (#15).
+
+## [0.4.0] — 2026-09-14
+
+### Added
+- **Electrohydrodynamics / electroconvection** (`src/kernels/ehd_*`, `src/drivers/`):
+  charge-transport and electric-potential LBM sub-solvers, Coulomb body force,
+  free-slip sidewalls, MRT collision, GPU-ready kernels, a `.krk` user surface
+  (`benchmarks/krk/ehd/`) and a critical-threshold sweep script
+  (`benchmarks/ehd/tc_sweep.jl`). Hydrostatic base state matches the analytical
+  charge-density and field profiles below 1%; onset threshold `T_c ~ 166.5`
+  against 163.5 from Luo, Wu, Yi & Tan, Phys. Rev. E 93, 023309 (2016), a +1.8%
+  deviation — mesh-convergence study for `T_c` still pending, so read it as
+  consistent-with rather than converged.
+- **West pressure boundary in 2D** (`apply_zou_he_pressure_west_2d!`), completing
+  the east/west pair. Validated against analytic Poiseuille: max relative error
+  2.03e-3 at Ny=16 and 5.15e-4 at Ny=32 (2nd order).
+- **Thermal conduction driver** accepts `nu`, `alpha` and an `orientation`
+  (`:vertical` default, `:horizontal` for west/east).
+- Regression tests exercising the public `.krk` runner rather than the drivers
+  directly: `test/analytical/H2-004-route.jl`, `test/analytical/TH-002-route.jl`.
+- `AGENTS.md` and `.github/CODEOWNERS`: contributor working rules, ownership per
+  directory, bug-report-as-failing-test convention.
+
+### Fixed
+- **MRT Guo forcing injected only half the requested body force.** Any MRT run
+  with a body force before this release was forced at half the intended value.
+- `_D2Q9_CX` was defined twice in the module with different types, which made the
+  package fail to load on Julia 1.11 — the declared minimum (#17).
+- The generic `.krk` runner silently ignored west pressure boundaries; unsupported
+  faces now raise an explicit error instead of a no-op (#18).
+- The conduction `.krk` fallback dropped `nu`, `alpha` and the thermal face
+  settings, silently solving a different problem. `examples/heat_conduction.krk`
+  is itself a west/east case and had been running south/north defaults at nu=0.05
+  instead of its documented nu=0.1, alpha=0.01 (#19).
+- 3D cavity test ran at omega = 1.8868, above the measured BGK stability ceiling
+  of ~1.81, and produced NaN at step 194. Reconfigured at the same Re = 32 with
+  tightened assertions.
+
+### Changed
+- **Breaking:** driver spec `OldroydB` renamed `OldroydBSpec` (name clash with the
+  rheology model of the same name). Scripts naming the old type must be updated.
+- `main` reconciled with the development line; the two now carry the same content.
+
+### Known issues
+- 3 failures in multi-block ghost exchange (`test_multiblock_exchange.jl`).
+- `zou_he_pressure_3d_kernel!` still omits the wall-parallel diagonal populations
+  that the velocity BC now includes (#20).
+
 ## [0.3.0] — 2026-07-22
 
 ### Added
