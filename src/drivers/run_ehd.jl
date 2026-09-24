@@ -24,6 +24,7 @@ function _run_ehd(setup::SimulationSetup;
                                          backend=backend, FT=T)
         return merge(result, (setup=setup,))
     elseif name == "electroconvection" || startswith(name, "electroconvection_")
+        sidewall_bc = _ehd_ec_sidewall_bc(setup.boundaries)
         T_ehd = Float64(get(params, :T, 175.0))
         charge_scheme = _ehd_symbol_param(params, :charge_scheme, :regularized)
         ns_scheme = _ehd_symbol_param(params, :ns_scheme, :bgk)
@@ -34,6 +35,7 @@ function _run_ehd(setup::SimulationSetup;
                                            charge_scheme=charge_scheme,
                                            phi_scheme=phi_scheme,
                                            ns_scheme=ns_scheme,
+                                           sidewall_bc=sidewall_bc,
                                            force_projection=force_projection,
                                            max_cycles=setup.max_steps,
                                            backend=backend, FT=T)
@@ -43,6 +45,30 @@ function _run_ehd(setup::SimulationSetup;
             "EHD dispatch: unrecognized case name '$(setup.name)'. " *
             "Known cases: ehd_hydrostatic, electroconvection."))
     end
+end
+
+"""Lower existing lateral flow declarations; absent declarations keep free slip.
+
+Both `west` and `east` must be declared together, as either `wall` (stationary
+no slip) or `symmetry` (impermeable free slip), without parameters. Explicit
+declarations on other faces are rejected: EC electrode/plate conditions are
+built into the driver and cannot be selected through `Boundary` declarations.
+Asymmetric, repeated, parameterised or
+unsupported lateral declarations are rejected instead of being ignored.
+"""
+function _ehd_ec_sidewall_bc(boundaries)
+    all(b -> b.face in (:west, :east), boundaries) ||
+        throw(ArgumentError("Electroconvection Boundary declarations support only west/east; electrode/plate conditions are built in."))
+    sides = filter(b -> b.face in (:west, :east), boundaries)
+    isempty(sides) && return :free_slip
+    length(sides) == 2 && count(b -> b.face === :west, sides) == 1 &&
+        count(b -> b.face === :east, sides) == 1 ||
+        throw(ArgumentError("Electroconvection requires one west and one east boundary, or neither."))
+    all(b -> isempty(b.values), sides) ||
+        throw(ArgumentError("Electroconvection sidewalls do not support boundary parameters."))
+    all(b -> b.type === :wall, sides) && return :no_slip
+    all(b -> b.type === :symmetry, sides) && return :free_slip
+    throw(ArgumentError("Electroconvection sidewalls must both be wall or both be symmetry."))
 end
 
 function _ehd_symbol_param(params::Dict{Symbol,Any}, key::Symbol, default::Symbol)
