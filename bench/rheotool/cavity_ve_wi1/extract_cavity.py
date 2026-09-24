@@ -90,21 +90,30 @@ def stream_function(ux, n):
 
 
 def vortex_centre(psi, n):
-    """Location and value of min(psi), refined by a 1D parabola in each direction."""
+    """Location and value of min(psi), refined by a 2D quadratic fit.
+
+    psi = a + b X + c Y + d X^2 + e X Y + f Y^2 is fitted by least squares on
+    the 3x3 cells around the discrete minimum (X, Y in cell units), and its
+    stationary point is returned. The cross term matters: two separate 1D
+    parabolas bias the location at first order in the cell size.
+    """
     j, i = np.unravel_index(np.argmin(psi), psi.shape)
-    x = (i + 0.5) / n
-    y = (j + 0.5) / n
-    if 0 < i < n - 1:
-        a, b, c = psi[j, i - 1], psi[j, i], psi[j, i + 1]
-        den = a - 2 * b + c
-        if den != 0:
-            x += 0.5 * (a - c) / den / n
-    if 0 < j < n - 1:
-        a, b, c = psi[j - 1, i], psi[j, i], psi[j + 1, i]
-        den = a - 2 * b + c
-        if den != 0:
-            y += 0.5 * (a - c) / den / n
-    return x, y, psi[j, i]
+    x0 = (i + 0.5) / n
+    y0 = (j + 0.5) / n
+    if not (0 < i < n - 1 and 0 < j < n - 1):
+        return x0, y0, psi[j, i]
+    X, Y = np.meshgrid([-1.0, 0.0, 1.0], [-1.0, 0.0, 1.0])  # Y rows, X columns
+    A = np.column_stack([np.ones(9), X.ravel(), Y.ravel(), X.ravel() ** 2,
+                         (X * Y).ravel(), Y.ravel() ** 2])
+    a, b, c, d, e, f = np.linalg.lstsq(A, psi[j - 1:j + 2, i - 1:i + 2].ravel(), rcond=None)[0]
+    H = np.array([[2 * d, e], [e, 2 * f]])
+    if np.linalg.det(H) <= 0 or H[0, 0] <= 0:
+        return x0, y0, psi[j, i]
+    dX, dY = np.linalg.solve(H, [-b, -c])
+    if abs(dX) > 1 or abs(dY) > 1:
+        return x0, y0, psi[j, i]
+    value = a + b * dX + c * dY + d * dX ** 2 + e * dX * dY + f * dY ** 2
+    return x0 + dX / n, y0 + dY / n, value
 
 
 def main():
@@ -150,8 +159,10 @@ def main():
 
         psi = stream_function(U[:, :, 0], n)
         xc, yc, pmin = vortex_centre(psi, n)
-        top_flux = np.max(np.abs(psi[-1] + 0.5 * U[-1, :, 0] / n))
-        vort_rows.append([t, xc, yc, pmin, top_flux])
+        # max over columns of |int_0^1 u_x dy| from cell-centre u (midpoint rule):
+        # a consistency check of the sampled field, not mass conservation
+        column_integral = np.max(np.abs(psi[-1] + 0.5 * U[-1, :, 0] / n))
+        vort_rows.append([t, xc, yc, pmin, column_integral])
 
     header = "t,line,coord,ux,uy,tau_xx,tau_xy,tau_yy,C_xx,C_xy,C_yy"
     with open(args.prefix + "_profiles.csv", "w") as fh:
@@ -159,7 +170,7 @@ def main():
         for r in prof_rows:
             fh.write(",".join(r_ if isinstance(r_, str) else f"{r_:.12g}" for r_ in r) + "\n")
     np.savetxt(args.prefix + "_vortex.csv", np.array(vort_rows), delimiter=",",
-               header="t,x_centre,y_centre,psi_min,column_flux_residual", comments="", fmt="%.12g")
+               header="t,x_centre,y_centre,psi_min,max_abs_column_integral_ux", comments="", fmt="%.12g")
 
 
 if __name__ == "__main__":
