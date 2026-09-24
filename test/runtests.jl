@@ -226,6 +226,7 @@ end
     # Operator- and model-level 3D tests: cheap, and they are what catches a
     # broken kernel. These always run.
     include("test_fvfd_operators_3d.jl")
+    include("test_fvfd_boundary_stencils_3d.jl")
     include("test_fvfd_logconf_3d.jl")
     include("test_fvfd_fenep_3d.jl")
     include("test_fvfd_giesekus_3d.jl")

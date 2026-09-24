@@ -56,6 +56,7 @@ const sectionedSidebar: Record<string, any[]> = {
   '/krk/': section('Reference'),
   '/api/': section('Reference'),
   '/theory/': section('Reference'),
+  '/references': section('Reference'),
   '/': flatSidebar,
 }
 

@@ -151,7 +151,7 @@ Each constitutive closure is validated independently before it appears here:
   FENE-P differ by a documented `~11 %` in `C_xx` — a genuine **closure-variant**
   difference (Peterlin argument `tr C` vs `tr A`), *not* a bug: Kraken's own
   1000-step canary matches its own steady-state transcendental solution to
-  `0.3 %`. See
+  `1e-5` relative. See
   `benchmarks/results/rheotool_compare/viscoelastic_extensional_fenep_3d/`
   and the [Viscoelastic cylinder](viscoelastic-cylinder.md) page (Oldroyd-B,
   `< 1 %` on `C_d`).

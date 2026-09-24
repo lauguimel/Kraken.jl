@@ -20,7 +20,7 @@ closures -- RheoTool transports A with equilibrium a*I and varf=1/(1-trA/L2);
 Kraken transports C with equilibrium I and f=(L2-3)/(L2-trC). The two coincide
 only as L2->inf (Oldroyd-B): RheoTool at L2=1e5 returns C_xx=1.99985 (0.007% vs
 the OB value 2), which validates the reconstruction pipeline. At the finite
-L2=50 a genuine ~11% closure gap remains (RheoTool C_xx=1.737 vs Kraken 1.944).
+L2=50 a genuine ~11% closure gap remains (RheoTool C_xx=1.737 vs Kraken 1.950).
 
 Dark Documenter theme (#1f2424), matching the other rheotool_compare figures.
 
@@ -44,7 +44,7 @@ DARK = "#1f2424"  # Documenter dark theme background
 # --- operating point ---
 LAMBDA, EPS_DOT, L2 = 50.0, 0.005, 50.0
 # Kraken FENE-P (its own closure): canary center + steady transcendental.
-KR_CXX, KR_CYY, KR_CZZ = 1.944, 0.661, 0.987   # canary C_xx, transcendental C_yy/C_zz
+KR_CXX, KR_CYY, KR_CZZ = 1.949729, 0.661, 0.987   # canary C_xx, transcendental C_yy/C_zz
 KR_CXX_T, KR_CYY_T, KR_CZZ_T = 1.949745, 0.660988, 0.987276  # Kraken transcendental
 # RheoTool FENE-P steady (its own closure, reconstructed to Kraken convention).
 RT_CXX, RT_CYY, RT_CZZ = 1.737435, 0.634695, 0.929747

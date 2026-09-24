@@ -57,14 +57,17 @@ validated below by the OB-limit run.
 
 | quantity | Kraken FENE-P | RheoTool FENE-P | difference |
 |----------|---------------|-----------------|------------|
-| `C_xx` | 1.944 (canary) / 1.9497 (transcendental) | 1.7374 | **10.9 %** |
+| `C_xx` | 1.9497 (canary) / 1.9497 (transcendental) | 1.7374 | **10.9 %** |
 | `C_yy` | 0.6610 (transcendental) | 0.6347 | 4.0 % |
 | `C_zz` | 0.9873 (transcendental) | 0.9297 | 5.8 % |
-| `tr C`  | 3.60 (canary) / 3.5980 (transcendental) | 3.3019 | **8.3 %** |
+| `tr C`  | 3.5980 (canary) / 3.5980 (transcendental) | 3.3019 | **8.3 %** |
 
-Kraken's own code is faithful: its 1000-step canary (`C_xx=1.944`, `tr C=3.60`)
-matches its own steady-state transcendental solution (`C_xx=1.9497`,
-`tr C=3.598`) to **0.3 %**. The ~11 % `C_xx` gap to RheoTool is therefore a
+Kraken's own code is faithful: its 1000-step canary (`C_xx=1.949729`,
+`tr C=3.597994`) matches its own steady-state transcendental solution
+(`C_xx=1.949745`, `tr C=3.598009`) to **1e-5** relative (measured 2026-09-24
+with the periodic-z advection fix of #54; before it the canary read
+`C_xx=1.944`, `tr C=3.60`, 0.3 % off, because the advection fell back to first
+order in 4 of the 6 z layers). The ~11 % `C_xx` gap to RheoTool is therefore a
 **genuine constitutive-closure difference**, not a bug or a discretisation
 error in either solver — both bound the stretch below `L²=50` (`tr C < L²`).
 

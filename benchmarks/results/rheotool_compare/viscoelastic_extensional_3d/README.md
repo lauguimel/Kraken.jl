@@ -34,14 +34,20 @@ is recovered as `C = I + (λ/η_p)·(τ_total − η_s·2ε̇·diag(1,−1,0))`.
 
 | component | analytic | RheoTool (steady, t=40λ) | rel. err | Kraken FVFD (1000 steps) | rel. err |
 |-----------|----------|--------------------------|----------|--------------------------|----------|
-| `C_xx` | 2.0000000 | 2.0000000 | 0.0 % | 1.9922628 | 0.39 % |
-| `C_yy` | 0.6666667 | 0.6666667 | <1e-5 % | 0.6666768 | 0.0015 % |
+| `C_xx` | 2.0000000 | 2.0000000 | 0.0 % | 1.9999546 | 0.0023 % |
+| `C_yy` | 0.6666667 | 0.6666667 | <1e-5 % | 0.6666667 | 5e-12 % |
 | `C_zz` | 1.0000000 | 1.0000000 | 0.0 % | 1.0000000 | 0.0 % |
 
 **RheoTool reaches the analytic fixed point to machine precision.** Kraken's
-1000-step canary sits on the *same* slow `C_xx` coil-stretch relaxation curve
-(0.39 % from the fixed point at that finite horizon — still relaxing, exactly
-like RheoTool at the same finite time); `C_yy`/`C_zz` are machine-exact.
+1000-step canary is 0.0023 % from it on `C_xx`, and exact to round-off on
+`C_yy` and `C_zz` (CPU, Float64, measured 2026-09-24 with the fix of #54).
+
+Before #54 this table read `C_xx = 1.9922628` (0.39 %) and `C_yy = 0.6666768`
+(0.0015 %), and the gap was attributed to a slow coil-stretch relaxation at a
+finite horizon. That explanation was wrong: the MUSCL-Superbee advection fell
+back to first-order upwind within two cells of the z faces although z is
+periodic, i.e. in 4 of the 6 z layers of this box. With the periodic z stencil
+wrapped instead, the same 1000-step run gives the values above.
 
 ## Files
 

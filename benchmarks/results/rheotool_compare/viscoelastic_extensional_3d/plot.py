@@ -19,7 +19,8 @@ residence-time effect (unlike a cross-slot). Its total extra-stress is inverted
 to the conformation tensor and shown relaxing to the analytic fixed point, which
 it reaches to machine precision at steady state. Kraken's 3D FVFD log-conformation
 canary (run_viscoelastic_fvfd_extensional_3d, 1000-step horizon) is overlaid as a
-filled marker; both sit on the same slow C_xx coil-stretch relaxation curve.
+filled marker; it sits 0.0023 % from the fixed point on C_xx (0.39 % before the
+periodic-z advection fix of #54, which removed a first-order fallback).
 
 Dark Documenter theme (DARK = #1f2424), matching the other rheotool_compare
 figures. LaTeX used for all text when a system ``latex`` is available.
@@ -47,7 +48,7 @@ CXX_A = 1.0 / (1.0 - 2.0 * LAMBDA * EPS_DOT)   # 2.0
 CYY_A = 1.0 / (1.0 + 2.0 * LAMBDA * EPS_DOT)   # 2/3
 CZZ_A = 1.0
 # Kraken FVFD log-conf canary (1000 steps, CPU/CUDA F64), center cell:
-KR_CXX, KR_CYY, KR_CZZ = 1.9922628, 0.6666768, 1.0
+KR_CXX, KR_CYY, KR_CZZ = 1.9999546, 0.6666667, 1.0
 KR_STEPS = 1000
 
 
