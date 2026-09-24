@@ -228,12 +228,15 @@ scope. They will be documented and validated in a later release.
 
 **3D viscoelastic (since v0.5.0).** Oldroyd-B, FENE-P, Giesekus and PTT (linear and
 exponential) run in 3D in log-conformation form on the FVFD path only
-(`run_viscoelastic_fvfd_poiseuille_3d`, `run_viscoelastic_fvfd_extensional_3d`), validated
-on periodic Poiseuille and homogeneous planar extension — see
+(`run_viscoelastic_fvfd_poiseuille_3d`, `run_viscoelastic_fvfd_extensional_3d`). Oldroyd-B
+is validated against analytic solutions and RheoTool on periodic Poiseuille and planar
+extension; FENE-P, Giesekus and PTT against their closed-form simple-shear fixed points
+(FENE-P also against its transcendental planar-extension fixed point), and in the coupled
+flows through their Oldroyd-B limit and qualitative trends — see
 [Viscoelastic constitutive models](users/benchmarks/ve-constitutive-models.md). The 3D
 LBM-CDE drivers (sphere, Couette, Poiseuille) accept Oldroyd-B only, in direct conformation
-form, and the sphere driver is not validated against a reference. The 3D viscoelastic tests
-run on CPU; the GPU and thermal-coupling columns above refer to 2D.
+form, and the sphere driver is not validated against a viscoelastic reference. The 3D
+viscoelastic tests run on CPU; the GPU and thermal-coupling columns above refer to 2D.
 
 Effective viscosity dispatches at compile-time (zero-cost abstraction
 via Julia's JIT). See `src/rheology/` (models, viscosity, strain_rate).
