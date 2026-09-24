@@ -13,12 +13,45 @@ using KernelAbstractions
 #   Fz = ∂τ_xz/∂x + ∂τ_yz/∂y + ∂τ_zz/∂z
 #
 # Central differences. Per-axis periodicity: x and z wrap (channel /
-# duct topology) when `periodic_x` / `periodic_z` are true, else clamp;
-# y always clamps (no-slip walls). This is the VALIDATED 2D production
+# duct topology) when `periodic_x` / `periodic_z` are true; otherwise their
+# boundary cells use the same second-order one-sided difference as the y
+# walls (y is never periodic). A clamped central difference there would
+# return (τ₂ − τ₁)/2, half the derivative. This is the VALIDATED 2D production
 # coupling (cylinder cut-link, <1% vs RheoTool) ported to 3D: the polymer
 # enters the momentum equation EXACTLY ONCE as a Guo body force at the
 # solvent rate ω_s, with NO (1±ω/2) denominator and lattice viscosity = ν_s
 # (bsd = 0). It replaces the standalone re-relaxed `apply_hermite_source_3d!`.
+
+# ∂τ/∂x at (i, j, k): wrapped central difference when periodic, else central
+# in the interior and second-order one-sided at i = 1 and i = Nx.
+@inline function _polymer_force_dx_3d(tau, i, j, k, Nx, periodic, half, T)
+    if periodic
+        ip = i < Nx ? i + 1 : 1
+        im = i > 1 ? i - 1 : Nx
+        return (tau[ip, j, k] - tau[im, j, k]) * half
+    elseif i == 1
+        return (-T(3) * tau[1, j, k] + T(4) * tau[2, j, k] - tau[3, j, k]) * half
+    elseif i == Nx
+        return (T(3) * tau[Nx, j, k] - T(4) * tau[Nx - 1, j, k] + tau[Nx - 2, j, k]) * half
+    else
+        return (tau[i + 1, j, k] - tau[i - 1, j, k]) * half
+    end
+end
+
+# ∂τ/∂z, same rule as `_polymer_force_dx_3d`.
+@inline function _polymer_force_dz_3d(tau, i, j, k, Nz, periodic, half, T)
+    if periodic
+        kp = k < Nz ? k + 1 : 1
+        km = k > 1 ? k - 1 : Nz
+        return (tau[i, j, kp] - tau[i, j, km]) * half
+    elseif k == 1
+        return (-T(3) * tau[i, j, 1] + T(4) * tau[i, j, 2] - tau[i, j, 3]) * half
+    elseif k == Nz
+        return (T(3) * tau[i, j, Nz] - T(4) * tau[i, j, Nz - 1] + tau[i, j, Nz - 2]) * half
+    else
+        return (tau[i, j, k + 1] - tau[i, j, k - 1]) * half
+    end
+end
 
 @kernel function compute_polymeric_force_3d_kernel!(Fx_p, Fy_p, Fz_p,
                                                       @Const(tau_xx), @Const(tau_xy),
@@ -31,15 +64,12 @@ using KernelAbstractions
     @inbounds begin
         T = eltype(Fx_p)
 
-        # Neighbour indices: wrap on x/z when periodic, else clamp; y wall rows
-        # use a 2nd-order ONE-SIDED difference instead of a degenerate clamped
-        # central difference (the wall-aware ∂/∂y the forensic recipe requires —
+        # x/z: wrap when periodic, else 2nd-order ONE-SIDED at the boundary
+        # cells (`_polymer_force_dx_3d` / `_dz_3d`). y wall rows use the same
+        # one-sided difference instead of a degenerate clamped central
+        # difference (the wall-aware ∂/∂y the forensic recipe requires —
         # a raw central diff at j=1/Ny injects a spurious near-wall force that
         # biases the constitutive self-consistency, since the bulk ∇·τ_p ≈ 0).
-        ip = i < Nx ? i + 1 : (periodic_x ? 1  : Nx)
-        im = i > 1  ? i - 1 : (periodic_x ? Nx : 1)
-        kp = k < Nz ? k + 1 : (periodic_z ? 1  : Nz)
-        km = k > 1  ? k - 1 : (periodic_z ? Nz : 1)
 
         # ∂τ/∂y with wall-aware one-sided 2nd-order at the no-slip y-faces.
         # interior: (τ[j+1]-τ[j-1])/2 ; j=1: (-3τ₁+4τ₂-τ₃)/2 ; j=Ny: (3τ_Ny-4τ_{Ny-1}+τ_{Ny-2})/2
@@ -55,16 +85,16 @@ using KernelAbstractions
                           (tau_yz[i,j+1,k] - tau_yz[i,j-1,k]) * half
 
         # Fx = ∂τ_xx/∂x + ∂τ_xy/∂y + ∂τ_xz/∂z
-        Fx_p[i,j,k] = (tau_xx[ip,j,k] - tau_xx[im,j,k]) * half + dy_xy +
-                      (tau_xz[i,j,kp] - tau_xz[i,j,km]) * half
+        Fx_p[i,j,k] = _polymer_force_dx_3d(tau_xx, i, j, k, Nx, periodic_x, half, T) + dy_xy +
+                      _polymer_force_dz_3d(tau_xz, i, j, k, Nz, periodic_z, half, T)
 
         # Fy = ∂τ_xy/∂x + ∂τ_yy/∂y + ∂τ_yz/∂z
-        Fy_p[i,j,k] = (tau_xy[ip,j,k] - tau_xy[im,j,k]) * half + dy_yy +
-                      (tau_yz[i,j,kp] - tau_yz[i,j,km]) * half
+        Fy_p[i,j,k] = _polymer_force_dx_3d(tau_xy, i, j, k, Nx, periodic_x, half, T) + dy_yy +
+                      _polymer_force_dz_3d(tau_yz, i, j, k, Nz, periodic_z, half, T)
 
         # Fz = ∂τ_xz/∂x + ∂τ_yz/∂y + ∂τ_zz/∂z
-        Fz_p[i,j,k] = (tau_xz[ip,j,k] - tau_xz[im,j,k]) * half + dy_yz +
-                      (tau_zz[i,j,kp] - tau_zz[i,j,km]) * half
+        Fz_p[i,j,k] = _polymer_force_dx_3d(tau_xz, i, j, k, Nx, periodic_x, half, T) + dy_yz +
+                      _polymer_force_dz_3d(tau_zz, i, j, k, Nz, periodic_z, half, T)
     end
 end
 
@@ -75,14 +105,20 @@ end
 
 Compute the 3D polymeric body force `F_poly = ∇·τ_p` (first moment) from the
 6-component symmetric polymer stress, for the Guo coupling. `periodic_x` /
-`periodic_z` wrap the x / z neighbour stencils (channel / duct); y always
-clamps (no-slip walls). 3D port of `compute_polymeric_force_2d!`.
+`periodic_z` wrap the x / z neighbour stencils (channel / duct); a
+non-periodic x or z face, and the y faces always, use a second-order
+one-sided difference in their boundary cells. 3D port of
+`compute_polymeric_force_2d!`.
 """
 function compute_polymeric_force_3d!(Fx_p, Fy_p, Fz_p,
                                       tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz;
                                       periodic_x::Bool=true, periodic_z::Bool=true)
     backend = KernelAbstractions.get_backend(Fx_p)
     Nx, Ny, Nz = size(Fx_p)
+    (periodic_x || Nx >= 3) ||
+        throw(ArgumentError("non-periodic x needs Nx ≥ 3 for the one-sided stencil (Nx = $Nx)"))
+    (periodic_z || Nz >= 3) ||
+        throw(ArgumentError("non-periodic z needs Nz ≥ 3 for the one-sided stencil (Nz = $Nz)"))
     kernel! = compute_polymeric_force_3d_kernel!(backend)
     kernel!(Fx_p, Fy_p, Fz_p,
             tau_xx, tau_xy, tau_xz, tau_yy, tau_yz, tau_zz,
