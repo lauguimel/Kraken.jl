@@ -3,6 +3,16 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- **Corrected the 0.5.0 notes on the 3D viscoelastic drivers** (#52). The four
+  log-conformation closures run on the FVFD path only; the LBM-CDE drivers (sphere,
+  Couette, Poiseuille) accept Oldroyd-B only, in direct conformation form. Couette and
+  LBM-CDE Poiseuille are not reachable from `.krk`, and the Oldroyd-B sphere driver is not
+  validated against a reference. `docs/src/capabilities.md` §9 now lists the 3D
+  viscoelastic models instead of reporting rheology as 2D-only.
+
 ## [0.5.0] — 2026-09-24
 
 ### Added
@@ -10,12 +20,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `src/kernels/logconformation_lbm_3d.jl`, `src/fvfd/operators_3d*.jl`,
   `src/drivers/viscoelastic_*_3d.jl`, `src/rheology/linalg_3d.jl`): log-conformation
   constitutive step in 3D with Oldroyd-B, FENE-P, Giesekus and PTT (linear and
-  exponential), on either the LBM lattice or the FVFD finite-volume grid. Drivers for the
-  Oldroyd-B sphere, planar Couette, planar Poiseuille, FVFD Poiseuille and FVFD planar
-  extension, each reachable from `.krk`. Each closure matches its closed-form steady
+  exponential), on the FVFD finite-volume grid (`run_viscoelastic_fvfd_poiseuille_3d`,
+  `run_viscoelastic_fvfd_extensional_3d`). The LBM-CDE drivers (Oldroyd-B sphere, planar
+  Couette, planar Poiseuille) evolve the conformation directly and accept Oldroyd-B only.
+  Reachable from `.krk`: the sphere, FVFD Poiseuille and FVFD planar extension (imposed
+  velocity by default); Couette and LBM-CDE Poiseuille are Julia-only. The sphere driver is
+  not validated against a reference. Each closure matches its closed-form steady
   simple-shear fixed point (Giesekus, PTT residual ≤ 1e-6; FENE-P and the Oldroyd-B limit
   ≤ 1e-3), and setting `α = 0`, `ε = 0` or `L² → ∞` recovers the Oldroyd-B trajectory
   byte-for-byte.
+  *Corrected 2026-09-24 (#52). The entry as tagged said the four closures ran "on either
+  the LBM lattice or the FVFD finite-volume grid" and that all five drivers were "reachable
+  from `.krk`"; neither was true.*
 - **FVFD transport cures the near-wall conformation error of the LBM-CDE path.** On
   identical `N_y = 32` viscoelastic Poiseuille, near-wall `C_xy` is machine-exact
   (≤ 1.9e-7, i.e. ≤ 2e-5 %) against an anti-tautological reference built from the measured
