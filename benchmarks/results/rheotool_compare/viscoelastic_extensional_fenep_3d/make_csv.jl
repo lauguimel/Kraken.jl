@@ -57,7 +57,7 @@ tlast = rows[end]
 cx,cy,cz = recon(tlast[2],tlast[3],tlast[4])
 trC = cx+cy+cz
 # Kraken FVFD canary center (test_fvfd_fenep_extensional_3d.jl gate G2):
-KR_CXX = 1.944; KR_TRC = 3.60
+KR_CXX = 1.949729; KR_TRC = 3.597994
 # Kraken steady transcendental (its own closure, f=(L2-3)/(L2-trC), C-eq=I):
 let
     w=2*LAM*EPS; fk=1.0; cxk=cyk=czk=trk=0.0

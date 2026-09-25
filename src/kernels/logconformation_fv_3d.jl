@@ -61,29 +61,28 @@ function logfv_recommended_oldroydb_substeps_3d(args...; kwargs...)
     return logfv_oldroydb_subcycle_estimate_3d(args...; kwargs...).recommended
 end
 
+@inline _logfv_grad_norm2_3d(a, b, c, d, e, f, g, h, p) =
+    a * a + b * b + c * c + d * d + e * e + f * f + g * g + h * h + p * p
+
+"""
+    logfv_max_grad_norm_3d(duxdx, duxdy, duxdz, duydx, duydy, duydz, duzdx, duzdy, duzdz)
+
+Maximum over the cells of the Frobenius norm of the velocity gradient, as a
+`Float64`. The reduction runs on the arrays' own device and only the scalar
+comes back, so a GPU run does not copy nine fields to the host every step.
+The squares are summed in the arrays' element type.
+"""
 function logfv_max_grad_norm_3d(
     duxdx, duxdy, duxdz,
     duydx, duydy, duydz,
     duzdx, duzdy, duzdz,
 )
-    h_duxdx = Array(duxdx); h_duxdy = Array(duxdy); h_duxdz = Array(duxdz)
-    h_duydx = Array(duydx); h_duydy = Array(duydy); h_duydz = Array(duydz)
-    h_duzdx = Array(duzdx); h_duzdy = Array(duzdy); h_duzdz = Array(duzdz)
-    max_norm2 = 0.0
-    @inbounds for idx in eachindex(h_duxdx)
-        norm2 =
-            Float64(h_duxdx[idx]) * Float64(h_duxdx[idx]) +
-            Float64(h_duxdy[idx]) * Float64(h_duxdy[idx]) +
-            Float64(h_duxdz[idx]) * Float64(h_duxdz[idx]) +
-            Float64(h_duydx[idx]) * Float64(h_duydx[idx]) +
-            Float64(h_duydy[idx]) * Float64(h_duydy[idx]) +
-            Float64(h_duydz[idx]) * Float64(h_duydz[idx]) +
-            Float64(h_duzdx[idx]) * Float64(h_duzdx[idx]) +
-            Float64(h_duzdy[idx]) * Float64(h_duzdy[idx]) +
-            Float64(h_duzdz[idx]) * Float64(h_duzdz[idx])
-        max_norm2 = max(max_norm2, norm2)
-    end
-    return sqrt(max_norm2)
+    max_norm2 = mapreduce(
+        _logfv_grad_norm2_3d, max,
+        duxdx, duxdy, duxdz, duydx, duydy, duydz, duzdx, duzdy, duzdz;
+        init=zero(eltype(duxdx)),
+    )
+    return sqrt(Float64(max_norm2))
 end
 
 @kernel function logfv_constitutive_step_log_3d_kernel!(

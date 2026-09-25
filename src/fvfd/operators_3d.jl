@@ -286,13 +286,33 @@ end
     west_bc, east_bc, south_bc, north_bc, back_bc, front_bc,
     ::Val{:muscl_superbee},
 )
-    if i <= 2 || i >= Nx - 1 || j <= 2 || j >= Ny - 1 || k <= 2 || k >= Nz - 1 ||
-       is_solid[i - 2, j, k] || is_solid[i - 1, j, k] ||
-       is_solid[i + 1, j, k] || is_solid[i + 2, j, k] ||
-       is_solid[i, j - 2, k] || is_solid[i, j - 1, k] ||
-       is_solid[i, j + 1, k] || is_solid[i, j + 2, k] ||
-       is_solid[i, j, k - 2] || is_solid[i, j, k - 1] ||
-       is_solid[i, j, k + 1] || is_solid[i, j, k + 2]
+    # Fall back to first-order upwind within two cells of an x or y face, of
+    # a non-periodic z face, or of a solid cell. A periodic z wraps its
+    # stencil instead, so a thin periodic z (quasi-2D run) stays second order.
+    # x and y keep the fallback even when periodic: on a z-slab this operator
+    # must equal the 2D one (`operators_2d_advection.jl`), whose hand-written
+    # adjoint (`ad/ad_ve_ops.jl`) mirrors that fallback.
+    zper = back_bc == FVFD_BC_PERIODIC && front_bc == FVFD_BC_PERIODIC
+    if i <= 2 || i >= Nx - 1 || j <= 2 || j >= Ny - 1 ||
+       (!zper && (k <= 2 || k >= Nz - 1))
+        return _fvfd_upwind_scalar_advective_rhs_3d(
+            phi, west_phi, east_phi, south_phi, north_phi, back_phi, front_phi,
+            ux_face, uy_face, uz_face, is_solid, i, j, k, Nx, Ny, Nz, inv_dx, inv_dy, inv_dz,
+            west_bc, east_bc, south_bc, north_bc, back_bc, front_bc, Val(:rusanov),
+        )
+    end
+    im2, im1, ip1, ip2 = i - 2, i - 1, i + 1, i + 2
+    jm2, jm1, jp1, jp2 = j - 2, j - 1, j + 1, j + 2
+    km2 = zper ? mod1(k - 2, Nz) : k - 2
+    km1 = zper ? mod1(k - 1, Nz) : k - 1
+    kp1 = zper ? mod1(k + 1, Nz) : k + 1
+    kp2 = zper ? mod1(k + 2, Nz) : k + 2
+    if is_solid[im2, j, k] || is_solid[im1, j, k] ||
+       is_solid[ip1, j, k] || is_solid[ip2, j, k] ||
+       is_solid[i, jm2, k] || is_solid[i, jm1, k] ||
+       is_solid[i, jp1, k] || is_solid[i, jp2, k] ||
+       is_solid[i, j, km2] || is_solid[i, j, km1] ||
+       is_solid[i, j, kp1] || is_solid[i, j, kp2]
         return _fvfd_upwind_scalar_advective_rhs_3d(
             phi, west_phi, east_phi, south_phi, north_phi, back_phi, front_phi,
             ux_face, uy_face, uz_face, is_solid, i, j, k, Nx, Ny, Nz, inv_dx, inv_dy, inv_dz,
@@ -309,33 +329,33 @@ end
 
     phie = ifelse(
         ue >= 0,
-        _fvfd_muscl_superbee_face_value_3d(phi[i - 1, j, k], phi[i, j, k], phi[i + 1, j, k]),
-        _fvfd_muscl_superbee_face_value_3d(phi[i + 2, j, k], phi[i + 1, j, k], phi[i, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[im1, j, k], phi[i, j, k], phi[ip1, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[ip2, j, k], phi[ip1, j, k], phi[i, j, k]),
     )
     phiw = ifelse(
         uw >= 0,
-        _fvfd_muscl_superbee_face_value_3d(phi[i - 2, j, k], phi[i - 1, j, k], phi[i, j, k]),
-        _fvfd_muscl_superbee_face_value_3d(phi[i + 1, j, k], phi[i, j, k], phi[i - 1, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[im2, j, k], phi[im1, j, k], phi[i, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[ip1, j, k], phi[i, j, k], phi[im1, j, k]),
     )
     phin = ifelse(
         vn >= 0,
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j - 1, k], phi[i, j, k], phi[i, j + 1, k]),
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j + 2, k], phi[i, j + 1, k], phi[i, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, jm1, k], phi[i, j, k], phi[i, jp1, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, jp2, k], phi[i, jp1, k], phi[i, j, k]),
     )
     phis = ifelse(
         vs >= 0,
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j - 2, k], phi[i, j - 1, k], phi[i, j, k]),
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j + 1, k], phi[i, j, k], phi[i, j - 1, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, jm2, k], phi[i, jm1, k], phi[i, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, jp1, k], phi[i, j, k], phi[i, jm1, k]),
     )
     phif = ifelse(
         wf >= 0,
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j, k - 1], phi[i, j, k], phi[i, j, k + 1]),
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j, k + 2], phi[i, j, k + 1], phi[i, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, j, km1], phi[i, j, k], phi[i, j, kp1]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, j, kp2], phi[i, j, kp1], phi[i, j, k]),
     )
     phib = ifelse(
         wb >= 0,
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j, k - 2], phi[i, j, k - 1], phi[i, j, k]),
-        _fvfd_muscl_superbee_face_value_3d(phi[i, j, k + 1], phi[i, j, k], phi[i, j, k - 1]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, j, km2], phi[i, j, km1], phi[i, j, k]),
+        _fvfd_muscl_superbee_face_value_3d(phi[i, j, kp1], phi[i, j, k], phi[i, j, km1]),
     )
 
     flux_div = (ue * phie - uw * phiw) * inv_dx +

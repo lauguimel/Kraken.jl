@@ -20,6 +20,7 @@ include("platform/contract.jl")
 include("platform/solution.jl")   # LBM, LBMSolution, solve
 include("platform/sample.jl")     # sample
 include("platform/observe.jl")    # observe, predict, Prediction, observables
+include("platform/state.jl")      # AbstractSimulationState, StateSnapshot, advance!
 export AbstractProblem, AbstractMethod, AbstractSolution, AbstractObservable, AbstractClosure
 export Capability, ForwardSolve, GPUExecution, SteadyAdjoint, TransientAdjoint, FiniteDiff, NeuralClosure, SteadyResidual
 export capabilities
@@ -28,6 +29,13 @@ export observe, predict, Prediction, FieldProbe, LineProfile, FieldReduction
 export residual, adjoint_vjp
 export LBMGeomParams, LBMThermalParams, LBMVEParams, LBMScalarParams, LBMFieldParams
 export ParameterSpace, loss, fit, CalibResult
+export AbstractSimulationState, StateSnapshot, CheckpointError
+export init_state, advance!, solution, restore_state
+export update_parameter!, updatable_parameters, export_state, check_compatible
+# Client hooks stay unexported (extend as Kraken.snapshot, Kraken.validate_snapshot,
+# Kraken.at_boundary, Kraken.check_updatable, Kraken.migrate).
+export CHECKPOINT_CONTAINER_VERSION, write_checkpoint, read_checkpoint, checkpoint_info
+export save_checkpoint, load_checkpoint
 
 # --- Lattice definitions ---
 include("lattice/lattice.jl")
@@ -154,6 +162,7 @@ include("drivers/cylinder_libb.jl")
 include("drivers/thermal.jl")
 include("drivers/ehd_poisson.jl")
 include("drivers/ehd.jl")
+include("drivers/ehd_ec_state.jl")
 include("drivers/ehd_ec.jl")
 include("drivers/axisymmetric.jl")
 include("drivers/multiphase.jl")
@@ -257,6 +266,7 @@ include("refinement/conservative_tree_krk_validation_2d.jl")
 # --- I/O ---
 include("io/vtk_writer.jl")
 include("io/diagnostics.jl")
+include("io/checkpoint_hdf5.jl")  # write_checkpoint, read_checkpoint (only HDF5 user)
 
 # --- Spatial boundary kernels ---
 include("kernels/boundary_spatial_2d.jl")
@@ -330,6 +340,7 @@ export apply_fixed_temp_west_2d!, apply_fixed_temp_east_2d!
 export run_rayleigh_benard_2d, run_natural_convection_2d, run_natural_convection_refined_2d
 export run_natural_convection_3d
 export run_electroconvection_2d
+export ECState, ECSolution
 export ThermalPatchArrays, create_thermal_patch_arrays, advance_thermal_refined_step!
 export collide_boussinesq_2d!, collide_boussinesq_vt_2d!, collide_boussinesq_vt_modified_2d!
 export fused_natconv_step!, fused_natconv_vt_step!

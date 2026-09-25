@@ -146,7 +146,7 @@ makedocs(;
     format = DocumenterVitepress.MarkdownVitepress(
         repo = "github.com/lauguimel/Kraken.jl",
         devurl = "dev",
-        devbranch = "release/v0.3",
+        devbranch = "release/v0.5",
         build_vitepress = false,
         keep = :patch,
     ),
@@ -160,6 +160,7 @@ makedocs(;
             "Architecture" => "architecture.md",
             "KRK reference" => "users/krk-reference.md",
             "Incompressible Navier–Stokes (FVFD/SIMPLE)" => "users/incompressible-navier-stokes.md",
+            "Simulation state and checkpoints" => "users/simulation-state-checkpoints.md",
         ],
         "Examples" => [
             "Newtonian" => [
@@ -227,6 +228,7 @@ makedocs(;
                 "Boundary conditions" => "api/bc.md",
                 "Backend" => "api/backend.md",
                 "KRK I/O" => "api/io-krk.md",
+                "Platform state & checkpoints" => "api/platform.md",
             ],
             "Julia API" => [
                 "api/lattice.md",
@@ -258,6 +260,10 @@ makedocs(;
                 "theory/18_grid_refinement.md",
                 "theory/19_spatial_bcs.md",
             ],
+            # The one page carrying a @bibliography block. Without it every
+            # citation in the docs has no destination and DocumenterCitations
+            # degrades it to plain unlinked text (#46).
+            "References" => "references.md",
         ],
     ],
     remotes = nothing,
@@ -403,7 +409,7 @@ if startswith(get(ENV, "GITHUB_REF", ""), "refs/tags/v")
     DocumenterVitepress.deploydocs(;
         repo = "github.com/lauguimel/Kraken.jl.git",
         target = joinpath(@__DIR__, "build"),
-        devbranch = "release/v0.3",
+        devbranch = "release/v0.5",
         branch = "gh-pages",
         push_preview = true,
     )

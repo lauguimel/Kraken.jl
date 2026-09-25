@@ -122,6 +122,7 @@ end
 
 @testset "Kraken.jl LBM" begin
     include("platform/contract_parity_test.jl")
+    include("platform/state_contract_test.jl")
     include("platform/residual_vjp_test.jl")
     if SKIP_AD
         @info "Skipping calibration twin experiments (KRAKEN_SKIP_AD=true)"
@@ -142,6 +143,7 @@ end
     include("analytical/TH-002-route.jl")
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
+    include("analytical/ehd_ec_split_parity_2d.jl")
     include("analytical/ehd_hydrostatic_2d.jl")
     include("analytical/ehd_krk_2d.jl")
     include("analytical/ehd_mapping_parity_2d.jl")
@@ -224,6 +226,7 @@ end
     # Operator- and model-level 3D tests: cheap, and they are what catches a
     # broken kernel. These always run.
     include("test_fvfd_operators_3d.jl")
+    include("test_fvfd_boundary_stencils_3d.jl")
     include("test_fvfd_logconf_3d.jl")
     include("test_fvfd_fenep_3d.jl")
     include("test_fvfd_giesekus_3d.jl")
@@ -264,6 +267,7 @@ end
             if enzyme_ok
                 include("ad/test_ad_sensitivity.jl")
                 include("ad/test_ad_ve_sensitivity.jl")
+                include("ad/test_ad_ve_fd_check.jl")
             else
                 @info "Skipping AD steady-sensitivity tests (Enzyme extension not loadable in this environment)"
             end

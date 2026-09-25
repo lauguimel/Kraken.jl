@@ -138,8 +138,14 @@ end
         # z-periodicity mismatch — the LBM solvent's PullHalfwayBB_3D bounced the
         # k=1/k=Nz z-faces as no-slip walls while the FVFD polymer side was fully
         # z-periodic. Threading periodic_z=true into the Guo solvent step (z-wrap
-        # variant of PullHalfwayBB_3D) closes it: measured grad_x≈0.00508 (1.5% of
-        # ε̇=0.005), C_xx rel-err ≈0.06%, C_yy rel-err ≈0.22% — all ≤1%, no calibration.
+        # variant of PullHalfwayBB_3D) closes it: no calibration.
+        # Measured 2026-09-24 (CPU, Float64), after the periodic-z MUSCL fix
+        # (#54): grad_x = 0.0050704 (+1.41 % over ε̇ = 0.005), grad_y = -0.0050424,
+        # C_xx rel-err 0.83 %, C_yy rel-err 0.29 % against the NOMINAL-rate fixed
+        # point. Against the fixed point at the measured rates, 1/(1 − 2λ·grad),
+        # C_xx is -0.59 % and C_yy -0.007 %. Before #54 the nominal errors read
+        # 0.06 % / 0.22 %: the first-order z fallback damped C_xx and happened to
+        # offset the +1.4 % strain-rate excess of the coupled flow.
         @test m.rel_Cxx <= 0.01
         @test m.rel_Cyy <= 0.01
         @test m.abs_Czz <= 0.01
