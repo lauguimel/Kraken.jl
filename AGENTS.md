@@ -100,10 +100,21 @@ On Linux x86_64, run the five Enzyme-driven files (`platform/calibration_test.jl
 reverse mode miscompiles them: segfault or LLVM crash on Linux, wrong gradient
 on macOS (#41). CI does exactly this in the `full` job.
 
-A pull request is not reviewable until `julia --project test/runtests.jl`
-passes on the branch. CI runs it on Julia 1.11 and 1.12 for every pull request
-into `main` or `dev/platform`; run it locally first anyway, because a CI round
-trip costs about seventy minutes.
+A pull request is not reviewable until the full suite passes on the final head
+of its branch. Pull requests into `main` or `dev/platform` automatically run
+only the `quick` tier: Julia 1.11 and 1.12, with the automatic-differentiation
+and 3D viscoelastic tiers skipped. Start the full suite yourself after your
+last push, in either of two ways:
+
+- on GitHub: `gh workflow run CI.yml --ref <your-branch>`, leaving the `only`
+  and `check_bounds` inputs at their defaults (this needs write access to the
+  repository; otherwise ask the maintainer to start it). The `full` job applies
+  the bounds-checking rule above to the Enzyme-driven files by itself;
+- locally, with the commands above and the same rule.
+
+A green dispatched run is enough; a local run is not required. A run started
+before your last push does not count for the new head. Post the run link in
+the pull request. The full suite also runs on every merge into `dev/platform`.
 
 State in the pull request body which gates you ran, on which backend and which
 precision. A known failure carried deliberately must be `@test_broken` and named
