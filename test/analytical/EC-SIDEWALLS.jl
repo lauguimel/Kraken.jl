@@ -407,6 +407,10 @@ const HYDROSTATIC_CPU = Dict{Tuple{DataType,Symbol,Int},Any}()
 end
 
 # Explicit opt-in: no CUDA qualification is claimed by ordinary CPU CI.
+# Run from the repository root on a GPU compute node (not the Pkg.test sandbox):
+# export JULIA_CUDA_USE_COMPAT=false
+# julia --project=. -e 'using Pkg; Pkg.instantiate()'
+# KRAKEN_TEST_EHD_SIDEWALLS_CUDA=true julia --project=. -e 'include("test/analytical/EC-SIDEWALLS.jl")'
 if get(ENV, "KRAKEN_TEST_EHD_SIDEWALLS_CUDA", "false") == "true"
     @eval using CUDA
     CUDA.functional() || error("Requested EC sidewall CUDA tests, but CUDA is unavailable")
