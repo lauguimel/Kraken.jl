@@ -109,7 +109,7 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
                                   charge_scheme=:srt,
                                   phi_scheme=:lbm,
                                   max_steps=100000, charge_tol=1e-8,
-                                  phi_tol=1e-4, phi_max_iter=10000,
+                                  phi_tol=1e-4, field_tol=1e-4, phi_max_iter=10000,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
     Nx < 3 && throw(ArgumentError("Nx must be at least 3."))
     Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
@@ -117,6 +117,8 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
         throw(ArgumentError("charge_scheme must be :srt or :regularized."))
     phi_scheme in (:lbm, :direct) ||
         throw(ArgumentError("phi_scheme must be :lbm or :direct."))
+    _ehd_phi_ddf_check_field_tol(field_tol)
+    phi_scheme === :lbm && (phi_max_iter = _ehd_phi_ddf_max_iter(phi_max_iter))
 
     p = _ehd_lattice_params(Ny, C, M, Ma_E, alpha, delta_U; FT=FT)
     p.tau_q <= FT(0.5) && error("Charge relaxation time must be greater than 0.5.")
@@ -179,12 +181,12 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
         else
             phi_f_in, phi_f_out, phi_stats = ehd_phi_ddf_solve!(
                 phi_f_in, phi_f_out, phi, qfield, p, :periodic, phi_ws;
-                phi_tol=phi_tol, field_tol=Inf, max_iter=phi_max_iter,
+                phi_tol=phi_tol, field_tol=field_tol, max_iter=phi_max_iter,
                 check_every=EHD_HYDROSTATIC_PHI_CHECK_EVERY,
                 phi_bottom=one(FT), phi_top=zero(FT))
             phi_iters_last = phi_stats.iters
             phi_rel_last = phi_stats.phi_rel
-            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter)
+            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter, phi_tol)
             compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
         end
 

@@ -1,4 +1,10 @@
 # Issue #23: potential convergence does not imply field-moment convergence.
+# The capacitor fixtures run the production adaptive solve
+# (`Kraken.ehd_phi_ddf_solve!`) at the drivers' check cadences; since the #23
+# repair its stopping rule also checks the field, and the cold starts meet the
+# field gate. The same fixtures with `field_tol = Inf` (the pre-#23 rule) are the
+# negative control. The public-driver check at default settings remains broken
+# for a different reason (see its comment).
 # CPU Float64 regression; no GPU, charge-transport or onset qualification.
 # Run: julia --project test/analytical/ES-002-STOP.jl
 module ES002FieldStoppingRegression
@@ -13,26 +19,12 @@ const FIELD_GATE = 1e-6
 const WEIGHTS = (4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36)
 const CY = (0, 0, 1, 0, -1, 1, 1, -1, -1)
 
-function potential_step!(f, g, phi, q, tau, xbc)
-    nx, ny = size(phi)
-    Kraken.collide_electric_potential_2d!(f, q, 0.7, inv(tau), (tau-0.5)/3)
-    if xbc === :neumann
-        Kraken.stream_wall_x_wall_y_2d!(g, f, nx, ny)
-    else
-        Kraken.stream_periodic_x_wall_y_2d!(g, f, nx, ny)
-    end
-    Kraken.compute_ehd_scalar_2d!(phi, g)
-    if xbc === :neumann
-        Kraken.apply_phi_nee_box_2d!(g, phi, 1.0, 0.0, nx, ny)
-    else
-        Kraken.apply_phi_nee_walls_2d!(g, phi, 1.0, 0.0, nx, ny)
-    end
-    Kraken.compute_ehd_scalar_2d!(phi, g)
-    KernelAbstractions.synchronize(CPU_BACKEND)
-    return g, f
-end
+# The drivers' check cadences: every 8 iterations in the EC box (:neumann),
+# every iteration in the hydrostatic driver (:periodic).
+check_every(xbc) = xbc === :neumann ? Kraken.EHD_EC_PHI_CHECK_EVERY :
+                                      Kraken.EHD_HYDROSTATIC_PHI_CHECK_EVERY
 
-function capacitor(xbc, tau, initialization)
+function capacitor(xbc, tau, initialization; field_tol=1e-10)
     nx = xbc === :neumann ? 11 : 10
     ny = H + 1
     reference = [1.0-(j-1)/H for i in 1:nx, j in 1:ny]
@@ -46,32 +38,21 @@ function capacitor(xbc, tau, initialization)
     end
     g = copy(f)
     phi = copy(reference)
-    previous = similar(phi)
     q = zeros(nx, ny)
     ex, ey = zeros(nx, ny), zeros(nx, ny)
-    diag = zeros(2)
-    accepted = false
-    n = 0
-    relative_change = Inf
-    # Mirrors the CURRENT EC scalar-only stopping loop, using production
-    # collision, streaming, boundary, reduction and field kernels. There is
-    # no reusable potential-solve API accepting these states yet. When #23
-    # introduces that seam, route this fixture through it before promoting
-    # its broken assertions. A driver-only fix cannot change a mirrored loop.
-    for iteration in 1:128
-        copyto!(previous, phi)
-        f, g = potential_step!(f, g, phi, q, tau, xbc)
-        n = iteration
-        if iteration % 8 == 0
-            Kraken.ehd_rel_change_2d!(diag, phi, previous, nx, ny)
-            KernelAbstractions.synchronize(CPU_BACKEND)
-            relative_change = diag[1]
-            if relative_change <= 1e-10
-                accepted = true
-                break
-            end
-        end
-    end
+    # The production adaptive solve (the one both drivers call), with this
+    # fixture's tolerance 1e-10 on both moments and its 128-iteration cap.
+    p = (; eps=0.7, omega_U=inv(tau), nu_U=(tau-0.5)/3, tau_U=tau)
+    ws = Kraken.ehd_phi_ddf_workspace(phi)
+    f, g, st = Kraken.ehd_phi_ddf_solve!(f, g, phi, q, p, xbc, ws;
+                                         phi_tol=1e-10, field_tol=field_tol, max_iter=128,
+                                         check_every=check_every(xbc),
+                                         phi_bottom=1.0, phi_top=0.0)
+    KernelAbstractions.synchronize(CPU_BACKEND)
+    accepted = st.converged
+    n = st.iters
+    relative_change = st.phi_rel
+    # Independent reconstruction of E from the returned populations.
     Kraken.compute_electric_field_2d!(ex, ey, f, tau)
     KernelAbstractions.synchronize(CPU_BACKEND)
     ex .*= H
@@ -88,7 +69,7 @@ end
 field_difference(a, b) = H * max(maximum(abs.(a.Ex .- b.Ex)),
                                maximum(abs.(a.Ey .- b.Ey)))
 
-@testset "ES-002-STOP: known field-stopping defect (#23)" begin
+@testset "ES-002-STOP: field-aware potential stopping (#23)" begin
     @testset "$xbc tau=$tau $initialization" for xbc in (:neumann, :periodic),
             tau in (0.8, 1.4, 2.0), initialization in (:cold, :consistent)
         result = capacitor(xbc, tau, initialization)
@@ -100,13 +81,25 @@ field_difference(a, b) = H * max(maximum(abs.(a.Ex .- b.Ex)),
         @test result.phi_error <= 1e-10
         @test result.prediction_error <= 1e-11
         if initialization === :cold
-            # https://github.com/lauguimel/Kraken.jl/issues/23
-            @test_broken result.field_error <= FIELD_GATE
+            # https://github.com/lauguimel/Kraken.jl/issues/23 (repaired: the
+            # stopping rule also checks the field moment).
+            @test result.field_error <= FIELD_GATE
         else
             @test result.field_error <= FIELD_GATE
             @test result.field_error <= 1e-10
         end
         @info "Capacitor stopping" xbc tau initialization result
+    end
+
+    @testset "negative control: pre-#23 rule, $xbc tau=$tau" for xbc in (:neumann, :periodic),
+            tau in (0.8, 1.4, 2.0)
+        # field_tol = Inf is the phi-only rule, run through the same production
+        # solve: the cold starts must still fail the field gate, which shows
+        # the promoted assertions above test the field check and nothing else.
+        result = capacitor(xbc, tau, :cold; field_tol=Inf)
+        @test result.accepted
+        @test result.field_error > FIELD_GATE
+        @info "Capacitor stopping, pre-#23 rule" xbc tau result
     end
 
     @testset "Public EC driver: first-cycle field convergence" begin
@@ -130,10 +123,14 @@ field_difference(a, b) = H * max(maximum(abs.(a.Ex .- b.Ex)),
         @test all(isfinite, reference.Ex) && all(isfinite, reference.Ey)
         @test adaptive.steps == fixed.steps == reference.steps == 1
         @test field_difference(fixed, reference) <= 1e-8
+        # Still broken after the #23 repair, for another reason: the remaining
+        # default-settings error (~3.5e-5) comes from the slow diffusive mode of
+        # the pseudo-time Poisson iteration. phi_tol and field_tol bound an
+        # increment between checks, not the error. Tracked in issue #SLOWMODE.
+        # test/analytical/ehd_phi_ddf_solve_2d.jl runs this case with a tighter
+        # field_tol and meets the gate.
         @test_broken field_difference(adaptive, reference) <= FIELD_GATE
         @info "Public driver field stopping" iterations=adaptive.phi_iters_last error=field_difference(adaptive, reference) reference_change=field_difference(fixed, reference)
-        # This assertion can detect a driver-only repair. The capacitor
-        # fixtures above additionally need rewiring to its new solver seam.
         # Code-to-code iterative convergence is not physical validation.
     end
 end

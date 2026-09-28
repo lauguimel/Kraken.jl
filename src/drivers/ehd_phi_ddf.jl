@@ -7,6 +7,10 @@
 # One iteration: collide with the charge source, stream, rebuild the plate
 # populations by non-equilibrium extrapolation, take the zeroth moment. The
 # adaptive solve repeats it until its stopping rule accepts. Not exported.
+#
+# Issue #23: the potential (zeroth moment) can stop changing while the field,
+# rebuilt from the first moment, is still relaxing from a cold start. The
+# stopping rule therefore checks both moments.
 # ============================================================================
 
 """
@@ -28,6 +32,23 @@ function _ehd_phi_ddf_check_xbc(xbc::Symbol)
     return nothing
 end
 
+# Entry validation of the drivers' `field_tol` keyword: a non-negative real;
+# `Inf` disables the field check.
+function _ehd_phi_ddf_check_field_tol(field_tol)
+    (field_tol isa Real && field_tol >= 0) ||
+        throw(ArgumentError("field_tol must be a non-negative real number, got $(field_tol)."))
+    return field_tol
+end
+
+# Entry validation of the drivers' `phi_max_iter` keyword on the adaptive DDF path:
+# an integral value of at least 1, returned as an `Int` (`10000.0` becomes `10000`).
+function _ehd_phi_ddf_max_iter(phi_max_iter)
+    (phi_max_iter isa Real && isinteger(phi_max_iter) && phi_max_iter >= 1) ||
+        throw(ArgumentError("phi_max_iter must be an integer of at least 1 on the adaptive " *
+                            "potential solve, got $(phi_max_iter)."))
+    return Int(phi_max_iter)
+end
+
 """
     ehd_phi_ddf_step!(f_in, f_out, phi, qfield, p, xbc; phi_bottom, phi_top) -> (f_in, f_out)
 
@@ -46,8 +67,12 @@ rebind, `f_in, f_out = ehd_phi_ddf_step!(f_in, f_out, ...)`.
   (`run_ehd_hydrostatic_2d`).
 
 `p` is any object with the fields `eps`, `omega_U` and `nu_U`.
+
+Inlined so that plate values given as constants by the caller reach the kernel
+launch as constants: on the CPU backend a run-time `Float64` kernel argument costs
+one small heap allocation per launch.
 """
-function ehd_phi_ddf_step!(f_in, f_out, phi, qfield, p, xbc::Symbol; phi_bottom, phi_top)
+@inline function ehd_phi_ddf_step!(f_in, f_out, phi, qfield, p, xbc::Symbol; phi_bottom, phi_top)
     _ehd_phi_ddf_check_xbc(xbc)
     Nx, Ny = size(phi)
     collide_electric_potential_2d!(f_in, qfield, p.eps, p.omega_U, p.nu_U)
@@ -68,13 +93,15 @@ end
     ehd_phi_ddf_workspace(phi) -> NamedTuple
 
 Scratch buffers of [`ehd_phi_ddf_solve!`](@ref), allocated once on the backend and
-with the element type of `phi`: `phi_prev` (the shape of `phi`), `diag` (length 2,
-on the device) and `diag_host` (length 2, on the host). Their contents on entry do
-not matter: each buffer is overwritten before it is read.
+with the element type of `phi`: `phi_prev`, `Ex`, `Ey`, `Ex_prev`, `Ey_prev` (the
+shape of `phi`), `diag` (length 4, on the device) and `diag_host` (length 4, on the
+host). Their contents on entry do not matter: each buffer is overwritten before it
+is read.
 """
 function ehd_phi_ddf_workspace(phi)
-    return (phi_prev=similar(phi), diag=similar(phi, 2),
-            diag_host=Vector{eltype(phi)}(undef, 2))
+    return (phi_prev=similar(phi), Ex=similar(phi), Ey=similar(phi),
+            Ex_prev=similar(phi), Ey_prev=similar(phi),
+            diag=similar(phi, 4), diag_host=Vector{eltype(phi)}(undef, 4))
 end
 
 """
@@ -85,63 +112,100 @@ Adaptive DDF solve of the electric potential for a frozen charge `qfield`: repea
 [`ehd_phi_ddf_step!`](@ref) until the stopping rule accepts, or until `max_iter`
 iterations have run.
 
-The rule is evaluated at iteration `iter` when `iter % check_every == 0` or
-`iter == max_iter`, with one device-to-host copy per check. It accepts when
-`phi_rel <= phi_tol`, where `phi_rel = max|phi - phi_prev| / max|phi|` is the
-relative change of the zeroth moment over the last iteration
-(`ehd_rel_change_2d!`). `phi_tol` is compared as given, without conversion to the
-element type.
+The rule is evaluated at iteration `iter` when `iter % check_every == 0` (on
+cadence) or `iter == max_iter`, with one device-to-host copy per check. It measures
+- `phi_rel = max|phi - phi_prev| / max|phi|`, the relative change of the zeroth
+  moment over the last iteration (`ehd_rel_change_2d!`);
+- `field_rel = max|E - E_prev| / max(max|E|, E_ref)`, the relative change of the
+  field rebuilt from the first moment (`compute_electric_field_2d!`) since the
+  previous check, or since entry at the first check (`ehd_field_change_2d!`).
+  Maxima run over all nodes and both components;
+  `E_ref = |phi_bottom - phi_top| / (Ny - 1)`.
 
-`field_tol` must be `Inf`: no check on the electric field, which is the rule the
-drivers have always applied.
+It accepts when `phi_rel <= phi_tol`, both moments are finite, the check is on
+cadence and `field_rel <= field_tol`. A final check off cadence
+(`max_iter % check_every != 0`) measures the field over fewer iterations and
+cannot accept. `phi_tol` and `field_tol` are compared as given, without
+conversion to the element type.
+
+`field_tol` bounds a change between checks, not the error of the field. `Inf`
+means no field check: the rule is then `phi_rel <= phi_tol` alone, at every check,
+which is the pre-#23 rule bit for bit (same exit iteration, same populations, same
+`phi_rel`); it is reserved for non-regression comparisons against that rule.
 
 Returns the swapped population pair (the solution is the returned `f_in`; callers
 rebind) and `stats = (; iters, phi_rel, field_rel, converged)`:
-- `iters`: iterations run;
-- `phi_rel`: `phi_rel` at the last check (`Inf` when no check ran);
-- `field_rel`: `NaN`, since the field is not checked;
+- `iters`: iterations run (an `Int`);
+- `phi_rel`, `field_rel`: their values at the last check;
 - `converged`: `true` when a check accepted. `false` after `max_iter` iterations
   without acceptance; no exception is raised, each driver raises its own error.
 
-On exit `phi` holds the zeroth moment of the returned `f_in` (unless no iteration
-ran). `ws` is an [`ehd_phi_ddf_workspace`](@ref) or any `NamedTuple` with the same
-fields; `p` is any object with the fields `eps`, `omega_U` and `nu_U`.
+On exit `phi` holds the zeroth moment of the returned `f_in`, and `ws.Ex`, `ws.Ey`
+its field. `ws` is an [`ehd_phi_ddf_workspace`](@ref) or any `NamedTuple` with the
+same fields; `p` is any object with the fields `eps`, `omega_U`, `nu_U` and
+`tau_U`. `max_iter` and `check_every` are integers of at least 1.
+
+Inlined, like [`ehd_phi_ddf_step!`](@ref), so that the caller's constant plate
+values reach the kernel launches.
 """
-function ehd_phi_ddf_solve!(f_in, f_out, phi, qfield, p, xbc::Symbol, ws;
-                            phi_tol, field_tol, max_iter, check_every, phi_bottom, phi_top)
+@inline function ehd_phi_ddf_solve!(f_in, f_out, phi, qfield, p, xbc::Symbol, ws;
+                                    phi_tol, field_tol, max_iter, check_every,
+                                    phi_bottom, phi_top)
     _ehd_phi_ddf_check_xbc(xbc)
-    check_every >= 1 ||
-        throw(ArgumentError("check_every must be at least 1, got $(check_every)."))
-    field_tol == Inf ||
-        throw(ArgumentError("field_tol must be Inf (no field check), got $(field_tol)."))
+    _ehd_phi_ddf_check_field_tol(field_tol)
+    (max_iter isa Integer && max_iter >= 1) ||
+        throw(ArgumentError("max_iter must be an integer of at least 1, got $(max_iter)."))
+    (check_every isa Integer && check_every >= 1) ||
+        throw(ArgumentError("check_every must be an integer of at least 1, got $(check_every)."))
     FT = eltype(phi)
     Nx, Ny = size(phi)
+    n_max = Int(max_iter)
+    field_check = isfinite(field_tol)
+    E_ref = FT(abs(phi_bottom - phi_top) / (Ny - 1))
+    (; phi_prev, Ex, Ey, Ex_prev, Ey_prev, diag, diag_host) = ws
+    compute_electric_field_2d!(Ex_prev, Ey_prev, f_in, p.tau_U)
     iters = 0
     phi_rel = FT(Inf)
+    field_rel = FT(Inf)
     converged = false
-    for iter in 1:max_iter
-        copyto!(ws.phi_prev, phi)
+    for iter in 1:n_max
+        copyto!(phi_prev, phi)
         f_in, f_out = ehd_phi_ddf_step!(f_in, f_out, phi, qfield, p, xbc;
                                         phi_bottom=phi_bottom, phi_top=phi_top)
         iters = iter
-        if iter % check_every == 0 || iter == max_iter
-            ehd_rel_change_2d!(ws.diag, phi, ws.phi_prev, Nx, Ny)
-            copyto!(ws.diag_host, ws.diag)
-            phi_rel = ws.diag_host[1]
-            if phi_rel <= phi_tol
+        on_cadence = iter % check_every == 0
+        if on_cadence || iter == n_max
+            ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
+            compute_electric_field_2d!(Ex, Ey, f_in, p.tau_U)
+            ehd_field_change_2d!(diag, Ex, Ey, Ex_prev, Ey_prev, E_ref, Nx, Ny, 2)
+            copyto!(diag_host, diag)
+            phi_rel = diag_host[1]
+            field_rel = diag_host[3]
+            accept = if field_check
+                on_cadence && diag_host[2] != 0 && diag_host[4] != 0 &&
+                    phi_rel <= phi_tol && field_rel <= field_tol
+            else
+                phi_rel <= phi_tol
+            end
+            if accept
                 converged = true
                 break
             end
+            copyto!(Ex_prev, Ex)
+            copyto!(Ey_prev, Ey)
         end
     end
-    return f_in, f_out, (; iters, phi_rel, field_rel=FT(NaN), converged)
+    return f_in, f_out, (; iters, phi_rel, field_rel, converged)
 end
 
-# The drivers' non-convergence error. A solve that ran no iteration
-# (`max_iter < 1`) has no failed check and raises nothing, as the drivers'
-# loops never did.
-function _ehd_phi_ddf_require_converged(stats, max_iter)
-    (stats.converged || stats.iters == 0) && return nothing
-    error("Electric potential solve did not converge within $(max_iter) iterations. " *
-          "Last relative change: $(stats.phi_rel).")
+# The drivers' non-convergence error. When the potential met `phi_tol` but the
+# field did not settle, the message also gives the last relative field change.
+function _ehd_phi_ddf_require_converged(stats, max_iter, phi_tol)
+    stats.converged && return nothing
+    msg = "Electric potential solve did not converge within $(max_iter) iterations. " *
+          "Last relative change: $(stats.phi_rel)."
+    if stats.phi_rel <= phi_tol
+        msg *= " Last relative field change: $(stats.field_rel)."
+    end
+    error(msg)
 end

@@ -18,12 +18,16 @@
 Everything the 2D electroconvection solver carries from one cycle to the next.
 
 - `config`: the configuration keywords exactly as the caller passed them
-  (`history_interval` converted to `Int`); `p`: the derived lattice parameters.
+  (`history_interval` converted to `Int`, and `phi_max_iter` too on the adaptive
+  DDF potential path); `p`: the derived lattice parameters.
 - Dynamic state: the three population pairs (`phi_f_*`, `q_f_*`, `f_*`), the force
   history `Fx_prev` / `Fy_prev`, `qfield`, and `phi` (under `phi_scheme = :direct`
   it lags the charge by one cycle and cannot be rebuilt from populations).
 - Derived buffers, overwritten before being read in every cycle: `Ex`, `Ey`, `rho`,
-  `ux`, `uy`, `Fx`, `Fy`, `phi_prev`, `q_prev`, `diag`, `diag_host`.
+  `ux`, `uy`, `Fx`, `Fy`, `phi_prev`, `q_prev`, `Ex_prev`, `Ey_prev`, `diag`,
+  `diag_host`. `diag` and `diag_host` have length 4: the adaptive potential solve
+  fills all four entries at each check (one device-to-host copy), the charge and
+  velocity diagnostics the first two.
 - Carried scalars: `phi_iters_last`, `phi_rel_last`, `q_rel_last`.
 - `cycle`: global cycle counter (cycles completed since `init_state`).
 - `umax_history` / `cycle_history`: histories sampled on the global counter.
@@ -57,6 +61,8 @@ mutable struct ECState{FT,A3,A2,A1,AB,P,PS,B,CFG} <: AbstractSimulationState
     Fy_prev::A2
     phi_prev::A2
     q_prev::A2
+    Ex_prev::A2
+    Ey_prev::A2
     diag::A1
     diag_host::Vector{FT}
     is_solid::AB
@@ -93,7 +99,7 @@ the electroconvection solver, at cycle 0. Same keywords and defaults as
 function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     Ma_E=1e-2, alpha=1e-4, delta_U=1.0,
                     gamma=0.3,
-                    phi_tol=1e-4, phi_max_iter=10000,
+                    phi_tol=1e-4, field_tol=1e-4, phi_max_iter=10000,
                     phi_substeps=nothing,
                     phi_scheme=:lbm,
                     charge_scheme=:regularized,
@@ -118,6 +124,10 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
     history_interval = Int(history_interval)
     history_interval > 0 ||
         throw(ArgumentError("history_interval must be positive."))
+    _ehd_phi_ddf_check_field_tol(field_tol)
+    if phi_scheme === :lbm && phi_substeps === nothing
+        phi_max_iter = _ehd_phi_ddf_max_iter(phi_max_iter)
+    end
 
     p = _ehd_ec_lattice_params(Ny, C, M, T, Ma_E, alpha, delta_U, gamma; FT=FT)
     p.tau <= FT(0.5) && error("NS relaxation time must be greater than 0.5.")
@@ -148,8 +158,10 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
     Fy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     phi_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     q_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    diag = KernelAbstractions.zeros(backend, FT, 2)
-    diag_host = Vector{FT}(undef, 2)
+    Ex_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Ey_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    diag = KernelAbstractions.zeros(backend, FT, 4)
+    diag_host = Vector{FT}(undef, 4)
     is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
 
     q_init = zeros(FT, Nx, Ny)
@@ -192,13 +204,15 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
     end
 
-    config = (; Nx, Ny, C, M, T, Ma_E, alpha, delta_U, gamma, phi_tol, phi_max_iter,
-              phi_substeps, phi_scheme, charge_scheme, ns_scheme, perturb_amplitude,
-              perturb_mode, force_projection, velocity_stop, history_interval)
+    config = (; Nx, Ny, C, M, T, Ma_E, alpha, delta_U, gamma, phi_tol, field_tol,
+              phi_max_iter, phi_substeps, phi_scheme, charge_scheme, ns_scheme,
+              perturb_amplitude, perturb_mode, force_projection, velocity_stop,
+              history_interval)
     return ECState(config, p, backend, A,
                    phi_f_in, phi_f_out, q_f_in, q_f_out, f_in, f_out,
                    phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev,
-                   phi_prev, q_prev, diag, diag_host, is_solid, poisson_setup,
+                   phi_prev, q_prev, Ex_prev, Ey_prev, diag, diag_host, is_solid,
+                   poisson_setup,
                    0, FT(Inf), FT(Inf), 0, FT[], Int[], UInt64(0), true)
 end
 
@@ -220,14 +234,14 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
     n < 0 && throw(ArgumentError("advance!: the number of cycles must be non-negative, got $n."))
     # Bindings that never change during a run. The population pairs and the carried
     # scalars are read and written through `s` because they do change.
-    (; Nx, Ny, phi_tol, phi_max_iter, phi_substeps, phi_scheme, charge_scheme,
+    (; Nx, Ny, phi_tol, field_tol, phi_max_iter, phi_substeps, phi_scheme, charge_scheme,
        ns_scheme, force_projection, velocity_stop, history_interval) = s.config
     p = s.p
     poisson_setup = s.poisson_setup
     (; phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev, phi_prev, q_prev,
-       diag, diag_host, is_solid) = s
+       Ex_prev, Ey_prev, diag, diag_host, is_solid) = s
     # The adaptive potential solve works in the state's own derived buffers.
-    phi_ws = (; phi_prev, diag, diag_host)
+    phi_ws = (; phi_prev, Ex, Ey, Ex_prev, Ey_prev, diag, diag_host)
 
     t0 = time_ns()
     for k in 1:n
@@ -243,11 +257,11 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
         elseif phi_substeps === nothing
             s.phi_f_in, s.phi_f_out, phi_stats = ehd_phi_ddf_solve!(
                 s.phi_f_in, s.phi_f_out, phi, qfield, p, :neumann, phi_ws;
-                phi_tol=phi_tol, field_tol=Inf, max_iter=phi_max_iter,
+                phi_tol=phi_tol, field_tol=field_tol, max_iter=phi_max_iter,
                 check_every=EHD_EC_PHI_CHECK_EVERY, phi_bottom=one(FT), phi_top=zero(FT))
             s.phi_iters_last = phi_stats.iters
             s.phi_rel_last = phi_stats.phi_rel
-            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter)
+            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter, phi_tol)
             compute_electric_field_2d!(Ex, Ey, s.phi_f_in, p.tau_U)
         else
             sample_cycle && copyto!(phi_prev, phi)
