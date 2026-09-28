@@ -27,6 +27,30 @@ uses the pseudo-time DDF Poisson solve, charge uses drift equilibrium
 `u + K*E`, and Navier-Stokes uses BGK + Guo forcing with force density `q*E`.
 Sidewalls are EHD-local zero-gradient scalar NEE and post-stream free-slip flow
 mirroring ported from Jiachen's MATLAB driver.
+
+Potential solve (`phi_scheme = :lbm`, `phi_substeps = nothing`): each cycle
+iterates the DDF until a check accepts, or raises after `phi_max_iter` iterations.
+Checks run every `Kraken.EHD_EC_PHI_CHECK_EVERY = 8` iterations. A check accepts
+when the potential changed by at most `phi_tol` (relative, over the last
+iteration) and the field by at most `field_tol` (largest change of `Ex` or `Ey`
+since the previous check, relative to `max(max|E|, 1/(Ny - 1))`).
+
+- `field_tol` (default `1e-4`, independent of `phi_tol`) bounds a change between
+  checks, not the error of `E`. Once the slow diffusive mode of the pseudo-time
+  iteration dominates, the relative error of `E` is about `κ * field_tol`, with
+  `κ ≈ H^2 / (m * gamma * π^2)`, `H = Ny - 1` and `m = 8` the cadence: about 5,
+  22 and 380 on 8x12, 16x24 and 60x96 at `gamma = 0.3`. For a relative error
+  `ε` on `E`, use `field_tol ≈ ε / κ`, or `phi_scheme = :direct`.
+- `field_tol = Inf` means no field check (the rule before issue #23); it is
+  reserved for non-regression comparisons against that rule.
+- `FT = Float32`: on grids with `H ≳ 100` the iteration stops changing at bit
+  level before `E` has converged, so the field change drops to 0 and the check
+  accepts whatever `field_tol` is. Use `phi_scheme = :direct` or `FT = Float64`
+  for an accurate `E`.
+
+`field_tol` is a Julia keyword only; `.krk` files do not set it. `init_state` rejects
+a negative or `NaN` `field_tol`, and on the adaptive path a `phi_max_iter` that is not
+an integral value of at least 1, with an `ArgumentError` before allocating.
 """
 function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     Ma_E=1e-2, alpha=1e-4, delta_U=1.0,

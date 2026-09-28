@@ -101,8 +101,8 @@ Both runs print the same history:
 
 ```
 cycle_history: [3, 6, 9, 11]
-umax_history:  [0.0012354541404731377, 0.0022273894325655933,
-                0.0026186856688318375, 0.0022223543026364994]
+umax_history:  [0.0012303241839259102, 0.00222354892427558,
+                0.0026139779313496406, 0.0022204371645721914]
 ```
 
 A history entry is recorded when the cycle count is a multiple of

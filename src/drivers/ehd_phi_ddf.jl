@@ -128,7 +128,11 @@ cadence and `field_rel <= field_tol`. A final check off cadence
 cannot accept. `phi_tol` and `field_tol` are compared as given, without
 conversion to the element type.
 
-`field_tol` bounds a change between checks, not the error of the field. `Inf`
+`field_tol` bounds a change between checks, not the error of the field. The
+slowest mode of the iteration, `sin(π y / H)` between the plates with `H = Ny - 1`,
+decays by `ρ ≈ 1 - p.nu_U * π^2 / H^2` per iteration; once it dominates, the
+relative error of `E` at acceptance is about `κ * field_rel`, with
+`κ = ρ^m / (1 - ρ^m) ≈ H^2 / (m * p.nu_U * π^2)` and `m = check_every`. `Inf`
 means no field check: the rule is then `phi_rel <= phi_tol` alone, at every check,
 which is the pre-#23 rule bit for bit (same exit iteration, same populations, same
 `phi_rel`); it is reserved for non-regression comparisons against that rule.

@@ -103,6 +103,35 @@ Steady state is declared when
 inner phi solve. Wall values are node-on-wall; interior DDF profiles are compared
 at the effective half-link samples `y*=(j-3/2)/(Ny-1)`, which is the grid where
 the faithful wall-node NEE charge update matches the diffusion-free base state.
+
+Potential solve (`phi_scheme = :lbm`): each step iterates the DDF until a check
+accepts, or raises after `phi_max_iter` iterations. The check runs after every
+iteration (`Kraken.EHD_HYDROSTATIC_PHI_CHECK_EVERY = 1`) and accepts when the
+potential changed by at most `phi_tol` (relative, over the last iteration) and the
+field by at most `field_tol` (largest change of `Ex` or `Ey` since the previous
+check, relative to `max(max|E|, 1/(Ny - 1))`).
+
+- `field_tol` (default `1e-4`, independent of `phi_tol`) bounds a change between
+  checks, not the error of `E`. Once the slow diffusive mode of the pseudo-time
+  iteration dominates, the relative error of `E` left by one solve is about
+  `κ * field_tol`, with `κ ≈ H^2 / (m * gamma * π^2)`, `H = Ny - 1`, `m = 1` the
+  cadence and `gamma = 0.3` fixed here (`tau_U = 1.4`): about 3000 at the default
+  `Ny = 96`. The first solve of the default run (cold start) is not yet in that
+  regime: its relative error is 3.4e-3 at `field_tol = 1e-4` and 6.3e-4 at `1e-6`
+  (0.29 with the rule before issue #23). Later steps start from the previous
+  populations; the default run ends with `err_E = 0.76 %` (relative L2 against
+  the analytic field), as before #23. For a relative error `ε` on `E` from one
+  solve, use `field_tol ≈ ε / κ`, or `phi_scheme = :direct`.
+- `field_tol = Inf` means no field check (the rule before issue #23); it is
+  reserved for non-regression comparisons against that rule.
+- `FT = Float32`: on grids with `H ≳ 100` the iteration stops changing at bit
+  level before `E` has converged, so the field change drops to 0 and the check
+  accepts whatever `field_tol` is. Use `phi_scheme = :direct` or `FT = Float64`
+  for an accurate `E`.
+
+`field_tol` is a Julia keyword only; `.krk` files do not set it. Throws an
+`ArgumentError` before allocating when `field_tol` is negative or `NaN`, or, with
+`phi_scheme = :lbm`, when `phi_max_iter` is not an integral value of at least 1.
 """
 function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
                                   alpha=1e-4, delta_U=1.0,

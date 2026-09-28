@@ -6,7 +6,8 @@
 # `run_electroconvection_2d` (src/drivers/ehd_ec.jl) is the one-shot wrapper over
 # these three verbs. The cycle body below is the body of the former monolithic
 # loop, in the same order of operations; `test/analytical/ehd_ec_split_parity_2d.jl`
-# compares it bit for bit against a frozen copy of that function. The DDF
+# compares it bit for bit against a frozen copy of that function, with
+# `field_tol = Inf` (the potential stopping rule before issue #23). The DDF
 # potential solve is shared with the hydrostatic driver (src/drivers/ehd_phi_ddf.jl).
 #
 # Export / restore to disk and parameter updates are not defined here yet.
@@ -19,7 +20,12 @@ Everything the 2D electroconvection solver carries from one cycle to the next.
 
 - `config`: the configuration keywords exactly as the caller passed them
   (`history_interval` converted to `Int`, and `phi_max_iter` too on the adaptive
-  DDF potential path); `p`: the derived lattice parameters.
+  DDF potential path); `p`: the derived lattice parameters. `field_tol` decides
+  where each potential solve stops, hence the trajectory: when `ECState` gains a
+  `Kraken.snapshot`, it belongs to the `identity` class like `phi_tol`
+  (`docs/platform/07-STATE-CONTRACT.md`, section 3). `snapshot` is not implemented
+  for `ECState`, so no electroconvection checkpoint from before issue #23 exists:
+  none lacks `field_tol`, and no identity default is needed for it.
 - Dynamic state: the three population pairs (`phi_f_*`, `q_f_*`, `f_*`), the force
   history `Fx_prev` / `Fy_prev`, `qfield`, and `phi` (under `phi_scheme = :direct`
   it lags the charge by one cycle and cannot be rebuilt from populations).
@@ -95,6 +101,23 @@ at_boundary(s::ECState) = s.at_boundary
 Validate the configuration, allocate on `backend` and set the initial conditions of
 the electroconvection solver, at cycle 0. Same keywords and defaults as
 `run_electroconvection_2d`, minus the run control (`max_cycles`, `target_t_star`).
+
+Adaptive potential solve (`phi_scheme = :lbm`, `phi_substeps = nothing`): checked
+every `Kraken.EHD_EC_PHI_CHECK_EVERY = 8` iterations; a check accepts when the
+relative one-iteration change of `phi` is at most `phi_tol` and the relative change
+of `E` since the previous check is at most `field_tol` (default `1e-4`, independent
+of `phi_tol`). `field_tol` bounds that change, not the error of `E`: once the slow
+diffusive mode of the pseudo-time iteration dominates, the relative error is about
+`κ * field_tol`, `κ ≈ (Ny - 1)^2 / (8 * gamma * π^2)` (about 5, 22 and 380 on
+8x12, 16x24 and 60x96 at `gamma = 0.3`). `field_tol = Inf` disables the field check
+(the rule before issue #23) and is reserved for non-regression comparisons. In
+`Float32` on grids with `Ny - 1 ≳ 100` the iteration freezes at bit level before
+`E` converges and the check accepts regardless of `field_tol`: use
+`phi_scheme = :direct` or `Float64` for an accurate `E`. See
+`run_electroconvection_2d` for details.
+
+Throws an `ArgumentError` before allocating when `field_tol` is negative or `NaN`,
+or, on the adaptive path, when `phi_max_iter` is not an integral value of at least 1.
 """
 function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     Ma_E=1e-2, alpha=1e-4, delta_U=1.0,
