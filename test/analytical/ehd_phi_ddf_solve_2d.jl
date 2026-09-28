@@ -114,8 +114,13 @@ const PUBLIC = (; Nx=11, Ny=H + 1, C=0.01, M=10.0, T=175.0, Ma_E=0.01, alpha=1e-
         # EC, public-driver case: the pre-#23 rule accepted at the first check
         # (iteration 8). The field has moved from zero there, so with the default
         # field_tol that check cannot accept and 8 iterations are not enough.
-        @test_throws ErrorException run_electroconvection_2d(; PUBLIC..., phi_tol=1e-4,
-                                                             phi_max_iter=8)
+        err_ec = thrown(() -> run_electroconvection_2d(; PUBLIC..., phi_tol=1e-4,
+                                                        phi_max_iter=8))
+        @test err_ec isa ErrorException
+        @test err_ec !== nothing && occursin("field", err_ec.msg)
+        # Positive control: the same case under the pre-#23 rule completes.
+        @test run_electroconvection_2d(; PUBLIC..., phi_tol=1e-4, phi_max_iter=8,
+                                       field_tol=Inf).steps == 1
     end
 
     @testset "function contract (cold :neumann capacitor)" begin

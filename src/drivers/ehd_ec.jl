@@ -47,6 +47,10 @@ since the previous check, relative to `max(max|E|, 1/(Ny - 1))`).
   level before `E` has converged, so the field change drops to 0 and the check
   accepts whatever `field_tol` is. Use `phi_scheme = :direct` or `FT = Float64`
   for an accurate `E`.
+- Keep `phi_max_iter` a multiple of 8. Otherwise the last check falls off the
+  cadence, and with a finite `field_tol` that check cannot accept: the solve
+  raises even when both reported changes are below their tolerances. With a
+  finite `field_tol`, `phi_max_iter < 8` never converges.
 
 `field_tol` is a Julia keyword only; `.krk` files do not set it. `init_state` rejects
 a negative or `NaN` `field_tol`, and on the adaptive path a `phi_max_iter` that is not

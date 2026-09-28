@@ -113,8 +113,9 @@ diffusive mode of the pseudo-time iteration dominates, the relative error is abo
 (the rule before issue #23) and is reserved for non-regression comparisons. In
 `Float32` on grids with `Ny - 1 ≳ 100` the iteration freezes at bit level before
 `E` converges and the check accepts regardless of `field_tol`: use
-`phi_scheme = :direct` or `Float64` for an accurate `E`. See
-`run_electroconvection_2d` for details.
+`phi_scheme = :direct` or `Float64` for an accurate `E`. Keep `phi_max_iter` a
+multiple of 8: with a finite `field_tol`, an off-cadence last check cannot accept.
+See `run_electroconvection_2d` for details.
 
 Throws an `ArgumentError` before allocating when `field_tol` is negative or `NaN`,
 or, on the adaptive path, when `phi_max_iter` is not an integral value of at least 1.

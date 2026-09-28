@@ -39,7 +39,7 @@ coarse electroconvection onset bracket.
 
 - Mutates potential populations `phi_f`, charge populations `q_f`, scalar moments `phi`/`q`, and electric fields `Ex`/`Ey` in place.
 - The coupled driver also mutates local NS populations, `rho/ux/uy`, and `Fx/Fy`.
-- Allocates per run in the driver: two ping-pong DDF arrays for each scalar, scalar moment arrays, electric-field arrays, the previous-check field `Ex_prev`/`Ey_prev` of the potential stopping rule (in `ECState`, or in the hydrostatic driver's `ehd_phi_ddf_workspace`), and small host copies for convergence tests and returned profiles. Nothing is allocated per check of the potential solve.
+- Allocates per run in the driver: two ping-pong DDF arrays for each scalar, scalar moment arrays, electric-field arrays, the previous-check field `Ex_prev`/`Ey_prev` of the potential stopping rule (in `ECState`, or in the hydrostatic driver's `ehd_phi_ddf_workspace`), and small host copies for convergence tests and returned profiles. No buffer is allocated per check of the potential solve (on the CPU backend, each check still pays the kernel-launch overhead of its three launches, about 350 B).
 - Does not mutate parser state, units registries, generic BC framework, or GPU-specific paths.
 
 ## Backend constraints
