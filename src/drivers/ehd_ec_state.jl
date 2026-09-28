@@ -6,7 +6,8 @@
 # `run_electroconvection_2d` (src/drivers/ehd_ec.jl) is the one-shot wrapper over
 # these three verbs. The cycle body below is the body of the former monolithic
 # loop, in the same order of operations; `test/analytical/ehd_ec_split_parity_2d.jl`
-# compares it bit for bit against a frozen copy of that function.
+# compares it bit for bit against a frozen copy of that function. The DDF
+# potential solve is shared with the hydrostatic driver (src/drivers/ehd_phi_ddf.jl).
 #
 # Export / restore to disk and parameter updates are not defined here yet.
 # ============================================================================
@@ -225,7 +226,8 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
     poisson_setup = s.poisson_setup
     (; phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev, phi_prev, q_prev,
        diag, diag_host, is_solid) = s
-    phi_check_every = 8
+    # The adaptive potential solve works in the state's own derived buffers.
+    phi_ws = (; phi_prev, diag, diag_host)
 
     t0 = time_ns()
     for k in 1:n
@@ -239,34 +241,20 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
             s.phi_iters_last = 1
             s.phi_rel_last = zero(FT)
         elseif phi_substeps === nothing
-            for iter in 1:phi_max_iter
-                copyto!(phi_prev, phi)
-                collide_electric_potential_2d!(s.phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
-                stream_wall_x_wall_y_2d!(s.phi_f_out, s.phi_f_in, Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                apply_phi_nee_box_2d!(s.phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                s.phi_f_in, s.phi_f_out = s.phi_f_out, s.phi_f_in
-                s.phi_iters_last = iter
-                if iter % phi_check_every == 0 || iter == phi_max_iter
-                    ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
-                    copyto!(diag_host, diag)
-                    s.phi_rel_last = diag_host[1]
-                    s.phi_rel_last <= phi_tol && break
-                    iter == phi_max_iter &&
-                        error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(s.phi_rel_last).")
-                end
-            end
+            s.phi_f_in, s.phi_f_out, phi_stats = ehd_phi_ddf_solve!(
+                s.phi_f_in, s.phi_f_out, phi, qfield, p, :neumann, phi_ws;
+                phi_tol=phi_tol, field_tol=Inf, max_iter=phi_max_iter,
+                check_every=EHD_EC_PHI_CHECK_EVERY, phi_bottom=one(FT), phi_top=zero(FT))
+            s.phi_iters_last = phi_stats.iters
+            s.phi_rel_last = phi_stats.phi_rel
+            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter)
             compute_electric_field_2d!(Ex, Ey, s.phi_f_in, p.tau_U)
         else
             sample_cycle && copyto!(phi_prev, phi)
             for _ in 1:Int(phi_substeps)
-                collide_electric_potential_2d!(s.phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
-                stream_wall_x_wall_y_2d!(s.phi_f_out, s.phi_f_in, Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                apply_phi_nee_box_2d!(s.phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                s.phi_f_in, s.phi_f_out = s.phi_f_out, s.phi_f_in
+                s.phi_f_in, s.phi_f_out = ehd_phi_ddf_step!(
+                    s.phi_f_in, s.phi_f_out, phi, qfield, p, :neumann;
+                    phi_bottom=one(FT), phi_top=zero(FT))
             end
             if sample_cycle
                 ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)

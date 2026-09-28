@@ -141,7 +141,7 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
     q_f_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     phi = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     qfield = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    phi_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    phi_ws = ehd_phi_ddf_workspace(phi)
     q_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     diag = KernelAbstractions.zeros(backend, FT, 2)
     diag_host = Vector{FT}(undef, 2)
@@ -177,22 +177,14 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
             phi_iters_last = 1
             phi_rel_last = zero(FT)
         else
-            for iter in 1:phi_max_iter
-                copyto!(phi_prev, phi)
-                collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
-                stream_periodic_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
-                compute_ehd_scalar_2d!(phi, phi_f_out)
-                apply_phi_nee_walls_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
-                compute_ehd_scalar_2d!(phi, phi_f_out)
-                ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
-                copyto!(diag_host, diag)
-                phi_rel_last = diag_host[1]
-                phi_f_in, phi_f_out = phi_f_out, phi_f_in
-                phi_iters_last = iter
-                phi_rel_last <= phi_tol && break
-                iter == phi_max_iter &&
-                    error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(phi_rel_last).")
-            end
+            phi_f_in, phi_f_out, phi_stats = ehd_phi_ddf_solve!(
+                phi_f_in, phi_f_out, phi, qfield, p, :periodic, phi_ws;
+                phi_tol=phi_tol, field_tol=Inf, max_iter=phi_max_iter,
+                check_every=EHD_HYDROSTATIC_PHI_CHECK_EVERY,
+                phi_bottom=one(FT), phi_top=zero(FT))
+            phi_iters_last = phi_stats.iters
+            phi_rel_last = phi_stats.phi_rel
+            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter)
             compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
         end
 
