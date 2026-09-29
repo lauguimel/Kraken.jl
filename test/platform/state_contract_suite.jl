@@ -119,9 +119,13 @@ Conformance suite of the state contract for client `S`.
 - `negative_controls`: for every stored field, check that perturbing it before the
   restore changes the final state, i.e. that the comparison has teeth and that the
   field is not dead weight. Disable only with a written reason.
+- `parameter_snapshot`: optional `(snapshot, name, value) -> snapshot` callback
+  that applies the client's public update verb and exports coherent derived values
+  and parameter provenance. Default: change only the parameter dictionary (toy).
 """
 function run_state_contract_suite(::Type{S}; make_state, restore_kwargs, interrupt!, tmpdir,
                                   n_first::Int=7, n_second::Int=13,
+                                  parameter_snapshot=nothing,
                                   negative_controls::Bool=true) where {S<:AbstractSimulationState}
     n_total = n_first + n_second
     @testset "state contract: $S" begin
@@ -250,7 +254,12 @@ function run_state_contract_suite(::Type{S}; make_state, restore_kwargs, interru
             for key in keys(mid.parameters)
                 parameters = deepcopy(mid.parameters)
                 parameters[key] = _nudged(parameters[key])
-                @test restore_state(S, tampered(mid; parameters=parameters); restore_kwargs...) isa S
+                # Updating only T while retaining old derived values/provenance
+                # would create a corrupt checkpoint, not a legitimate change.
+                changed = parameter_snapshot === nothing ? tampered(mid; parameters=parameters) :
+                          parameter_snapshot(mid, Symbol(key), parameters[key])
+                @test changed.parameters[key] == parameters[key]
+                @test restore_state(S, changed; restore_kwargs...) isa S
             end
         end
     end
