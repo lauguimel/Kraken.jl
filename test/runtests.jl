@@ -233,6 +233,13 @@ end
     include("test_fvfd_giesekus_3d.jl")
     include("test_fvfd_ptt_3d.jl")
     include("test_fvfd_velocity_gradient_3d.jl")
+    # Known defects of the extensional driver (@test_broken), on a 12x12x4 box
+    # for 2 to 20 steps, so they run on the pull-request path and a fix shows
+    # its Unexpected Pass there:
+    # issue #ISSUE-READBACK (post-collision velocity read-back) and
+    # issue #ISSUE-ZPLANES (Zou-He faces skip k = 1 and k = Nz).
+    include("analytical/ve3d_ext_velocity_readback.jl")
+    include("analytical/ve3d_ext_zouhe_zplanes.jl")
     # Full 3D flow validations: these must reach a developed state for the
     # analytical comparison to mean anything, so they cannot be shrunk without
     # loosening their gates. Measured 2026-09-16, they are 52% of the non-AD
