@@ -284,6 +284,8 @@ end # module
 #                        known accuracy of the analytic geometry seed, C2 of the
 #                        sibling suite, amplified by a ~20x cancellation)
 #   lambda  rel 9.9e-7,  Fx rel 1.4e-7,  nu_s rel 9.1e-7
+#   After the TRT Guo source fix (#67), macOS arm64, Julia 1.11.9, 2026-10-08:
+#   R rel 1.05e-3; lambda 8.7e-7, Fx 1.2e-7, nu_s 1.17e-6 (gates unchanged)
 #   transpose residual 8.5e-16 / 6.4e-16;  API vs inline gradient 1.9e-15 / 6.4e-16
 # The miscompiled reduced construct of #41 gives a 2.3e-2 gradient error or NaN.
 # Directions 2-4 depend on the reverse-mode adjoint only through lambda, so
