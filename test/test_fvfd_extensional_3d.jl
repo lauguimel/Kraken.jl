@@ -140,7 +140,7 @@ end
         # z-periodic. Threading periodic_z=true into the Guo solvent step (z-wrap
         # variant of PullHalfwayBB_3D) closes it: no calibration.
         # Measured 2026-10-08 (CPU, Float64, Julia 1.11.9), after the TRT Guo
-        # forcing fix (issue #ISSUE-GUO: odd part of the Guo source scaled by
+        # forcing fix (issue #67: odd part of the Guo source scaled by
         # 1 - s_minus/2): grad_x = 0.0050362 (+0.72 % over ε̇ = 0.005),
         # grad_y = -0.0050172 (+0.34 %), C_xx rel-err 0.18 %, C_yy rel-err 0.11 %
         # against the NOMINAL-rate fixed point. Against the fixed point at the

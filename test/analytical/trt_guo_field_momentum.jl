@@ -1,5 +1,5 @@
 # Bug report: the TRT Guo-field collision bricks inject g*F instead of F per
-# step, with g = 1 + (s_minus - s_plus)/2 (issue #ISSUE-GUO).
+# step, with g = 1 + (s_minus - s_plus)/2 (issue #67).
 #
 # Case: one collision of a uniform equilibrium state (rho = 1, u0 != 0) under a
 # uniform body-force field F, read at an interior cell (no wall link, no cut
@@ -207,7 +207,7 @@ end
 
 # ---------------------------------------------------------------------------
 # Analytic checks of the even and odd parts of the TRT Guo source, required by
-# the design review of the fix (issue #ISSUE-GUO).
+# the design review of the fix (issue #67).
 #
 # Notation. One collision at the centre of a uniform patch, interior cell, no
 # cut link, so the populations the cell pulls are its own (f_pre). With

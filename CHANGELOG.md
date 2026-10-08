@@ -9,7 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Electroconvection `.krk` cases now apply paired `Boundary west wall` / `Boundary east wall` as stationary no-slip sidewalls instead of ignoring them; omitted sides retain free slip. Explicit non-lateral `Boundary` declarations are rejected because electrode/plate conditions are built into this driver.
 
 ### Fixed
-- **TRT Guo forcing injects exactly `F` per step** (#ISSUE-GUO). The TRT collision
+- **TRT Guo forcing injects exactly `F` per step** (#67). The TRT collision
   bricks with a per-cell Guo force (`CollideTRTDirectGuoField`,
   `CollideTRTDirectGuoField_3D`) scaled the whole Guo source by `1 − s₊/2`. The odd
   part of the source, which carries the momentum, relaxes at `s₋`, so each step added
