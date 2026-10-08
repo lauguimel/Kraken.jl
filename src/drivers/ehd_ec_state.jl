@@ -102,11 +102,21 @@ Validate the configuration, allocate on `backend` and set the initial conditions
 the electroconvection solver, at cycle 0. Same keywords and defaults as
 `run_electroconvection_2d`, minus the run control (`max_cycles`, `target_t_star`).
 
+`sidewall_bc` selects `:free_slip` (default) or stationary `:no_slip` flow walls.
+It is fixed simulation identity, not run control or a continuation parameter.
+The future EC checkpoint client must store/compare this configuration key on
+restore; EC snapshot/restore is not implemented by this sidewall capability.
+
 Adaptive potential solve (`phi_scheme = :lbm`, `phi_substeps = nothing`): checked
 every `Kraken.EHD_EC_PHI_CHECK_EVERY = 8` iterations; a check accepts when the
-relative one-iteration change of `phi` is at most `phi_tol` and the relative change
-of `E` since the previous check is at most `field_tol` (default `1e-4`, independent
-of `phi_tol`). `field_tol` bounds that change, not the error of `E`: once the slow
+relative one-iteration change of `phi` is at most `phi_tol` and the field change is
+at most `field_tol` (default `1e-4`, independent of `phi_tol`). The field change is
+the change of `E` since the previous check, relative to `max(max|E|, E_ref)`, with
+`E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+public drivers). The applied field is a minimum scale: it applies while `E` is below
+it everywhere, as at the first checks of a cold start, where `E` starts at 0. A
+`floatmin` guard avoids a division by zero when the plates are at the same potential
+and the field is zero. `field_tol` bounds that change, not the error of `E`: once the slow
 diffusive mode of the pseudo-time iteration dominates, the relative error is about
 `κ * field_tol`, `κ ≈ (Ny - 1)^2 / (8 * gamma * π^2)` (about 5, 22 and 380 on
 8x12, 16x24 and 60x96 at `gamma = 0.3`). `field_tol = Inf` disables the field check
@@ -128,6 +138,7 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     phi_scheme=:lbm,
                     charge_scheme=:regularized,
                     ns_scheme=:bgk,
+                    sidewall_bc=:free_slip,
                     perturb_amplitude=1e-4,
                     perturb_mode=1,
                     force_projection=:none,
@@ -141,6 +152,8 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         throw(ArgumentError("charge_scheme must be :srt or :regularized."))
     ns_scheme in (:bgk, :mrt) ||
         throw(ArgumentError("ns_scheme must be :bgk or :mrt."))
+    sidewall_bc in (:free_slip, :no_slip) ||
+        throw(ArgumentError("sidewall_bc must be :free_slip or :no_slip."))
     force_projection in (:none, :xy, :y) ||
         throw(ArgumentError("force_projection must be :none, :xy, or :y."))
     phi_scheme in (:lbm, :direct) ||
@@ -230,8 +243,8 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
 
     config = (; Nx, Ny, C, M, T, Ma_E, alpha, delta_U, gamma, phi_tol, field_tol,
               phi_max_iter, phi_substeps, phi_scheme, charge_scheme, ns_scheme,
-              perturb_amplitude, perturb_mode, force_projection, velocity_stop,
-              history_interval)
+              sidewall_bc, perturb_amplitude, perturb_mode, force_projection,
+              velocity_stop, history_interval)
     return ECState(config, p, backend, A,
                    phi_f_in, phi_f_out, q_f_in, q_f_out, f_in, f_out,
                    phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev,
@@ -259,7 +272,7 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
     # Bindings that never change during a run. The population pairs and the carried
     # scalars are read and written through `s` because they do change.
     (; Nx, Ny, phi_tol, field_tol, phi_max_iter, phi_substeps, phi_scheme, charge_scheme,
-       ns_scheme, force_projection, velocity_stop, history_interval) = s.config
+       ns_scheme, sidewall_bc, force_projection, velocity_stop, history_interval) = s.config
     p = s.p
     poisson_setup = s.poisson_setup
     (; phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev, phi_prev, q_prev,
@@ -304,7 +317,7 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
         end
 
         compute_macroscopic_guo_field_2d!(rho, ux, uy, s.f_in, Fx_prev, Fy_prev, Nx, Ny)
-        enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+        sidewall_bc === :free_slip && enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
 
         sample_cycle && copyto!(q_prev, qfield)
         if charge_scheme == :srt
@@ -332,12 +345,16 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
             ehd_collide_mrt_2d!(s.f_in, Fx, Fy, is_solid, p.nu)
         end
         stream_wall_x_wall_y_2d!(s.f_out, s.f_in, Nx, Ny)
-        apply_free_slip_sidewalls_2d!(s.f_out, Nx, Ny)
+        if sidewall_bc === :free_slip
+            apply_free_slip_sidewalls_2d!(s.f_out, Nx, Ny)
+        else
+            apply_no_slip_sidewalls_2d!(s.f_out, Fx, Fy, Nx, Ny)
+        end
         s.f_in, s.f_out = s.f_out, s.f_in
 
         if sample_cycle
             compute_macroscopic_guo_field_2d!(rho, ux, uy, s.f_in, Fx, Fy, Nx, Ny)
-            enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
+            sidewall_bc === :free_slip && enforce_free_side_macros_2d!(ux, uy, Nx, Ny)
             ehd_maxspeed_2d!(diag, ux, uy, Nx, Ny)
             copyto!(diag_host, diag)
             umax = diag_host[1]
@@ -362,6 +379,10 @@ end
 Host-side result at the current cycle: the `NamedTuple` `run_electroconvection_2d`
 returns, wrapped in an [`ECSolution`](@ref).
 
+For legacy output parity, `result.sidewall_bc` reports `:free_slip_ported` for
+the input `:free_slip` (and `:no_slip` unchanged); checkpoint identity must use
+the canonical `config.sidewall_bc`, not this legacy result label.
+
 The derived buffers `qfield`, `phi` (`:lbm` only), `Ex`, `Ey`, `rho`, `ux`, `uy` are
 recomputed in place from the populations, as the one-shot driver did after its
 loop. `qfield`, `phi`, `Ex`, `Ey` get the values they already hold; `rho`, `ux`,
@@ -383,7 +404,7 @@ function solution(s::ECState)
         compute_electric_field_2d!(Ex, Ey, s.phi_f_in, p.tau_U)
     end
     compute_macroscopic_guo_field_2d!(rho, ux, uy, s.f_in, Fx, Fy, c.Nx, c.Ny)
-    enforce_free_side_macros_2d!(ux, uy, c.Nx, c.Ny)
+    c.sidewall_bc === :free_slip && enforce_free_side_macros_2d!(ux, uy, c.Nx, c.Ny)
 
     steps_done = s.cycle
     result = (ux=Array(ux), uy=Array(uy), rho=Array(rho), q=Array(qfield),
@@ -398,7 +419,7 @@ function solution(s::ECState)
               phi_iters_last=s.phi_iters_last, phi_rel_last=s.phi_rel_last,
               q_rel_change=s.q_rel_last, params=p,
               ns_collision=(c.ns_scheme == :bgk ? :bgk_guo : :mrt_guo_moment),
-              sidewall_bc=:free_slip_ported,
+              sidewall_bc=(c.sidewall_bc === :free_slip ? :free_slip_ported : :no_slip),
               loop_ms_per_step=steps_done > 0 ? s.loop_ns / 1e6 / steps_done : 0.0)
     return ECSolution(result)
 end

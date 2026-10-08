@@ -25,15 +25,24 @@ end
 Run a CPU-oriented coupled EHD electroconvection canary. The electric potential
 uses the pseudo-time DDF Poisson solve, charge uses drift equilibrium
 `u + K*E`, and Navier-Stokes uses BGK + Guo forcing with force density `q*E`.
-Sidewalls are EHD-local zero-gradient scalar NEE and post-stream free-slip flow
-mirroring ported from Jiachen's MATLAB driver.
+Electrical sidewalls retain EHD-local zero-gradient scalar NEE. Flow sidewalls
+select `sidewall_bc=:free_slip` (default, preserving the existing mirroring) or
+`:no_slip` (stationary on-node walls at i=1,Nx, separation Nx-1). Plate rows and
+corners retain their existing treatment in both modes.
 
 Potential solve (`phi_scheme = :lbm`, `phi_substeps = nothing`): each cycle
 iterates the DDF until a check accepts, or raises after `phi_max_iter` iterations.
 Checks run every `Kraken.EHD_EC_PHI_CHECK_EVERY = 8` iterations. A check accepts
 when the potential changed by at most `phi_tol` (relative, over the last
-iteration) and the field by at most `field_tol` (largest change of `Ex` or `Ey`
-since the previous check, relative to `max(max|E|, 1/(Ny - 1))`).
+iteration) and the field by at most `field_tol`. The field change is the change
+of `E` since the previous check, relative to `max(max|E|, E_ref)`, with
+`E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+public drivers). The applied field is a minimum scale: it applies while `E` is
+below it everywhere, as at the first checks of a cold start, where `E` starts at
+0. A `floatmin` guard avoids a division by zero when the plates are at the same
+potential and the field is zero. Measured on 60x96 over 20 cycles (2026-10-08,
+Float64 and Float32): `max|E| / E_ref` is 1.484 at every accepting check, so the
+floor never decides there.
 
 - `field_tol` (default `1e-4`, independent of `phi_tol`) bounds a change between
   checks, not the error of `E`. Once the slow diffusive mode of the pseudo-time
@@ -65,6 +74,7 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                                     phi_scheme=:lbm,
                                     charge_scheme=:regularized,
                                     ns_scheme=:bgk,
+                                    sidewall_bc=:free_slip,
                                     perturb_amplitude=1e-4,
                                     perturb_mode=1,
                                     force_projection=:none,
@@ -78,7 +88,8 @@ function run_electroconvection_2d(; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                    delta_U=delta_U, gamma=gamma, phi_tol=phi_tol, field_tol=field_tol,
                    phi_max_iter=phi_max_iter, phi_substeps=phi_substeps,
                    phi_scheme=phi_scheme, charge_scheme=charge_scheme,
-                   ns_scheme=ns_scheme, perturb_amplitude=perturb_amplitude,
+                   ns_scheme=ns_scheme, sidewall_bc=sidewall_bc,
+                   perturb_amplitude=perturb_amplitude,
                    perturb_mode=perturb_mode, force_projection=force_projection,
                    velocity_stop=velocity_stop, history_interval=history_interval,
                    backend=backend, FT=FT)

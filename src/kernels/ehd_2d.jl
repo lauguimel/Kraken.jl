@@ -120,8 +120,14 @@ by a single work item like `ehd_rel_change_2d!`:
   maxima run over every node and both components;
 - `out[offset + 2]` is `1` when every component of `E` is finite, `0` otherwise.
 
-`E_ref` (converted to the element type) keeps the ratio meaningful where the field
-itself is near zero. No allocation beyond the kernel launch.
+This is the change of `E` since the previous check, relative to `max(max|E|, E_ref)`,
+with `E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+public drivers). The applied field is a minimum scale: it applies while `E` is below
+it everywhere, as at the first checks of a cold start, where `E` starts at 0. A
+`floatmin` guard avoids a division by zero when the plates are at the same potential
+and the field is zero. `E_ref` is converted to the element type. The caller computes
+it; measured values of `max|E| / E_ref` at acceptance are in the docstring of
+`ehd_phi_ddf_solve!`. No allocation beyond the kernel launch.
 """
 function ehd_field_change_2d!(out, Ex, Ey, Ex_prev, Ey_prev, E_ref, Nx, Ny, offset=0)
     backend = KernelAbstractions.get_backend(Ex)

@@ -74,6 +74,11 @@ end
 # when r^m < 0 (r < 0, m odd) the factor |1 - r^m| = 1 + rho outweighs a_n <= 1 + e.
 # For m = 1 this bound is weak (1e-4 at tau_U = 2), which is why it is asserted
 # instead of FIELD_GATE.
+# Valid for the tested mode only: exact phi from the start, with a single relaxing
+# first-moment mode contracting by r per iteration. It is not a bound for a general
+# start, where the slow diffusive mode of the iteration (contraction about
+# 1 - nu_U * pi^2 / H^2 per iteration) dominates and the error is about
+# kappa * field_tol with kappa >> 1; that general case is issue #63.
 stopping_bound(tau, m, field_tol) = (rho = abs(1 - 1 / tau)^m; field_tol * rho / (1 - rho))
 # Roundoff floor: E* is H times a first moment of O(1) populations carrying unit
 # roundoff eps(FT), so its noise is a few eps(FT) * H; 16 is the margin. For Float32
@@ -278,8 +283,12 @@ const PUBLIC = (; Nx=11, Ny=H + 1, C=0.01, M=10.0, T=175.0, Ma_E=0.01, alpha=1e-
         # since the cold start has the exact potential; the field error there is
         # |r|^m = 2^-m, 0.5 and 3.9e-3, above the gate. The default field_tol must
         # bring it under. Not every case of the production testset discriminates:
-        # Float32 :neumann tau_U = 0.8 leaves 0.25^8 = 1.5e-5 under the old rule,
-        # below the 3.05e-5 roundoff floor, so the gate cannot separate the rules there.
+        # Float32 :neumann tau_U = 0.8 (|r|^8 = 0.25^8 = 1.5e-5): the old rule leaves
+        # an error of 1.72e-5 (measured 2026-10-08, CPU), below the gate 3.05e-5, which
+        # is the roundoff floor there (the stopping-bound term is 1.5e-9). The roundoff
+        # floor dominates, so the gate cannot separate the rules in that case, and the
+        # production testset above passes it under either rule. This is a limit of the
+        # Float32 test at that tau_U, not of the stopping rule.
         FT = Float32
         tau = 2.0
         m = check_every(xbc)

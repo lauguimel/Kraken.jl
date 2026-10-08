@@ -126,7 +126,7 @@ field_difference(a, b) = H * max(maximum(abs.(a.Ex .- b.Ex)),
         # Still broken after the #23 repair, for another reason: the remaining
         # default-settings error (~3.5e-5) comes from the slow diffusive mode of
         # the pseudo-time Poisson iteration. phi_tol and field_tol bound an
-        # increment between checks, not the error. Tracked in issue #SLOWMODE.
+        # increment between checks, not the error. Tracked in issue #63.
         # test/analytical/ehd_phi_ddf_solve_2d.jl runs this case with a tighter
         # field_tol and meets the gate.
         @test_broken field_difference(adaptive, reference) <= FIELD_GATE

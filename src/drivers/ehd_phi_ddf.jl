@@ -116,11 +116,22 @@ The rule is evaluated at iteration `iter` when `iter % check_every == 0` (on
 cadence) or `iter == max_iter`, with one device-to-host copy per check. It measures
 - `phi_rel = max|phi - phi_prev| / max|phi|`, the relative change of the zeroth
   moment over the last iteration (`ehd_rel_change_2d!`);
-- `field_rel = max|E - E_prev| / max(max|E|, E_ref)`, the relative change of the
-  field rebuilt from the first moment (`compute_electric_field_2d!`) since the
-  previous check, or since entry at the first check (`ehd_field_change_2d!`).
-  Maxima run over all nodes and both components;
-  `E_ref = |phi_bottom - phi_top| / (Ny - 1)`.
+- `field_rel = max|E - E_prev| / max(max|E|, E_ref)` (`ehd_field_change_2d!`), for
+  the field rebuilt from the first moment (`compute_electric_field_2d!`): the change
+  of `E` since the previous check, relative to `max(max|E|, E_ref)`, with
+  `E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+  public drivers). The applied field is a minimum scale: it applies while `E` is
+  below it everywhere, as at the first checks of a cold start, where `E` starts at
+  0. A `floatmin` guard avoids a division by zero when the plates are at the same
+  potential and the field is zero. At the first check the previous field is the
+  one on entry. Maxima run over all nodes and both components.
+
+  Measured on 2026-10-08 at every accepting check: `max|E| / E_ref` is 1.484 to
+  1.495 in the default hydrostatic driver and in 60x96 electroconvection over 20
+  cycles (Float64 and Float32), and 0.99999999994 to 1.0043 on the 16-cell
+  capacitors of `test/analytical/ES-002-STOP.jl`. At each of these acceptances,
+  `max|E - E_prev| / max|E| <= field_tol` held as well, so the floor did not
+  change where any of these solves stopped.
 
 It accepts when `phi_rel <= phi_tol`, both moments are finite, the check is on
 cadence and `field_rel <= field_tol`. A final check off cadence

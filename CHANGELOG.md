@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- Electroconvection `.krk` cases now apply paired `Boundary west wall` / `Boundary east wall` as stationary no-slip sidewalls instead of ignoring them; omitted sides retain free slip. Explicit non-lateral `Boundary` declarations are rejected because electrode/plate conditions are built into this driver.
+
 ### Fixed
 - **Corrected the 0.5.0 notes** (#52). The four log-conformation closures run on the
   FVFD path only; the LBM-CDE drivers (sphere, Couette, Poiseuille) accept Oldroyd-B
@@ -39,10 +42,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   populations, which relaxes on its own: a cold start could return an unconverged field
   (`E*` errors of 1.5e-5 to 3.9e-3 on the ES-002 capacitors at the electroconvection
   check cadence, 0.25 to 0.5 at the hydrostatic one; relative error 0.29 on the first
-  potential solve of the default hydrostatic run). A check now also requires the largest
-  change of `Ex` or `Ey` since the previous check, relative to `max(max|E|, 1/(Ny - 1))`,
-  to be at most the new keyword `field_tol` (default `1e-4`, independent of `phi_tol`)
-  of `run_electroconvection_2d`, `init_state(ECState; ...)` and `run_ehd_hydrostatic_2d`.
+  potential solve of the default hydrostatic run). A check now also requires the field
+  change to be at most the new keyword `field_tol` (default `1e-4`, independent of
+  `phi_tol`) of `run_electroconvection_2d`, `init_state(ECState; ...)` and
+  `run_ehd_hydrostatic_2d`: the change of `E` since the previous check, relative to
+  `max(max|E|, E_ref)`, with `E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field
+  (`1/(Ny − 1)` in all public drivers). The applied field is a minimum scale: it applies
+  while `E` is below it everywhere, as at the first checks of a cold start, where `E`
+  starts at 0. A `floatmin` guard avoids a division by zero when the plates are at the
+  same potential and the field is zero. Measured at every accepting check: `max|E| / E_ref`
+  is 1.484 to 1.495 in the default hydrostatic run and in 60x96 electroconvection over
+  20 cycles (Float64 and Float32), 0.99999999994 to 1.0043 on the ES-002 capacitors; at
+  each of these acceptances the change relative to `max|E|` alone also met `field_tol`.
   It is a Julia keyword only, not a `.krk` one. Checks run every 8 iterations in the
   electroconvection solver and after every iteration in the hydrostatic driver
   (`src/drivers/ehd_phi_ddf.jl`). `field_tol = Inf` restores the previous rule bit for
@@ -64,7 +75,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   relative error is about `κ * field_tol`, `κ ≈ (Ny - 1)^2 / (m * gamma * π^2)` with `m`
   the check cadence: about 5, 22 and 380 on 8x12, 16x24 and 60x96 at `gamma = 0.3`. The
   ES-002 public-driver case keeps an `E*` error of 3.5e-5 at default settings and stays
-  `@test_broken` (#SLOWMODE); with `field_tol = 1e-8` it meets the 1e-6 gate. In Float32,
+  `@test_broken` (#63); with `field_tol = 1e-8` it meets the 1e-6 gate. In Float32,
   on grids with `Ny - 1 ≳ 100`, the iteration freezes at bit level before `E` converges
   and the check accepts whatever `field_tol` is: use `phi_scheme = :direct` or Float64
   for an accurate `E`.

@@ -108,8 +108,15 @@ Potential solve (`phi_scheme = :lbm`): each step iterates the DDF until a check
 accepts, or raises after `phi_max_iter` iterations. The check runs after every
 iteration (`Kraken.EHD_HYDROSTATIC_PHI_CHECK_EVERY = 1`) and accepts when the
 potential changed by at most `phi_tol` (relative, over the last iteration) and the
-field by at most `field_tol` (largest change of `Ex` or `Ey` since the previous
-check, relative to `max(max|E|, 1/(Ny - 1))`).
+field by at most `field_tol`. The field change is the change of `E` since the
+previous check, relative to `max(max|E|, E_ref)`, with
+`E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+public drivers). The applied field is a minimum scale: it applies while `E` is
+below it everywhere, as at the first checks of a cold start, where `E` starts at 0.
+A `floatmin` guard avoids a division by zero when the plates are at the same
+potential and the field is zero. Measured on the default run (2026-10-08, Float64
+and Float32): `max|E| / E_ref` is 1.484 to 1.495 at every accepting check, so the
+floor never decides there.
 
 - `field_tol` (default `1e-4`, independent of `phi_tol`) bounds a change between
   checks, not the error of `E`. Once the slow diffusive mode of the pseudo-time
