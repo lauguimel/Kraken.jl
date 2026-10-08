@@ -4,7 +4,9 @@
 #   2. wiring guards: the drivers' defaults switch the field check on;
 #   3. the function contract and the drivers' entry validation;
 #   4. cold capacitors at production tolerances (CPU Float64 and Float32) against a
-#      bound derived before any run.
+#      bound derived before any run;
+#   5. an identically zero field (E_ref = 0): no division by zero, the rule accepts;
+#   6. red/green: the Float32 gate of 4. rejects the pre-#23 rule's field.
 # CPU only: GPU acceptance waits for the corner-race issue (separate ticket).
 # Every gate below was written, with its rationale, before the file was first run.
 # Run: julia --project test/analytical/ehd_phi_ddf_solve_2d.jl
@@ -38,6 +40,16 @@ function solve(c, xbc; kwargs...)
     FT = eltype(c.phi)
     return Kraken.ehd_phi_ddf_solve!(c.f, c.g, c.phi, c.q, c.p, xbc, c.ws; kwargs...,
                                      phi_bottom=one(FT), phi_top=zero(FT))
+end
+
+# Zero applied potential difference, no charge: both plates at 0, f = 0. The drivers
+# fix the plates at 1 and 0, so this state is reachable only through the solve itself.
+function zero_capacitor(xbc, tau, FT)
+    c = cold_capacitor(xbc, tau, FT)
+    fill!(c.f, zero(FT))
+    fill!(c.g, zero(FT))
+    fill!(c.phi, zero(FT))
+    return c
 end
 
 function field(f, tau_U)
@@ -219,6 +231,72 @@ const PUBLIC = (; Nx=11, Ny=H + 1, C=0.01, M=10.0, T=175.0, Ma_E=0.01, alpha=1e-
         @test all(isfinite, f)
         @test error_star <= gate
         @info "Cold capacitor, production tolerances" FT xbc tau iterations=st.iters phi_rel=st.phi_rel field_rel=st.field_rel error_star gate
+    end
+
+    @testset "identically zero field (E_ref = 0), $FT $xbc" for FT in (Float64, Float32),
+            xbc in (:neumann, :periodic)
+        # Both plates at 0, q = 0, f = 0. One step maps this state to itself exactly:
+        # the collision relaxes towards feq(0) = 0 with a zero source, streaming
+        # permutes zeros, and the plate rebuild adds feq(0) = 0 to a zero
+        # non-equilibrium part. So phi = 0 and E* = 0 at every iteration, and
+        # E_ref = |0 - 0| / H = 0: both relative changes are 0 / 0 but for the floatmin
+        # term of their denominators. With it they are exactly 0, both moments are
+        # finite, and the rule accepts at the first check (iteration m), even with
+        # zero tolerances. Were the ratios NaN, NaN <= tol would be false and the
+        # solve would run to max_iter unconverged.
+        m = check_every(xbc)
+        tau = 2.0
+        for field_tol in (0.0, 1e-4, Inf)
+            c = zero_capacitor(xbc, tau, FT)
+            f, _, st = Kraken.ehd_phi_ddf_solve!(c.f, c.g, c.phi, c.q, c.p, xbc, c.ws;
+                                                 phi_tol=0.0, field_tol=field_tol,
+                                                 max_iter=4m, check_every=m,
+                                                 phi_bottom=zero(FT), phi_top=zero(FT))
+            @test st.converged
+            @test st.iters == m
+            @test st.phi_rel === zero(FT) && st.field_rel === zero(FT)
+            # Zero implies finite: no NaN or Inf in the populations or the moments.
+            @test all(iszero, f) && all(iszero, c.phi)
+            @test all(iszero, c.ws.Ex) && all(iszero, c.ws.Ey)
+        end
+        # The two reductions directly, on zero inputs with E_ref = 0; the NaN fill
+        # shows that every slot is written.
+        nx, ny = size(zero_capacitor(xbc, tau, FT).phi)
+        z = zeros(FT, nx, ny)
+        diag = fill(FT(NaN), 4)
+        Kraken.ehd_rel_change_2d!(diag, z, z, nx, ny)
+        Kraken.ehd_field_change_2d!(diag, z, z, z, z, 0.0, nx, ny, 2)
+        @test diag == FT[0, 1, 0, 1]
+    end
+
+    @testset "red/green: Float32 gate against the pre-#23 rule, $xbc tau=2.0" for xbc in (:periodic, :neumann)
+        # The gate is that of the production-tolerance testset: stopping_bound, the
+        # contraction tail e <= field_tol * rho / (1 - rho) with rho = |1 - 1/tau_U|^m,
+        # plus roundoff_floor, 16 eps(Float32) H. Float32, tau_U = 2, at each driver's
+        # cadence (m = 1 hydrostatic, m = 8 EC): 1.3e-4 and 3.1e-5. Under field_tol = Inf
+        # (pre-#23 rule) the phi-only rule accepts at the first check, iteration m,
+        # since the cold start has the exact potential; the field error there is
+        # |r|^m = 2^-m, 0.5 and 3.9e-3, above the gate. The default field_tol must
+        # bring it under. Not every case of the production testset discriminates:
+        # Float32 :neumann tau_U = 0.8 leaves 0.25^8 = 1.5e-5 under the old rule,
+        # below the 3.05e-5 roundoff floor, so the gate cannot separate the rules there.
+        FT = Float32
+        tau = 2.0
+        m = check_every(xbc)
+        gate = stopping_bound(tau, m, 1e-4) + roundoff_floor(FT)
+        c_old = cold_capacitor(xbc, tau, FT)
+        f_old, _, st_old = solve(c_old, xbc; phi_tol=1e-4, field_tol=Inf, max_iter=10000,
+                                 check_every=m)
+        c_new = cold_capacitor(xbc, tau, FT)
+        f_new, _, st_new = solve(c_new, xbc; phi_tol=1e-4, field_tol=1e-4, max_iter=10000,
+                                 check_every=m)
+        err_old = capacitor_field_error(f_old, tau)
+        err_new = capacitor_field_error(f_new, tau)
+        @test st_old.converged && st_old.iters == m
+        @test st_new.converged
+        @test err_old > gate
+        @test err_new <= gate
+        @info "Red/green, Float32 tau=2" xbc iters_old=st_old.iters iters_new=st_new.iters err_old err_new gate
     end
 end
 
