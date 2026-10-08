@@ -4,8 +4,8 @@
 const _EC_SCHEMA = 1
 const _EC_IDENTITY = (:Nx, :Ny, :C, :M, :Ma_E, :alpha, :delta_U, :gamma,
     :phi_tol, :phi_max_iter, :phi_substeps, :phi_scheme, :charge_scheme,
-    :ns_scheme, :force_projection, :velocity_stop, :history_interval)
-const _EC_SYMBOLS = (:phi_scheme, :charge_scheme, :ns_scheme, :force_projection)
+    :ns_scheme, :sidewall_bc, :force_projection, :velocity_stop, :history_interval)
+const _EC_SYMBOLS = (:phi_scheme, :charge_scheme, :ns_scheme, :sidewall_bc, :force_projection)
 
 _ec_encode(v::Symbol) = String(v)
 _ec_encode(v) = v
@@ -86,6 +86,7 @@ function validate_snapshot(::Type{ECState}, snap::StateSnapshot)
     for (k, values) in (("phi_scheme", ("lbm", "direct")),
                         ("charge_scheme", ("srt", "regularized")),
                         ("ns_scheme", ("bgk", "mrt")),
+                        ("sidewall_bc", ("free_slip", "no_slip")),
                         ("force_projection", ("none", "xy", "y")))
         d[k] in values || throw(CheckpointError("identity/$k: unsupported value $(repr(d[k]))"))
     end
@@ -141,6 +142,9 @@ end
 Restore the saved configuration and state. Optional identity keywords are checked
 against the snapshot; they cannot change the simulation. Change T afterwards with
 `update_parameter!`. Backend migration is refused in this first increment.
+The canonical `sidewall_bc` is mandatory identity: missing or mismatched walls
+are rejected, never defaulted. Schema 1 has not been released; no migration is
+provided for development checkpoints that omitted this field.
 """
 function restore_state(::Type{ECState}, snap::StateSnapshot;
                        backend=KernelAbstractions.CPU(), kwargs...)

@@ -7,11 +7,12 @@ end
 
 # Prospective gates: same-backend CPU restarts and zero-step snapshots are exact,
 # not tolerance-based. These short interface tests do not qualify paper Fig. 4.
-function ec_restart_fixture(FT; phi_scheme=:direct, ns_scheme=:bgk, backend=CPU())
+function ec_restart_fixture(FT; phi_scheme=:direct, ns_scheme=:bgk,
+                            sidewall_bc=:free_slip, backend=CPU())
     return (; Nx=10, Ny=16, C=10.0, M=10.0, T=190.0, Ma_E=0.01,
         alpha=1e-4, delta_U=1.0, gamma=0.3, phi_tol=1e-4,
         phi_max_iter=10000, phi_substeps=phi_scheme === :lbm ? 2 : nothing,
-        phi_scheme, charge_scheme=:regularized, ns_scheme,
+        phi_scheme, charge_scheme=:regularized, ns_scheme, sidewall_bc,
         perturb_amplitude=1e-4, perturb_mode=1, force_projection=:none,
         velocity_stop=0.2, history_interval=3, backend, FT)
 end
@@ -83,6 +84,47 @@ end
                 initial = init_state(ECState; cfg...)
                 @test ec_result_equal(solution(initial).result,
                     solution(restore_state(ECState, export_state(initial))).result)
+            end
+        end
+    end
+end
+
+@testset "EC-RESTART sidewall identity" begin
+    # PR60 review: mandatory schema-1 wall identity, with no default/migration.
+    for FT in (Float64, Float32), scheme in (:direct, :lbm), wall in (:free_slip, :no_slip)
+        @testset "$FT $scheme $wall" begin
+            cfg = ec_restart_fixture(FT; phi_scheme=scheme, sidewall_bc=wall)
+            s = advance!(init_state(ECState; cfg...), 7)
+            mid = export_state(s)
+            @test mid.schema_version == 1
+            @test mid.identity["sidewall_bc"] == String(wall)
+            other = wall === :free_slip ? :no_slip : :free_slip
+            mktempdir() do dir
+                path = joinpath(dir, "wall.h5")
+                save_checkpoint(path, s)
+                r = load_checkpoint(ECState, path; sidewall_bc=wall)
+                @test r.config.sidewall_bc === wall
+                @test isempty(snapshot_differences(export_state(r), mid))
+                @test_throws CheckpointError load_checkpoint(ECState, path; sidewall_bc=other)
+                missing = tampered(mid)
+                delete!(missing.identity, "sidewall_bc")
+                @test_throws CheckpointError restore_state(ECState, missing)
+                @test_throws CheckpointError restore_state(ECState, missing; sidewall_bc=wall)
+                invalid = tampered(mid)
+                invalid.identity["sidewall_bc"] = "periodic"
+                @test_throws CheckpointError restore_state(ECState, invalid)
+                for state in (s, r)
+                    update_parameter!(state, :T, 180.0)
+                    @test state.config.sidewall_bc === wall
+                    @test export_state(state).identity["sidewall_bc"] == String(wall)
+                    @test state.parameter_cycles == [0, 7]
+                    @test state.parameter_values == [190.0, 180.0]
+                    advance!(state, 13)
+                    @test state.config.sidewall_bc === wall
+                end
+                @test isempty(snapshot_differences(export_state(s), export_state(r)))
+                save_checkpoint(path, r)
+                @test load_checkpoint(ECState, path).config.sidewall_bc === wall
             end
         end
     end
