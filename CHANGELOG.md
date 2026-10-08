@@ -9,6 +9,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Electroconvection `.krk` cases now apply paired `Boundary west wall` / `Boundary east wall` as stationary no-slip sidewalls instead of ignoring them; omitted sides retain free slip. Explicit non-lateral `Boundary` declarations are rejected because electrode/plate conditions are built into this driver.
 
 ### Fixed
+- **TRT Guo forcing injects exactly `F` per step** (#ISSUE-GUO). The TRT collision
+  bricks with a per-cell Guo force (`CollideTRTDirectGuoField`,
+  `CollideTRTDirectGuoField_3D`) scaled the whole Guo source by `1 − s₊/2`. The odd
+  part of the source, which carries the momentum, relaxes at `s₋`, so each step added
+  `g·F` with `g = 1 + (s₋ − s₊)/2` instead of `F`. At the default `Λ = 3/16`, `g = 1`
+  only at `ν = √3/12 ≈ 0.144`; `g = 0.52` at `ν = 0.05`, `0.44` at `ν = 0.04`, `0.82`
+  at `ν = 0.10`, `1.02` at `ν = 0.15`. The source is now split: even part
+  `w[9(c·u)(c·F) − 3u·F]` at `1 − s₊/2`, odd part `3w c·F` at `1 − s₋/2` (TRT form of
+  the MRT forcing, Silva 2020, doi:10.1016/j.compfluid.2020.104537). Affected paths:
+  `fused_trt_libb_v2_guo_field_step!` (2D log-FV coupled step behind the cylinder,
+  BFS, contraction and square-channel coupled drivers, and the passive BFS precursor;
+  all three `wall_bc` variants), `fused_trt_libb_v2_guo_field_step_3d!` (VE sphere and
+  coupled planar-extension drivers), and the AD mirror `ad_ve_coupled_step!`. The BGK
+  Guo kernels were correct and are unchanged. New analytic tests in
+  `test/analytical/trt_guo_field_momentum.jl` check the even and odd parts separately
+  for five `(s₊, s₋)` pairs in 2D and 3D, Float64 and Float32, the SRT limit against the
+  BGK Guo kernels, and the AD mirror against the 2D brick. The coupled planar-extension
+  test moves from 0.83 % to 0.18 % on `C_xx` against the nominal strain rate (the
+  coupled flow now runs 0.72 % above it, down from 1.41 %). Published numbers
+  affected: see erratum.
 - **Corrected the 0.5.0 notes** (#52). The four log-conformation closures run on the
   FVFD path only; the LBM-CDE drivers (sphere, Couette, Poiseuille) accept Oldroyd-B
   only, in direct conformation form. Couette and LBM-CDE Poiseuille are not reachable
@@ -31,6 +51,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   planar-extension test moves from 0.06 % to 0.83 % on `C_xx` against the nominal
   strain rate (gate 1 %): the coupled flow runs 1.4 % above the nominal rate, which
   the old fallback happened to offset; against the measured rate it is -0.59 %.
+  *These coupled values were measured before the TRT Guo forcing fix above, which
+  brings them to 0.18 %, 0.72 % and -0.54 %.*
 - `compute_polymeric_force_3d!` takes `wall_x` / `wall_z`, giving x and z walls the
   second-order one-sided difference the y walls use (a clamped stencil returned half
   the derivative there). Faces that are neither periodic nor walls keep the clamp.

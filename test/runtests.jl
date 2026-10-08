@@ -133,6 +133,8 @@ end
     include("test_lbm_basic.jl")
     include("test_poiseuille.jl")
     include("test_guo_convention_pairs.jl")
+    # Issue #ISSUE-GUO: TRT Guo-field brick injects exactly F per collision.
+    include("analytical/trt_guo_field_momentum.jl")
     # Issue #18: west/east pressure channel through the public .krk runner.
     include("analytical/H2-004-route.jl")
     include("test_poiseuille_3d.jl")

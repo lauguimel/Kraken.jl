@@ -139,13 +139,18 @@ end
         # k=1/k=Nz z-faces as no-slip walls while the FVFD polymer side was fully
         # z-periodic. Threading periodic_z=true into the Guo solvent step (z-wrap
         # variant of PullHalfwayBB_3D) closes it: no calibration.
-        # Measured 2026-09-24 (CPU, Float64), after the periodic-z MUSCL fix
-        # (#54): grad_x = 0.0050704 (+1.41 % over ε̇ = 0.005), grad_y = -0.0050424,
-        # C_xx rel-err 0.83 %, C_yy rel-err 0.29 % against the NOMINAL-rate fixed
-        # point. Against the fixed point at the measured rates, 1/(1 − 2λ·grad),
-        # C_xx is -0.59 % and C_yy -0.007 %. Before #54 the nominal errors read
-        # 0.06 % / 0.22 %: the first-order z fallback damped C_xx and happened to
-        # offset the +1.4 % strain-rate excess of the coupled flow.
+        # Measured 2026-10-08 (CPU, Float64, Julia 1.11.9), after the TRT Guo
+        # forcing fix (issue #ISSUE-GUO: odd part of the Guo source scaled by
+        # 1 - s_minus/2): grad_x = 0.0050362 (+0.72 % over ε̇ = 0.005),
+        # grad_y = -0.0050172 (+0.34 %), C_xx rel-err 0.18 %, C_yy rel-err 0.11 %
+        # against the NOMINAL-rate fixed point. Against the fixed point at the
+        # measured rates, 1/(1 − 2λ·grad), C_xx is -0.54 % and C_yy +0.0001 %.
+        # Before the Guo fix (2026-09-24, after the periodic-z MUSCL fix #54):
+        # grad_x = 0.0050704 (+1.41 %), C_xx 0.83 %, C_yy 0.29 % nominal; the
+        # collision injected g·F per step, g = 1 + (s_minus - s_plus)/2 ≈ 0.52 at
+        # ν_s = 0.05. Before #54 the nominal errors read 0.06 % / 0.22 %: the
+        # first-order z fallback damped C_xx and happened to offset the
+        # strain-rate excess of the coupled flow.
         @test m.rel_Cxx <= 0.01
         @test m.rel_Cyy <= 0.01
         @test m.abs_Czz <= 0.01
