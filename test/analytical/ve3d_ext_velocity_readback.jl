@@ -1,5 +1,5 @@
 # Bug report: run_viscoelastic_fvfd_extensional_3d reads the velocity back from
-# the POST-collision populations (issue #ISSUE-READBACK).
+# the POST-collision populations (issue #68).
 #
 # src/drivers/viscoelastic_fvfd_extensional_3d.jl:268 (and :293 after the loop)
 # calls compute_macroscopic_forced_field_3d! on f_out, i.e. after the fused
@@ -53,7 +53,7 @@
 #  - max |F| (x and y) on those cells at step 2 >= 1e-9, so that the defect
 #    (g*F/rho with g = 0.516 here, F/rho once the brick is fixed, rho ~ 1)
 #    stays at least 500 times above the gate. The step-2 force comes partly
-#    from the boundary defect of issue #ISSUE-ZPLANES: with the k = 1 and
+#    from the boundary defect of issue #69: with the k = 1 and
 #    k = Nz rebuilds added in a scratch copy it drops from 1.6e-5 to 2.0e-6
 #    (measured, same machine and date), hence a threshold far below both.
 #

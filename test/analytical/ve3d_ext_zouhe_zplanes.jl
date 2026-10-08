@@ -1,5 +1,5 @@
 # Bug report: the open-face Zou-He rebuilds of run_viscoelastic_fvfd_extensional_3d
-# skip the k = 1 and k = Nz planes although z is periodic (issue #ISSUE-ZPLANES).
+# skip the k = 1 and k = Nz planes although z is periodic (issue #69).
 #
 # The west kernel (src/bc/rebuild_3d.jl:2, launched at :95-96) and the east,
 # south and north kernels (src/fvfd/operators_3d_openbc.jl, launched at :338-343)
