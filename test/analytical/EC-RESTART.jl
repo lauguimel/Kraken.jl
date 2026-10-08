@@ -110,6 +110,9 @@ end
                 delete!(missing.identity, "sidewall_bc")
                 @test_throws CheckpointError restore_state(ECState, missing)
                 @test_throws CheckpointError restore_state(ECState, missing; sidewall_bc=wall)
+                missing_path = joinpath(dir, "missing_wall.h5")
+                write_checkpoint(missing_path, missing)
+                @test_throws CheckpointError load_checkpoint(ECState, missing_path)
                 invalid = tampered(mid)
                 invalid.identity["sidewall_bc"] = "periodic"
                 @test_throws CheckpointError restore_state(ECState, invalid)
