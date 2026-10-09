@@ -103,13 +103,49 @@ Steady state is declared when
 inner phi solve. Wall values are node-on-wall; interior DDF profiles are compared
 at the effective half-link samples `y*=(j-3/2)/(Ny-1)`, which is the grid where
 the faithful wall-node NEE charge update matches the diffusion-free base state.
+
+Potential solve (`phi_scheme = :lbm`): each step iterates the DDF until a check
+accepts, or raises after `phi_max_iter` iterations. The check runs after every
+iteration (`Kraken.EHD_HYDROSTATIC_PHI_CHECK_EVERY = 1`) and accepts when the
+potential changed by at most `phi_tol` (relative, over the last iteration) and the
+field by at most `field_tol`. The field change is the change of `E` since the
+previous check, relative to `max(max|E|, E_ref)`, with
+`E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+public drivers). The applied field is a minimum scale: it applies while `E` is
+below it everywhere, as at the first checks of a cold start, where `E` starts at 0.
+A `floatmin` guard avoids a division by zero when the plates are at the same
+potential and the field is zero. Measured on the default run (2026-10-08, Float64
+and Float32): `max|E| / E_ref` is 1.484 to 1.495 at every accepting check, so the
+floor never decides there.
+
+- `field_tol` (default `1e-4`, independent of `phi_tol`) bounds a change between
+  checks, not the error of `E`. Once the slow diffusive mode of the pseudo-time
+  iteration dominates, the relative error of `E` left by one solve is about
+  `κ * field_tol`, with `κ ≈ H^2 / (m * gamma * π^2)`, `H = Ny - 1`, `m = 1` the
+  cadence and `gamma = 0.3` fixed here (`tau_U = 1.4`): about 3000 at the default
+  `Ny = 96`. The first solve of the default run (cold start) is not yet in that
+  regime: its relative error is 3.4e-3 at `field_tol = 1e-4` and 6.3e-4 at `1e-6`
+  (0.29 with the rule before issue #23). Later steps start from the previous
+  populations; the default run ends with `err_E = 0.76 %` (relative L2 against
+  the analytic field), as before #23. For a relative error `ε` on `E` from one
+  solve, use `field_tol ≈ ε / κ`, or `phi_scheme = :direct`.
+- `field_tol = Inf` means no field check (the rule before issue #23); it is
+  reserved for non-regression comparisons against that rule.
+- `FT = Float32`: on grids with `H ≳ 100` the iteration stops changing at bit
+  level before `E` has converged, so the field change drops to 0 and the check
+  accepts whatever `field_tol` is. Use `phi_scheme = :direct` or `FT = Float64`
+  for an accurate `E`.
+
+`field_tol` is a Julia keyword only; `.krk` files do not set it. Throws an
+`ArgumentError` before allocating when `field_tol` is negative or `NaN`, or, with
+`phi_scheme = :lbm`, when `phi_max_iter` is not an integral value of at least 1.
 """
 function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
                                   alpha=1e-4, delta_U=1.0,
                                   charge_scheme=:srt,
                                   phi_scheme=:lbm,
                                   max_steps=100000, charge_tol=1e-8,
-                                  phi_tol=1e-4, phi_max_iter=10000,
+                                  phi_tol=1e-4, field_tol=1e-4, phi_max_iter=10000,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
     Nx < 3 && throw(ArgumentError("Nx must be at least 3."))
     Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
@@ -117,6 +153,8 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
         throw(ArgumentError("charge_scheme must be :srt or :regularized."))
     phi_scheme in (:lbm, :direct) ||
         throw(ArgumentError("phi_scheme must be :lbm or :direct."))
+    _ehd_phi_ddf_check_field_tol(field_tol)
+    phi_scheme === :lbm && (phi_max_iter = _ehd_phi_ddf_max_iter(phi_max_iter))
 
     p = _ehd_lattice_params(Ny, C, M, Ma_E, alpha, delta_U; FT=FT)
     p.tau_q <= FT(0.5) && error("Charge relaxation time must be greater than 0.5.")
@@ -141,7 +179,7 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
     q_f_out = KernelAbstractions.zeros(backend, FT, Nx, Ny, 9)
     phi = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     qfield = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    phi_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    phi_ws = ehd_phi_ddf_workspace(phi)
     q_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     diag = KernelAbstractions.zeros(backend, FT, 2)
     diag_host = Vector{FT}(undef, 2)
@@ -177,22 +215,14 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
             phi_iters_last = 1
             phi_rel_last = zero(FT)
         else
-            for iter in 1:phi_max_iter
-                copyto!(phi_prev, phi)
-                collide_electric_potential_2d!(phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
-                stream_periodic_x_wall_y_2d!(phi_f_out, phi_f_in, Nx, Ny)
-                compute_ehd_scalar_2d!(phi, phi_f_out)
-                apply_phi_nee_walls_2d!(phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
-                compute_ehd_scalar_2d!(phi, phi_f_out)
-                ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
-                copyto!(diag_host, diag)
-                phi_rel_last = diag_host[1]
-                phi_f_in, phi_f_out = phi_f_out, phi_f_in
-                phi_iters_last = iter
-                phi_rel_last <= phi_tol && break
-                iter == phi_max_iter &&
-                    error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(phi_rel_last).")
-            end
+            phi_f_in, phi_f_out, phi_stats = ehd_phi_ddf_solve!(
+                phi_f_in, phi_f_out, phi, qfield, p, :periodic, phi_ws;
+                phi_tol=phi_tol, field_tol=field_tol, max_iter=phi_max_iter,
+                check_every=EHD_HYDROSTATIC_PHI_CHECK_EVERY,
+                phi_bottom=one(FT), phi_top=zero(FT))
+            phi_iters_last = phi_stats.iters
+            phi_rel_last = phi_stats.phi_rel
+            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter, phi_tol)
             compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
         end
 

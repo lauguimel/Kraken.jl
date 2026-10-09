@@ -3,7 +3,7 @@
 
 const _EC_SCHEMA = 1
 const _EC_IDENTITY = (:Nx, :Ny, :C, :M, :Ma_E, :alpha, :delta_U, :gamma,
-    :phi_tol, :phi_max_iter, :phi_substeps, :phi_scheme, :charge_scheme,
+    :phi_tol, :field_tol, :phi_max_iter, :phi_substeps, :phi_scheme, :charge_scheme,
     :ns_scheme, :sidewall_bc, :force_projection, :velocity_stop, :history_interval)
 const _EC_SYMBOLS = (:phi_scheme, :charge_scheme, :ns_scheme, :sidewall_bc, :force_projection)
 
@@ -83,6 +83,11 @@ function validate_snapshot(::Type{ECState}, snap::StateSnapshot)
         d[k] isa Real && isfinite(d[k]) && d[k] > 0 ||
             throw(CheckpointError("identity/$k: expected a finite positive value"))
     end
+    # field_tol: same range as the drivers' entry check, [0, Inf]; Inf (no field
+    # check, the rule before issue #23) is a legitimate value, NaN is not.
+    ft = d["field_tol"]
+    ft isa Real && !isnan(ft) && ft >= 0 ||
+        throw(CheckpointError("identity/field_tol: expected a real in [0, Inf], found $(repr(ft))"))
     for (k, values) in (("phi_scheme", ("lbm", "direct")),
                         ("charge_scheme", ("srt", "regularized")),
                         ("ns_scheme", ("bgk", "mrt")),
@@ -142,9 +147,10 @@ end
 Restore the saved configuration and state. Optional identity keywords are checked
 against the snapshot; they cannot change the simulation. Change T afterwards with
 `update_parameter!`. Backend migration is refused in this first increment.
-The canonical `sidewall_bc` is mandatory identity: missing or mismatched walls
-are rejected, never defaulted. Schema 1 has not been released; no migration is
-provided for development checkpoints that omitted this field.
+The canonical `sidewall_bc` and the potential stopping tolerance `field_tol`
+(issue #23; `Inf` round-trips) are mandatory identity: missing or mismatched
+values are rejected, never defaulted. Schema 1 has not been released; no migration
+is provided for development checkpoints that omitted these fields.
 """
 function restore_state(::Type{ECState}, snap::StateSnapshot;
                        backend=KernelAbstractions.CPU(), kwargs...)

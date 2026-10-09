@@ -7,11 +7,15 @@ end
 
 # Prospective gates: same-backend CPU restarts and zero-step snapshots are exact,
 # not tolerance-based. These short interface tests do not qualify paper Fig. 4.
+# `adaptive=true` selects the adaptive DDF potential solve (`phi_scheme = :lbm`,
+# `phi_substeps = nothing`), the only path on which `field_tol` acts (#23).
 function ec_restart_fixture(FT; phi_scheme=:direct, ns_scheme=:bgk,
-                            sidewall_bc=:free_slip, backend=CPU())
+                            sidewall_bc=:free_slip, backend=CPU(),
+                            field_tol=1e-4, adaptive=false)
     return (; Nx=10, Ny=16, C=10.0, M=10.0, T=190.0, Ma_E=0.01,
-        alpha=1e-4, delta_U=1.0, gamma=0.3, phi_tol=1e-4,
-        phi_max_iter=10000, phi_substeps=phi_scheme === :lbm ? 2 : nothing,
+        alpha=1e-4, delta_U=1.0, gamma=0.3, phi_tol=1e-4, field_tol,
+        phi_max_iter=10000,
+        phi_substeps=phi_scheme === :lbm && !adaptive ? 2 : nothing,
         phi_scheme, charge_scheme=:regularized, ns_scheme, sidewall_bc,
         perturb_amplitude=1e-4, perturb_mode=1, force_projection=:none,
         velocity_stop=0.2, history_interval=3, backend, FT)
@@ -162,6 +166,76 @@ end
             @test isempty(snapshot_differences(export_state(s), export_state(r)))
             save_checkpoint(path, s)
             @test isempty(snapshot_differences(export_state(load_checkpoint(ECState, path)), export_state(s)))
+        end
+    end
+end
+
+@testset "EC-RESTART field_tol identity" begin
+    # #23 x #60: field_tol decides where each adaptive potential solve stops, hence
+    # the trajectory. It is mandatory schema-1 identity, with no default/migration.
+    for FT in (Float64, Float32), wall in (:free_slip, :no_slip)
+        @testset "$FT $wall" begin
+            cfg = ec_restart_fixture(FT; phi_scheme=:lbm, adaptive=true, sidewall_bc=wall)
+            cfg_inf = merge(cfg, (; field_tol=Inf))
+            @test cfg.phi_substeps === nothing && cfg.field_tol === 1e-4
+            s = advance!(init_state(ECState; cfg...), 8)
+            s_inf = advance!(init_state(ECState; cfg_inf...), 8)
+            mid, mid_inf = export_state(s), export_state(s_inf)
+            @test mid.schema_version == 1
+            @test mid.identity["field_tol"] === 1e-4
+            @test mid_inf.identity["field_tol"] === Inf
+            # The fixture exercises the field check: over 8 cycles, the 1e-4 and Inf
+            # rules stop the potential solves at different iterations.
+            @test !isempty(snapshot_differences(mid, mid_inf; classes=(:fields,)))
+            mktempdir() do dir
+                path, path_inf = joinpath(dir, "tol.h5"), joinpath(dir, "inf.h5")
+                save_checkpoint(path, s)
+                save_checkpoint(path_inf, s_inf)
+                # (a) same field_tol accepted, image unchanged.
+                r = load_checkpoint(ECState, path; field_tol=1e-4)
+                @test r.config.field_tol === 1e-4
+                @test isempty(snapshot_differences(export_state(r), mid))
+                # (e) Inf round-trips through HDF5 exactly, with and without the check.
+                r_inf = load_checkpoint(ECState, path_inf)
+                @test r_inf.config.field_tol === Inf
+                @test export_state(r_inf).identity["field_tol"] === Inf
+                @test load_checkpoint(ECState, path_inf; field_tol=Inf).config.field_tol === Inf
+                @test isempty(snapshot_differences(export_state(r_inf), mid_inf))
+                # (b) mismatch refused both ways, from memory and from disk.
+                @test_throws CheckpointError load_checkpoint(ECState, path; field_tol=Inf)
+                @test_throws CheckpointError load_checkpoint(ECState, path_inf; field_tol=1e-4)
+                @test_throws CheckpointError restore_state(ECState, mid; field_tol=Inf)
+                @test_throws CheckpointError restore_state(ECState, mid_inf; field_tol=1e-4)
+                @test_throws CheckpointError restore_state(ECState, mid; field_tol=1e-6)
+                # (c) a snapshot lacking field_tol is refused, never defaulted.
+                missing = tampered(mid)
+                delete!(missing.identity, "field_tol")
+                @test_throws CheckpointError restore_state(ECState, missing)
+                @test_throws CheckpointError restore_state(ECState, missing; field_tol=1e-4)
+                missing_path = joinpath(dir, "missing_tol.h5")
+                write_checkpoint(missing_path, missing)
+                @test_throws CheckpointError load_checkpoint(ECState, missing_path)
+                # Stored range is [0, Inf], as at driver entry.
+                for value in (NaN, -1e-4, -Inf, "1e-4")
+                    bad = tampered(mid)
+                    bad.identity["field_tol"] = value
+                    @test_throws CheckpointError restore_state(ECState, bad)
+                end
+                zero_tol = tampered(mid)
+                zero_tol.identity["field_tol"] = 0.0
+                @test validate_snapshot(ECState, zero_tol) === nothing
+                # (d) adaptive-path restart is bit-identical to an uninterrupted run,
+                # for both rules.
+                advance!(r, 12)
+                advance!(r_inf, 12)
+                ref = advance!(init_state(ECState; cfg...), 20)
+                ref_inf = advance!(init_state(ECState; cfg_inf...), 20)
+                @test isempty(snapshot_differences(export_state(r), export_state(ref)))
+                @test isempty(snapshot_differences(export_state(r_inf), export_state(ref_inf)))
+                @test ec_result_equal(solution(r).result, solution(ref).result)
+                @test ec_result_equal(solution(r_inf).result, solution(ref_inf).result)
+                @test r.config.field_tol === 1e-4 && r_inf.config.field_tol === Inf
+            end
         end
     end
 end

@@ -157,7 +157,10 @@ include("platform/weakdeps_metadata_test.jl")
     # ~40 s: two 50k-cycle canaries bracketing the electroconvection onset.
     include("analytical/ehd_onset_2d.jl")
     include("analytical/ehd_phi_direct_2d.jl")
-    include("analytical/ES-002-STOP.jl") # Known field-stopping failure, Issue #23.
+    # Issue #23: the DDF potential solve stops on the field too. One case stays
+    # @test_broken (default settings, slow Poisson mode, issue #63).
+    include("analytical/ES-002-STOP.jl")
+    include("analytical/ehd_phi_ddf_solve_2d.jl")
     include("analytical/ehd_twin_parity_2d.jl")
     include("analytical/ehd_phi_gpu_parity_2d.jl")
     include("test_species.jl")

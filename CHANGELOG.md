@@ -43,6 +43,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   the derivative there). Faces that are neither periodic nor walls keep the clamp.
 - `logfv_max_grad_norm_3d` reduces on the arrays' device instead of copying nine
   fields to the host every step.
+- **The adaptive DDF potential solve also stops on the electric field** (#23). With
+  `phi_scheme = :lbm` and no `phi_substeps`, the solve stopped once `phi` changed by at
+  most `phi_tol` over one iteration, but `E` is rebuilt from the first moment of the
+  populations, which relaxes on its own: a cold start could return an unconverged field
+  (`E*` errors of 1.5e-5 to 3.9e-3 on the ES-002 capacitors at the electroconvection
+  check cadence, 0.25 to 0.5 at the hydrostatic one; relative error 0.29 on the first
+  potential solve of the default hydrostatic run). A check now also requires the field
+  change to be at most the new keyword `field_tol` (default `1e-4`, independent of
+  `phi_tol`) of `run_electroconvection_2d`, `init_state(ECState; ...)` and
+  `run_ehd_hydrostatic_2d`: the change of `E` since the previous check, relative to
+  `max(max|E|, E_ref)`, with `E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field
+  (`1/(Ny − 1)` in all public drivers). The applied field is a minimum scale: it applies
+  while `E` is below it everywhere, as at the first checks of a cold start, where `E`
+  starts at 0. A `floatmin` guard avoids a division by zero when the plates are at the
+  same potential and the field is zero. Measured at every accepting check: `max|E| / E_ref`
+  is 1.484 to 1.495 in the default hydrostatic run and in 60x96 electroconvection over
+  20 cycles (Float64 and Float32), 0.99999999994 to 1.0043 on the ES-002 capacitors; at
+  each of these acceptances the change relative to `max|E|` alone also met `field_tol`.
+  It is a Julia keyword only, not a `.krk` one. Checks run every 8 iterations in the
+  electroconvection solver and after every iteration in the hydrostatic driver
+  (`src/drivers/ehd_phi_ddf.jl`). `field_tol = Inf` restores the previous rule bit for
+  bit and is meant for non-regression comparisons only.
+  Cost on CPU, Float64: the default 60x96 electroconvection run takes 80, 64, 24, 40, 24,
+  32, 24, 24, 16, 16, 8, 8 potential iterations over its first 12 cycles (8 each before;
+  0.028 s instead of 0.010 s for those cycles), then 8 per cycle (measured up to cycle
+  18). On small grids the extra iterations persist: 112 per cycle at cycles 7 to 11 on
+  8x12, 48 to 144 at the last cycle of 23- to 30-cycle runs on 16x24 (8 before). The
+  default hydrostatic run takes 1.00 s instead of 0.88 s, with the same `err_E` (0.76 %).
+  Consequences: results on this path change (the worked example of
+  `docs/src/users/simulation-state-checkpoints.md` was regenerated); a negative or `NaN`
+  `field_tol`, and on the adaptive path a `phi_max_iter` that is not an integral value of
+  at least 1, are now an `ArgumentError` at entry (`phi_max_iter < 1` used to skip the
+  solve silently); when `phi` converged but `E` did not, the non-convergence error also
+  gives the last relative field change. `field_tol` is part of the EC checkpoint
+  identity (`src/drivers/ehd_ec_checkpoint.jl`): a restore with a different or missing
+  `field_tol` is refused, and `Inf` round-trips.
+- *Known limits of the #23 repair.* `field_tol` bounds a change between checks, not the
+  error of `E`. Once the slow diffusive mode of the pseudo-time iteration dominates, the
+  relative error is about `κ * field_tol`, `κ ≈ (Ny - 1)^2 / (m * gamma * π^2)` with `m`
+  the check cadence: about 5, 22 and 380 on 8x12, 16x24 and 60x96 at `gamma = 0.3`. The
+  ES-002 public-driver case keeps an `E*` error of 3.5e-5 at default settings and stays
+  `@test_broken` (#63); with `field_tol = 1e-8` it meets the 1e-6 gate. In Float32,
+  on grids with `Ny - 1 ≳ 100`, the iteration freezes at bit level before `E` converges
+  and the check accepts whatever `field_tol` is: use `phi_scheme = :direct` or Float64
+  for an accurate `E`.
 
 ## [0.5.0] — 2026-09-24
 

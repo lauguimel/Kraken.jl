@@ -6,7 +6,9 @@
 # `run_electroconvection_2d` (src/drivers/ehd_ec.jl) is the one-shot wrapper over
 # these three verbs. The cycle body below is the body of the former monolithic
 # loop, in the same order of operations; `test/analytical/ehd_ec_split_parity_2d.jl`
-# compares it bit for bit against a frozen copy of that function.
+# compares it bit for bit against a frozen copy of that function, with
+# `field_tol = Inf` (the potential stopping rule before issue #23). The DDF
+# potential solve is shared with the hydrostatic driver (src/drivers/ehd_phi_ddf.jl).
 #
 # Checkpoint export/restore and parameter updates: ehd_ec_checkpoint.jl.
 # ============================================================================
@@ -17,12 +19,21 @@
 Everything the 2D electroconvection solver carries from one cycle to the next.
 
 - `config`: the configuration keywords exactly as the caller passed them
-  (`history_interval` converted to `Int`); `p`: the derived lattice parameters.
+  (`history_interval` converted to `Int`, and `phi_max_iter` too on the adaptive
+  DDF potential path); `p`: the derived lattice parameters. `field_tol` decides
+  where each potential solve stops, hence the trajectory: it belongs to the
+  `identity` class of the EC checkpoint like `phi_tol` (src/drivers/ehd_ec_checkpoint.jl,
+  `docs/platform/07-STATE-CONTRACT.md`, section 3). A restore with a different or
+  missing `field_tol` is refused; there is no identity default, since no EC
+  checkpoint (schema 1) was released before issue #23.
 - Dynamic state: the three population pairs (`phi_f_*`, `q_f_*`, `f_*`), the force
   history `Fx_prev` / `Fy_prev`, `qfield`, and `phi` (under `phi_scheme = :direct`
   it lags the charge by one cycle and cannot be rebuilt from populations).
 - Derived buffers, overwritten before being read in every cycle: `Ex`, `Ey`, `rho`,
-  `ux`, `uy`, `Fx`, `Fy`, `phi_prev`, `q_prev`, `diag`, `diag_host`.
+  `ux`, `uy`, `Fx`, `Fy`, `phi_prev`, `q_prev`, `Ex_prev`, `Ey_prev`, `diag`,
+  `diag_host`. `diag` and `diag_host` have length 4: the adaptive potential solve
+  fills all four entries at each check (one device-to-host copy), the charge and
+  velocity diagnostics the first two.
 - Carried scalars: `phi_iters_last`, `phi_rel_last`, `q_rel_last`.
 - `cycle`: global cycle counter (cycles completed since `init_state`).
 - `umax_history` / `cycle_history`: histories sampled on the global counter.
@@ -56,6 +67,8 @@ mutable struct ECState{FT,A3,A2,A1,AB,P,PS,B,CFG} <: AbstractSimulationState
     Fy_prev::A2
     phi_prev::A2
     q_prev::A2
+    Ex_prev::A2
+    Ey_prev::A2
     diag::A1
     diag_host::Vector{FT}
     is_solid::AB
@@ -93,13 +106,36 @@ the electroconvection solver, at cycle 0. Same keywords and defaults as
 
 `sidewall_bc` selects `:free_slip` (default) or stationary `:no_slip` flow walls.
 It is fixed simulation identity, not run control or a continuation parameter.
-The future EC checkpoint client must store/compare this configuration key on
-restore; EC snapshot/restore is not implemented by this sidewall capability.
+The EC checkpoint (src/drivers/ehd_ec_checkpoint.jl) stores it as identity and
+refuses a restore with a different or missing `sidewall_bc`.
+
+Adaptive potential solve (`phi_scheme = :lbm`, `phi_substeps = nothing`): checked
+every `Kraken.EHD_EC_PHI_CHECK_EVERY = 8` iterations; a check accepts when the
+relative one-iteration change of `phi` is at most `phi_tol` and the field change is
+at most `field_tol` (default `1e-4`, independent of `phi_tol`). The field change is
+the change of `E` since the previous check, relative to `max(max|E|, E_ref)`, with
+`E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+public drivers). The applied field is a minimum scale: it applies while `E` is below
+it everywhere, as at the first checks of a cold start, where `E` starts at 0. A
+`floatmin` guard avoids a division by zero when the plates are at the same potential
+and the field is zero. `field_tol` bounds that change, not the error of `E`: once the slow
+diffusive mode of the pseudo-time iteration dominates, the relative error is about
+`κ * field_tol`, `κ ≈ (Ny - 1)^2 / (8 * gamma * π^2)` (about 5, 22 and 380 on
+8x12, 16x24 and 60x96 at `gamma = 0.3`). `field_tol = Inf` disables the field check
+(the rule before issue #23) and is reserved for non-regression comparisons. In
+`Float32` on grids with `Ny - 1 ≳ 100` the iteration freezes at bit level before
+`E` converges and the check accepts regardless of `field_tol`: use
+`phi_scheme = :direct` or `Float64` for an accurate `E`. Keep `phi_max_iter` a
+multiple of 8: with a finite `field_tol`, an off-cadence last check cannot accept.
+See `run_electroconvection_2d` for details.
+
+Throws an `ArgumentError` before allocating when `field_tol` is negative or `NaN`,
+or, on the adaptive path, when `phi_max_iter` is not an integral value of at least 1.
 """
 function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     Ma_E=1e-2, alpha=1e-4, delta_U=1.0,
                     gamma=0.3,
-                    phi_tol=1e-4, phi_max_iter=10000,
+                    phi_tol=1e-4, field_tol=1e-4, phi_max_iter=10000,
                     phi_substeps=nothing,
                     phi_scheme=:lbm,
                     charge_scheme=:regularized,
@@ -127,6 +163,10 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
     history_interval = Int(history_interval)
     history_interval > 0 ||
         throw(ArgumentError("history_interval must be positive."))
+    _ehd_phi_ddf_check_field_tol(field_tol)
+    if phi_scheme === :lbm && phi_substeps === nothing
+        phi_max_iter = _ehd_phi_ddf_max_iter(phi_max_iter)
+    end
 
     p = _ehd_ec_lattice_params(Ny, C, M, T, Ma_E, alpha, delta_U, gamma; FT=FT)
     p.tau <= FT(0.5) && error("NS relaxation time must be greater than 0.5.")
@@ -157,8 +197,10 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
     Fy_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     phi_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
     q_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
-    diag = KernelAbstractions.zeros(backend, FT, 2)
-    diag_host = Vector{FT}(undef, 2)
+    Ex_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    Ey_prev = KernelAbstractions.zeros(backend, FT, Nx, Ny)
+    diag = KernelAbstractions.zeros(backend, FT, 4)
+    diag_host = Vector{FT}(undef, 4)
     is_solid = KernelAbstractions.zeros(backend, Bool, Nx, Ny)
 
     q_init = zeros(FT, Nx, Ny)
@@ -201,13 +243,15 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
         compute_electric_field_2d!(Ex, Ey, phi_f_in, p.tau_U)
     end
 
-    config = (; Nx, Ny, C, M, T, Ma_E, alpha, delta_U, gamma, phi_tol, phi_max_iter,
-              phi_substeps, phi_scheme, charge_scheme, ns_scheme, sidewall_bc, perturb_amplitude,
-              perturb_mode, force_projection, velocity_stop, history_interval)
+    config = (; Nx, Ny, C, M, T, Ma_E, alpha, delta_U, gamma, phi_tol, field_tol,
+              phi_max_iter, phi_substeps, phi_scheme, charge_scheme, ns_scheme,
+              sidewall_bc, perturb_amplitude, perturb_mode, force_projection,
+              velocity_stop, history_interval)
     return ECState(config, p, backend, A,
                    phi_f_in, phi_f_out, q_f_in, q_f_out, f_in, f_out,
                    phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev,
-                   phi_prev, q_prev, diag, diag_host, is_solid, poisson_setup,
+                   phi_prev, q_prev, Ex_prev, Ey_prev, diag, diag_host, is_solid,
+                   poisson_setup,
                    0, FT(Inf), FT(Inf), 0, FT[], Int[], Int[0], Float64[T], UInt64(0), true)
 end
 
@@ -229,13 +273,14 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
     n < 0 && throw(ArgumentError("advance!: the number of cycles must be non-negative, got $n."))
     # Bindings that never change during a run. The population pairs and the carried
     # scalars are read and written through `s` because they do change.
-    (; Nx, Ny, phi_tol, phi_max_iter, phi_substeps, phi_scheme, charge_scheme,
+    (; Nx, Ny, phi_tol, field_tol, phi_max_iter, phi_substeps, phi_scheme, charge_scheme,
        ns_scheme, sidewall_bc, force_projection, velocity_stop, history_interval) = s.config
     p = s.p
     poisson_setup = s.poisson_setup
     (; phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev, phi_prev, q_prev,
-       diag, diag_host, is_solid) = s
-    phi_check_every = 8
+       Ex_prev, Ey_prev, diag, diag_host, is_solid) = s
+    # The adaptive potential solve works in the state's own derived buffers.
+    phi_ws = (; phi_prev, Ex, Ey, Ex_prev, Ey_prev, diag, diag_host)
 
     t0 = time_ns()
     for k in 1:n
@@ -249,34 +294,20 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
             s.phi_iters_last = 1
             s.phi_rel_last = zero(FT)
         elseif phi_substeps === nothing
-            for iter in 1:phi_max_iter
-                copyto!(phi_prev, phi)
-                collide_electric_potential_2d!(s.phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
-                stream_wall_x_wall_y_2d!(s.phi_f_out, s.phi_f_in, Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                apply_phi_nee_box_2d!(s.phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                s.phi_f_in, s.phi_f_out = s.phi_f_out, s.phi_f_in
-                s.phi_iters_last = iter
-                if iter % phi_check_every == 0 || iter == phi_max_iter
-                    ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
-                    copyto!(diag_host, diag)
-                    s.phi_rel_last = diag_host[1]
-                    s.phi_rel_last <= phi_tol && break
-                    iter == phi_max_iter &&
-                        error("Electric potential solve did not converge within $(phi_max_iter) iterations. Last relative change: $(s.phi_rel_last).")
-                end
-            end
+            s.phi_f_in, s.phi_f_out, phi_stats = ehd_phi_ddf_solve!(
+                s.phi_f_in, s.phi_f_out, phi, qfield, p, :neumann, phi_ws;
+                phi_tol=phi_tol, field_tol=field_tol, max_iter=phi_max_iter,
+                check_every=EHD_EC_PHI_CHECK_EVERY, phi_bottom=one(FT), phi_top=zero(FT))
+            s.phi_iters_last = phi_stats.iters
+            s.phi_rel_last = phi_stats.phi_rel
+            _ehd_phi_ddf_require_converged(phi_stats, phi_max_iter, phi_tol)
             compute_electric_field_2d!(Ex, Ey, s.phi_f_in, p.tau_U)
         else
             sample_cycle && copyto!(phi_prev, phi)
             for _ in 1:Int(phi_substeps)
-                collide_electric_potential_2d!(s.phi_f_in, qfield, p.eps, p.omega_U, p.nu_U)
-                stream_wall_x_wall_y_2d!(s.phi_f_out, s.phi_f_in, Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                apply_phi_nee_box_2d!(s.phi_f_out, phi, one(FT), zero(FT), Nx, Ny)
-                compute_ehd_scalar_2d!(phi, s.phi_f_out)
-                s.phi_f_in, s.phi_f_out = s.phi_f_out, s.phi_f_in
+                s.phi_f_in, s.phi_f_out = ehd_phi_ddf_step!(
+                    s.phi_f_in, s.phi_f_out, phi, qfield, p, :neumann;
+                    phi_bottom=one(FT), phi_top=zero(FT))
             end
             if sample_cycle
                 ehd_rel_change_2d!(diag, phi, phi_prev, Nx, Ny)
