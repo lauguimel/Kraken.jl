@@ -9,6 +9,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Electroconvection `.krk` cases now apply paired `Boundary west wall` / `Boundary east wall` as stationary no-slip sidewalls instead of ignoring them; omitted sides retain free slip. Explicit non-lateral `Boundary` declarations are rejected because electrode/plate conditions are built into this driver.
 
 ### Fixed
+- **CUDSS weak-dependency UUID corrected** (#61). Since v0.3.0 the `KrakenCUDSSExt`
+  extension could not be activated by `using CUDA, CUDSS, Kraken`, because `Project.toml`
+  declared a UUID that differs from the registered one in one character. Whether the
+  July 2026 GPU validation exercised the extension is not recorded; it is being re-run.
+  New offline test `test/platform/weakdeps_metadata_test.jl` checks every `[weakdeps]`
+  UUID against the registry; the GPU test now asserts the extension is active when
+  CUDSS loads.
 - **Corrected the 0.5.0 notes** (#52). The four log-conformation closures run on the
   FVFD path only; the LBM-CDE drivers (sphere, Couette, Poiseuille) accept Oldroyd-B
   only, in direct conformation form. Couette and LBM-CDE Poiseuille are not reachable
