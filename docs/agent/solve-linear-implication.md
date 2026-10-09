@@ -23,6 +23,14 @@ NO self-guard — never include it directly in `Kraken.jl`); seam names exported
 `linear_solve_cuda.jl` stays manual-load (bench scripts); package users get the
 SAME cuDSS seam through the `KrakenCUDSSExt` package extension instead.
 
+Activation requirement (#61): `KrakenCUDSSExt` loads only when `CUDSS` is loaded
+in the same session as `Kraken` (`using CUDA, CUDSS, Kraken`, in any order), AND the
+`CUDSS` weakdep UUID in `Project.toml` equals the registered one
+(`45b445bb-4962-46a0-9369-b4df9d0f772e`). From v0.3.0 until the fix the UUID was
+wrong, so the extension could not activate. Check with
+`Base.get_extension(Kraken, :KrakenCUDSSExt) !== nothing`; `test/platform/weakdeps_metadata_test.jl`
+guards the UUIDs offline and `test/analytical/poisson_cudss_gpu.jl` checks activation on GPU.
+
 Issue #8 adds two [weakdeps] package-extension backends behind the seam
 (ADR rule: no solver-backend dependency under plain `using Kraken`; precedent
 KrakenOptimExt): `KrakenLinearSolveExt` (trigger `LinearSolve`) backs the new
