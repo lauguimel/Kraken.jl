@@ -69,7 +69,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `field_tol`, and on the adaptive path a `phi_max_iter` that is not an integral value of
   at least 1, are now an `ArgumentError` at entry (`phi_max_iter < 1` used to skip the
   solve silently); when `phi` converged but `E` did not, the non-convergence error also
-  gives the last relative field change.
+  gives the last relative field change. `field_tol` is part of the EC checkpoint
+  identity (`src/drivers/ehd_ec_checkpoint.jl`): a restore with a different or missing
+  `field_tol` is refused, and `Inf` round-trips.
 - *Known limits of the #23 repair.* `field_tol` bounds a change between checks, not the
   error of `E`. Once the slow diffusive mode of the pseudo-time iteration dominates, the
   relative error is about `κ * field_tol`, `κ ≈ (Ny - 1)^2 / (m * gamma * π^2)` with `m`

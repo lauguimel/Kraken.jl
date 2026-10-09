@@ -10,7 +10,7 @@
 # `field_tol = Inf` (the potential stopping rule before issue #23). The DDF
 # potential solve is shared with the hydrostatic driver (src/drivers/ehd_phi_ddf.jl).
 #
-# Export / restore to disk and parameter updates are not defined here yet.
+# Checkpoint export/restore and parameter updates: ehd_ec_checkpoint.jl.
 # ============================================================================
 
 """
@@ -21,11 +21,11 @@ Everything the 2D electroconvection solver carries from one cycle to the next.
 - `config`: the configuration keywords exactly as the caller passed them
   (`history_interval` converted to `Int`, and `phi_max_iter` too on the adaptive
   DDF potential path); `p`: the derived lattice parameters. `field_tol` decides
-  where each potential solve stops, hence the trajectory: when `ECState` gains a
-  `Kraken.snapshot`, it belongs to the `identity` class like `phi_tol`
-  (`docs/platform/07-STATE-CONTRACT.md`, section 3). `snapshot` is not implemented
-  for `ECState`, so no electroconvection checkpoint from before issue #23 exists:
-  none lacks `field_tol`, and no identity default is needed for it.
+  where each potential solve stops, hence the trajectory: it belongs to the
+  `identity` class of the EC checkpoint like `phi_tol` (src/drivers/ehd_ec_checkpoint.jl,
+  `docs/platform/07-STATE-CONTRACT.md`, section 3). A restore with a different or
+  missing `field_tol` is refused; there is no identity default, since no EC
+  checkpoint (schema 1) was released before issue #23.
 - Dynamic state: the three population pairs (`phi_f_*`, `q_f_*`, `f_*`), the force
   history `Fx_prev` / `Fy_prev`, `qfield`, and `phi` (under `phi_scheme = :direct`
   it lags the charge by one cycle and cannot be rebuilt from populations).
@@ -79,6 +79,8 @@ mutable struct ECState{FT,A3,A2,A1,AB,P,PS,B,CFG} <: AbstractSimulationState
     cycle::Int
     umax_history::Vector{FT}
     cycle_history::Vector{Int}
+    parameter_cycles::Vector{Int}
+    parameter_values::Vector{Float64}
     loop_ns::UInt64
     at_boundary::Bool
 end
@@ -104,8 +106,8 @@ the electroconvection solver, at cycle 0. Same keywords and defaults as
 
 `sidewall_bc` selects `:free_slip` (default) or stationary `:no_slip` flow walls.
 It is fixed simulation identity, not run control or a continuation parameter.
-The future EC checkpoint client must store/compare this configuration key on
-restore; EC snapshot/restore is not implemented by this sidewall capability.
+The EC checkpoint (src/drivers/ehd_ec_checkpoint.jl) stores it as identity and
+refuses a restore with a different or missing `sidewall_bc`.
 
 Adaptive potential solve (`phi_scheme = :lbm`, `phi_substeps = nothing`): checked
 every `Kraken.EHD_EC_PHI_CHECK_EVERY = 8` iterations; a check accepts when the
@@ -250,7 +252,7 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                    phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev,
                    phi_prev, q_prev, Ex_prev, Ey_prev, diag, diag_host, is_solid,
                    poisson_setup,
-                   0, FT(Inf), FT(Inf), 0, FT[], Int[], UInt64(0), true)
+                   0, FT(Inf), FT(Inf), 0, FT[], Int[], Int[0], Float64[T], UInt64(0), true)
 end
 
 """

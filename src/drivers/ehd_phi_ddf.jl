@@ -32,11 +32,12 @@ function _ehd_phi_ddf_check_xbc(xbc::Symbol)
     return nothing
 end
 
-# Entry validation of the drivers' `field_tol` keyword: a non-negative real;
-# `Inf` disables the field check.
+# Entry validation of the drivers' `field_tol` keyword: a real in [0, Inf]
+# (`NaN` and negative values rejected); `Inf` disables the field check. The EC
+# checkpoint restore (ehd_ec_checkpoint.jl) accepts the same range.
 function _ehd_phi_ddf_check_field_tol(field_tol)
-    (field_tol isa Real && field_tol >= 0) ||
-        throw(ArgumentError("field_tol must be a non-negative real number, got $(field_tol)."))
+    (field_tol isa Real && !isnan(field_tol) && field_tol >= 0) ||
+        throw(ArgumentError("field_tol must be a real number in [0, Inf], got $(field_tol)."))
     return field_tol
 end
 

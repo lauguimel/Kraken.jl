@@ -206,7 +206,7 @@ const PUBLIC = (; Nx=11, Ny=H + 1, C=0.01, M=10.0, T=175.0, Ma_E=0.01, alpha=1e-
 
     @testset "driver entry validation" begin
         small = (; Nx=11, Ny=H + 1)
-        for bad in ((; field_tol=-1e-4), (; field_tol=NaN), (; phi_max_iter=0),
+        for bad in ((; field_tol=-1e-4), (; field_tol=NaN), (; field_tol=-Inf), (; phi_max_iter=0),
                     (; phi_max_iter=2.5), (; phi_max_iter=-3))
             @test_throws ArgumentError init_state(ECState; small..., bad...)
             @test_throws ArgumentError run_electroconvection_2d(; small..., bad...)
@@ -221,6 +221,8 @@ const PUBLIC = (; Nx=11, Ny=H + 1, C=0.01, M=10.0, T=175.0, Ma_E=0.01, alpha=1e-
         @test init_state(ECState; small..., phi_scheme=:direct, phi_max_iter=0) isa ECState
         # field_tol = Inf is accepted: the pre-#23 rule.
         @test init_state(ECState; small..., field_tol=Inf).config.field_tol == Inf
+        # Accepted range is [0, Inf], both ends included (same as the EC checkpoint).
+        @test init_state(ECState; small..., field_tol=0.0).config.field_tol === 0.0
     end
 
     @testset "cold capacitor, production tolerances, $FT $xbc tau=$tau" for FT in (Float64, Float32),
