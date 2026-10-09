@@ -8,7 +8,7 @@
 # loop, in the same order of operations; `test/analytical/ehd_ec_split_parity_2d.jl`
 # compares it bit for bit against a frozen copy of that function.
 #
-# Export / restore to disk and parameter updates are not defined here yet.
+# Checkpoint export/restore and parameter updates: ehd_ec_checkpoint.jl.
 # ============================================================================
 
 """
@@ -66,6 +66,8 @@ mutable struct ECState{FT,A3,A2,A1,AB,P,PS,B,CFG} <: AbstractSimulationState
     cycle::Int
     umax_history::Vector{FT}
     cycle_history::Vector{Int}
+    parameter_cycles::Vector{Int}
+    parameter_values::Vector{Float64}
     loop_ns::UInt64
     at_boundary::Bool
 end
@@ -206,7 +208,7 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                    phi_f_in, phi_f_out, q_f_in, q_f_out, f_in, f_out,
                    phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev,
                    phi_prev, q_prev, diag, diag_host, is_solid, poisson_setup,
-                   0, FT(Inf), FT(Inf), 0, FT[], Int[], UInt64(0), true)
+                   0, FT(Inf), FT(Inf), 0, FT[], Int[], Int[0], Float64[T], UInt64(0), true)
 end
 
 """

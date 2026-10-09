@@ -144,6 +144,8 @@ end
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
     include("analytical/ehd_ec_split_parity_2d.jl")
+    include("analytical/EC-RESTART.jl")
+    include("analytical/EC-RESTART-CUDA.jl")
     include("analytical/ehd_hydrostatic_2d.jl")
     include("analytical/ehd_krk_2d.jl")
     include("analytical/EC-SIDEWALLS.jl") # Issue #21: selectable ECState flow walls.
