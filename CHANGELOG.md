@@ -29,6 +29,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   test moves from 0.83 % to 0.18 % on `C_xx` against the nominal strain rate (the
   coupled flow now runs 0.72 % above it, down from 1.41 %). Published numbers
   affected: see erratum.
+- **CUDSS weak-dependency UUID corrected** (#61). Since v0.3.0 the `KrakenCUDSSExt`
+  extension could not be activated by `using CUDA, CUDSS, Kraken`, because `Project.toml`
+  declared a UUID that differs from the registered one in one character. Whether the
+  July 2026 GPU validation exercised the extension is not recorded; it is being re-run.
+  New offline test `test/platform/weakdeps_metadata_test.jl` checks every `[weakdeps]`
+  UUID against the registry; the GPU test now asserts the extension is active when
+  CUDSS loads.
 - **Corrected the 0.5.0 notes** (#52). The four log-conformation closures run on the
   FVFD path only; the LBM-CDE drivers (sphere, Couette, Poiseuille) accept Oldroyd-B
   only, in direct conformation form. Couette and LBM-CDE Poiseuille are not reachable

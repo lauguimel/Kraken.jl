@@ -120,6 +120,9 @@ if get(ENV, "KRAKEN_INCNS_ONLY", "false") == "true"
     exit()
 end
 
+# Package metadata (offline, no GPU): weakdep UUIDs vs General registry (#61).
+include("platform/weakdeps_metadata_test.jl")
+
 @testset "Kraken.jl LBM" begin
     include("platform/contract_parity_test.jl")
     include("platform/state_contract_test.jl")
@@ -146,6 +149,8 @@ end
     include("test_axisymmetric.jl")
     include("test_mrt.jl")
     include("analytical/ehd_ec_split_parity_2d.jl")
+    include("analytical/EC-RESTART.jl")
+    include("analytical/EC-RESTART-CUDA.jl")
     include("analytical/ehd_hydrostatic_2d.jl")
     include("analytical/ehd_krk_2d.jl")
     include("analytical/EC-SIDEWALLS.jl") # Issue #21: selectable ECState flow walls.
@@ -235,6 +240,13 @@ end
     include("test_fvfd_giesekus_3d.jl")
     include("test_fvfd_ptt_3d.jl")
     include("test_fvfd_velocity_gradient_3d.jl")
+    # Known defects of the extensional driver (@test_broken), on a 12x12x4 box
+    # for 2 to 20 steps, so they run on the pull-request path and a fix shows
+    # its Unexpected Pass there:
+    # issue #68 (post-collision velocity read-back) and
+    # issue #69 (Zou-He faces skip k = 1 and k = Nz).
+    include("analytical/ve3d_ext_velocity_readback.jl")
+    include("analytical/ve3d_ext_zouhe_zplanes.jl")
     # Full 3D flow validations: these must reach a developed state for the
     # analytical comparison to mean anything, so they cannot be shrunk without
     # loosening their gates. Measured 2026-09-16, they are 52% of the non-AD
