@@ -8,6 +8,13 @@ using Kraken
 #   3. negative controls showing that the exact comparisons of (2) can fail.
 # Every comparison is exact (`isequal`), never a tolerance: after 20 cycles the
 # Coulomb force is ~1e-10, far below anything a tolerance would notice.
+# The frozen copy predates the repair of issue #23: its adaptive potential solve
+# stops on the potential alone. In (1) the new code therefore runs with
+# `field_tol = Inf`, which reproduces that rule bit for bit; the default `field_tol`
+# also checks the field and takes more potential iterations. Parts (2) and (3)
+# compare the new code with itself and keep the defaults, and so does the error-path
+# parity: its `phi_max_iter = 1` case fails on the potential under both rules, with
+# the same message.
 
 if !isdefined(Kraken, :_legacy_run_electroconvection_2d)
     Base.include(Kraken, joinpath(@__DIR__, "..", "reference", "ehd_ec_legacy.jl"))
@@ -84,7 +91,7 @@ end
 
         for FT in (Float64, Float32), (name, kwargs) in cases
             legacy = Kraken._legacy_run_electroconvection_2d(; kwargs..., FT=FT)
-            new = run_electroconvection_2d(; kwargs..., FT=FT)
+            new = run_electroconvection_2d(; kwargs..., field_tol=Inf, FT=FT)
             @testset "$name $FT" begin
                 @test ec_results_identical(legacy, new)
                 @test eltype(new.ux) == FT

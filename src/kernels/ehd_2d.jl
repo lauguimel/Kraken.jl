@@ -88,6 +88,53 @@ function ehd_rel_change_2d!(out, field, prev, Nx, Ny)
     kernel!(out, field, prev, Nx, Ny; ndrange=(1,))
 end
 
+@kernel function ehd_field_change_2d_kernel!(out, @Const(Ex), @Const(Ey), @Const(Ex_prev),
+                                             @Const(Ey_prev), E_ref, Nx, Ny, offset)
+    k, = @index(Global, NTuple)
+    @inbounds begin
+        if k == 1
+            T = eltype(Ex)
+            maxdiff = zero(T)
+            maxabs = zero(T)
+            finite_flag = one(T)
+            for j in 1:Ny, i in 1:Nx
+                ex = Ex[i, j]
+                ey = Ey[i, j]
+                maxdiff = max(maxdiff, abs(ex - Ex_prev[i, j]), abs(ey - Ey_prev[i, j]))
+                maxabs = max(maxabs, abs(ex), abs(ey))
+                finite_flag = ifelse(isfinite(ex) & isfinite(ey), finite_flag, zero(T))
+            end
+            out[offset + 1] = maxdiff / max(maxabs, E_ref, floatmin(T))
+            out[offset + 2] = finite_flag
+        end
+    end
+end
+
+"""
+    ehd_field_change_2d!(out, Ex, Ey, Ex_prev, Ey_prev, E_ref, Nx, Ny, offset=0)
+
+Relative change of the electric field `(Ex, Ey)` since `(Ex_prev, Ey_prev)`, reduced
+by a single work item like `ehd_rel_change_2d!`:
+
+- `out[offset + 1] = max|E - E_prev| / max(max|E|, E_ref, floatmin)`, where both
+  maxima run over every node and both components;
+- `out[offset + 2]` is `1` when every component of `E` is finite, `0` otherwise.
+
+This is the change of `E` since the previous check, relative to `max(max|E|, E_ref)`,
+with `E_ref = |phi_bottom − phi_top|/(Ny − 1)` the applied field (`1/(Ny − 1)` in all
+public drivers). The applied field is a minimum scale: it applies while `E` is below
+it everywhere, as at the first checks of a cold start, where `E` starts at 0. A
+`floatmin` guard avoids a division by zero when the plates are at the same potential
+and the field is zero. `E_ref` is converted to the element type. The caller computes
+it; measured values of `max|E| / E_ref` at acceptance are in the docstring of
+`ehd_phi_ddf_solve!`. No allocation beyond the kernel launch.
+"""
+function ehd_field_change_2d!(out, Ex, Ey, Ex_prev, Ey_prev, E_ref, Nx, Ny, offset=0)
+    backend = KernelAbstractions.get_backend(Ex)
+    kernel! = ehd_field_change_2d_kernel!(backend)
+    kernel!(out, Ex, Ey, Ex_prev, Ey_prev, eltype(Ex)(E_ref), Nx, Ny, Int(offset); ndrange=(1,))
+end
+
 @kernel function ehd_maxspeed_2d_kernel!(out, @Const(ux), @Const(uy), Nx, Ny)
     k, = @index(Global, NTuple)
     @inbounds begin
