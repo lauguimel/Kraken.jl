@@ -7,10 +7,14 @@ authors:
     family-names: Maitrejean
     affiliation: "Grenoble INP, Université Grenoble Alpes"
     # orcid: "https://orcid.org/0000-0000-0000-0000"  # ← add if desired
+  - given-names: Jiachen
+    family-names: Zhao
+    affiliation: "Queensland University of Technology"
+    orcid: "https://orcid.org/0000-0002-3291-7134"
   - given-names: Emilie
     family-names: Sauret
     affiliation: "Queensland University of Technology"
-    # orcid: "https://orcid.org/0000-0000-0000-0000"  # ← add if desired
+    orcid: "https://orcid.org/0000-0002-8322-3319"
 repository-code: "https://github.com/lauguimel/Kraken.jl"
 url: "https://lauguimel.github.io/Kraken.jl/stable/"
 license: MIT
