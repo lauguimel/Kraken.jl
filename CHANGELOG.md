@@ -8,6 +8,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - Jiachen Zhao (Queensland University of Technology) joins the authors, second position, in `CITATION.cff`, `Project.toml` and the BibTeX entries of the README and the documentation home page. `CITATION.cff` now carries the ORCIDs of J. Zhao and E. Sauret.
 - Electroconvection `.krk` cases now apply paired `Boundary west wall` / `Boundary east wall` as stationary no-slip sidewalls instead of ignoring them; omitted sides retain free slip. Explicit non-lateral `Boundary` declarations are rejected because electrode/plate conditions are built into this driver.
+- Documentation numbers re-measured after the TRT Guo forcing fix (#67), same settings
+  as before (Aqua A100, CUDA Float64; post-fix source `edbc20916`, jobs 26763246/47/48,
+  26766115, 26766116/17; pre-fix control `249146d4d`, job 26763249, reproduces the
+  published 119.2410). Oldroyd-B confined cylinder vs RheoTool (`R = 50`, `β = 0.59`):
+  `Cd` 129.92 / 118.68 / 119.24 → 129.95 / 118.92 / 119.49 and error −0.40 / −0.86 /
+  −0.96 % → −0.37 / −0.66 / −0.75 % at `Wi = 0.1 / 0.5 / 1`; still under 1 %. `Wi = 1`
+  convergence −6.2 / −1.9 / −0.96 % → −6.1 / −1.7 / −0.75 % at `R = 10 / 30 / 50`.
+  `β = 0.3` is no longer described as within 1 %: −1.33 % at `Wi = 0.5` (−1.77 % before
+  the fix) and +1.24 % at `Wi = 1`, where the RheoTool reference is not steady at
+  `t = 20`. High-`Wi` `Cd` at `Wi = 3`: 141.8 / 116.3 → 131.6 / 118.4 (`R = 50 / 30`),
+  still NaN-free to `Wi = 10`. Wake-`N1` ratios 0.770 / 0.704 / 0.890 / 1.437 → 0.771 /
+  0.705 / 0.894 / 1.448. AD viscoelastic shape sensitivity: adjoint vs finite difference
+  0.42 % → 0.63 %, the `fwd_tol = 1e-11` counter-example 22.6 % → 53.3 %, and the "~20×"
+  cancellation ratio, which the runs do not measure, is removed. Pages:
+  `viscoelastic-cylinder` (benchmark and tutorial), `validation-matrix`,
+  `ad-shape-sensitivity-viscoelastic`, `docs/agent/ad-ve-implication.md`, and the
+  `benchmarks/results/rheotool_compare/viscoelastic/` README, `kraken_cd_vs_wi.csv` and
+  `error_norms.csv`. `comparison.png` (and its copy `viscoelastic-cylinder.png`) and
+  `m8_refs/*.csv` still hold the pre-fix values.
 
 ### Fixed
 - **TRT Guo forcing injects exactly `F` per step** (#67). The TRT collision
@@ -29,7 +48,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   BGK Guo kernels, and the AD mirror against the 2D brick. The coupled planar-extension
   test moves from 0.83 % to 0.18 % on `C_xx` against the nominal strain rate (the
   coupled flow now runs 0.72 % above it, down from 1.41 %). Published numbers
-  affected: see erratum.
+  affected: see the documentation entry under Changed above.
 - **CUDSS weak-dependency UUID corrected** (#61). Since v0.3.0 the `KrakenCUDSSExt`
   extension could not be activated by `using CUDA, CUDSS, Kraken`, because `Project.toml`
   declared a UUID that differs from the registered one in one character. Whether the
