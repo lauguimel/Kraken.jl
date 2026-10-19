@@ -1,11 +1,30 @@
 # EC client of the shared state/checkpoint contract (Issues #22 and #26).
-# No collision, boundary, Poisson or time-integration algorithm is changed here.
+# Schema 2 records the opt-in injector closure; schema 1 migrates only to :nee.
 
-const _EC_SCHEMA = 1
+const _EC_SCHEMA = 2
 const _EC_IDENTITY = (:Nx, :Ny, :C, :M, :Ma_E, :alpha, :delta_U, :gamma,
     :phi_tol, :field_tol, :phi_max_iter, :phi_substeps, :phi_scheme, :charge_scheme,
-    :ns_scheme, :sidewall_bc, :force_projection, :velocity_stop, :history_interval)
-const _EC_SYMBOLS = (:phi_scheme, :charge_scheme, :ns_scheme, :sidewall_bc, :force_projection)
+    :ns_scheme, :sidewall_bc, :force_projection, :velocity_stop, :history_interval, :injector_closure)
+const _EC_SYMBOLS = (:phi_scheme, :charge_scheme, :ns_scheme, :sidewall_bc, :force_projection, :injector_closure)
+
+"""Upgrade old EC schema 1 to explicit legacy injector identity.
+
+Only the new key is defaulted. Missing old identity keys remain errors; no
+populations, physical parameters or existing caller-owned dictionaries change.
+"""
+function migrate(::Type{ECState}, snap::StateSnapshot, from_version::Int)
+    (snap.solver == "ehd_ec" && from_version == 1 && snap.schema_version == 1) ||
+        throw(CheckpointError("schema_version: unsupported EC migration from $from_version"))
+    haskey(snap.identity,"injector_closure") &&
+        throw(CheckpointError("identity/injector_closure: unexpected in EC schema 1"))
+    identity = copy(snap.identity)
+    identity["injector_closure"] = "nee"
+    upgraded = StateSnapshot(; solver=snap.solver, schema_version=_EC_SCHEMA, cycle=snap.cycle,
+        fields=snap.fields, series=snap.series, scalars=snap.scalars, identity,
+        run_control=snap.run_control, parameters=snap.parameters, derived=snap.derived)
+    validate_snapshot(ECState, upgraded)
+    return upgraded
+end
 
 _ec_encode(v::Symbol) = String(v)
 _ec_encode(v) = v
@@ -71,6 +90,8 @@ end
 Reject missing, incompatible or non-finite carried state before device allocation.
 """
 function validate_snapshot(::Type{ECState}, snap::StateSnapshot)
+    (snap.solver == "ehd_ec" && snap.schema_version == _EC_SCHEMA) ||
+        throw(CheckpointError("solver/schema_version: expected ehd_ec schema $_EC_SCHEMA"))
     validate_content(snap)
     check_finite(snap)
     _ec_keys(snap.identity, [String.(_EC_IDENTITY)..., "FT"], "identity")
@@ -92,8 +113,15 @@ function validate_snapshot(::Type{ECState}, snap::StateSnapshot)
                         ("charge_scheme", ("srt", "regularized")),
                         ("ns_scheme", ("bgk", "mrt")),
                         ("sidewall_bc", ("free_slip", "no_slip")),
-                        ("force_projection", ("none", "xy", "y")))
+                        ("force_projection", ("none", "xy", "y")),
+                        ("injector_closure", ("nee", "moment")))
         d[k] in values || throw(CheckpointError("identity/$k: unsupported value $(repr(d[k]))"))
+    end
+    try
+        _ehd_check_injector_closure(Symbol(d["injector_closure"]), :ec,
+            Symbol(d["charge_scheme"]), Symbol(d["phi_scheme"]), FT, d["delta_U"])
+    catch e
+        throw(CheckpointError("identity/injector_closure: " * sprint(showerror,e)))
     end
     sub = d["phi_substeps"]
     (sub === nothing || (sub isa Int && sub > 0)) ||
@@ -149,11 +177,15 @@ against the snapshot; they cannot change the simulation. Change T afterwards wit
 `update_parameter!`. Backend migration is refused in this first increment.
 The canonical `sidewall_bc` and the potential stopping tolerance `field_tol`
 (issue #23; `Inf` round-trips) are mandatory identity: missing or mismatched
-values are rejected, never defaulted. Schema 1 has not been released; no migration
-is provided for development checkpoints that omitted these fields.
+values are rejected, never defaulted. Valid schema-1 checkpoints migrate to
+schema 2 with injector_closure=:nee. Schema 2 requires an explicit valid closure;
+missing closure keys are not silently repaired in newly written checkpoints.
 """
 function restore_state(::Type{ECState}, snap::StateSnapshot;
                        backend=KernelAbstractions.CPU(), kwargs...)
+    if snap.schema_version != _EC_SCHEMA
+        snap = migrate(ECState, snap, snap.schema_version)
+    end
     expected = copy(snap.identity)
     # Key-set validation prevents an unknown identity entry from comparing to itself.
     _ec_keys(expected, [String.(_EC_IDENTITY)..., "FT"], "identity")
