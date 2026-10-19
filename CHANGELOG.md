@@ -25,8 +25,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `viscoelastic-cylinder` (benchmark and tutorial), `validation-matrix`,
   `ad-shape-sensitivity-viscoelastic`, `docs/agent/ad-ve-implication.md`, and the
   `benchmarks/results/rheotool_compare/viscoelastic/` README, `kraken_cd_vs_wi.csv` and
-  `error_norms.csv`. `comparison.png` (and its copy `viscoelastic-cylinder.png`) and
-  `m8_refs/*.csv` still hold the pre-fix values.
+  `error_norms.csv`, and `comparison.png` (and its copy `viscoelastic-cylinder.png`),
+  regenerated from the post-fix `kraken_cd_vs_wi.csv`. `m8_refs/*.csv` keep the
+  pre-fix values as the dated record of the M8 study.
 
 ### Fixed
 - **TRT Guo forcing injects exactly `F` per step** (#67). The TRT collision
