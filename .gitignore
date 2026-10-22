@@ -27,3 +27,4 @@ benchmarks/results/ehd/tc_sweep_*.md
 
 # Local planning notes — never tracked
 .orchestrator/
+benchmarks/inverse_rheology/out/

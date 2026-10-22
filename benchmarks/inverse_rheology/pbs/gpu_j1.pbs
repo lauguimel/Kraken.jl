@@ -1,0 +1,45 @@
+#!/bin/bash
+#PBS -N ir_j1_gpu
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=A100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# J1 GPU measurements. Submit from ~/inverse_rheology_runs with
+#   qsub -v SPECS=1+4+7,T3=1,OUTSUB=j1c .../gpu_j1.pbs
+#   qsub -v SPECS=1:64:0.34+1:32:0.17 .../gpu_j1.pbs
+# SPECS = '+'-separated entries, each `run` (grid from the rule `case_grid`:
+# (64; 0.34), or (72; 0.34) when Mach > 0.1, i.e. run 4) or `run:m:nu0`.
+# T3=1 also runs the GNF test file (T3 CPU/GPU parity is active on a GPU node).
+# MAXWALL = per-run cap on the steady solve, seconds (default 2400).
+# OUTSUB = output subfolder of $RUNS (default j1). STOP = distance (default) or
+# step_change, TOL = stop tolerance (default 1e-10).
+set -euo pipefail
+source "${REPO:-$HOME/Kraken.jl-inverse}/benchmarks/inverse_rheology/pbs/env.sh"
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) SPECS=$SPECS T3=${T3:-0} OUTSUB=${OUTSUB:-j1} $(date)"
+git status --short
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv || true
+"$JL" --project=. -e 'using CUDA; @assert CUDA.functional(); println("CUDA OK ", CUDA.name(CUDA.device()))'
+
+if [ "${T3:-0}" = "1" ]; then
+    t0=$(date +%s)
+    "$JL" --project=. -e 'using Kraken, Test, KernelAbstractions; include("test/rheology/gnf_cell_test.jl")' \
+        || echo "!!! gnf_cell_test.jl FAILED"
+    echo "--- tests done in $(( $(date +%s) - t0 )) s ---"
+fi
+
+for spec in ${SPECS//+/ }; do
+    IFS=: read -r R M NU <<< "$spec"
+    GRID=()
+    [ -n "${M:-}" ] && GRID+=("m=$M")
+    [ -n "${NU:-}" ] && GRID+=("nu0=$NU")
+    t0=$(date +%s)
+    echo "--- run=$R ${GRID[*]:-grid=rule} start $(date) ---"
+    "$JL" --project=. benchmarks/inverse_rheology/run_j1_forward.jl run="$R" "${GRID[@]}" backend=cuda \
+        out="$RUNS/${OUTSUB:-j1}" max_wall="${MAXWALL:-2400}" stop="${STOP:-distance}" \
+        tol="${TOL:-1e-10}" || echo "!!! run=$R ${GRID[*]:-} FAILED"
+    echo "--- run=$R done in $(( $(date +%s) - t0 )) s ---"
+done
+echo "all done $(date)"

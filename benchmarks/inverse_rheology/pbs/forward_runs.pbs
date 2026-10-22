@@ -1,0 +1,28 @@
+#!/bin/bash
+#PBS -N ir_j4_fwd
+#PBS -l select=1:ncpus=4:ngpus=1:mem=32GB:gpu_id=A100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# J4-prep: forwards of the fluids 2, 3, 5, 6 (grid rule of plan §4.4). Submit
+# from ~/inverse_rheology_runs/j4:
+#   qsub ~/Kraken.jl-inverse/benchmarks/inverse_rheology/pbs/forward_runs.pbs
+#   qsub -v RUNS_LIST=2+3 .../forward_runs.pbs        (subset)
+# Output: $REPO/benchmarks/inverse_rheology/out/forward/ (and the PBS log).
+set -uo pipefail
+export REPO="${REPO:-$HOME/Kraken.jl-inverse}"
+export RUNS="${RUNS:-$HOME/inverse_rheology_runs/j4}"
+export JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-$RUNS/depot:$HOME/kraken_guo_remeasure/depot2}"
+source "$REPO/benchmarks/inverse_rheology/pbs/env.sh"
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) RUNS_LIST=${RUNS_LIST:-2+3+5+6} $(date)"
+git status --short
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv || true
+"$JL" --project=. -e 'using CUDA; @assert CUDA.functional(); println("CUDA OK ", CUDA.name(CUDA.device()))' || exit 2
+t0=$(date +%s)
+"$JL" --project=. benchmarks/inverse_rheology/forward_runs.jl runs="${RUNS_LIST:-2+3+5+6}" backend=cuda \
+    out="$REPO/benchmarks/inverse_rheology/out/forward" max_wall="${MAXWALL:-2400}" max_steps="${MAXSTEPS:-2000000}" \
+    || echo "!!! forward_runs FAILED (exit $?)"
+echo "all done in $(( $(date +%s) - t0 )) s $(date)"

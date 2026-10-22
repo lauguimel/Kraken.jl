@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N ir_j1_cputest
+#PBS -l select=1:ncpus=4:mem=16GB
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# CPU unit tests of the steady GNF forward (T1, T1b, T2, T2c; T3 is skipped
+# here and runs in the GPU job), then the existing rheology testset as a
+# regression check, each in its own Julia process. Submit from
+# ~/inverse_rheology_runs.
+
+set -euo pipefail
+source "${REPO:-$HOME/Kraken.jl-inverse}/benchmarks/inverse_rheology/pbs/env.sh"
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) $(date)"
+git status --short
+t0=$(date +%s)
+# Two separate processes: a failure in one test file does not hide the other.
+for tf in test/rheology/gnf_cell_test.jl test/test_rheology.jl; do
+    "$JL" --project=. -e "using Kraken, Test, KernelAbstractions
+t = @elapsed include(\"$tf\")
+println(\"$tf wall = \", round(t; digits=1), \" s\")" || echo "!!! $tf FAILED (exit $?)"
+done
+echo "cpu tests done in $(( $(date +%s) - t0 )) s $(date)"

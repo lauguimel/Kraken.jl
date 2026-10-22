@@ -1,0 +1,29 @@
+#!/bin/bash
+#PBS -N ir_quick
+#PBS -l select=1:ncpus=4:mem=16GB
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# Quick tier of the Kraken test suite, as the pull-request CI stage runs it
+# (KRAKEN_SKIP_AD=true, KRAKEN_SKIP_VE3D=true): LBM tier, then IncNS tier.
+# Runs test/runtests.jl directly (not Pkg.test, which would try to install
+# the test-only Enzyme dependency; compute nodes have no registry access).
+# The LBM testset summary is printed before the IncNS tier starts, so a job
+# killed at the walltime still reports the LBM tier. A failing LBM testset
+# stops the script before IncNS: TIER=incns (qsub -v TIER=incns) runs the
+# IncNS tier alone (KRAKEN_INCNS_ONLY=true). Submit from ~/inverse_rheology_runs.
+
+set -euo pipefail
+source "${REPO:-$HOME/Kraken.jl-inverse}/benchmarks/inverse_rheology/pbs/env.sh"
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) $(date)"
+git status --short
+export KRAKEN_SKIP_AD=true
+export KRAKEN_SKIP_VE3D=true
+if [ "${TIER:-all}" = "incns" ]; then export KRAKEN_INCNS_ONLY=true; fi
+echo "TIER=${TIER:-all}"
+t0=$(date +%s)
+"$JL" --project=. test/runtests.jl || echo "!!! quick tier FAILED (exit $?)"
+echo "quick tier done in $(( $(date +%s) - t0 )) s $(date)"

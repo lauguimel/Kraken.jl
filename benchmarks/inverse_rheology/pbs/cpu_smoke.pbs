@@ -1,0 +1,18 @@
+#!/bin/bash
+#PBS -N ir_j1_smoke
+#PBS -l select=1:ncpus=4:mem=16GB
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# Plumbing check of benchmarks/inverse_rheology/run_j1_forward.jl on CPU at a coarse,
+# short setting (m = 16, a few thousand steps). Not a measurement.
+set -euo pipefail
+source "${REPO:-$HOME/Kraken.jl-inverse}/benchmarks/inverse_rheology/pbs/env.sh"
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) $(date)"
+t0=$(date +%s)
+"$JL" --project=. benchmarks/inverse_rheology/run_j1_forward.jl run=1 m=16 nu0=0.085 backend=cpu \
+    out="$RUNS/smoke" max_steps=4000 check_every=500 t2b_units=0.5 timing_steps=100
+echo "smoke done in $(( $(date +%s) - t0 )) s $(date)"

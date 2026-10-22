@@ -1,0 +1,48 @@
+#!/bin/bash
+#PBS -N ir_j2_gate
+#PBS -l select=1:ncpus=4:ngpus=1:mem=48GB:gpu_id=A100
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# J2 GPU gate of the GNF steady adjoint (benchmarks/inverse_rheology/j2_gate.jl).
+# Submit from ~/inverse_rheology_runs:
+#   qsub .../gpu_gate.pbs                                  default measurement series
+#   qsub -v GATE_ARGS="fallbacks=force only=gate" .../gpu_gate.pbs
+# GATE_ARGS = extra key=value arguments passed to j2_gate.jl (see its header).
+# GPUTEST=1 first runs test/ad/gnf_adjoint_test.jl on the GPU node (its CPU/GPU
+# parity testset G is active there).
+# Output: $REPO/benchmarks/inverse_rheology/out/gate_<stamp>_<job>/ (log, manifest.toml,
+# results.toml, summary.txt, convergence_*.csv, nvidia_smi_mem.csv).
+set -uo pipefail
+source "${REPO:-$HOME/Kraken.jl-inverse}/benchmarks/inverse_rheology/pbs/env.sh"
+export OPENBLAS_NUM_THREADS="${NCPUS:-4}"
+STAMP=$(date +%Y%m%d_%H%M%S)
+OUT="$REPO/benchmarks/inverse_rheology/out/gate_${STAMP}_${PBS_JOBID%%.*}"; mkdir -p "$OUT"
+exec > >(tee -a "$OUT/gate.log") 2>&1
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) GATE_ARGS=${GATE_ARGS:-} GPUTEST=${GPUTEST:-0} $(date)"
+git status --short
+nvidia-smi || true
+"$JL" --project=. -e 'using CUDA; @assert CUDA.functional(); println("CUDA OK ", CUDA.name(CUDA.device()), " ", CUDA.runtime_version())' \
+    || { echo "!!! CUDA not functional"; exit 1; }
+
+nvidia-smi --query-gpu=timestamp,memory.used,memory.total,utilization.gpu --format=csv -l 5 \
+    > "$OUT/nvidia_smi_mem.csv" 2>&1 &
+SMI=$!
+trap 'kill $SMI 2>/dev/null' EXIT
+
+if [ "${GPUTEST:-0}" = "1" ]; then
+    t0=$(date +%s)
+    ( cd test && KRAKEN_SKIP_AD=true "$JL" --project=.. -e 'using Test, Kraken; include("ad/gnf_adjoint_test.jl")' ) \
+        || echo "!!! gnf_adjoint_test.jl FAILED"
+    echo "--- GPU-node tests done in $(( $(date +%s) - t0 )) s ---"
+fi
+
+t0=$(date +%s)
+# GATE_ARGS is split on spaces on purpose (key=value list).
+# shellcheck disable=SC2086
+"$JL" --project=. -t 4 benchmarks/inverse_rheology/j2_gate.jl out="$OUT" ${GATE_ARGS:-} \
+    || echo "!!! j2_gate.jl FAILED (exit $?)"
+echo "--- gate done in $(( $(date +%s) - t0 )) s ; all done $(date)"

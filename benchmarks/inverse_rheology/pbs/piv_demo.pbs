@@ -1,0 +1,25 @@
+#!/bin/bash
+#PBS -N ir_piv_demo
+#PBS -l select=1:ncpus=2:mem=8GB
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# Pseudo-PIV demo on the J1 fields (CPU). Own environment variables so that
+# nothing is shared with the other missions' depots:
+#   qsub -v REPO=$HOME/Kraken.jl-inverse,RUNS=$HOME/inverse_rheology_runs/piv \
+#        ~/Kraken.jl-inverse/benchmarks/inverse_rheology/pbs/piv_demo.pbs
+# Optional: -v ARGS="runs=run1_m64_nu0.340 seed=1" (forwarded to the script).
+# Output: benchmarks/inverse_rheology/out/piv/<run>/ and a log copy next to it.
+set -uo pipefail
+export REPO="${REPO:-$HOME/Kraken.jl-inverse}"
+export RUNS="${RUNS:-$HOME/inverse_rheology_runs/piv}"
+source "$REPO/benchmarks/inverse_rheology/pbs/env.sh"
+OUT="$REPO/benchmarks/inverse_rheology/out/piv"; mkdir -p "$OUT"
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) $(date)"
+t0=$(date +%s)
+"$JL" --project=. benchmarks/inverse_rheology/pseudo_piv_demo.jl out="$OUT" ${ARGS:-} \
+    || echo "!!! demo FAILED (exit $?)"
+echo "piv demo done in $(( $(date +%s) - t0 )) s $(date)"

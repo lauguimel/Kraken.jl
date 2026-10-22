@@ -1,0 +1,89 @@
+#!/bin/bash
+#PBS -N ir_j2_tests
+#PBS -l select=1:ncpus=4:mem=16GB
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+#
+# CPU test jobs of the inverse-rheology GNF milestones (J2 decision d10: ≤ 30 min, CPU).
+# Submit from ~/inverse_rheology_runs:
+#   qsub -v FILES="ad/gnf_adjoint_test.jl rheology/gnf_cell_test.jl" .../j2_tests.pbs
+#       each file (path relative to test/) in its own Julia process, quick-tier
+#       settings (KRAKEN_SKIP_AD=true); a failure in one does not hide the others
+#   qsub .../j2_tests.pbs                          quick tier of test/runtests.jl
+#   qsub -v SMOKE=1 .../j2_tests.pbs
+#       smoke run of benchmarks/inverse_rheology/j2_gate.jl on the KA CPU backend, small
+#       grid (64×32), every item and fallback once: checks the script before a
+#       GPU gate submission; the numbers are not measurements. SMOKE_ARGS =
+#       extra key=value arguments (later keys override), e.g. "only=gate fb_extra=v+vi"
+#   FILES and SMOKE may be combined in one job (FILES first); TIER is used only
+#   when neither is set.
+#   qsub -v TIER=full,KRAKEN_ONLY=ad/gnf_adjoint_enzyme_test.jl .../j2_tests.pbs
+#       Enzyme tier for one file. Enzyme is not in the worktree environment
+#       (weak dependency): an environment $RUNS/enzyme_env is made from the
+#       worktree Manifest + Kraken (dev) + Enzyme, in the dedicated first depot
+#       $RUNS/depot_enzyme. Julia 1.11 needs the LLVM 16 build of Enzyme_jll,
+#       which no Aqua depot held (2026-10-20: only LLVM 15/18 artifacts in
+#       ~/.julia). The environment is downloaded beforehand on the login node
+#       (download only: JULIA_PKG_PRECOMPILE_AUTO=0, registry not updated):
+#         source env.sh; export JULIA_DEPOT_PATH="$RUNS/depot_enzyme:$JULIA_DEPOT_PATH"
+#         cp $REPO/Manifest.toml $RUNS/enzyme_env/; $JL --project=$RUNS/enzyme_env -e \
+#           'using Pkg; Pkg.UPDATED_REGISTRY_THIS_SESSION[] = true; Pkg.develop(path=ENV["REPO"]);
+#            Pkg.add(["Enzyme","Test","KernelAbstractions","LinearAlgebra","Printf","Random"])'
+#       This job only precompiles and runs.
+# Output: the PBS log, and a copy in $REPO/benchmarks/inverse_rheology/out/j2_tests_<stamp>_<job>.log
+set -uo pipefail
+source "${REPO:-$HOME/Kraken.jl-inverse}/benchmarks/inverse_rheology/pbs/env.sh"
+# OpenBLAS sizes its pool from the node's core count, not from the PBS
+# allocation; pin it to the allocated cores (dense SVD/eig in T4b).
+export OPENBLAS_NUM_THREADS="${NCPUS:-4}"
+STAMP=$(date +%Y%m%d_%H%M%S)
+OUT="$REPO/benchmarks/inverse_rheology/out"; mkdir -p "$OUT"
+LOG="$OUT/j2_tests_${STAMP}_${PBS_JOBID%%.*}.log"
+exec > >(tee -a "$LOG") 2>&1
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) TIER=${TIER:-quick} FILES=${FILES:-} SMOKE=${SMOKE:-0} KRAKEN_ONLY=${KRAKEN_ONLY:-} $(date)"
+git status --short
+t0=$(date +%s)
+ran=0
+if [ -n "${FILES:-}" ]; then
+    ran=1
+    cd "$REPO/test"
+    export KRAKEN_SKIP_AD=true KRAKEN_SKIP_VE3D=true
+    for tf in $FILES; do
+        tf="${tf#test/}"
+        echo "=== $tf start $(date)"
+        "$JL" --project=.. -e "using Test, Kraken
+t = @elapsed include(\"$tf\")
+println(\"$tf wall = \", round(t; digits=1), \" s\")" || echo "!!! $tf FAILED (exit $?)"
+    done
+fi
+if [ "${SMOKE:-0}" = "1" ]; then
+    ran=1
+    cd "$REPO"
+    echo "=== gate smoke start $(date)"
+    "$JL" --project=. -t 4 benchmarks/inverse_rheology/j2_gate.jl backend=cpu out="$OUT/gate_smoke_${STAMP}_${PBS_JOBID%%.*}" \
+        gate=4:8:0.1 cases=N:8:0.1+1:8:0.1 timing=4:8:0.1 restart_case=1:8:0.1 restart=80 \
+        restart_none_max=400 fallbacks=force deflate=8 series_N=300 max_solve=120 budget=1500 \
+        ${SMOKE_ARGS:-} || echo "!!! gate smoke FAILED (exit $?)"
+fi
+if [ "$ran" = "0" ]; then
+    cd "$REPO/test"
+    if [ "${TIER:-quick}" = "full" ]; then
+        ONLY="${KRAKEN_ONLY:?TIER=full needs KRAKEN_ONLY}"; export KRAKEN_ONLY="${ONLY#test/}"
+        export KRAKEN_SKIP_AD=false
+        ENZ="$RUNS/enzyme_env"; mkdir -p "$ENZ" "$RUNS/depot_enzyme"
+        export JULIA_DEPOT_PATH="$RUNS/depot_enzyme:$JULIA_DEPOT_PATH"
+        [ -f "$ENZ/Manifest.toml" ] || { echo "!!! $ENZ not set up (see header: login-node download)"; exit 1; }
+        echo "--- precompile $(date)"
+        tp=$(date +%s)
+        "$JL" --project="$ENZ" -e 'using Pkg; Pkg.status(); Pkg.precompile()' || { echo "!!! precompile FAILED (exit $?)"; exit 1; }
+        echo "--- precompile done in $(( $(date +%s) - tp )) s ; run $(date)"
+        "$JL" --project="$ENZ" runtests.jl || echo "!!! full tier FAILED (exit $?)"
+    else
+        export KRAKEN_SKIP_AD=true KRAKEN_SKIP_VE3D=true
+        "$JL" --project=.. runtests.jl || echo "!!! quick tier FAILED (exit $?)"
+    fi
+fi
+echo "j2_tests done in $(( $(date +%s) - t0 )) s $(date)"

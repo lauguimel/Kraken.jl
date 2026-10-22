@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#PBS -N ir_j1_setup
+#PBS -l select=1:ncpus=4:mem=16GB
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -m n
+# RPID (mandatory from 2026-11-02, pending): add the directive  -P <RPID>
+# Instantiate + precompile the worktree environment (CPU node, no GPU needed).
+set -euo pipefail
+source "${REPO:-$HOME/Kraken.jl-inverse}/benchmarks/inverse_rheology/pbs/env.sh"
+cd "$REPO"
+echo "host=$(hostname) sha=$(git rev-parse HEAD) $(date)"
+t0=$SECONDS
+"$JL" --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using Kraken; println("Kraken OK ", VERSION, " threads=", Threads.nthreads())'
+echo "setup done in $((SECONDS-t0)) s $(date)"
