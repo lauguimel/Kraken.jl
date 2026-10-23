@@ -120,6 +120,9 @@ if get(ENV, "KRAKEN_INCNS_ONLY", "false") == "true"
     exit()
 end
 
+# Package metadata (offline, no GPU): weakdep UUIDs vs General registry (#61).
+include("platform/weakdeps_metadata_test.jl")
+
 @testset "Kraken.jl LBM" begin
     include("platform/contract_parity_test.jl")
     include("platform/state_contract_test.jl")

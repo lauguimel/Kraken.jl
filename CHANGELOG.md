@@ -3,6 +3,29 @@
 All notable changes to Kraken.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.1] — 2026-10-23
+
+### Changed
+- Jiachen Zhao (Queensland University of Technology) joins the authors, second position,
+  in `CITATION.cff`, `Project.toml` and the BibTeX entries of the README and the
+  documentation home page. `CITATION.cff` now carries the ORCIDs of J. Zhao and
+  E. Sauret. The `version` field of those two BibTeX entries now reads 0.5.1 (it read
+  0.2.0 in the README and 0.4.0 on the home page).
+
+### Fixed
+- **CUDSS weak-dependency UUID corrected** (#61). Since v0.3.0 the `KrakenCUDSSExt`
+  extension could not be activated by `using CUDA, CUDSS, Kraken`, because `Project.toml`
+  declared a UUID that differs from the registered one in one character. Whether the
+  July 2026 GPU validation exercised the extension is not recorded. The corrected
+  extension was run on an H100 on the fix branch (Julia 1.11.9, CUDA 5.11.3,
+  CUDSS 0.6.5, Float64): it loads through plain `using`, and 41/41 GPU assertions pass
+  with no CPU fallback. New offline test `test/platform/weakdeps_metadata_test.jl`
+  checks every `[weakdeps]` UUID against the registry; the GPU test now asserts the
+  extension is active when CUDSS loads.
+- The 0.3.0 entry "GPU-validated (parity ≤1.6e-12)" for the cuDSS solve and the matching
+  line of `docs/agent/solve-linear-implication.md` now carry a correction note (#61): the
+  loading path of that July run is not recorded.
+
 ## [0.5.0] — 2026-09-24
 
 ### Added
@@ -152,6 +175,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **LinearSolve.jl front-end + cuDSS direct solve** behind `[weakdeps]`
   (`solve_poisson_direct`): assembled sparse alternative to the MG path on the same
   discretization; CPU MMS order 2.00, GPU-validated (parity ≤1.6e-12).
+  *Correction (0.5.1, see #61):* the GPU claim is not supported as written. The declared
+  CUDSS UUID was wrong, so `using CUDSS` could not activate `KrakenCUDSSExt`, and the
+  loading path of the July run (extension or manual include) was not recorded. The
+  extension path was first validated with the UUID fix of 0.5.1 (Aqua job 26559033,
+  reported 2026-10-10: H100, 41/41 GPU assertions, no CPU fallback).
 
 ### Changed
 - Documentation reframed method-agnostic (architecture page, maturity table) — the

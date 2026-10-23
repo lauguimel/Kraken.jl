@@ -100,11 +100,11 @@ If you use Kraken.jl in academic work, please cite:
 
 ```bibtex
 @software{kraken_jl,
-  author  = {Maitrejean, Guillaume},
+  author  = {Maitrejean, Guillaume and Zhao, Jiachen and Sauret, Emilie},
   title   = {Kraken.jl: a GPU-portable Lattice Boltzmann framework in Julia},
   year    = {2026},
   url     = {https://github.com/lauguimel/Kraken.jl},
-  version = {0.2.0},
+  version = {0.5.1},
 }
 ```
 

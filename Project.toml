@@ -1,7 +1,7 @@
 name = "Kraken"
 uuid = "b9c8ae56-6711-4442-a2ee-93cdf3c40864"
-version = "0.5.0"
-authors = ["Guillaume"]
+version = "0.5.1"
+authors = ["Guillaume Maitrejean", "Jiachen Zhao", "Emilie Sauret"]
 
 [deps]
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
@@ -19,7 +19,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
 [weakdeps]
-CUDSS = "45b445bb-4962-46a0-9369-b3df9d0f772e"
+CUDSS = "45b445bb-4962-46a0-9369-b4df9d0f772e"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"

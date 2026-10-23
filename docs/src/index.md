@@ -158,10 +158,10 @@ so GitHub's **"Cite this repository"** button (top-right of the
 
 ```bibtex
 @software{kraken_jl,
-  author  = {Maitrejean, Guillaume and Sauret, Emilie},
+  author  = {Maitrejean, Guillaume and Zhao, Jiachen and Sauret, Emilie},
   title   = {{Kraken.jl}},
   year    = {2026},
-  version = {0.4.0},
+  version = {0.5.1},
   doi     = {10.5281/zenodo.22747126},
   url     = {https://github.com/lauguimel/Kraken.jl}
 }
