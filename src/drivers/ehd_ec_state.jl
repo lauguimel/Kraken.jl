@@ -139,6 +139,7 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     phi_substeps=nothing,
                     phi_scheme=:lbm,
                     charge_scheme=:regularized,
+                    injector_closure=:nee,
                     ns_scheme=:bgk,
                     sidewall_bc=:free_slip,
                     perturb_amplitude=1e-4,
@@ -148,6 +149,9 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     history_interval=1,
                     backend=KernelAbstractions.CPU(),
                     FT=Float64)
+    # PR 1 of #73 does not change EC configuration/checkpoint identity. Reject
+    # the experimental static option before allocation instead of ignoring it.
+    _ehd_check_injector_closure(injector_closure, :ec, charge_scheme, phi_scheme, FT, delta_U)
     Nx < 4 && throw(ArgumentError("Nx must be at least 4."))
     Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
     charge_scheme in (:srt, :regularized) ||
