@@ -67,6 +67,37 @@ using Test, Kraken, KernelAbstractions, LinearAlgebra
         @test candidate.q != legacy.q
     end
 
+    @testset "Converged public-driver all-node current regression" begin
+        # PR78 review, 2026-10-23, issuecomment-6362790750: maintainer CPU
+        # measurement at Nx=4, Ny=96 is 0.52% for :static_moment versus 26.6%
+        # for :nee. Freeze a 1% regression ceiling BEFORE the follow-up run.
+        # This guards the integrated call order, not a new profile-accuracy claim.
+        result = Kraken.run_ehd_hydrostatic_2d(; Nx=4, Ny=96,
+            C=10.0, M=10.0, Ma_E=0.01, alpha=1e-4, delta_U=1.0,
+            charge_scheme=:regularized, phi_scheme=:direct,
+            injector_closure=:static_moment, charge_tol=1e-10,
+            max_steps=100000, backend=CPU(), FT=Float64)
+        @test 1 < result.steps < 100000
+        @test result.q_rel_change <= 1e-10
+        @test all(isfinite, result.q) && minimum(result.q) > 0
+        # q(y=0)=q_inj to summation roundoff, not an accuracy tolerance.
+        @test all(isapprox.(result.q[:,1], result.params.q_inj;
+                            rtol=32eps(Float64), atol=0.0))
+        q, ey, p = result.q_profile, result.Ey_profile, result.params
+        # Lattice spacing is one. Include BOTH electrodes with second-order
+        # one-sided derivatives; the interior uses centred differences.
+        dq = similar(q)
+        dq[1] = (-3q[1] + 4q[2] - q[3])/2
+        dq[2:end-1] .= (q[3:end] .- q[1:end-2])./2
+        dq[end] = (3q[end] - 4q[end-1] + q[end-2])/2
+        current = p.K .* q .* ey .- p.D .* dq
+        mean_current = sum(current)/length(current)
+        @test all(isfinite, current) && minimum(current) > 0
+        variation = maximum(abs.(current .- mean_current))/abs(mean_current)
+        @test variation <= 0.01
+        @info "Static injector converged regression" steps=result.steps current_variation=variation charge_rel_change=result.q_rel_change
+    end
+
     @testset "Manufactured stationary recurrence, link balance and actual kernel" begin
         errors = Float64[]
         tau = 0.5017736200269506

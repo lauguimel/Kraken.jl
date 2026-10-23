@@ -155,6 +155,8 @@ flat injector. It is restricted to this u=0, periodic-x driver, regularized char
 direct potential, Float64 and delta_U=1; it does not enable ECState/T190.
 The collector and field operator are unchanged. For this option only, returned
 analytic comparisons use actual wall-node coordinates (no half-link shift).
+Consequently the returned `err_q`/`err_E` are not directly comparable between
+closures: the legacy diagnostics use different interior comparison coordinates.
 Those diffusion-free comparisons are diagnostics, not finite-alpha acceptance;
 issue #73 uses an independent finite-alpha reference and all-node current gates.
 
