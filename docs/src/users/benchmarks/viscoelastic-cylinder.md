@@ -7,9 +7,8 @@ log-conformation) to **better than 1 %** on the integrated drag coefficient `Cd`
 the validated range `Wi ≤ 1` at `β = 0.59` — `−0.75 %` at the most elastic point `Wi = 1`.
 
 Kraken (filled markers + line), RheoTool (dashed + open squares); the elastic minimum
-near `Wi ≈ 0.5` and the upturn toward `Wi = 1` are visible in both codes. The figure has
-not been regenerated since the 2026-10-14 re-measurement and still plots the pre-fix
-Kraken values (see the note below).
+near `Wi ≈ 0.5` and the upturn toward `Wi = 1` are visible in both codes. The figure plots the
+post-fix values (see the note below).
 
 ![Viscoelastic cylinder Cd vs Wi](viscoelastic-cylinder.png)
 
