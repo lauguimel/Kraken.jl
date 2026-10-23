@@ -371,3 +371,52 @@ function apply_charge_nee_walls_2d!(f, qfield, Ex, Ey, q_bottom, grad_top, K, Nx
     kernel! = apply_charge_nee_walls_2d_kernel!(backend)
     kernel!(f, qfield, Ex, Ey, eltype(f)(q_bottom), eltype(f)(grad_top), eltype(f)(K), Ny; ndrange=(Nx,))
 end
+
+# Experimental static-only closure, issue #73. Do not use for a transverse or
+# hydrodynamically coupled problem: the tangential nonequilibrium moment is zero.
+@inline function _ehd_static_injector_population(::Val{Q}, qb, v, outgoing) where {Q}
+    T = typeof(qb)
+    jy = T(2) * (qb * (one(T) - T(3)*v + T(3)*v*v) / T(6) - outgoing)
+    return ehd_charge_feq(Val(Q), qb, zero(T), v) +
+           T(3) * ehd_w(Val(Q), T) * ehd_cy(Val(Q), T) * jy
+end
+
+@kernel function _apply_charge_static_moment_walls_kernel!(f, @Const(qfield),
+                                                            @Const(Ex), @Const(Ey),
+                                                            qb, K, Ny)
+    i, = @index(Global, NTuple)
+    @inbounds begin
+        # Read the post-stream outgoing aggregate before overwriting any row.
+        outgoing = f[i,1,5] + f[i,1,8] + f[i,1,9]
+        v = K * Ey[i,1]
+        f[i,1,1] = _ehd_static_injector_population(Val(1), qb, v, outgoing)
+        f[i,1,2] = _ehd_static_injector_population(Val(2), qb, v, outgoing)
+        f[i,1,3] = _ehd_static_injector_population(Val(3), qb, v, outgoing)
+        f[i,1,4] = _ehd_static_injector_population(Val(4), qb, v, outgoing)
+        f[i,1,5] = _ehd_static_injector_population(Val(5), qb, v, outgoing)
+        f[i,1,6] = _ehd_static_injector_population(Val(6), qb, v, outgoing)
+        f[i,1,7] = _ehd_static_injector_population(Val(7), qb, v, outgoing)
+        f[i,1,8] = _ehd_static_injector_population(Val(8), qb, v, outgoing)
+        f[i,1,9] = _ehd_static_injector_population(Val(9), qb, v, outgoing)
+        # Same zero-gradient collector NEE expressions as the legacy kernel.
+        qt = qfield[i,Ny-1]
+        uxt = K*Ex[i,Ny]; uyt = K*Ey[i,Ny]
+        uxn = K*Ex[i,Ny-1]; uyn = K*Ey[i,Ny-1]
+        f[i,Ny,1] = f[i,Ny-1,1] + ehd_charge_feq(Val(1),qt,uxt,uyt) - ehd_charge_feq(Val(1),qt,uxn,uyn)
+        f[i,Ny,2] = f[i,Ny-1,2] + ehd_charge_feq(Val(2),qt,uxt,uyt) - ehd_charge_feq(Val(2),qt,uxn,uyn)
+        f[i,Ny,3] = f[i,Ny-1,3] + ehd_charge_feq(Val(3),qt,uxt,uyt) - ehd_charge_feq(Val(3),qt,uxn,uyn)
+        f[i,Ny,4] = f[i,Ny-1,4] + ehd_charge_feq(Val(4),qt,uxt,uyt) - ehd_charge_feq(Val(4),qt,uxn,uyn)
+        f[i,Ny,5] = f[i,Ny-1,5] + ehd_charge_feq(Val(5),qt,uxt,uyt) - ehd_charge_feq(Val(5),qt,uxn,uyn)
+        f[i,Ny,6] = f[i,Ny-1,6] + ehd_charge_feq(Val(6),qt,uxt,uyt) - ehd_charge_feq(Val(6),qt,uxn,uyn)
+        f[i,Ny,7] = f[i,Ny-1,7] + ehd_charge_feq(Val(7),qt,uxt,uyt) - ehd_charge_feq(Val(7),qt,uxn,uyn)
+        f[i,Ny,8] = f[i,Ny-1,8] + ehd_charge_feq(Val(8),qt,uxt,uyt) - ehd_charge_feq(Val(8),qt,uxn,uyn)
+        f[i,Ny,9] = f[i,Ny-1,9] + ehd_charge_feq(Val(9),qt,uxt,uyt) - ehd_charge_feq(Val(9),qt,uxn,uyn)
+    end
+end
+
+# Internal seam for the flat, periodic-x, u=0 stationary-injection driver only.
+function _apply_charge_static_moment_walls!(f, qfield, Ex, Ey, qb, K, Nx, Ny)
+    backend = KernelAbstractions.get_backend(f)
+    _apply_charge_static_moment_walls_kernel!(backend)(
+        f, qfield, Ex, Ey, eltype(f)(qb), eltype(f)(K), Ny; ndrange=(Nx,))
+end

@@ -86,6 +86,25 @@ function _rel_l2(a, b)
     return num / den
 end
 
+function _ehd_check_injector_closure(closure, driver, charge_scheme, phi_scheme, FT, delta_U)
+    closure in (:nee, :static_moment, :moment) ||
+        throw(ArgumentError("injector_closure must be :nee, :static_moment or :moment."))
+    closure === :nee && return nothing
+    if closure === :moment
+        driver === :ec || throw(ArgumentError(":moment is restricted to ECState."))
+        (charge_scheme === :regularized && phi_scheme === :direct && FT === Float64 && delta_U == 1) ||
+            throw(ArgumentError(":moment requires regularized/direct, Float64 and delta_U=1."))
+        return nothing
+    end
+    driver === :hydrostatic || throw(ArgumentError(
+        ":static_moment is experimental and restricted to run_ehd_hydrostatic_2d; ECState/T190 is not supported."))
+    charge_scheme === :regularized && phi_scheme === :direct ||
+        throw(ArgumentError(":static_moment requires charge_scheme=:regularized and phi_scheme=:direct."))
+    FT === Float64 || throw(ArgumentError(":static_moment is qualified for testing only in Float64."))
+    delta_U == 1 || throw(ArgumentError(":static_moment currently requires delta_U=1 (the driver's unit-potential plates)."))
+    return nothing
+end
+
 """
     run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
                             alpha=1e-4, charge_scheme=:srt, ...)
@@ -136,6 +155,15 @@ floor never decides there.
   accepts whatever `field_tol` is. Use `phi_scheme = :direct` or `FT = Float64`
   for an accurate `E`.
 
+`injector_closure=:nee` retains the legacy default. Experimental
+`:static_moment` retains the outgoing normal charge-population aggregate at the
+flat injector. It is restricted to this u=0, periodic-x driver, regularized charge,
+direct potential, Float64 and delta_U=1; it does not enable ECState/T190.
+The collector and field operator are unchanged. For this option only, returned
+analytic comparisons use actual wall-node coordinates (no half-link shift).
+Those diffusion-free comparisons are diagnostics, not finite-alpha acceptance;
+issue #73 uses an independent finite-alpha reference and all-node current gates.
+
 `field_tol` is a Julia keyword only; `.krk` files do not set it. Throws an
 `ArgumentError` before allocating when `field_tol` is negative or `NaN`, or, with
 `phi_scheme = :lbm`, when `phi_max_iter` is not an integral value of at least 1.
@@ -144,6 +172,7 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
                                   alpha=1e-4, delta_U=1.0,
                                   charge_scheme=:srt,
                                   phi_scheme=:lbm,
+                                  injector_closure=:nee,
                                   max_steps=100000, charge_tol=1e-8,
                                   phi_tol=1e-4, field_tol=1e-4, phi_max_iter=10000,
                                   backend=KernelAbstractions.CPU(), FT=Float64)
@@ -153,6 +182,11 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
         throw(ArgumentError("charge_scheme must be :srt or :regularized."))
     phi_scheme in (:lbm, :direct) ||
         throw(ArgumentError("phi_scheme must be :lbm or :direct."))
+    _ehd_check_injector_closure(injector_closure, :hydrostatic, charge_scheme, phi_scheme, FT, delta_U)
+    if injector_closure === :static_moment
+        all(x -> isfinite(x) && x > 0, (C, M, Ma_E, alpha)) ||
+            throw(ArgumentError(":static_moment requires finite positive C, M, Ma_E and alpha."))
+    end
     _ehd_phi_ddf_check_field_tol(field_tol)
     phi_scheme === :lbm && (phi_max_iter = _ehd_phi_ddf_max_iter(phi_max_iter))
 
@@ -162,9 +196,11 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
     q_init_profile = FT(p.q_inj) .* analytic.q_star
     Ey_init_profile = FT(delta_U) .* analytic.E_star ./ FT(p.H)
     y_compare = copy(analytic.y)
-    for j in 2:(Ny - 1)
-        y_compare[j] = FT(j) - FT(1.5)
-        y_compare[j] /= FT(p.H)
+    if injector_closure === :nee
+        for j in 2:(Ny - 1)
+            y_compare[j] = FT(j) - FT(1.5)
+            y_compare[j] /= FT(p.H)
+        end
     end
     q_star_compare = [analytic.a / (FT(2) * FT(C) * sqrt(yj + analytic.b)) for yj in y_compare]
     E_star_compare = [analytic.a * sqrt(yj + analytic.b) for yj in y_compare]
@@ -233,7 +269,11 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
         end
         stream_periodic_x_wall_y_2d!(q_f_out, q_f_in, Nx, Ny)
         compute_ehd_scalar_2d!(qfield, q_f_out)
-        apply_charge_nee_walls_2d!(q_f_out, qfield, Ex, Ey, p.q_inj, zero(FT), p.K, Nx, Ny)
+        if injector_closure === :nee
+            apply_charge_nee_walls_2d!(q_f_out, qfield, Ex, Ey, p.q_inj, zero(FT), p.K, Nx, Ny)
+        else
+            _apply_charge_static_moment_walls!(q_f_out, qfield, Ex, Ey, p.q_inj, p.K, Nx, Ny)
+        end
         compute_ehd_scalar_2d!(qfield, q_f_out)
         ehd_rel_change_2d!(diag, qfield, q_prev, Nx, Ny)
         copyto!(diag_host, diag)
@@ -276,6 +316,7 @@ function run_ehd_hydrostatic_2d(; Nx=8, Ny=96, C=10.0, M=10.0, Ma_E=1e-2,
             phi_iters_last=phi_iters_last, phi_rel_last=phi_rel_last,
             Nx=Nx, Ny=Ny, C=C, M=M, Ma_E=Ma_E, alpha=alpha,
             charge_scheme=charge_scheme, phi_scheme=phi_scheme,
-            bc=:non_equilibrium_extrapolation,
-            y_mapping=:wall_nodes_interior_half_link, params=p)
+            bc=injector_closure === :nee ? :non_equilibrium_extrapolation : :static_moment_injector,
+            y_mapping=injector_closure === :nee ? :wall_nodes_interior_half_link : :wall_nodes,
+            params=p)
 end

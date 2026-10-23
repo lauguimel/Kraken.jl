@@ -105,6 +105,11 @@ the electroconvection solver, at cycle 0. Same keywords and defaults as
 `run_electroconvection_2d`, minus the run control (`max_cycles`, `target_t_star`).
 
 `sidewall_bc` selects `:free_slip` (default) or stationary `:no_slip` flow walls.
+`injector_closure=:moment` selects the experimental 2D regularized outgoing-
+moment injector (Float64, direct potential, regularized charge, delta_U=1).
+It updates electrodes, charge, then sides/corners in separate ordered kernels.
+`:nee` remains the unchanged default. The closure is checkpoint identity; this
+option's scalar verification is not full nonlinear electroconvection validation.
 It is fixed simulation identity, not run control or a continuation parameter.
 The EC checkpoint (src/drivers/ehd_ec_checkpoint.jl) stores it as identity and
 refuses a restore with a different or missing `sidewall_bc`.
@@ -139,6 +144,7 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     phi_substeps=nothing,
                     phi_scheme=:lbm,
                     charge_scheme=:regularized,
+                    injector_closure=:nee,
                     ns_scheme=:bgk,
                     sidewall_bc=:free_slip,
                     perturb_amplitude=1e-4,
@@ -148,6 +154,12 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
                     history_interval=1,
                     backend=KernelAbstractions.CPU(),
                     FT=Float64)
+    # The 2D moment option is experimental; unsupported paths fail before allocation.
+    _ehd_check_injector_closure(injector_closure, :ec, charge_scheme, phi_scheme, FT, delta_U)
+    if injector_closure === :moment
+        all(x -> x isa Real && isfinite(x) && x > 0, (C,M,T,Ma_E,alpha)) ||
+            throw(ArgumentError(":moment requires finite positive C, M, T, Ma_E and alpha."))
+    end
     Nx < 4 && throw(ArgumentError("Nx must be at least 4."))
     Ny < 8 && throw(ArgumentError("Ny must be at least 8."))
     charge_scheme in (:srt, :regularized) ||
@@ -244,7 +256,7 @@ function init_state(::Type{ECState}; Nx=60, Ny=96, C=10.0, M=10.0, T=175.0,
     end
 
     config = (; Nx, Ny, C, M, T, Ma_E, alpha, delta_U, gamma, phi_tol, field_tol,
-              phi_max_iter, phi_substeps, phi_scheme, charge_scheme, ns_scheme,
+              phi_max_iter, phi_substeps, phi_scheme, charge_scheme, injector_closure, ns_scheme,
               sidewall_bc, perturb_amplitude, perturb_mode, force_projection,
               velocity_stop, history_interval)
     return ECState(config, p, backend, A,
@@ -274,7 +286,7 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
     # Bindings that never change during a run. The population pairs and the carried
     # scalars are read and written through `s` because they do change.
     (; Nx, Ny, phi_tol, field_tol, phi_max_iter, phi_substeps, phi_scheme, charge_scheme,
-       ns_scheme, sidewall_bc, force_projection, velocity_stop, history_interval) = s.config
+       injector_closure, ns_scheme, sidewall_bc, force_projection, velocity_stop, history_interval) = s.config
     p = s.p
     poisson_setup = s.poisson_setup
     (; phi, qfield, Ex, Ey, rho, ux, uy, Fx, Fy, Fx_prev, Fy_prev, phi_prev, q_prev,
@@ -329,7 +341,11 @@ function advance!(s::ECState{FT}, n::Integer; sample_final::Bool=false) where {F
         end
         stream_wall_x_wall_y_2d!(s.q_f_out, s.q_f_in, Nx, Ny)
         compute_ehd_scalar_2d!(qfield, s.q_f_out)
-        apply_charge_nee_box_2d!(s.q_f_out, qfield, ux, uy, Ex, Ey, p.q_inj, zero(FT), p.K, Nx, Ny)
+        if injector_closure === :moment
+            _apply_charge_moment_box_2d!(s.q_f_out, qfield, ux, uy, Ex, Ey, p.q_inj, p.K, Nx, Ny)
+        else
+            apply_charge_nee_box_2d!(s.q_f_out, qfield, ux, uy, Ex, Ey, p.q_inj, zero(FT), p.K, Nx, Ny)
+        end
         compute_ehd_scalar_2d!(qfield, s.q_f_out)
         if sample_cycle
             ehd_rel_change_2d!(diag, qfield, q_prev, Nx, Ny)

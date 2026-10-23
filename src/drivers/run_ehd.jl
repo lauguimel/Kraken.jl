@@ -11,6 +11,7 @@ function _run_ehd(setup::SimulationSetup;
     alpha = Float64(get(params, :alpha, 1e-4))
     delta_U = Float64(get(params, :delta_U, 1.0))
     phi_scheme = _ehd_symbol_param(params, :phi_scheme, :lbm)
+    injector_closure = _ehd_symbol_param(params, :injector_closure, :nee)
 
     if name == "ehd_hydrostatic" || startswith(name, "ehd_hydrostatic_") ||
        name == "hydrostatic" || startswith(name, "hydrostatic_")
@@ -20,6 +21,7 @@ function _run_ehd(setup::SimulationSetup;
                                          delta_U=delta_U,
                                          charge_scheme=charge_scheme,
                                          phi_scheme=phi_scheme,
+                                         injector_closure=injector_closure,
                                          max_steps=setup.max_steps,
                                          backend=backend, FT=T)
         return merge(result, (setup=setup,))
@@ -34,6 +36,7 @@ function _run_ehd(setup::SimulationSetup;
                                            alpha=alpha, delta_U=delta_U,
                                            charge_scheme=charge_scheme,
                                            phi_scheme=phi_scheme,
+                                           injector_closure=injector_closure,
                                            ns_scheme=ns_scheme,
                                            sidewall_bc=sidewall_bc,
                                            force_projection=force_projection,

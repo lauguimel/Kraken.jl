@@ -100,7 +100,7 @@ end
             cfg = ec_restart_fixture(FT; phi_scheme=scheme, sidewall_bc=wall)
             s = advance!(init_state(ECState; cfg...), 7)
             mid = export_state(s)
-            @test mid.schema_version == 1
+            @test mid.schema_version == 2
             @test mid.identity["sidewall_bc"] == String(wall)
             other = wall === :free_slip ? :no_slip : :free_slip
             mktempdir() do dir
@@ -181,7 +181,7 @@ end
             s = advance!(init_state(ECState; cfg...), 8)
             s_inf = advance!(init_state(ECState; cfg_inf...), 8)
             mid, mid_inf = export_state(s), export_state(s_inf)
-            @test mid.schema_version == 1
+            @test mid.schema_version == 2
             @test mid.identity["field_tol"] === 1e-4
             @test mid_inf.identity["field_tol"] === Inf
             # The fixture exercises the field check: over 8 cycles, the 1e-4 and Inf

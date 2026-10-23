@@ -152,6 +152,8 @@ include("platform/weakdeps_metadata_test.jl")
     include("analytical/EC-RESTART.jl")
     include("analytical/EC-RESTART-CUDA.jl")
     include("analytical/ehd_hydrostatic_2d.jl")
+    include("analytical/ehd_static_moment_2d.jl")
+    include("analytical/ehd_transient_moment_2d.jl")
     include("analytical/ehd_krk_2d.jl")
     include("analytical/EC-SIDEWALLS.jl") # Issue #21: selectable ECState flow walls.
     include("analytical/ehd_mapping_parity_2d.jl")
