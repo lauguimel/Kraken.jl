@@ -42,6 +42,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   pre-fix values as the dated record of the M8 study.
 
 ### Fixed
+- The 0.3.0 entry "GPU-validated (parity ≤1.6e-12)" for the cuDSS solve and the matching
+  line of `docs/agent/solve-linear-implication.md` now carry a correction note (#61): the
+  loading path of that July run is not recorded. Same note as in 0.5.1.
 - **TRT Guo forcing injects exactly `F` per step** (#67). The TRT collision
   bricks with a per-cell Guo force (`CollideTRTDirectGuoField`,
   `CollideTRTDirectGuoField_3D`) scaled the whole Guo source by `1 − s₊/2`. The odd
@@ -311,6 +314,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **LinearSolve.jl front-end + cuDSS direct solve** behind `[weakdeps]`
   (`solve_poisson_direct`): assembled sparse alternative to the MG path on the same
   discretization; CPU MMS order 2.00, GPU-validated (parity ≤1.6e-12).
+  *Correction (0.5.1, see #61):* the GPU claim is not supported as written. The declared
+  CUDSS UUID was wrong, so `using CUDSS` could not activate `KrakenCUDSSExt`, and the
+  loading path of the July run (extension or manual include) was not recorded. The
+  extension path was first validated with the UUID fix of 0.5.1 (Aqua job 26559033,
+  reported 2026-10-10: H100, 41/41 GPU assertions, no CPU fallback).
 
 ### Changed
 - Documentation reframed method-agnostic (architecture page, maturity table) — the

@@ -165,6 +165,11 @@ result vector per call; despite the `!` it does NOT mutate `b` or the cache
 
 - KrakenCUDSSExt validated on RTX A6000 (driver 535, CUDA 12.2 pin): Poisson MMS parity
   Linf 3.9e-14 (Dirichlet) / 1.6e-12 (Neumann pinned), 3/3 tests.
+  **Correction (2026-10, #61):** the loading path of this run was not recorded. With the
+  wrong CUDSS UUID declared until 0.5.1, plain `using CUDSS` could not activate the
+  extension, so these numbers may come from a manual include. Extension-path evidence:
+  Aqua job 26559033 (reported 2026-10-10), H100, 41/41 GPU assertions, no CPU fallback
+  (see the 0.5.1 changelog entry).
 - **Landmine (Julia 1.12.6, empirically bisected)**: KrakenCUDSSExt fails to precompile with
   "Package CUDSS … does not seem to be installed" whenever a SIBLING declared weakdep
   (Enzyme/CairoMakie/Optim) is NOT installed in the environment. KrakenLinearSolveExt is immune.
