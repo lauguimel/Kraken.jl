@@ -56,5 +56,5 @@ julia --project benchmarks/run_all.jl --suite=perf --gpu --hardware-id=my_gpu
 
 Results are written to `benchmarks/results/` as CSV files tagged with the
 hardware ID and timestamp. Add your hardware to
-[`benchmarks/hardware.toml`](https://github.com/lauguimel/Kraken.jl/blob/lbm/benchmarks/hardware.toml)
+[`benchmarks/hardware.toml`](https://github.com/lauguimel/Kraken.jl/blob/main/benchmarks/hardware.toml)
 before running so the results are traceable.

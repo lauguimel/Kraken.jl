@@ -37,9 +37,8 @@ literature). Diffusive scaling: fixed lattice viscosity `ν_total = 0.15`, `τ =
   `run_simulation("cylinder_oldroyd_b.krk")`.
 - `comparison.png` — Cd vs Wi: Kraken filled markers + connecting line, RheoTool dashed
   reference line + open squares, per-point relative error annotated. Dark Documenter
-  theme. Also copied to `docs/src/users/benchmarks/viscoelastic-cylinder.png`. Not
-  regenerated since the 2026-10-14 re-measurement: it still plots the pre-fix Kraken
-  values.
+  theme. Also copied to `docs/src/users/benchmarks/viscoelastic-cylinder.png`.
+  Regenerated on 2026-10-19 from the post-fix `kraken_cd_vs_wi.csv`.
 - `plot.py` — **self-contained reproducer**: reads the two `*_cd_vs_wi.csv` files in this
   directory and regenerates `comparison.png` (csv + matplotlib + seaborn; LaTeX if a
   system `latex` is present, else mathtext — no external paths). Run
@@ -96,8 +95,8 @@ settings of job 22199679 (Aqua A100, CUDA Float64, 300 000 steps):
 
 At `β = 0.59` the fix moves `Cd` by +0.03 % to +0.23 % (`Wi = 0.1` to `1`,
 `R = 10` to `50`). `kraken_cd_vs_wi.csv` and `error_norms.csv` hold the post-fix
-values. `comparison.png` and `m8_refs/*.csv` are pre-fix; the full post-fix CSV rows are
-on Aqua. Post-fix values for the files in `m8_refs/`:
+values, and `comparison.png` is regenerated from them. `m8_refs/*.csv` are kept
+pre-fix as the dated M8 record. Post-fix values for the files in `m8_refs/`:
 
 - `β = 0.30`, `R = 50`: `Cd = 108.46` at `Wi = 0.5` (RheoTool 109.92, −1.33 %) and
   108.61 at `Wi = 1` (RheoTool 107.28, +1.24 %). The RheoTool `Wi = 1` run is not steady

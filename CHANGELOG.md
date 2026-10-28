@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- Experimental hydrostatic `injector_closure=:static_moment` Julia keyword and
+  `.krk` `Physics injector_closure = static_moment` selector (#73, #78).
+  The opt-in normal-moment reconstruction preserves the outgoing charge aggregate
+  and enforces the flat injector charge. It is restricted to the periodic-x,
+  zero-fluid-velocity hydrostatic driver with regularized charge, direct Poisson,
+  Float64 and `delta_U=1`. The default `:nee`, collector and field operators are
+  unchanged; the option is rejected by the coupled EC driver and `ECState`.
+  Opt-in analytic diagnostics use wall-node coordinates (`y_mapping=:wall_nodes`),
+  not the legacy interior half-link mapping; their errors are not directly
+  comparable across closures. This does not establish complete EHD validation.
+
 ### Changed
 - Jiachen Zhao (Queensland University of Technology) joins the authors, second position, in `CITATION.cff`, `Project.toml` and the BibTeX entries of the README and the documentation home page. `CITATION.cff` now carries the ORCIDs of J. Zhao and E. Sauret.
 - Electroconvection `.krk` cases now apply paired `Boundary west wall` / `Boundary east wall` as stationary no-slip sidewalls instead of ignoring them; omitted sides retain free slip. Explicit non-lateral `Boundary` declarations are rejected because electrode/plate conditions are built into this driver.
@@ -25,10 +37,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `viscoelastic-cylinder` (benchmark and tutorial), `validation-matrix`,
   `ad-shape-sensitivity-viscoelastic`, `docs/agent/ad-ve-implication.md`, and the
   `benchmarks/results/rheotool_compare/viscoelastic/` README, `kraken_cd_vs_wi.csv` and
-  `error_norms.csv`. `comparison.png` (and its copy `viscoelastic-cylinder.png`) and
-  `m8_refs/*.csv` still hold the pre-fix values.
+  `error_norms.csv`, and `comparison.png` (and its copy `viscoelastic-cylinder.png`),
+  regenerated from the post-fix `kraken_cd_vs_wi.csv`. `m8_refs/*.csv` keep the
+  pre-fix values as the dated record of the M8 study.
 
 ### Fixed
+- The 0.3.0 entry "GPU-validated (parity ≤1.6e-12)" for the cuDSS solve and the matching
+  line of `docs/agent/solve-linear-implication.md` now carry a correction note (#61): the
+  loading path of that July run is not recorded. Same note as in 0.5.1.
 - **TRT Guo forcing injects exactly `F` per step** (#67). The TRT collision
   bricks with a per-cell Guo force (`CollideTRTDirectGuoField`,
   `CollideTRTDirectGuoField_3D`) scaled the whole Guo source by `1 − s₊/2`. The odd
@@ -298,6 +314,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **LinearSolve.jl front-end + cuDSS direct solve** behind `[weakdeps]`
   (`solve_poisson_direct`): assembled sparse alternative to the MG path on the same
   discretization; CPU MMS order 2.00, GPU-validated (parity ≤1.6e-12).
+  *Correction (0.5.1, see #61):* the GPU claim is not supported as written. The declared
+  CUDSS UUID was wrong, so `using CUDSS` could not activate `KrakenCUDSSExt`, and the
+  loading path of the July run (extension or manual include) was not recorded. The
+  extension path was first validated with the UUID fix of 0.5.1 (Aqua job 26559033,
+  reported 2026-10-10: H100, 41/41 GPU assertions, no CPU fallback).
 
 ### Changed
 - Documentation reframed method-agnostic (architecture page, maturity table) — the
