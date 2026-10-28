@@ -356,13 +356,29 @@ function build_vitepress_outputs!(vp_input::AbstractString)
     current_version = vitepress_current_version(bases)
 
     cd(@__DIR__) do
+        # docs/package.json and docs/package-lock.json are tracked so the npm
+        # tree is reproducible: the DocumenterVitepress template uses caret
+        # ranges, and on 2026-10-13 `@nolebase/*` 2.21 started requiring
+        # vitepress 2, which broke `npm install` (ERESOLVE). docs/package.json
+        # pins the plugin to ~2.18.2 and `overrides` its `@nolebase/ui`
+        # dependency to ~2.18.2 too (the plugin asks for ^2.18.2, which would
+        # pull ui 2.21 with an unmet vitepress-2 peer). Drop both pins only
+        # when moving to vitepress 2. The template copy below is only a
+        # fallback for a checkout without docs/package.json.
         tmpl_pkg = joinpath(dirname(pathof(DocumenterVitepress)), "..", "template", "package.json")
         pkg_json = joinpath(@__DIR__, "package.json")
+        lock_json = joinpath(@__DIR__, "package-lock.json")
         cleanup_pkg = !isfile(pkg_json)
         cleanup_pkg && cp(tmpl_pkg, pkg_json)
         try
             npm_bin = npm_executable()
-            run(`$(npm_bin) install --no-audit --no-fund`)
+            if !cleanup_pkg && isfile(lock_json)
+                # Install exactly the locked tree; fails if package.json and
+                # the lockfile disagree instead of silently re-resolving.
+                run(`$(npm_bin) ci --no-audit --no-fund`)
+            else
+                run(`$(npm_bin) install --no-audit --no-fund`)
+            end
             for (i, base) in enumerate(bases)
                 base_url = vitepress_base_url(deploy_abspath, base)
                 config = replace(
@@ -380,7 +396,7 @@ function build_vitepress_outputs!(vp_input::AbstractString)
         finally
             if cleanup_pkg
                 rm(pkg_json; force = true)
-                rm(joinpath(@__DIR__, "package-lock.json"); force = true)
+                rm(lock_json; force = true)
             end
         end
     end
