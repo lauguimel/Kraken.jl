@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- Experimental hydrostatic `injector_closure=:static_moment` Julia keyword and
+  `.krk` `Physics injector_closure = static_moment` selector (#73, #78).
+  The opt-in normal-moment reconstruction preserves the outgoing charge aggregate
+  and enforces the flat injector charge. It is restricted to the periodic-x,
+  zero-fluid-velocity hydrostatic driver with regularized charge, direct Poisson,
+  Float64 and `delta_U=1`. The default `:nee`, collector and field operators are
+  unchanged; the option is rejected by the coupled EC driver and `ECState`.
+  Opt-in analytic diagnostics use wall-node coordinates (`y_mapping=:wall_nodes`),
+  not the legacy interior half-link mapping; their errors are not directly
+  comparable across closures. This does not establish complete EHD validation.
+
 ### Changed
 - Jiachen Zhao (Queensland University of Technology) joins the authors, second position, in `CITATION.cff`, `Project.toml` and the BibTeX entries of the README and the documentation home page. `CITATION.cff` now carries the ORCIDs of J. Zhao and E. Sauret.
 - Electroconvection `.krk` cases now apply paired `Boundary west wall` / `Boundary east wall` as stationary no-slip sidewalls instead of ignoring them; omitted sides retain free slip. Explicit non-lateral `Boundary` declarations are rejected because electrode/plate conditions are built into this driver.
