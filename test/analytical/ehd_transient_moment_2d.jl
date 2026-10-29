@@ -14,9 +14,12 @@ using Test, Kraken, KernelAbstractions
         charge_scheme=:regularized,ns_scheme=:mrt,history_interval=1)
     replace_snapshot(s; kw...)=Kraken.StateSnapshot(;
         merge((; (k=>getfield(s,k) for k in fieldnames(typeof(s)))...), (;kw...))...)
+    electrodes = Dict{Symbol,Array{Float64,3}}()
     for closure in (:nee,:moment)
         s=Kraken.init_state(Kraken.ECState;cfg...,injector_closure=closure)
         Kraken.advance!(s,4)
+        # Keep injector interior nodes: exclude sidewall/corner scheduling effects.
+        electrodes[closure] = copy(s.q_f_in[2:end-1,1:1,:])
         snap=Kraken.export_state(s)
         @test snap.schema_version==2
         @test snap.identity["injector_closure"]==String(closure)
@@ -41,10 +44,36 @@ using Test, Kraken, KernelAbstractions
             @test isequal(rr.q_f_in,snap.fields["q_f_in"])
             Kraken.advance!(rr,4)
             @test isequal(rr.q_f_in,s.q_f_in)
+            mktempdir() do dir
+                # Write an actual schema-1 container, without the new identity key.
+                path = joinpath(dir, "schema1.h5")
+                Kraken.write_checkpoint(path, old)
+                disk = Kraken.read_checkpoint(path)
+                @test disk.schema_version == 1
+                @test !haskey(disk.identity, "injector_closure")
+                loaded = Kraken.load_checkpoint(Kraken.ECState, path)
+                @test loaded.config.injector_closure === :nee
+                @test Kraken.export_state(loaded).schema_version == 2
+                for key in keys(snap.fields)
+                    @test isequal(Kraken.export_state(loaded).fields[key], snap.fields[key])
+                end
+                Kraken.advance!(loaded,4)
+                @test isequal(loaded.q_f_in,s.q_f_in)
+                @test isequal(loaded.f_in,s.f_in)
+                @test isequal(loaded.umax_history,s.umax_history)
+            end
             delete!(old.identity,"sidewall_bc")
             @test_throws Kraken.CheckpointError Kraken.restore_state(Kraken.ECState,old)
         end
     end
+    # Dispatch regression, not an accuracy gate: silently routing :moment to
+    # production NEE makes these arrays identical. A scale-relative roundoff
+    # margin rejects incidental last-bit differences, without fitting to a result.
+    delta = maximum(abs.(electrodes[:moment] .- electrodes[:nee]))
+    scale = max(maximum(abs, electrodes[:moment]), maximum(abs, electrodes[:nee]))
+    @test all(isfinite, electrodes[:moment]) && all(isfinite, electrodes[:nee])
+    @test delta > 100eps(Float64)*scale
+    @info "Transient injector dispatch regression" electrode_difference=delta roundoff_margin=100eps(Float64)*scale
     for overrides in ((phi_scheme=:lbm,), (charge_scheme=:srt,), (FT=Float32,), (delta_U=2.,))
         @test_throws ArgumentError Kraken.init_state(Kraken.ECState;
             merge(cfg,(injector_closure=:moment,),overrides)...)

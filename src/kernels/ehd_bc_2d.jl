@@ -62,8 +62,11 @@ end
     end
 end
 
-# Internal control switches allow the exact periodic and same-schedule legacy
-# verification. ECState always selects the box moment path. For Nx>=4, the
+# Internal control switches allow periodic verification and an ordered NEE
+# control (moment=false) on the same race-free schedule as the moment closure.
+# This control is NOT bit-identical to the production apply_charge_nee_box_2d!:
+# it recomputes q after electrodes, before sidewalls read completed corner data.
+# ECState calls this wrapper only for the box moment option. For Nx>=4, the
 # side writes never read another side destination. Separate launches with a
 # barrier complete electrodes and q before corner reads: no #64 scheduling race.
 function _apply_charge_moment_box_2d!(f,q,ux,uy,Ex,Ey,qb,K,Nx,Ny;
