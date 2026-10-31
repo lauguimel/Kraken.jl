@@ -87,9 +87,15 @@ function _rel_l2(a, b)
 end
 
 function _ehd_check_injector_closure(closure, driver, charge_scheme, phi_scheme, FT, delta_U)
-    closure in (:nee, :static_moment) ||
-        throw(ArgumentError("injector_closure must be :nee or :static_moment."))
+    closure in (:nee, :static_moment, :moment) ||
+        throw(ArgumentError("injector_closure must be :nee, :static_moment or :moment."))
     closure === :nee && return nothing
+    if closure === :moment
+        driver === :ec || throw(ArgumentError(":moment is restricted to ECState."))
+        (charge_scheme === :regularized && phi_scheme === :direct && FT === Float64 && delta_U == 1) ||
+            throw(ArgumentError(":moment requires regularized/direct, Float64 and delta_U=1."))
+        return nothing
+    end
     driver === :hydrostatic || throw(ArgumentError(
         ":static_moment is experimental and restricted to run_ehd_hydrostatic_2d; ECState/T190 is not supported."))
     charge_scheme === :regularized && phi_scheme === :direct ||
